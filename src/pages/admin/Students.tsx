@@ -1,13 +1,11 @@
 import React, { useEffect, useState } from 'react';
 import { supabase } from '../../supabase';
-import { UserProfile, UserRole } from '../../types';
-import {
-  Users, UserPlus, Search, UserCheck, UserX,
-  X, Mail, User, Eye, EyeOff, RotateCcw, Copy, BookOpen
-} from 'lucide-react';
+import { UserProfile } from '../../types';
+import { Users, UserPlus, Search, UserCheck, UserX, BookOpen } from 'lucide-react';
 import { toast } from 'sonner';
 import AdminLayout from '../../components/layout/AdminLayout';
 import { cn } from '../../lib/utils';
+import AddStudentModal from '../../components/AddStudentModal';
 
 interface StudentWithMeta extends UserProfile {
   teacherName: string;

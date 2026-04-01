@@ -257,7 +257,10 @@ async function startServer() {
 
   // Route to create a student
   app.post("/api/admin/create-student", async (req, res) => {
-    const { name, email, password, teacherId } = req.body;
+    const {
+      name, email, password, teacherId,
+      phone, dateOfBirth, gender, preferredLanguage, currentLevel, notes
+    } = req.body;
     
     try {
       // 1. Create or find user in Supabase Auth
@@ -273,10 +276,9 @@ async function startServer() {
       if (!userId) {
         const { data: usersData, error: listError } = await supabaseAdmin.auth.admin.listUsers();
         if (!listError) {
-          const existingUser = usersData.users.find(u => u.email === email);
+          const existingUser = usersData.users.find((u: any) => u.email === email);
           if (existingUser) {
             userId = existingUser.id;
-            // Update metadata to ensure role is student
             await supabaseAdmin.auth.admin.updateUserById(userId, {
               user_metadata: { displayName: name, role: 'student' }
             });
@@ -304,20 +306,31 @@ async function startServer() {
 
       if (profileError) throw profileError;
 
-      // 3. Create student record
-      const names = name.split(' ');
+      // 3. Create student record with all available fields
+      const names = name.trim().split(' ');
       const firstName = names[0];
-      const lastName = names.slice(1).join(' ') || 'Student';
+      const lastName = names.slice(1).join(' ') || '';
+
+      const studentPayload: any = {
+        user_id: userId,
+        first_name: firstName,
+        last_name: lastName,
+        email: email,
+        status: 'active',
+        joined_at: new Date().toISOString(),
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      };
+
+      if (phone) studentPayload.phone = phone;
+      if (dateOfBirth) studentPayload.date_of_birth = dateOfBirth;
+      if (gender) studentPayload.gender = gender;
+      if (preferredLanguage) studentPayload.preferred_language = preferredLanguage;
+      if (currentLevel) studentPayload.current_level = currentLevel;
 
       const { error: studentError } = await supabaseAdmin
         .from('students')
-        .upsert({
-          user_id: userId,
-          first_name: firstName,
-          last_name: lastName,
-          email: email,
-          status: 'active'
-        });
+        .upsert(studentPayload);
 
       if (studentError) throw studentError;
 
