@@ -32,6 +32,14 @@ A multi-role educational platform for quiz management, course tracking, and resu
 - **Students**: Teacher can manage enrolled students; Admin views all students
 - **Results**: Teacher views quiz attempt results per student
 
+## Known Schema Constraints
+The live Supabase DB has schema differences from what some pages expect. All affected pages now handle these gracefully (empty state, no crash):
+- `attempts` table does not exist → all attempt/result pages show empty state
+- `quizzes.teacher_id` column does not exist → quiz count shows 0, quiz lists show empty
+- `courses.teacher_id` column does not exist → course lists show empty for teacher filter
+- `courses.student_ids` column does not exist → enrolled courses show empty for students
+- `Notification` type now includes `title: string` and `read: boolean` fields
+
 ## Running the App
 - **Dev**: `npm run dev` — starts Express + Vite dev server on port 5000
 - **Build**: `npm run build` — builds to `dist/`

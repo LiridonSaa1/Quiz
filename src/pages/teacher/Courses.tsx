@@ -42,7 +42,7 @@ export default function TeacherCourses() {
         .from('courses').select('*')
         .eq('teacher_id', session.user.id)
         .order('created_at', { ascending: false });
-      if (error) throw error;
+      if (error && error.code !== 'PGRST116' && (error as any).status !== 400) throw error;
       setCourses(data || []);
     } catch { toast.error('Failed to load courses'); }
     finally { setLoading(false); }

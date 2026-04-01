@@ -1,0 +1,71 @@
+uwwfozpchsziaslusfln.supabase.co/rest/v1/courses?select=*&student_ids=cs.%7Bf1991fa5-9d82-4d32-9e88-e162689c0c37%7D:1  Failed to load resource: the server responded with a status of 400 ()
+uwwfozpchsziaslusfln.supabase.co/rest/v1/attempts?select=*&student_id=eq.f1991fa5-9d82-4d32-9e88-e162689c0c37&order=completed_at.desc:1  Failed to load resource: the server responded with a status of 404 ()
+uwwfozpchsziaslusfln.supabase.co/rest/v1/courses?select=*&student_ids=cs.%7Bf1991fa5-9d82-4d32-9e88-e162689c0c37%7D:1  Failed to load resource: the server responded with a status of 400 ()
+App.tsx:40 Backend health check: OK
+@supabase_supabase-js.js?v=b781549a:7874 Uncaught (in promise) Error: cannot add `postgres_changes` callbacks for realtime:notifications:f1991fa5-9d82-4d32-9e88-e162689c0c37 after `subscribe()`.
+    at _RealtimeChannel.on (@supabase_supabase-js.js?v=b781549a:7874:13)
+    at Proxy.<anonymous> (supabase.ts:13:34)
+    at setupNotifications (NotificationCenter.tsx:53:10)
+uwwfozpchsziaslusfln.supabase.co/rest/v1/attempts?select=*&student_id=eq.f1991fa5-9d82-4d32-9e88-e162689c0c37&order=completed_at.desc:1  Failed to load resource: the server responded with a status of 404 ()
+:5000/login:1 [DOM] Input elements should have autocomplete attributes (suggested: "current-password"): (More info: https://goo.gl/9p2vKq) <input required class=​"w-full pl-10 pr-4 py-3 bg-white border border-slate-200 rounded-xl text-sm focus:​outline-none focus:​ring-2 focus:​ring-indigo-500 focus:​border-transparent transition-all placeholder:​text-slate-400" placeholder=​"••••••••" type=​"password" value=​"cmVaips2$mBu">​
+:5000/login:1 [DOM] Input elements should have autocomplete attributes (suggested: "current-password"): (More info: https://goo.gl/9p2vKq) <input required class=​"w-full pl-10 pr-4 py-3 bg-white border border-slate-200 rounded-xl text-sm focus:​outline-none focus:​ring-2 focus:​ring-indigo-500 focus:​border-transparent transition-all placeholder:​text-slate-400" placeholder=​"••••••••" type=​"password" value>​
+2recharts.js?v=b781549a:9084 The width(-1) and height(-1) of chart should be greater than 0,
+       please check the style of container, or the props width(100%) and height(100%),
+       or add a minWidth(0) or minHeight(undefined) or use aspect(undefined) to control the
+       height and width.
+warn2 @ recharts.js?v=b781549a:9084
+uwwfozpchsziaslusfln.supabase.co/rest/v1/attempts?select=*&teacher_id=eq.836f7b33-0177-4228-8e60-8a0566c6d078:1  Failed to load resource: the server responded with a status of 404 ()
+uwwfozpchsziaslusfln.supabase.co/rest/v1/quizzes?select=*&teacher_id=eq.836f7b33-0177-4228-8e60-8a0566c6d078:1  Failed to load resource: the server responded with a status of 400 ()
+uwwfozpchsziaslusfln.supabase.co/rest/v1/attempts?select=*&teacher_id=eq.836f7b33-0177-4228-8e60-8a0566c6d078:1  Failed to load resource: the server responded with a status of 404 ()
+@supabase_supabase-js.js?v=b781549a:7874 Uncaught (in promise) Error: cannot add `postgres_changes` callbacks for realtime:notifications:836f7b33-0177-4228-8e60-8a0566c6d078 after `subscribe()`.
+    at _RealtimeChannel.on (@supabase_supabase-js.js?v=b781549a:7874:13)
+    at Proxy.<anonymous> (supabase.ts:13:34)
+    at setupNotifications (NotificationCenter.tsx:53:10)
+uwwfozpchsziaslusfln.supabase.co/rest/v1/quizzes?select=*&teacher_id=eq.836f7b33-0177-4228-8e60-8a0566c6d078:1  Failed to load resource: the server responded with a status of 400 ()
+uwwfozpchsziaslusfln.supabase.co/rest/v1/attempts?select=*%2Cprofiles%28display_name%29%2Cquizzes%28title%29&teacher_id=eq.836f7b33-0177-4228-8e60-8a0566c6d078&order=completed_at.desc&limit=5:1  Failed to load resource: the server responded with a status of 404 ()
+uwwfozpchsziaslusfln.supabase.co/rest/v1/attempts?select=*%2Cprofiles%28display_name%29%2Cquizzes%28title%29&teacher_id=eq.836f7b33-0177-4228-8e60-8a0566c6d078&order=completed_at.desc&limit=5:1  Failed to load resource: the server responded with a status of 404 ()
+client:802 WebSocket connection to 'wss://404bdb1e-fd26-4f8b-b4a6-049a4554cf94-00-11022fcvtnxn3.picard.replit.dev:24678/?token=s-3kCBIR3Cmn' failed: 
+createConnection @ client:802
+client:841 [vite] failed to connect to websocket (Error: WebSocket closed without opened.). 
+connect @ client:841
+client:454 Uncaught (in promise) Error: WebSocket closed without opened.
+    at WebSocket.<anonymous> (client:454:22)
+2@supabase_supabase-js.js?v=b781549a:7874 Uncaught (in promise) Error: cannot add `postgres_changes` callbacks for realtime:notifications:836f7b33-0177-4228-8e60-8a0566c6d078 after `subscribe()`.
+    at _RealtimeChannel.on (@supabase_supabase-js.js?v=b781549a:7874:13)
+    at Proxy.<anonymous> (supabase.ts:13:34)
+    at setupNotifications (NotificationCenter.tsx:53:10)
+uwwfozpchsziaslusfln.supabase.co/rest/v1/courses?select=id%2Cname%2Ctitle&teacher_id=eq.836f7b33-0177-4228-8e60-8a0566c6d078&order=created_at.desc:1  Failed to load resource: the server responded with a status of 400 ()
+@supabase_supabase-js.js?v=b781549a:7874 Uncaught (in promise) Error: cannot add `postgres_changes` callbacks for realtime:notifications:836f7b33-0177-4228-8e60-8a0566c6d078 after `subscribe()`.
+    at _RealtimeChannel.on (@supabase_supabase-js.js?v=b781549a:7874:13)
+    at Proxy.<anonymous> (supabase.ts:13:34)
+    at setupNotifications (NotificationCenter.tsx:53:10)
+uwwfozpchsziaslusfln.supabase.co/rest/v1/courses?select=id%2Cname%2Ctitle&teacher_id=eq.836f7b33-0177-4228-8e60-8a0566c6d078&order=created_at.desc:1  Failed to load resource: the server responded with a status of 400 ()
+uwwfozpchsziaslusfln.supabase.co/rest/v1/quizzes?select=*&teacher_id=eq.836f7b33-0177-4228-8e60-8a0566c6d078&order=created_at.desc:1  Failed to load resource: the server responded with a status of 400 ()
+uwwfozpchsziaslusfln.supabase.co/rest/v1/courses?select=id%2Cname%2Ctitle&teacher_id=eq.836f7b33-0177-4228-8e60-8a0566c6d078:1  Failed to load resource: the server responded with a status of 400 ()
+@supabase_supabase-js.js?v=b781549a:7874 Uncaught (in promise) Error: cannot add `postgres_changes` callbacks for realtime:notifications:836f7b33-0177-4228-8e60-8a0566c6d078 after `subscribe()`.
+    at _RealtimeChannel.on (@supabase_supabase-js.js?v=b781549a:7874:13)
+    at Proxy.<anonymous> (supabase.ts:13:34)
+    at setupNotifications (NotificationCenter.tsx:53:10)
+uwwfozpchsziaslusfln.supabase.co/rest/v1/quizzes?select=*&teacher_id=eq.836f7b33-0177-4228-8e60-8a0566c6d078&order=created_at.desc:1  Failed to load resource: the server responded with a status of 400 ()
+uwwfozpchsziaslusfln.supabase.co/rest/v1/courses?select=id%2Cname%2Ctitle&teacher_id=eq.836f7b33-0177-4228-8e60-8a0566c6d078:1  Failed to load resource: the server responded with a status of 400 ()
+uwwfozpchsziaslusfln.supabase.co/rest/v1/courses?select=id%2Cname%2Ctitle%2Cstudent_ids&teacher_id=eq.836f7b33-0177-4228-8e60-8a0566c6d078:1  Failed to load resource: the server responded with a status of 400 ()
+@supabase_supabase-js.js?v=b781549a:7874 Uncaught (in promise) Error: cannot add `postgres_changes` callbacks for realtime:notifications:836f7b33-0177-4228-8e60-8a0566c6d078 after `subscribe()`.
+    at _RealtimeChannel.on (@supabase_supabase-js.js?v=b781549a:7874:13)
+    at Proxy.<anonymous> (supabase.ts:13:34)
+    at setupNotifications (NotificationCenter.tsx:53:10)
+uwwfozpchsziaslusfln.supabase.co/rest/v1/courses?select=id%2Cname%2Ctitle%2Cstudent_ids&teacher_id=eq.836f7b33-0177-4228-8e60-8a0566c6d078:1  Failed to load resource: the server responded with a status of 400 ()
+uwwfozpchsziaslusfln.supabase.co/rest/v1/courses?select=id%2Cname%2Ctitle%2Cstudent_ids&teacher_id=eq.836f7b33-0177-4228-8e60-8a0566c6d078:1  Failed to load resource: the server responded with a status of 400 ()
+uwwfozpchsziaslusfln.supabase.co/rest/v1/courses?select=id%2Cname%2Ctitle%2Cstudent_ids&teacher_id=eq.836f7b33-0177-4228-8e60-8a0566c6d078:1  Failed to load resource: the server responded with a status of 400 ()
+@supabase_supabase-js.js?v=b781549a:7874 Uncaught (in promise) Error: cannot add `postgres_changes` callbacks for realtime:notifications:836f7b33-0177-4228-8e60-8a0566c6d078 after `subscribe()`.
+    at _RealtimeChannel.on (@supabase_supabase-js.js?v=b781549a:7874:13)
+    at Proxy.<anonymous> (supabase.ts:13:34)
+    at setupNotifications (NotificationCenter.tsx:53:10)
+students:1 [DOM] Password field is not contained in a form: (More info: https://goo.gl/9p2vKq)
+uwwfozpchsziaslusfln.supabase.co/rest/v1/quizzes?select=*&teacher_id=eq.836f7b33-0177-4228-8e60-8a0566c6d078&order=created_at.desc:1  Failed to load resource: the server responded with a status of 400 ()
+uwwfozpchsziaslusfln.supabase.co/rest/v1/courses?select=id%2Cname%2Ctitle&teacher_id=eq.836f7b33-0177-4228-8e60-8a0566c6d078:1  Failed to load resource: the server responded with a status of 400 ()
+@supabase_supabase-js.js?v=b781549a:7874 Uncaught (in promise) Error: cannot add `postgres_changes` callbacks for realtime:notifications:836f7b33-0177-4228-8e60-8a0566c6d078 after `subscribe()`.
+    at _RealtimeChannel.on (@supabase_supabase-js.js?v=b781549a:7874:13)
+    at Proxy.<anonymous> (supabase.ts:13:34)
+    at setupNotifications (NotificationCenter.tsx:53:10)
+uwwfozpchsziaslusfln.supabase.co/rest/v1/quizzes?select=*&teacher_id=eq.836f7b33-0177-4228-8e60-8a0566c6d078&order=created_at.desc:1  Failed to load resource: the server responded with a status of 400 ()
+uwwfozpchsziaslusfln.supabase.co/rest/v1/courses?select=id%2Cname%2Ctitle&teacher_id=eq.836f7b33-0177-4228-8e60-8a0566c6d078:1  Failed to load resource: the server responded with a status of 400 ()

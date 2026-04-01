@@ -3,11 +3,11 @@ import { supabase } from '../../supabase';
 import StudentLayout from '../../components/layout/StudentLayout';
 import { BookOpen, Clock, CheckCircle2, Trophy, ArrowRight, Flame } from 'lucide-react';
 import { Link } from 'react-router-dom';
-import { Course, Quiz } from '../../types';
+import { Quiz } from '../../types';
 import { cn } from '../../lib/utils';
 
 export default function StudentDashboard() {
-  const [enrolledCourses, setEnrolledCourses] = useState<Course[]>([]);
+  const [enrolledCourses, setEnrolledCourses] = useState<any[]>([]);
   const [availableQuizzes, setAvailableQuizzes] = useState<Quiz[]>([]);
   const [recentAttempts, setRecentAttempts] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -18,15 +18,41 @@ export default function StudentDashboard() {
       if (!session) return;
       const studentId = session.user.id;
       try {
-        const { data: courses } = await supabase.from('courses').select('*').contains('student_ids', [studentId]);
-        setEnrolledCourses((courses as any) || []);
-        if (courses && courses.length > 0) {
-          const courseIds = courses.map((c: any) => c.id);
-          const { data: quizzes } = await supabase.from('quizzes').select('*').in('course_id', courseIds).eq('published', true);
-          setAvailableQuizzes((quizzes as any) || []);
+        let courses: any[] = [];
+        let quizzes: Quiz[] = [];
+        let attempts: any[] = [];
+
+        const coursesSnap = await supabase
+          .from('courses')
+          .select('*')
+          .contains('student_ids', [studentId]);
+        if (!coursesSnap.error) {
+          courses = coursesSnap.data || [];
         }
-        const { data: attempts } = await supabase.from('attempts').select('*').eq('student_id', studentId).order('completed_at', { ascending: false });
-        setRecentAttempts(attempts || []);
+        setEnrolledCourses(courses);
+
+        if (courses.length > 0) {
+          const courseIds = courses.map((c: any) => c.id);
+          const quizzesSnap = await supabase
+            .from('quizzes')
+            .select('*')
+            .in('course_id', courseIds)
+            .eq('published', true);
+          if (!quizzesSnap.error) {
+            quizzes = (quizzesSnap.data as any) || [];
+          }
+        }
+        setAvailableQuizzes(quizzes);
+
+        const attemptsSnap = await supabase
+          .from('attempts')
+          .select('*')
+          .eq('student_id', studentId)
+          .order('completed_at', { ascending: false });
+        if (!attemptsSnap.error) {
+          attempts = attemptsSnap.data || [];
+        }
+        setRecentAttempts(attempts);
       } catch (error) {
         console.error('Error fetching student data:', error);
       } finally {

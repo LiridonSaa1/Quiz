@@ -1,37 +1,35 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { supabase } from '../supabase';
 import { Notification } from '../types';
-import { Bell, Check, Trash2, X, Info, CheckCircle2, AlertTriangle, AlertCircle } from 'lucide-react';
+import { Bell, Info, CheckCircle2, AlertTriangle, AlertCircle } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { formatDistanceToNow } from 'date-fns';
 
 export default function NotificationCenter() {
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [isOpen, setIsOpen] = useState(false);
+  const channelRef = useRef<any>(null);
   const unreadCount = notifications.filter(n => !n.read).length;
 
   useEffect(() => {
-    let channel: any = null;
     let active = true;
 
     const setupNotifications = async () => {
       const { data: { session } } = await supabase.auth.getSession();
       if (!session || !active) return;
 
+      const userId = session.user.id;
+      const channelName = `notifications:${userId}`;
+
       const fetchNotifications = async () => {
         const { data, error } = await supabase
           .from('notifications')
           .select('*')
-          .eq('user_id', session.user.id)
+          .eq('user_id', userId)
           .order('created_at', { ascending: false })
           .limit(20);
         
-        if (error) {
-          console.error('Error fetching notifications:', error);
-          return;
-        }
-
-        if (!active) return;
+        if (error || !active) return;
 
         setNotifications(data.map(d => ({
           id: d.id,
@@ -45,18 +43,29 @@ export default function NotificationCenter() {
       };
 
       await fetchNotifications();
+      if (!active) return;
+
+      try {
+        const existingChannels = supabase.getChannels() as any[];
+        const existing = existingChannels.find(
+          (c: any) => c.topic === `realtime:${channelName}`
+        );
+        if (existing) {
+          await supabase.removeChannel(existing);
+        }
+      } catch {}
 
       if (!active) return;
 
       const newChannel = supabase
-        .channel(`notifications:${session.user.id}`)
+        .channel(channelName)
         .on(
           'postgres_changes',
           {
             event: '*',
             schema: 'public',
             table: 'notifications',
-            filter: `user_id=eq.${session.user.id}`
+            filter: `user_id=eq.${userId}`
           },
           () => {
             fetchNotifications();
@@ -67,7 +76,7 @@ export default function NotificationCenter() {
       if (!active) {
         supabase.removeChannel(newChannel);
       } else {
-        channel = newChannel;
+        channelRef.current = newChannel;
       }
     };
 
@@ -75,20 +84,17 @@ export default function NotificationCenter() {
 
     return () => {
       active = false;
-      if (channel) {
-        supabase.removeChannel(channel);
+      if (channelRef.current) {
+        supabase.removeChannel(channelRef.current);
+        channelRef.current = null;
       }
     };
   }, []);
 
   const markAsRead = async (id: string) => {
     try {
-      const { error } = await supabase
-        .from('notifications')
-        .update({ read: true })
-        .eq('id', id);
-      
-      if (error) throw error;
+      await supabase.from('notifications').update({ read: true }).eq('id', id);
+      setNotifications(prev => prev.map(n => n.id === id ? { ...n, read: true } : n));
     } catch (error) {
       console.error('Error marking notification as read:', error);
     }
@@ -97,15 +103,13 @@ export default function NotificationCenter() {
   const markAllAsRead = async () => {
     const { data: { session } } = await supabase.auth.getSession();
     if (!session) return;
-
     try {
-      const { error } = await supabase
+      await supabase
         .from('notifications')
         .update({ read: true })
         .eq('user_id', session.user.id)
         .eq('read', false);
-      
-      if (error) throw error;
+      setNotifications(prev => prev.map(n => ({ ...n, read: true })));
     } catch (error) {
       console.error('Error marking all as read:', error);
     }
@@ -141,7 +145,7 @@ export default function NotificationCenter() {
             onClick={() => setIsOpen(false)}
           />
           <div className="absolute right-0 mt-2 w-80 bg-white rounded-xl shadow-lg border border-gray-200 z-50 overflow-hidden">
-            <div className="p-4 border-bottom border-gray-100 flex items-center justify-between bg-gray-50">
+            <div className="p-4 border-b border-gray-100 flex items-center justify-between bg-gray-50">
               <h3 className="font-semibold text-gray-900">Notifications</h3>
               {unreadCount > 0 && (
                 <button
@@ -164,7 +168,7 @@ export default function NotificationCenter() {
                   <div
                     key={notification.id}
                     className={cn(
-                      "p-4 border-bottom border-gray-50 flex gap-3 hover:bg-gray-50 transition-colors cursor-pointer",
+                      "p-4 border-b border-gray-50 flex gap-3 hover:bg-gray-50 transition-colors cursor-pointer",
                       !notification.read && "bg-blue-50/30"
                     )}
                     onClick={() => markAsRead(notification.id)}
@@ -187,7 +191,7 @@ export default function NotificationCenter() {
                       </p>
                     </div>
                     {!notification.read && (
-                      <div className="w-2 h-2 rounded-full bg-blue-500 mt-2" />
+                      <div className="w-2 h-2 rounded-full bg-blue-500 mt-2 shrink-0" />
                     )}
                   </div>
                 ))

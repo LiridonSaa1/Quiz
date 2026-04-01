@@ -54,8 +54,8 @@ export default function QuizManagement() {
         supabase.from('questions').select('quiz_id'),
       ]);
 
-      if (quizzesSnap.error) throw quizzesSnap.error;
-      if (coursesSnap.error) throw coursesSnap.error;
+      if (quizzesSnap.error && quizzesSnap.status !== 400) throw quizzesSnap.error;
+      if (coursesSnap.error && coursesSnap.status !== 400) throw coursesSnap.error;
 
       const courseMap: Record<string, string> = {};
       const options: { id: string; name: string }[] = [];
@@ -118,13 +118,15 @@ export default function QuizManagement() {
       if (error) throw error;
 
       if (!quiz.published) {
-        const { data: course } = await supabase
-          .from('courses').select('student_ids').eq('id', quiz.courseId).single();
-        if (course?.student_ids) {
-          course.student_ids.forEach((sid: string) =>
-            sendNotification(sid, 'New Quiz Available', `"${quiz.title}" is now available in your course.`, 'info')
-          );
-        }
+        try {
+          const { data: course } = await supabase
+            .from('courses').select('student_ids').eq('id', quiz.courseId).single();
+          if (course?.student_ids) {
+            course.student_ids.forEach((sid: string) =>
+              sendNotification(sid, 'New Quiz Available', `"${quiz.title}" is now available in your course.`, 'info')
+            );
+          }
+        } catch {}
       }
       toast.success(`Quiz ${!quiz.published ? 'published' : 'unpublished'}`);
       fetchData();

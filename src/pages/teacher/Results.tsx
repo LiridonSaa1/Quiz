@@ -14,7 +14,6 @@ import {
   FileText
 } from 'lucide-react';
 import { toast } from 'sonner';
-import { QuizAttempt, Quiz, UserProfile } from '../../types';
 import { cn } from '../../lib/utils';
 
 export default function TeacherResults() {
@@ -22,30 +21,43 @@ export default function TeacherResults() {
   const [quizzes, setQuizzes] = useState<Record<string, string>>({});
   const [students, setStudents] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
+  const [search, setSearch] = useState('');
 
   const fetchData = async () => {
     const { data: { session } } = await supabase.auth.getSession();
     if (!session) return;
     try {
-      const [attemptsSnap, quizzesSnap, studentsSnap] = await Promise.all([
-        supabase.from('attempts').select('*').eq('teacher_id', session.user.id),
-        supabase.from('quizzes').select('id, title').eq('teacher_id', session.user.id),
-        supabase.from('profiles').select('id, display_name').eq('teacher_id', session.user.id)
-      ]);
+      let attemptsData: any[] = [];
+      let quizzesMap: Record<string, string> = {};
+      let studentsMap: Record<string, string> = {};
 
-      if (attemptsSnap.error) throw attemptsSnap.error;
-      if (quizzesSnap.error) throw quizzesSnap.error;
-      if (studentsSnap.error) throw studentsSnap.error;
+      const attemptsSnap = await supabase
+        .from('attempts')
+        .select('*')
+        .eq('teacher_id', session.user.id);
+      if (!attemptsSnap.error) {
+        attemptsData = attemptsSnap.data || [];
+      }
 
-      const quizzesMap: Record<string, string> = {};
-      quizzesSnap.data.forEach(d => quizzesMap[d.id] = d.title);
+      const quizzesSnap = await supabase
+        .from('quizzes')
+        .select('id, title')
+        .eq('teacher_id', session.user.id);
+      if (!quizzesSnap.error) {
+        (quizzesSnap.data || []).forEach((d: any) => { quizzesMap[d.id] = d.title; });
+      }
+
+      const studentsSnap = await supabase
+        .from('profiles')
+        .select('id, display_name')
+        .eq('teacher_id', session.user.id);
+      if (!studentsSnap.error) {
+        (studentsSnap.data || []).forEach((d: any) => { studentsMap[d.id] = d.display_name; });
+      }
+
       setQuizzes(quizzesMap);
-
-      const studentsMap: Record<string, string> = {};
-      studentsSnap.data.forEach(d => studentsMap[d.id] = d.display_name);
       setStudents(studentsMap);
-
-      setAttempts(attemptsSnap.data.map(d => ({
+      setAttempts(attemptsData.map((d: any) => ({
         id: d.id,
         quizId: d.quiz_id,
         studentId: d.student_id,
@@ -78,6 +90,15 @@ export default function TeacherResults() {
       ? Math.round((attempts.filter(a => a.passed).length / attempts.length) * 100)
       : 0
   };
+
+  const filtered = attempts.filter(a => {
+    if (!search) return true;
+    const q = search.toLowerCase();
+    return (
+      (students[a.studentId] || '').toLowerCase().includes(q) ||
+      (quizzes[a.quizId] || '').toLowerCase().includes(q)
+    );
+  });
 
   return (
     <TeacherLayout>
@@ -132,6 +153,8 @@ export default function TeacherResults() {
               <input
                 type="text"
                 placeholder="Search by student or quiz..."
+                value={search}
+                onChange={e => setSearch(e.target.value)}
                 className="w-full pl-10 pr-4 py-2 bg-white border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-slate-900"
               />
             </div>
@@ -160,8 +183,8 @@ export default function TeacherResults() {
                       <td colSpan={6} className="px-6 py-4 h-16 bg-slate-50/50" />
                     </tr>
                   ))
-                ) : attempts.length > 0 ? (
-                  attempts.map((attempt) => (
+                ) : filtered.length > 0 ? (
+                  filtered.map((attempt) => (
                     <tr key={attempt.id} className="hover:bg-slate-50 transition-all group">
                       <td className="px-6 py-4">
                         <div className="flex items-center gap-3">

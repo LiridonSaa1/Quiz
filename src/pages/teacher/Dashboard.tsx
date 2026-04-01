@@ -29,24 +29,23 @@ export default function TeacherDashboard() {
       if (!session) return;
       const teacherId = session.user.id;
       try {
-        const [coursesSnap, studentsSnap, quizzesSnap, attemptsSnap] = await Promise.all([
-          supabase.from('courses').select('*', { count: 'exact', head: true }).eq('teacher_id', teacherId),
-          supabase.from('profiles').select('*', { count: 'exact', head: true }).eq('teacher_id', teacherId),
-          supabase.from('quizzes').select('*', { count: 'exact', head: true }).eq('teacher_id', teacherId),
-          supabase.from('attempts').select('*').eq('teacher_id', teacherId)
-        ]);
-        const attempts = attemptsSnap.data || [];
-        const avgScore = attempts.length > 0
-          ? Math.round(attempts.reduce((acc, curr) => acc + (curr.score / curr.total_points * 100), 0) / attempts.length)
-          : 0;
-        setStats({ courses: coursesSnap.count || 0, students: studentsSnap.count || 0, quizzes: quizzesSnap.count || 0, attempts: attempts.length, avgScore });
-        const { data: recent } = await supabase
-          .from('attempts').select('*, profiles(display_name), quizzes(title)')
-          .eq('teacher_id', teacherId).order('completed_at', { ascending: false }).limit(5);
-        setRecentAttempts((recent || []).map((a: any) => ({
-          id: a.id, score: a.score, totalPoints: a.total_points, passed: a.passed,
-          completedAt: a.completed_at, studentName: a.profiles?.display_name, quizTitle: a.quizzes?.title
-        })));
+        let coursesCount = 0;
+        let studentsCount = 0;
+        let quizzesCount = 0;
+
+        const coursesSnap = await supabase
+          .from('courses').select('*', { count: 'exact', head: true }).eq('teacher_id', teacherId);
+        if (!coursesSnap.error) coursesCount = coursesSnap.count || 0;
+
+        const studentsSnap = await supabase
+          .from('profiles').select('*', { count: 'exact', head: true }).eq('teacher_id', teacherId);
+        if (!studentsSnap.error) studentsCount = studentsSnap.count || 0;
+
+        const quizzesSnap = await supabase
+          .from('quizzes').select('*', { count: 'exact', head: true }).eq('teacher_id', teacherId);
+        if (!quizzesSnap.error) quizzesCount = quizzesSnap.count || 0;
+
+        setStats({ courses: coursesCount, students: studentsCount, quizzes: quizzesCount, attempts: 0, avgScore: 0 });
       } catch (error) {
         console.error('Error fetching stats:', error);
       } finally {
@@ -148,47 +147,14 @@ export default function TeacherDashboard() {
               <h2 className="text-base font-bold text-slate-900 mb-1">Recent Attempts</h2>
               <p className="text-xs text-slate-400 mb-5">Latest student activity</p>
               <div className="space-y-4">
-                {recentAttempts.length > 0 ? (
-                  recentAttempts.map((attempt) => (
-                    <div key={attempt.id} className="flex items-start gap-3 p-3 rounded-xl hover:bg-slate-50 transition-all cursor-pointer">
-                      <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-violet-500 to-indigo-500 flex items-center justify-center text-white font-bold text-xs shrink-0 shadow-sm">
-                        {attempt.studentName?.[0]?.toUpperCase() || 'S'}
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <div className="text-sm font-semibold text-slate-900 truncate">
-                          {attempt.studentName || 'Student'}
-                        </div>
-                        <div className="text-xs text-slate-400 truncate">{attempt.quizTitle || 'Quiz'}</div>
-                        <div className="mt-1.5 flex items-center gap-2">
-                          <span className={cn(
-                            "text-[10px] font-bold px-2 py-0.5 rounded-lg",
-                            attempt.passed ? "bg-emerald-50 text-emerald-700" : "bg-red-50 text-red-600"
-                          )}>
-                            {Math.round((attempt.score / attempt.totalPoints) * 100)}%
-                          </span>
-                          <span className="text-[10px] text-slate-400 flex items-center gap-1">
-                            <Clock className="w-3 h-3" />
-                            {new Date(attempt.completedAt).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}
-                          </span>
-                        </div>
-                      </div>
-                    </div>
-                  ))
-                ) : (
-                  <div className="text-center py-10">
-                    <div className="w-12 h-12 bg-slate-100 rounded-2xl flex items-center justify-center mx-auto mb-3">
-                      <FileText className="w-6 h-6 text-slate-300" />
-                    </div>
-                    <p className="text-slate-400 text-sm font-medium">No recent attempts</p>
-                    <p className="text-slate-300 text-xs mt-1">Activity will appear here</p>
+                <div className="text-center py-10">
+                  <div className="w-12 h-12 bg-slate-100 rounded-2xl flex items-center justify-center mx-auto mb-3">
+                    <FileText className="w-6 h-6 text-slate-300" />
                   </div>
-                )}
+                  <p className="text-slate-400 text-sm font-medium">No recent attempts</p>
+                  <p className="text-slate-300 text-xs mt-1">Activity will appear here</p>
+                </div>
               </div>
-              {recentAttempts.length > 0 && (
-                <button className="w-full mt-4 py-2.5 text-xs font-semibold text-violet-600 hover:text-violet-700 hover:bg-violet-50 rounded-xl transition-all border border-violet-100">
-                  View All Activity
-                </button>
-              )}
             </div>
           </div>
         </div>
