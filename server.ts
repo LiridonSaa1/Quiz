@@ -128,6 +128,29 @@ async function startServer() {
     }
   });
 
+  // Route to fetch all teachers (bypasses RLS using service role)
+  app.get("/api/admin/teachers", async (req, res) => {
+    try {
+      const { data, error } = await supabaseAdmin
+        .from('profiles')
+        .select('*')
+        .eq('role', 'teacher');
+      if (error) throw error;
+      const teachers = (data || []).map((p: any) => ({
+        uid: p.id,
+        email: p.email,
+        displayName: p.display_name,
+        role: p.role,
+        status: p.status || 'active',
+        createdAt: p.created_at,
+      }));
+      res.json({ success: true, teachers });
+    } catch (error: any) {
+      console.error('Error fetching teachers:', error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
   // Route to seed the initial admin account
   app.get("/api/admin/seed", async (req, res) => {
     const adminEmail = "liridon.salihi123@gmail.com";
@@ -230,7 +253,7 @@ async function startServer() {
 
   // Route to create a teacher (Admin only)
   app.post("/api/admin/create-teacher", async (req, res) => {
-    const { name, email, password } = req.body;
+    const { name, email, password, phone, specialization, bio } = req.body;
     
     try {
       // 1. Create or find user in Supabase Auth
@@ -281,15 +304,20 @@ async function startServer() {
       const firstName = names[0];
       const lastName = names.slice(1).join(' ') || 'Teacher';
 
+      const teacherPayload: any = {
+        user_id: userId,
+        first_name: firstName,
+        last_name: lastName,
+        email: email,
+        status: 'active',
+      };
+      if (phone) teacherPayload.phone = phone;
+      if (specialization) teacherPayload.specialization = specialization;
+      if (bio) teacherPayload.bio = bio;
+
       const { error: teacherError } = await supabaseAdmin
         .from('teachers')
-        .upsert({
-          user_id: userId,
-          first_name: firstName,
-          last_name: lastName,
-          email: email,
-          status: 'active'
-        });
+        .upsert(teacherPayload);
 
       if (teacherError) throw teacherError;
 
