@@ -1,0 +1,5 @@
+{
+  "name": "QuizMaster Pro",
+  "description": "A comprehensive quiz platform with Admin, Teacher, and Student roles. Admins manage teachers and students, teachers manage courses and quizzes, and students participate in quizzes.",
+  "requestFramePermissions": []
+}
