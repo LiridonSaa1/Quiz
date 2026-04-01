@@ -9,9 +9,11 @@ import Login from './pages/Login';
 import AdminDashboard from './pages/AdminDashboard';
 import AdminStudents from './pages/admin/Students';
 import AdminTeachers from './pages/admin/Teachers';
+import AdminCourses from './pages/admin/Courses';
+import AdminCourseForm from './pages/admin/CourseForm';
 import TeacherDashboard from './pages/teacher/Dashboard';
-import StudentDashboard from './pages/student/Dashboard';
-import CourseManagement from './pages/teacher/CourseManagement';
+import TeacherCourses from './pages/teacher/Courses';
+import TeacherCourseForm from './pages/teacher/CourseForm';
 import StudentManagement from './pages/teacher/StudentManagement';
 import QuizManagement from './pages/teacher/QuizManagement';
 import QuizBuilder from './pages/teacher/QuizBuilder';
@@ -19,8 +21,7 @@ import QuizTaking from './pages/student/QuizTaking';
 import QuizResults from './pages/student/QuizResults';
 import StudentProfile from './pages/student/Profile';
 import TeacherResults from './pages/teacher/Results';
-
-const ADMIN_EMAIL = 'liridon.salihi123@gmail.com';
+import StudentDashboard from './pages/student/Dashboard';
 
 export default function App() {
   const [user, setUser] = useState<UserProfile | null>(null);
@@ -30,11 +31,11 @@ export default function App() {
     const checkBackend = async () => {
       try {
         const res = await fetch('/api/health');
-        if (!res.ok) throw new Error('Backend not responding correctly');
+        if (!res.ok) throw new Error('Backend not responding');
         console.log('Backend health check: OK');
       } catch (error) {
         console.error('Backend health check failed:', error);
-        toast.error('Backend server is not reachable. Some features may not work.');
+        toast.error('Backend server is not reachable.');
       }
     };
 
@@ -47,8 +48,7 @@ export default function App() {
           setLoading(false);
         }
       } catch (error: any) {
-        console.error('Initial session check failed:', error);
-        toast.error(error.message || 'Failed to connect to Supabase. Check your configuration.');
+        toast.error(error.message || 'Failed to connect to Supabase.');
         setLoading(false);
       }
     };
@@ -56,7 +56,6 @@ export default function App() {
     checkBackend();
     initSession();
 
-    // Listen for auth changes
     let subscription: any;
     try {
       const { data } = supabase.auth.onAuthStateChange((_event, session) => {
@@ -72,23 +71,15 @@ export default function App() {
       console.error('Auth state change listener failed:', error);
     }
 
-    return () => {
-      if (subscription) subscription.unsubscribe();
-    };
+    return () => { if (subscription) subscription.unsubscribe(); };
   }, []);
 
   const fetchProfile = async (userId: string) => {
     try {
-      const { data: profile, error } = await supabase
-        .from('profiles')
-        .select('*')
-        .eq('id', userId)
-        .single();
-
+      const { data: profile, error } = await supabase.from('profiles').select('*').eq('id', userId).single();
       if (error) throw error;
-
       if (profile) {
-        const userData: UserProfile = {
+        setUser({
           uid: profile.id,
           email: profile.email,
           displayName: profile.display_name,
@@ -96,8 +87,7 @@ export default function App() {
           teacherId: profile.teacher_id,
           status: profile.status,
           createdAt: profile.created_at
-        };
-        setUser(userData);
+        });
       }
     } catch (error) {
       console.error('Error fetching profile:', error);
@@ -109,7 +99,15 @@ export default function App() {
   if (loading) {
     return (
       <div className="flex items-center justify-center min-h-screen bg-slate-50">
-        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-slate-900"></div>
+        <div className="flex flex-col items-center gap-4">
+          <div className="w-10 h-10 bg-indigo-600 rounded-xl flex items-center justify-center animate-pulse">
+            <svg className="w-5 h-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 14l9-5-9-5-9 5 9 5z" />
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 14l6.16-3.422a12.083 12.083 0 01.665 6.479A11.952 11.952 0 0012 20.055a11.952 11.952 0 00-6.824-2.998 12.078 12.078 0 01.665-6.479L12 14z" />
+            </svg>
+          </div>
+          <div className="text-slate-500 text-sm font-medium">Loading QuizMaster...</div>
+        </div>
       </div>
     );
   }
@@ -118,44 +116,17 @@ export default function App() {
     <Router>
       <Toaster position="top-right" richColors />
       <Routes>
-        {/* Public Routes */}
         <Route path="/login" element={!user ? <Login /> : <Navigate to="/" />} />
-
-        {/* Protected Routes */}
-        <Route
-          path="/"
-          element={
-            user ? (
-              user.role === 'admin' ? (
-                <Navigate to="/admin" />
-              ) : user.role === 'teacher' ? (
-                <Navigate to="/teacher" />
-              ) : (
-                <Navigate to="/student" />
-              )
-            ) : (
-              <Navigate to="/login" />
-            )
-          }
-        />
-
-        {/* Admin Routes */}
-        <Route
-          path="/admin/*"
-          element={user?.role === 'admin' ? <AdminRoutes /> : <Navigate to="/login" />}
-        />
-
-        {/* Teacher Routes */}
-        <Route
-          path="/teacher/*"
-          element={user?.role === 'teacher' ? <TeacherRoutes /> : <Navigate to="/login" />}
-        />
-
-        {/* Student Routes */}
-        <Route
-          path="/student/*"
-          element={user?.role === 'student' ? <StudentRoutes /> : <Navigate to="/login" />}
-        />
+        <Route path="/" element={
+          user ? (
+            user.role === 'admin' ? <Navigate to="/admin" /> :
+            user.role === 'teacher' ? <Navigate to="/teacher" /> :
+            <Navigate to="/student" />
+          ) : <Navigate to="/login" />
+        } />
+        <Route path="/admin/*" element={user?.role === 'admin' ? <AdminRoutes /> : <Navigate to="/login" />} />
+        <Route path="/teacher/*" element={user?.role === 'teacher' ? <TeacherRoutes /> : <Navigate to="/login" />} />
+        <Route path="/student/*" element={user?.role === 'student' ? <StudentRoutes /> : <Navigate to="/login" />} />
       </Routes>
     </Router>
   );
@@ -167,6 +138,9 @@ function AdminRoutes() {
       <Route path="/" element={<AdminDashboard />} />
       <Route path="/students" element={<AdminStudents />} />
       <Route path="/teachers" element={<AdminTeachers />} />
+      <Route path="/courses" element={<AdminCourses />} />
+      <Route path="/courses/new" element={<AdminCourseForm />} />
+      <Route path="/courses/:id/edit" element={<AdminCourseForm />} />
     </Routes>
   );
 }
@@ -175,7 +149,9 @@ function TeacherRoutes() {
   return (
     <Routes>
       <Route path="/" element={<TeacherDashboard />} />
-      <Route path="/courses" element={<CourseManagement />} />
+      <Route path="/courses" element={<TeacherCourses />} />
+      <Route path="/courses/new" element={<TeacherCourseForm />} />
+      <Route path="/courses/:id/edit" element={<TeacherCourseForm />} />
       <Route path="/students" element={<StudentManagement />} />
       <Route path="/quizzes" element={<QuizManagement />} />
       <Route path="/quizzes/new" element={<QuizBuilder />} />
