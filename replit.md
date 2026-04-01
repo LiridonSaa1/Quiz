@@ -17,10 +17,20 @@ A multi-role educational platform for quiz management, course tracking, and resu
   - `App.tsx` — Main app with RBAC routing
   - `supabase.ts` — Supabase client
   - `types.ts` — Shared TypeScript types
-  - `pages/` — Role-specific pages (admin, teacher, student)
-  - `components/` — Shared UI components
+  - `pages/admin/` — Admin pages: Courses, Teachers, Students, Modules, Lessons
+  - `pages/teacher/` — Teacher pages: Courses, Modules, Lessons, Quizzes, Students, Results
+  - `pages/student/` — Student pages: Dashboard, Quiz Taking, Results, Profile
+  - `components/` — Shared UI components (layouts, NotificationCenter)
 - `vite.config.ts` — Vite configuration
 - `index.html` — SPA entry template
+
+## Implemented Features
+- **Courses**: Full CRUD for admin and teacher, grid/list view
+- **Modules**: Full CRUD for teacher (with modal form), read-only overview for admin. Linked to courses with order/status management.
+- **Lessons**: Full CRUD for teacher (with modal form), read-only overview for admin. Types: Video/Text/Quiz. Supports duration, order, status, free preview toggle. Linked to course + module.
+- **Quizzes**: Full builder with multiple question types (MC, T/F, short/long answer, file upload)
+- **Students**: Teacher can manage enrolled students; Admin views all students
+- **Results**: Teacher views quiz attempt results per student
 
 ## Running the App
 - **Dev**: `npm run dev` — starts Express + Vite dev server on port 5000

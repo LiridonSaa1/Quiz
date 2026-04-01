@@ -22,7 +22,9 @@ import QuizResults from './pages/student/QuizResults';
 import StudentProfile from './pages/student/Profile';
 import TeacherResults from './pages/teacher/Results';
 import TeacherModules from './pages/teacher/Modules';
+import TeacherLessons from './pages/teacher/Lessons';
 import AdminModules from './pages/admin/Modules';
+import AdminLessons from './pages/admin/Lessons';
 import StudentDashboard from './pages/student/Dashboard';
 
 export default function App() {
@@ -144,6 +146,7 @@ function AdminRoutes() {
       <Route path="/courses/new" element={<AdminCourseForm />} />
       <Route path="/courses/:id/edit" element={<AdminCourseForm />} />
       <Route path="/modules" element={<AdminModules />} />
+      <Route path="/lessons" element={<AdminLessons />} />
     </Routes>
   );
 }
@@ -161,6 +164,7 @@ function TeacherRoutes() {
       <Route path="/quizzes/edit/:quizId" element={<QuizBuilder />} />
       <Route path="/results" element={<TeacherResults />} />
       <Route path="/modules" element={<TeacherModules />} />
+      <Route path="/lessons" element={<TeacherLessons />} />
     </Routes>
   );
 }
