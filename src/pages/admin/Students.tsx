@@ -26,11 +26,6 @@ const getAvatarColor = (name: string) => {
   return AVATAR_COLORS[Math.abs(hash) % AVATAR_COLORS.length];
 };
 
-const generatePassword = () => {
-  const chars = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!@#$';
-  return Array.from({ length: 12 }, () => chars[Math.floor(Math.random() * chars.length)]).join('');
-};
-
 export default function AdminStudents() {
   const [students, setStudents] = useState<StudentWithMeta[]>([]);
   const [loading, setLoading] = useState(true);
@@ -39,9 +34,6 @@ export default function AdminStudents() {
   const [teacherFilter, setTeacherFilter] = useState('all');
   const [teacherOptions, setTeacherOptions] = useState<{ id: string; name: string }[]>([]);
   const [showAddModal, setShowAddModal] = useState(false);
-  const [showPassword, setShowPassword] = useState(false);
-  const [submitting, setSubmitting] = useState(false);
-  const [newUserData, setNewUserData] = useState({ name: '', email: '', password: generatePassword(), role: 'student' as UserRole });
 
   const fetchData = async () => {
     setLoading(true);
@@ -89,29 +81,6 @@ export default function AdminStudents() {
 
   useEffect(() => { fetchData(); }, []);
 
-  const handleAddStudent = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setSubmitting(true);
-    try {
-      const { data: { session } } = await supabase.auth.getSession();
-      const res = await fetch('/api/admin/create-student', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: newUserData.name, email: newUserData.email, password: newUserData.password, teacherId: session?.user.id }),
-      });
-      const json = await res.json();
-      if (!json.success) throw new Error(json.error || 'Failed to create student');
-      toast.success('Student created successfully');
-      setShowAddModal(false);
-      setNewUserData({ name: '', email: '', password: generatePassword(), role: 'student' });
-      fetchData();
-    } catch (err: any) {
-      toast.error(err.message);
-    } finally {
-      setSubmitting(false);
-    }
-  };
-
   const toggleStatus = async (student: StudentWithMeta) => {
     const newStatus = student.status === 'active' ? 'inactive' : 'active';
     try {
@@ -120,11 +89,6 @@ export default function AdminStudents() {
       toast.success(`Student ${newStatus === 'active' ? 'activated' : 'deactivated'}`);
       fetchData();
     } catch { toast.error('Failed to update status'); }
-  };
-
-  const copyPassword = () => {
-    navigator.clipboard.writeText(newUserData.password);
-    toast.success('Password copied');
   };
 
   const filtered = students.filter(s => {
@@ -155,7 +119,7 @@ export default function AdminStudents() {
             <p className="text-slate-500 text-sm mt-1">Platform-wide view of all student accounts.</p>
           </div>
           <button
-            onClick={() => { setNewUserData({ name: '', email: '', password: generatePassword(), role: 'student' }); setShowAddModal(true); }}
+            onClick={() => setShowAddModal(true)}
             className="flex items-center gap-2 px-5 py-2.5 bg-emerald-600 text-white rounded-xl font-semibold text-sm hover:bg-emerald-700 transition-all shadow-lg shadow-emerald-200 active:scale-[0.98]"
           >
             <UserPlus className="w-4 h-4" />
@@ -343,83 +307,11 @@ export default function AdminStudents() {
 
       {/* Add Student Modal */}
       {showAddModal && (
-        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-2xl w-full max-w-md overflow-hidden shadow-2xl">
-            <div className="p-6 border-b border-slate-100 bg-gradient-to-r from-emerald-50 to-teal-50 flex items-center justify-between">
-              <div>
-                <h2 className="text-lg font-bold text-slate-900">Add New Student</h2>
-                <p className="text-xs text-slate-500 mt-0.5">Create a new student account</p>
-              </div>
-              <button onClick={() => setShowAddModal(false)} className="p-2 hover:bg-white/60 rounded-xl transition-all">
-                <X className="w-5 h-5 text-slate-400" />
-              </button>
-            </div>
-            <form onSubmit={handleAddStudent} className="p-6 space-y-4">
-              <div>
-                <label className="block text-xs font-bold text-slate-600 uppercase tracking-wider mb-1.5">Full Name</label>
-                <div className="relative">
-                  <User className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
-                  <input
-                    required type="text"
-                    value={newUserData.name}
-                    onChange={e => setNewUserData({ ...newUserData, name: e.target.value })}
-                    placeholder="John Doe"
-                    className="w-full pl-9 pr-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500 transition-all"
-                  />
-                </div>
-              </div>
-              <div>
-                <label className="block text-xs font-bold text-slate-600 uppercase tracking-wider mb-1.5">Email Address</label>
-                <div className="relative">
-                  <Mail className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
-                  <input
-                    required type="email"
-                    value={newUserData.email}
-                    onChange={e => setNewUserData({ ...newUserData, email: e.target.value })}
-                    placeholder="john@example.com"
-                    className="w-full pl-9 pr-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500 transition-all"
-                  />
-                </div>
-              </div>
-              <div>
-                <label className="block text-xs font-bold text-slate-600 uppercase tracking-wider mb-1.5">Temporary Password</label>
-                <div className="flex gap-2">
-                  <div className="relative flex-1">
-                    <input
-                      type={showPassword ? 'text' : 'password'}
-                      readOnly
-                      value={newUserData.password}
-                      className="w-full pr-9 pl-4 py-2.5 bg-slate-100 border border-slate-200 rounded-xl text-sm font-mono text-slate-600 focus:outline-none"
-                    />
-                    <button type="button" onClick={() => setShowPassword(!showPassword)}
-                      className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600">
-                      {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                    </button>
-                  </div>
-                  <button type="button" onClick={copyPassword} title="Copy"
-                    className="p-2.5 bg-slate-100 hover:bg-slate-200 border border-slate-200 rounded-xl transition-all">
-                    <Copy className="w-4 h-4 text-slate-500" />
-                  </button>
-                  <button type="button" onClick={() => setNewUserData({ ...newUserData, password: generatePassword() })} title="Regenerate"
-                    className="p-2.5 bg-slate-100 hover:bg-slate-200 border border-slate-200 rounded-xl transition-all">
-                    <RotateCcw className="w-4 h-4 text-slate-500" />
-                  </button>
-                </div>
-                <p className="text-[11px] text-slate-400 mt-1.5">Share this password with the student — they can change it after first login.</p>
-              </div>
-              <div className="flex gap-3 pt-2">
-                <button type="button" onClick={() => setShowAddModal(false)}
-                  className="flex-1 px-4 py-2.5 bg-slate-100 text-slate-600 rounded-xl font-semibold text-sm hover:bg-slate-200 transition-all">
-                  Cancel
-                </button>
-                <button type="submit" disabled={submitting}
-                  className="flex-1 px-4 py-2.5 bg-emerald-600 text-white rounded-xl font-semibold text-sm hover:bg-emerald-700 transition-all shadow-lg shadow-emerald-200 disabled:opacity-60">
-                  {submitting ? 'Creating...' : 'Create Student'}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
+        <AddStudentModal
+          accentColor="emerald"
+          onClose={() => setShowAddModal(false)}
+          onSuccess={() => fetchData()}
+        />
       )}
     </AdminLayout>
   );
