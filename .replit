@@ -41,3 +41,7 @@ externalPort = 80
 deploymentTarget = "autoscale"
 run = ["node", "dist/server.js"]
 build = ["npm", "run", "build"]
+
+[userenv]
+
+[userenv.shared]
