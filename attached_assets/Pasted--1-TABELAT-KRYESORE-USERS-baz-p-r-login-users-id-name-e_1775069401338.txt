@@ -1,0 +1,189 @@
+🧱 1. TABELAT KRYESORE
+👤 USERS (bazë për login)
+users
+- id
+- name
+- email
+- password
+- role (admin/teacher/student)
+- created_at
+
+👉 gjithë sistemin e lidh me këtë
+
+👨‍🏫 TEACHERS
+teachers
+- id
+- user_id
+- specialization
+- status
+👨‍🎓 STUDENTS
+students
+- id
+- user_id
+- current_level
+- status
+📘 COURSES
+courses
+- id
+- teacher_id
+- title
+- description
+- level
+- status
+
+👉 shumë e rëndësishme:
+course i takon një teacher-i
+
+📦 MODULES
+modules
+- id
+- course_id
+- title
+- order
+📚 LESSONS
+lessons
+- id
+- course_id
+- module_id
+- title
+- type
+- order
+🧩 LESSON CONTENT
+lesson_contents
+- id
+- lesson_id
+- content_type
+- content
+- file_url
+🧠 QUIZZES
+quizzes
+- id
+- course_id
+- lesson_id
+- title
+- time_limit
+❓ QUESTIONS
+questions
+- id
+- quiz_id
+- question_text
+✅ ANSWERS
+answers
+- id
+- question_id
+- answer_text
+- is_correct
+🔗 COURSE_STUDENT (shumë e rëndësishme 🔥)
+course_student
+- id
+- course_id
+- student_id
+- progress
+
+👉 kjo lidh studentët me kurset
+
+📝 QUIZ_ATTEMPTS
+quiz_attempts
+- id
+- student_id
+- quiz_id
+- score
+🏫 CLASSES
+classes
+- id
+- teacher_id
+- name
+🔗 CLASS_STUDENT
+class_student
+- id
+- class_id
+- student_id
+🔗 2. RELATIONSHIPS (SHUMË E RËNDËSISHME)
+👨‍🏫 Teacher → Courses
+1 teacher → shumë courses
+teachers.id = courses.teacher_id
+📘 Course → Modules
+courses.id = modules.course_id
+📦 Module → Lessons
+modules.id = lessons.module_id
+📚 Lesson → Content
+lessons.id = lesson_contents.lesson_id
+📘 Course → Students
+courses.id = course_student.course_id
+students.id = course_student.student_id
+🧠 Quiz → Questions → Answers
+quizzes.id = questions.quiz_id
+questions.id = answers.question_id
+👨‍🎓 Student → Quiz Attempts
+students.id = quiz_attempts.student_id
+🔒 3. ACCESS CONTROL (SHUMË KRITIKE 🔥)
+🎯 Qëllimi yt:
+
+👉 Teacher nuk duhet me pa:
+
+kurset e teacher tjetër ❌
+studentët e teacher tjetër ❌
+✅ RREGULLI KRYESOR
+🔥 çdo gjë filtrohet me teacher_id
+👨‍🏫 Teacher sheh vetëm:
+Courses
+SELECT * FROM courses WHERE teacher_id = current_teacher_id
+Students (vetëm të tijtë)
+SELECT students.*
+FROM students
+JOIN course_student ON students.id = course_student.student_id
+JOIN courses ON courses.id = course_student.course_id
+WHERE courses.teacher_id = current_teacher_id
+Lessons
+SELECT lessons.*
+FROM lessons
+JOIN courses ON lessons.course_id = courses.id
+WHERE courses.teacher_id = current_teacher_id
+Quizzes
+SELECT quizzes.*
+FROM quizzes
+JOIN courses ON quizzes.course_id = courses.id
+WHERE courses.teacher_id = current_teacher_id
+👨‍🎓 Student sheh vetëm:
+Courses ku është i regjistruar
+SELECT courses.*
+FROM courses
+JOIN course_student ON courses.id = course_student.course_id
+WHERE course_student.student_id = current_student_id
+👑 Admin
+
+👉 sheh gjithçka (pa filter)
+
+🧠 PRO TIP (shumë e rëndësishme)
+
+Mos u mbështet vetëm në frontend ❌
+👉 gjithmonë filtro në backend
+
+🔥 BEST PRACTICE (Laravel)
+
+Në Model:
+
+Course.php
+public function teacher()
+{
+    return $this->belongsTo(Teacher::class);
+}
+Teacher.php
+public function courses()
+{
+    return $this->hasMany(Course::class);
+}
+Filter global (shumë powerful)
+Course::where('teacher_id', auth()->user()->teacher->id)
+🚀 STRUKTURA E SAKTË LOGJIKE
+User
+ ├── Teacher
+ │     └── Courses
+ │           └── Modules
+ │                 └── Lessons
+ │                       └── Quiz
+ │
+ └── Student
+       └── Enrolled Courses
+             └── Lessons
+             └── Quiz Attempts
