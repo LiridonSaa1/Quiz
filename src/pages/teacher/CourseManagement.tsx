@@ -67,7 +67,7 @@ export default function CourseManagement() {
         const { error } = await supabase
           .from('courses')
           .update({
-            name: formData.name,
+            title: formData.name,
             description: formData.description,
             language: formData.language
           })
@@ -79,9 +79,10 @@ export default function CourseManagement() {
         const { error } = await supabase
           .from('courses')
           .insert({
-            ...formData,
+            title: formData.name,
+            description: formData.description,
+            language: formData.language,
             teacher_id: session.user.id,
-            student_ids: []
           });
         
         if (error) throw error;

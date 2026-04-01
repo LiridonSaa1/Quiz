@@ -58,7 +58,8 @@ export default function QuizBuilder() {
         
         setCourses(coursesData?.map(d => ({
           id: d.id,
-          name: d.name,
+          title: d.title,
+          name: d.title,
           description: d.description,
           language: d.language,
           teacherId: d.teacher_id,
@@ -161,7 +162,6 @@ export default function QuizBuilder() {
         time_limit: quizData.timeLimit,
         published: quizData.published,
         settings: quizData.settings,
-        teacher_id: session.user.id
       };
 
       if (quizId) {

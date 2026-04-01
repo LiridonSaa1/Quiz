@@ -51,7 +51,7 @@ export default function AdminQuizzes() {
     try {
       const [quizzesSnap, coursesSnap, teachersSnap, questionsSnap] = await Promise.all([
         supabase.from('quizzes').select('*').order('created_at', { ascending: false }),
-        supabase.from('courses').select('id, name, title, teacher_id'),
+        supabase.from('courses').select('id, title, teacher_id'),
         supabase.from('teachers').select('user_id, first_name, last_name'),
         supabase.from('questions').select('quiz_id'),
       ]);
@@ -66,7 +66,7 @@ export default function AdminQuizzes() {
       const courseMap: Record<string, { name: string; teacher: string }> = {};
       const options: { id: string; name: string }[] = [];
       (coursesSnap.data || []).forEach(c => {
-        const name = c.name || c.title || 'Untitled';
+        const name = c.title || 'Untitled';
         courseMap[c.id] = { name, teacher: teacherMap[c.teacher_id] || '—' };
         options.push({ id: c.id, name });
       });

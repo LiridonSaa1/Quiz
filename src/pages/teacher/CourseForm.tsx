@@ -85,7 +85,7 @@ export default function TeacherCourseForm() {
       if (!session) throw new Error('Not authenticated');
 
       const payload = {
-        name: form.name, title: form.name,
+        title: form.name,
         description: form.description, short_description: form.short_description,
         language: form.language, level: form.level, category: form.category,
         price: form.is_free ? 0 : form.price, is_free: form.is_free,
@@ -101,7 +101,7 @@ export default function TeacherCourseForm() {
         toast.success(publishNow ? 'Course published!' : 'Course saved');
       } else {
         const { error } = await supabase.from('courses').insert({
-          ...payload, teacher_id: session.user.id, student_ids: [], created_at: new Date().toISOString()
+          ...payload, teacher_id: session.user.id, created_at: new Date().toISOString()
         });
         if (error) throw error;
         toast.success(publishNow ? 'Course created & published!' : 'Course saved as draft');

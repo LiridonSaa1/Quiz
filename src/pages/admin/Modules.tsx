@@ -21,7 +21,7 @@ export default function AdminModules() {
     try {
       const [modulesSnap, coursesSnap, teachersSnap] = await Promise.all([
         supabase.from('modules').select('*').order('order', { ascending: true }),
-        supabase.from('courses').select('id, name, title, teacher_id'),
+        supabase.from('courses').select('id, title, teacher_id'),
         supabase.from('teachers').select('user_id, first_name, last_name'),
       ]);
 
@@ -35,7 +35,7 @@ export default function AdminModules() {
       const coursesMap: Record<string, { title: string; teacher: string }> = {};
       (coursesSnap.data || []).forEach(c => {
         coursesMap[c.id] = {
-          title: c.name || c.title || 'Untitled',
+          title: c.title || 'Untitled',
           teacher: teacherMap[c.teacher_id] || 'Unknown',
         };
       });

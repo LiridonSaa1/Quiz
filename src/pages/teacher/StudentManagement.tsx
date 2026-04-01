@@ -41,13 +41,13 @@ export default function StudentManagement() {
     try {
       const [profilesSnap, coursesSnap] = await Promise.all([
         supabase.from('profiles').select('*').eq('teacher_id', session.user.id).eq('role', 'student').order('created_at', { ascending: false }),
-        supabase.from('courses').select('id, name, title, student_ids').eq('teacher_id', session.user.id),
+        supabase.from('courses').select('id, title, student_ids').eq('teacher_id', session.user.id),
       ]);
       if (profilesSnap.error) throw profilesSnap.error;
 
       const coursesData = (coursesSnap.data || []).map(c => ({
         id: c.id,
-        name: c.name || c.title || 'Untitled',
+        name: c.title || 'Untitled',
         studentIds: c.student_ids || [],
       }));
       setCourses(coursesData);

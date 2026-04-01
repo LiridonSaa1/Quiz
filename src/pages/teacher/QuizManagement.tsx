@@ -50,7 +50,7 @@ export default function QuizManagement() {
     try {
       const [quizzesSnap, coursesSnap, questionsSnap] = await Promise.all([
         supabase.from('quizzes').select('*').eq('teacher_id', session.user.id).order('created_at', { ascending: false }),
-        supabase.from('courses').select('id, name, title').eq('teacher_id', session.user.id),
+        supabase.from('courses').select('id, title').eq('teacher_id', session.user.id),
         supabase.from('questions').select('quiz_id'),
       ]);
 
@@ -60,8 +60,8 @@ export default function QuizManagement() {
       const courseMap: Record<string, string> = {};
       const options: { id: string; name: string }[] = [];
       (coursesSnap.data || []).forEach(c => {
-        courseMap[c.id] = c.name || c.title || 'Untitled';
-        options.push({ id: c.id, name: c.name || c.title || 'Untitled' });
+        courseMap[c.id] = c.title || 'Untitled';
+        options.push({ id: c.id, name: c.title || 'Untitled' });
       });
       setCourseOptions(options);
 

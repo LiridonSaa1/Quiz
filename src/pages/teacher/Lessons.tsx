@@ -55,10 +55,10 @@ export default function TeacherLessons() {
     try {
       const { data: coursesData, error: coursesError } = await supabase
         .from('courses')
-        .select('id, name, title')
+        .select('id, title')
         .eq('teacher_id', session.user.id)
         .order('created_at', { ascending: false });
-      if (coursesError) throw coursesError;
+      if (coursesError && (coursesError as any).status !== 400) throw coursesError;
       const courseList = coursesData || [];
       setCourses(courseList);
 

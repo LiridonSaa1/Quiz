@@ -36,7 +36,7 @@ export default function TeacherModules() {
         .select('*')
         .eq('teacher_id', session.user.id)
         .order('created_at', { ascending: false });
-      if (coursesError) throw coursesError;
+      if (coursesError && (coursesError as any).status !== 400) throw coursesError;
 
       const courseList = coursesData || [];
       setCourses(courseList.map(c => ({ ...c, id: c.id })) as Course[]);
