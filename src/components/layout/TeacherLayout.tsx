@@ -20,7 +20,8 @@ import {
   MessageSquare,
   Megaphone,
   FileBarChart,
-  User
+  User,
+  GraduationCap
 } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import NotificationCenter from '../NotificationCenter';
@@ -84,118 +85,104 @@ export default function TeacherLayout({ children }: { children: React.ReactNode 
     navigate('/login');
   };
 
-  const NavItem = ({ item, onClick }: { item: any, onClick?: () => void, key?: string }) => (
+  const NavItem = ({ item, onClick }: { item: any, onClick?: () => void }) => (
     <Link
       to={item.path}
       onClick={onClick}
       className={cn(
-        "flex items-center gap-3 px-4 py-2 rounded-lg transition-all text-sm",
+        "flex items-center gap-3 px-3 py-2 rounded-lg transition-all text-sm font-medium",
         location.pathname === item.path
-          ? "bg-slate-900 text-white font-semibold"
-          : "text-slate-500 hover:bg-slate-50 hover:text-slate-900"
+          ? "bg-violet-600 text-white shadow-lg shadow-violet-900/30"
+          : "text-slate-400 hover:bg-slate-700/60 hover:text-white"
       )}
     >
-      <item.icon className="w-4 h-4" />
+      <item.icon className="w-4 h-4 shrink-0" />
       <span>{item.label}</span>
     </Link>
+  );
+
+  const SidebarContent = ({ onLinkClick }: { onLinkClick?: () => void }) => (
+    <>
+      <div className="p-5 border-b border-slate-700/50">
+        <div className="flex items-center gap-3">
+          <div className="w-9 h-9 bg-violet-600 rounded-xl flex items-center justify-center shadow-lg shadow-violet-900/40">
+            <GraduationCap className="w-5 h-5 text-white" />
+          </div>
+          <div>
+            <h1 className="text-base font-bold text-white leading-tight">QuizMaster</h1>
+            <p className="text-[10px] text-slate-400 font-medium uppercase tracking-widest">Teacher Portal</p>
+          </div>
+        </div>
+      </div>
+      <nav className="flex-1 px-3 py-4 space-y-5 overflow-y-auto">
+        {teacherNavSections.map((section) => (
+          <div key={section.title} className="space-y-0.5">
+            <h3 className="px-3 text-[9px] font-bold text-slate-500 uppercase tracking-widest mb-1.5">
+              {section.title}
+            </h3>
+            {section.items.map((item) => (
+              <NavItem key={item.path} item={item} onClick={onLinkClick} />
+            ))}
+          </div>
+        ))}
+        <div className="pt-3 border-t border-slate-700/50">
+          <button
+            onClick={handleLogout}
+            className="flex items-center gap-3 px-3 py-2 w-full text-slate-400 hover:bg-red-500/10 hover:text-red-400 rounded-lg transition-all text-sm font-medium"
+          >
+            <LogOut className="w-4 h-4" />
+            <span>Sign out</span>
+          </button>
+        </div>
+      </nav>
+    </>
   );
 
   return (
     <div className="min-h-screen bg-slate-50 flex">
       {/* Sidebar Desktop */}
-      <aside className="hidden lg:flex flex-col w-64 bg-white border-r border-slate-200 fixed h-full z-30 overflow-y-auto scrollbar-hide">
-        <div className="p-6 sticky top-0 bg-white z-10 border-b border-slate-50">
-          <div className="flex items-center gap-3">
-            <div className="w-8 h-8 bg-slate-900 rounded-lg flex items-center justify-center text-white">
-              <BookOpen className="w-5 h-5" />
-            </div>
-            <h1 className="text-xl font-bold text-slate-900">Teacher</h1>
-          </div>
-        </div>
-        
-        <nav className="flex-1 px-4 py-4 space-y-6">
-          {teacherNavSections.map((section) => (
-            <div key={section.title} className="space-y-1">
-              <h3 className="px-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-2">
-                {section.title}
-              </h3>
-              {section.items.map((item) => (
-                <NavItem key={item.path} item={item} />
-              ))}
-            </div>
-          ))}
-          
-          <div className="pt-4 border-t border-slate-100">
-            <button
-              onClick={handleLogout}
-              className="flex items-center gap-3 px-4 py-2 w-full text-slate-500 hover:bg-red-50 hover:text-red-600 rounded-lg transition-all text-sm font-medium"
-            >
-              <LogOut className="w-4 h-4" />
-              <span>Sign out</span>
-            </button>
-          </div>
-        </nav>
+      <aside className="hidden lg:flex flex-col w-60 bg-slate-800 fixed h-full z-30 overflow-hidden">
+        <SidebarContent />
       </aside>
 
       {/* Top Bar Desktop */}
-      <header className="hidden lg:flex fixed top-0 right-0 left-64 h-16 bg-white border-b border-slate-200 items-center justify-end px-8 z-20">
+      <header className="hidden lg:flex fixed top-0 right-0 left-60 h-14 bg-white border-b border-slate-200 items-center justify-between px-6 z-20">
+        <div className="flex items-center gap-2">
+          <span className="text-sm font-semibold text-slate-500">
+            {teacherNavSections.flatMap(s => s.items).find(i => i.path === location.pathname)?.label || 'Dashboard'}
+          </span>
+        </div>
         <NotificationCenter />
       </header>
 
       {/* Mobile Header */}
-      <div className="lg:hidden fixed top-0 left-0 right-0 h-16 bg-white border-b border-slate-200 flex items-center justify-between px-6 z-50">
-        <div className="flex items-center gap-2">
-          <div className="w-8 h-8 bg-slate-900 rounded-lg flex items-center justify-center text-white">
-            <BookOpen className="w-5 h-5" />
+      <div className="lg:hidden fixed top-0 left-0 right-0 h-14 bg-slate-800 flex items-center justify-between px-4 z-50">
+        <div className="flex items-center gap-2.5">
+          <div className="w-8 h-8 bg-violet-600 rounded-lg flex items-center justify-center">
+            <GraduationCap className="w-4 h-4 text-white" />
           </div>
-          <h1 className="text-lg font-bold text-slate-900">Teacher</h1>
+          <h1 className="text-base font-bold text-white">QuizMaster</h1>
         </div>
-        <div className="flex items-center gap-4">
+        <div className="flex items-center gap-3">
           <NotificationCenter />
-          <button onClick={() => setIsSidebarOpen(!isSidebarOpen)} className="p-2 hover:bg-slate-50 rounded-lg">
-            {isSidebarOpen ? <X className="w-6 h-6 text-slate-600" /> : <Menu className="w-6 h-6 text-slate-600" />}
+          <button onClick={() => setIsSidebarOpen(!isSidebarOpen)} className="p-1.5 hover:bg-slate-700 rounded-lg">
+            {isSidebarOpen ? <X className="w-5 h-5 text-slate-300" /> : <Menu className="w-5 h-5 text-slate-300" />}
           </button>
         </div>
       </div>
 
       {/* Mobile Sidebar */}
       {isSidebarOpen && (
-        <div className="lg:hidden fixed inset-0 bg-slate-900/50 z-40 backdrop-blur-sm" onClick={() => setIsSidebarOpen(false)}>
-          <aside className="w-72 bg-white h-full overflow-y-auto" onClick={e => e.stopPropagation()}>
-            <div className="p-6 border-b border-slate-100 flex items-center justify-between">
-              <h1 className="text-xl font-bold text-slate-900 tracking-tight">QuizMaster</h1>
-              <button onClick={() => setIsSidebarOpen(false)} className="p-2 hover:bg-slate-50 rounded-lg">
-                <X className="w-5 h-5 text-slate-400" />
-              </button>
-            </div>
-            <nav className="p-4 space-y-6">
-              {teacherNavSections.map((section) => (
-                <div key={section.title} className="space-y-1">
-                  <h3 className="px-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-2">
-                    {section.title}
-                  </h3>
-                  {section.items.map((item) => (
-                    <NavItem key={item.path} item={item} onClick={() => setIsSidebarOpen(false)} />
-                  ))}
-                </div>
-              ))}
-              <div className="pt-4 border-t border-slate-100">
-                <button
-                  onClick={handleLogout}
-                  className="flex items-center gap-3 px-4 py-2 w-full text-slate-500 hover:bg-red-50 hover:text-red-600 rounded-lg transition-all text-sm font-medium"
-                >
-                  <LogOut className="w-4 h-4" />
-                  <span>Sign out</span>
-                </button>
-              </div>
-            </nav>
+        <div className="lg:hidden fixed inset-0 bg-black/60 z-40 backdrop-blur-sm" onClick={() => setIsSidebarOpen(false)}>
+          <aside className="w-64 bg-slate-800 h-full flex flex-col overflow-hidden" onClick={e => e.stopPropagation()}>
+            <SidebarContent onLinkClick={() => setIsSidebarOpen(false)} />
           </aside>
         </div>
       )}
 
       {/* Main Content */}
-      <main className="flex-1 lg:ml-64 px-3 sm:px-4 md:px-6 lg:px-8 py-4 pt-20 lg:pt-24">
-        <div className="max-w-8xl mx-auto">
+      <main className="flex-1 lg:ml-60 px-3 sm:px-4 md:px-6 lg:px-8 py-4" style={{paddingTop: '3.5rem'}}>
+        <div className="max-w-8xl mx-auto pt-6">
           {children}
         </div>
       </main>
