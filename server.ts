@@ -83,6 +83,51 @@ async function startServer() {
     });
   });
 
+  // Route to fetch all students (bypasses RLS using service role)
+  app.get("/api/admin/students", async (req, res) => {
+    try {
+      const [profilesRes, teachersRes, coursesRes] = await Promise.all([
+        supabaseAdmin.from('profiles').select('*').eq('role', 'student'),
+        supabaseAdmin.from('teachers').select('user_id, first_name, last_name'),
+        supabaseAdmin.from('courses').select('id, student_ids, teacher_id'),
+      ]);
+
+      if (profilesRes.error) throw profilesRes.error;
+
+      const teacherMap: Record<string, string> = {};
+      const teacherOptions: { id: string; name: string }[] = [];
+      (teachersRes.data || []).forEach((t: any) => {
+        const name = `${t.first_name} ${t.last_name}`.trim();
+        teacherMap[t.user_id] = name;
+        teacherOptions.push({ id: t.user_id, name });
+      });
+
+      const enrolledCountMap: Record<string, number> = {};
+      (coursesRes.data || []).forEach((c: any) => {
+        (c.student_ids || []).forEach((sid: string) => {
+          enrolledCountMap[sid] = (enrolledCountMap[sid] || 0) + 1;
+        });
+      });
+
+      const students = (profilesRes.data || []).map((p: any) => ({
+        uid: p.id,
+        email: p.email,
+        displayName: p.display_name,
+        role: p.role,
+        teacherId: p.teacher_id,
+        status: p.status || 'active',
+        createdAt: p.created_at,
+        teacherName: p.teacher_id ? (teacherMap[p.teacher_id] || '—') : '—',
+        enrolledCourseCount: enrolledCountMap[p.id] || 0,
+      }));
+
+      res.json({ success: true, students, teacherOptions });
+    } catch (error: any) {
+      console.error('Error fetching students:', error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
   // Route to seed the initial admin account
   app.get("/api/admin/seed", async (req, res) => {
     const adminEmail = "liridon.salihi123@gmail.com";

@@ -38,40 +38,11 @@ export default function AdminStudents() {
   const fetchData = async () => {
     setLoading(true);
     try {
-      const [profilesSnap, teachersSnap, coursesSnap] = await Promise.all([
-        supabase.from('profiles').select('*').eq('role', 'student'),
-        supabase.from('teachers').select('user_id, first_name, last_name'),
-        supabase.from('courses').select('id, student_ids, teacher_id'),
-      ]);
-      if (profilesSnap.error) throw profilesSnap.error;
-
-      const teacherMap: Record<string, string> = {};
-      const options: { id: string; name: string }[] = [];
-      (teachersSnap.data || []).forEach(t => {
-        const name = `${t.first_name} ${t.last_name}`.trim();
-        teacherMap[t.user_id] = name;
-        options.push({ id: t.user_id, name });
-      });
-      setTeacherOptions(options);
-
-      const enrolledCountMap: Record<string, number> = {};
-      (coursesSnap.data || []).forEach(c => {
-        (c.student_ids || []).forEach((sid: string) => {
-          enrolledCountMap[sid] = (enrolledCountMap[sid] || 0) + 1;
-        });
-      });
-
-      setStudents((profilesSnap.data || []).map(p => ({
-        uid: p.id,
-        email: p.email,
-        displayName: p.display_name,
-        role: p.role,
-        teacherId: p.teacher_id,
-        status: p.status || 'active',
-        createdAt: p.created_at,
-        teacherName: p.teacher_id ? (teacherMap[p.teacher_id] || '—') : '—',
-        enrolledCourseCount: enrolledCountMap[p.id] || 0,
-      })));
+      const res = await fetch('/api/admin/students');
+      const json = await res.json();
+      if (!res.ok || !json.success) throw new Error(json.error || 'Failed to fetch students');
+      setStudents(json.students);
+      setTeacherOptions(json.teacherOptions);
     } catch {
       toast.error('Failed to load students');
     } finally {
