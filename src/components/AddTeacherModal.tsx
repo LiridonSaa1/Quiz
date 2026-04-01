@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import {
-  X, User, Mail, Lock, Phone, BookOpen, FileText,
+  X, User, Mail, Lock, Phone, BookOpen,
   Eye, EyeOff, Copy, RotateCcw, ChevronRight, ChevronLeft,
   Check, UserPlus
 } from 'lucide-react';
@@ -14,7 +14,6 @@ interface FormData {
   password: string;
   phone: string;
   specialization: string;
-  bio: string;
 }
 
 interface Props {
@@ -45,7 +44,6 @@ export default function AddTeacherModal({ onClose, onSuccess }: Props) {
     password: generatePassword(),
     phone: '',
     specialization: '',
-    bio: '',
   });
 
   const set = (key: keyof FormData, val: string) => setForm(f => ({ ...f, [key]: val }));
@@ -76,7 +74,6 @@ export default function AddTeacherModal({ onClose, onSuccess }: Props) {
           password: form.password,
           phone: form.phone || undefined,
           specialization: form.specialization || undefined,
-          bio: form.bio || undefined,
         }),
       });
       const json = await res.json();
@@ -228,19 +225,6 @@ export default function AddTeacherModal({ onClose, onSuccess }: Props) {
                   </select>
                 </div>
               </div>
-              <div>
-                <label className={labelCls}>Bio / Notes <span className="text-slate-300 normal-case font-normal">(optional)</span></label>
-                <div className="relative">
-                  <FileText className="absolute left-3 top-3 w-4 h-4 text-slate-400" />
-                  <textarea
-                    value={form.bio}
-                    onChange={e => set('bio', e.target.value)}
-                    placeholder="Brief description or notes about this teacher..."
-                    rows={3}
-                    className={`${inputCls} pl-9 resize-none`}
-                  />
-                </div>
-              </div>
             </div>
           )}
 
@@ -272,12 +256,6 @@ export default function AddTeacherModal({ onClose, onSuccess }: Props) {
                     <div className="flex gap-2">
                       <span className="text-slate-400 w-32 shrink-0">Specialization</span>
                       <span className="font-semibold text-slate-800">{form.specialization}</span>
-                    </div>
-                  )}
-                  {form.bio && (
-                    <div className="flex gap-2">
-                      <span className="text-slate-400 w-32 shrink-0">Bio</span>
-                      <span className="font-semibold text-slate-800 line-clamp-2">{form.bio}</span>
                     </div>
                   )}
                 </div>

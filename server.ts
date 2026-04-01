@@ -253,7 +253,7 @@ async function startServer() {
 
   // Route to create a teacher (Admin only)
   app.post("/api/admin/create-teacher", async (req, res) => {
-    const { name, email, password, phone, specialization, bio } = req.body;
+    const { name, email, password, phone, specialization } = req.body;
     
     try {
       // 1. Create or find user in Supabase Auth
@@ -313,7 +313,6 @@ async function startServer() {
       };
       if (phone) teacherPayload.phone = phone;
       if (specialization) teacherPayload.specialization = specialization;
-      if (bio) teacherPayload.bio = bio;
 
       const { error: teacherError } = await supabaseAdmin
         .from('teachers')
