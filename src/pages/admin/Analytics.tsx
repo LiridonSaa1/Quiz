@@ -118,6 +118,25 @@ export default function AdminAnalytics() {
           </button>
         </div>
 
+        {/* Platform Health Summary */}
+        <div className="bg-gradient-to-br from-indigo-600 to-violet-700 rounded-2xl p-6 text-white shadow-xl shadow-indigo-200">
+          <h3 className="text-lg font-bold mb-4">Platform Health Summary</h3>
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+            {[
+              { label: 'Quiz Pass Rate', value: `${ov?.passRate ?? 0}%`, good: (ov?.passRate ?? 0) >= 60 },
+              { label: 'Avg Quiz Score', value: `${ov?.avgScore ?? 0}%`, good: (ov?.avgScore ?? 0) >= 60 },
+              { label: 'Attendance Rate', value: `${ov?.attendanceRate ?? 0}%`, good: (ov?.attendanceRate ?? 0) >= 75 },
+              { label: 'Course Publish Rate', value: ov?.totalCourses ? `${Math.round((ov.publishedCourses / ov.totalCourses) * 100)}%` : '0%', good: true },
+            ].map(({ label, value, good }) => (
+              <div key={label} className="bg-white/10 rounded-xl p-3 backdrop-blur-sm">
+                <p className="text-white/60 text-xs font-medium">{label}</p>
+                <p className="text-2xl font-bold mt-1">{value}</p>
+                <div className={cn('w-full h-1 rounded-full mt-2', good ? 'bg-emerald-400' : 'bg-amber-400')} />
+              </div>
+            ))}
+          </div>
+        </div>
+
         {/* Stat Cards — Row 1: Users & Courses */}
         <div>
           <h2 className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-3">Users & Content</h2>
@@ -267,24 +286,6 @@ export default function AdminAnalytics() {
           </ChartCard>
         </div>
 
-        {/* Performance Summary */}
-        <div className="bg-gradient-to-br from-indigo-600 to-violet-700 rounded-2xl p-6 text-white shadow-xl shadow-indigo-200">
-          <h3 className="text-lg font-bold mb-4">Platform Health Summary</h3>
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-            {[
-              { label: 'Quiz Pass Rate', value: `${ov?.passRate ?? 0}%`, good: (ov?.passRate ?? 0) >= 60 },
-              { label: 'Avg Quiz Score', value: `${ov?.avgScore ?? 0}%`, good: (ov?.avgScore ?? 0) >= 60 },
-              { label: 'Attendance Rate', value: `${ov?.attendanceRate ?? 0}%`, good: (ov?.attendanceRate ?? 0) >= 75 },
-              { label: 'Course Publish Rate', value: ov?.totalCourses ? `${Math.round((ov.publishedCourses / ov.totalCourses) * 100)}%` : '0%', good: true },
-            ].map(({ label, value, good }) => (
-              <div key={label} className="bg-white/10 rounded-xl p-3 backdrop-blur-sm">
-                <p className="text-white/60 text-xs font-medium">{label}</p>
-                <p className="text-2xl font-bold mt-1">{value}</p>
-                <div className={cn('w-full h-1 rounded-full mt-2', good ? 'bg-emerald-400' : 'bg-amber-400')} />
-              </div>
-            ))}
-          </div>
-        </div>
       </div>
     </AdminLayout>
   );
