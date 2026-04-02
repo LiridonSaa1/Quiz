@@ -21,7 +21,7 @@ const GRADIENTS = [
   { label: 'Fuchsia', value: 'from-fuchsia-500 to-violet-600' },
 ];
 const LANGUAGES = ['English', 'Albanian', 'Spanish', 'French', 'German', 'Italian', 'Portuguese', 'Arabic', 'Chinese'];
-const LEVELS = ['Beginner', 'Intermediate', 'Advanced', 'All Levels'];
+const LEVELS = ['beginner', 'intermediate', 'advanced'];
 const CATEGORIES = ['Mathematics', 'Science', 'Programming', 'Language Arts', 'History', 'Arts', 'Music', 'Physical Education', 'Other'];
 
 const initialForm = {
@@ -29,7 +29,7 @@ const initialForm = {
   description: '',
   short_description: '',
   language: 'English',
-  level: 'All Levels',
+  level: 'beginner',
   price: 0,
   is_free: true,
   status: 'draft' as 'draft' | 'published',
@@ -94,7 +94,7 @@ export default function AdminCourseForm() {
           description: data.description || '',
           short_description: data.short_description || '',
           language: data.language || 'English',
-          level: data.level || 'All Levels',
+          level: data.level || 'beginner',
           price: data.price || 0,
           is_free: data.is_free ?? true,
           status: data.status || 'draft',
@@ -127,7 +127,6 @@ export default function AdminCourseForm() {
         gradient: form.gradient,
         category: form.category,
         teacher_id: form.teacher_id || null,
-        tags: form.tags,
         updated_at: new Date().toISOString(),
       };
 
@@ -279,7 +278,7 @@ export default function AdminCourseForm() {
                         <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">Level</label>
                         <select value={form.level} onChange={e => set('level', e.target.value)}
                           className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 transition-all">
-                          {LEVELS.map(l => <option key={l}>{l}</option>)}
+                          {LEVELS.map(l => <option key={l} value={l}>{l.charAt(0).toUpperCase() + l.slice(1)}</option>)}
                         </select>
                       </div>
                     </div>
