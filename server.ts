@@ -251,6 +251,32 @@ async function startServer() {
     }
   });
 
+  // Route to create a course (bypasses RLS using service role)
+  app.post("/api/admin/create-course", async (req, res) => {
+    try {
+      const payload = { ...req.body, created_at: new Date().toISOString() };
+      const { data, error } = await supabaseAdmin.from('courses').insert(payload).select().single();
+      if (error) throw error;
+      res.json({ success: true, course: data });
+    } catch (error: any) {
+      console.error('Error creating course:', error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // Route to update a course (bypasses RLS using service role)
+  app.patch("/api/admin/update-course/:id", async (req, res) => {
+    try {
+      const { id } = req.params;
+      const { data, error } = await supabaseAdmin.from('courses').update(req.body).eq('id', id).select().single();
+      if (error) throw error;
+      res.json({ success: true, course: data });
+    } catch (error: any) {
+      console.error('Error updating course:', error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
   // Route to create a teacher (Admin only)
   app.post("/api/admin/create-teacher", async (req, res) => {
     const { name, email, password, phone, specialization } = req.body;
