@@ -12,6 +12,7 @@ import AdminTeachers from './pages/admin/Teachers';
 import AdminCourses from './pages/admin/Courses';
 import AdminCourseForm from './pages/admin/CourseForm';
 import TeacherDashboard from './pages/teacher/Dashboard';
+import TeacherClasses from './pages/teacher/Classes';
 import TeacherCourses from './pages/teacher/Courses';
 import TeacherCourseForm from './pages/teacher/CourseForm';
 import StudentManagement from './pages/teacher/StudentManagement';
@@ -193,6 +194,7 @@ function TeacherRoutes() {
   return (
     <Routes>
       <Route path="/" element={<TeacherDashboard />} />
+      <Route path="/classes" element={<TeacherClasses />} />
       <Route path="/courses" element={<TeacherCourses />} />
       <Route path="/courses/new" element={<TeacherCourseForm />} />
       <Route path="/courses/:id/edit" element={<TeacherCourseForm />} />
