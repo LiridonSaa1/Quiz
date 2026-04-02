@@ -136,7 +136,7 @@ export default function AdminCourseForm() {
         if (error) throw error;
         toast.success(publishNow ? 'Course published!' : 'Course saved');
       } else {
-        const { error } = await supabase.from('courses').insert({ ...payload, student_ids: [], created_at: new Date().toISOString() });
+        const { error } = await supabase.from('courses').insert({ ...payload, created_at: new Date().toISOString() });
         if (error) throw error;
         toast.success(publishNow ? 'Course created & published!' : 'Course created as draft');
       }
