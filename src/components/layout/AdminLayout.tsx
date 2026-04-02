@@ -20,7 +20,6 @@ import {
   Megaphone, 
   BarChart3, 
   FileBarChart, 
-  CreditCard, 
   DollarSign, 
   Receipt, 
   Settings, 
@@ -80,7 +79,6 @@ const adminNavSections = [
   {
     title: 'BUSINESS',
     items: [
-      { icon: CreditCard, label: 'Subscription', path: '/admin/subscription' },
       { icon: DollarSign, label: 'Payments', path: '/admin/payments' },
       { icon: Receipt, label: 'Invoices', path: '/admin/invoices' },
     ]
