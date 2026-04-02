@@ -26,6 +26,7 @@ import TeacherLessons from './pages/teacher/Lessons';
 import AdminModules from './pages/admin/Modules';
 import AdminLessons from './pages/admin/Lessons';
 import AdminQuizzes from './pages/admin/Quizzes';
+import AdminClasses from './pages/admin/Classes';
 import StudentDashboard from './pages/student/Dashboard';
 
 export default function App() {
@@ -149,6 +150,7 @@ function AdminRoutes() {
       <Route path="/modules" element={<AdminModules />} />
       <Route path="/lessons" element={<AdminLessons />} />
       <Route path="/quizzes" element={<AdminQuizzes />} />
+      <Route path="/classes" element={<AdminClasses />} />
     </Routes>
   );
 }
