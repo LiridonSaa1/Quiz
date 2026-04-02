@@ -115,7 +115,6 @@ export default function AdminCourseForm() {
     setSaving(true);
     try {
       const payload = {
-        name: form.name,
         title: form.name,
         description: form.description,
         short_description: form.short_description,
