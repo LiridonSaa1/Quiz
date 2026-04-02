@@ -1,0 +1,20 @@
+uwwfozpchsziaslusfln.supabase.co/rest/v1/certificates?select=*%2Cstudent%3Aprofiles%21certificates_student_id_fkey%28display_name%2Cemail%29%2Ccourse%3Acourses%28title%29&order=issued_at.desc:1  Failed to load resource: the server responded with a status of 400 ()
+uwwfozpchsziaslusfln.supabase.co/rest/v1/certificates?select=*%2Cstudent%3Aprofiles%21certificates_student_id_fkey%28display_name%2Cemail%29%2Ccourse%3Acourses%28title%29&order=issued_at.desc:1  Failed to load resource: the server responded with a status of 400 ()
+App.tsx:44 Backend health check: OK
+@supabase_supabase-js.js?v=4ed6108e:7055 WebSocket connection to 'wss://uwwfozpchsziaslusfln.supabase.co/realtime/v1/websocket?apikey=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InV3d2ZvenBjaHN6aWFzbHVzZmxuIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQ1MjczODAsImV4cCI6MjA5MDEwMzM4MH0.GFKTZPw4VEs2lVCBcA3dex70LlFdf68zYCfeMNhtYZA&vsn=2.0.0' failed: WebSocket is closed before the connection is established.
+(anonymous) @ @supabase_supabase-js.js?v=4ed6108e:7055
+App.tsx:44 Backend health check: OK
+client:802 WebSocket connection to 'wss://8f761a16-d743-4ba3-8cee-da6acb296674-00-1gaweg8wfjvtl.picard.replit.dev:24678/?token=M0eCKEsofY3Z' failed: 
+createConnection @ client:802
+client:841 [vite] failed to connect to websocket (Error: WebSocket closed without opened.). 
+connect @ client:841
+client:454 Uncaught (in promise) Error: WebSocket closed without opened.
+    at WebSocket.<anonymous> (client:454:22)
+uwwfozpchsziaslusfln.supabase.co/rest/v1/attendance?select=*%2Cstudent%3Aprofiles%21attendance_student_id_fkey%28display_name%2Cemail%29%2Cclass%3Aclasses%28name%29%2Cmarker%3Aprofiles%21attendance_marked_by_fkey%28display_name%29&order=date.desc%2Ccreated_at.desc&limit=200:1  Failed to load resource: the server responded with a status of 404 ()
+uwwfozpchsziaslusfln.supabase.co/rest/v1/attendance?select=*%2Cstudent%3Aprofiles%21attendance_student_id_fkey%28display_name%2Cemail%29%2Cclass%3Aclasses%28name%29%2Cmarker%3Aprofiles%21attendance_marked_by_fkey%28display_name%29&order=date.desc%2Ccreated_at.desc&limit=200:1  Failed to load resource: the server responded with a status of 404 ()
+@supabase_supabase-js.js?v=4ed6108e:7055 WebSocket connection to 'wss://uwwfozpchsziaslusfln.supabase.co/realtime/v1/websocket?apikey=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InV3d2ZvenBjaHN6aWFzbHVzZmxuIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQ1MjczODAsImV4cCI6MjA5MDEwMzM4MH0.GFKTZPw4VEs2lVCBcA3dex70LlFdf68zYCfeMNhtYZA&vsn=2.0.0' failed: WebSocket is closed before the connection is established.
+(anonymous) @ @supabase_supabase-js.js?v=4ed6108e:7055
+uwwfozpchsziaslusfln.supabase.co/rest/v1/assignments?select=*%2Ccourse%3Acourses%28title%29%2Cteacher%3Aprofiles%21assignments_teacher_id_fkey%28display_name%29&order=created_at.desc:1  Failed to load resource: the server responded with a status of 404 ()
+@supabase_supabase-js.js?v=4ed6108e:7055 WebSocket connection to 'wss://uwwfozpchsziaslusfln.supabase.co/realtime/v1/websocket?apikey=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InV3d2ZvenBjaHN6aWFzbHVzZmxuIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQ1MjczODAsImV4cCI6MjA5MDEwMzM4MH0.GFKTZPw4VEs2lVCBcA3dex70LlFdf68zYCfeMNhtYZA&vsn=2.0.0' failed: WebSocket is closed before the connection is established.
+(anonymous) @ @supabase_supabase-js.js?v=4ed6108e:7055
+uwwfozpchsziaslusfln.supabase.co/rest/v1/assignments?select=*%2Ccourse%3Acourses%28title%29%2Cteacher%3Aprofiles%21assignments_teacher_id_fkey%28display_name%29&order=created_at.desc:1  Failed to load resource: the server responded with a status of 404 ()

@@ -95,8 +95,8 @@ export default function AdminCertificates() {
         .from('certificates')
         .select(`
           *,
-          student:profiles!certificates_student_id_fkey(display_name, email),
-          course:courses(title)
+          student:profiles!student_id(display_name, email),
+          course:courses!course_id(title)
         `)
         .order('issued_at', { ascending: false });
       if (error) throw error;

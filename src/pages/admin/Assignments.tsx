@@ -90,8 +90,8 @@ export default function AdminAssignments() {
         .from('assignments')
         .select(`
           *,
-          course:courses(title),
-          teacher:profiles!assignments_teacher_id_fkey(display_name)
+          course:courses!course_id(title),
+          teacher:profiles!teacher_id(display_name)
         `)
         .order('created_at', { ascending: false });
       if (error) throw error;

@@ -76,9 +76,9 @@ export default function AdminAttendance() {
         .from('attendance')
         .select(`
           *,
-          student:profiles!attendance_student_id_fkey(display_name, email),
-          class:classes(name),
-          marker:profiles!attendance_marked_by_fkey(display_name)
+          student:profiles!student_id(display_name, email),
+          class:classes!class_id(name),
+          marker:profiles!marked_by(display_name)
         `)
         .order('date', { ascending: false })
         .order('created_at', { ascending: false })
