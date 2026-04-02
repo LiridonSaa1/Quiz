@@ -38,6 +38,10 @@ import AdminAnalytics from './pages/admin/Analytics';
 import AdminReports from './pages/admin/Reports';
 import AdminPayments from './pages/admin/Payments';
 import AdminInvoices from './pages/admin/Invoices';
+import AdminSettings from './pages/admin/Settings';
+import AdminBranding from './pages/admin/Branding';
+import AdminDomain from './pages/admin/Domain';
+import AdminRoles from './pages/admin/Roles';
 import StudentDashboard from './pages/student/Dashboard';
 
 export default function App() {
@@ -173,6 +177,10 @@ function AdminRoutes() {
       <Route path="/reports" element={<AdminReports />} />
       <Route path="/payments" element={<AdminPayments />} />
       <Route path="/invoices" element={<AdminInvoices />} />
+      <Route path="/settings" element={<AdminSettings />} />
+      <Route path="/branding" element={<AdminBranding />} />
+      <Route path="/domain" element={<AdminDomain />} />
+      <Route path="/roles" element={<AdminRoles />} />
     </Routes>
   );
 }
