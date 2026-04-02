@@ -91,21 +91,26 @@ export default function AdminCertificates() {
   const fetchData = async () => {
     setLoading(true);
     try {
-      const { data, error } = await supabase
-        .from('certificates')
-        .select(`
-          *,
-          student:profiles!student_id(display_name, email),
-          course:courses!course_id(title)
-        `)
-        .order('issued_at', { ascending: false });
-      if (error) throw error;
-      setCerts(data || []);
-
-      const [{ data: c }, { data: s }] = await Promise.all([
+      const [{ data: rawCerts, error }, { data: c }, { data: s }] = await Promise.all([
+        supabase.from('certificates').select('*').order('issued_at', { ascending: false }),
         supabase.from('courses').select('id,title'),
         supabase.from('profiles').select('id,display_name,email').eq('role', 'student'),
       ]);
+      if (error) throw error;
+
+      const courseMap: Record<string, string> = {};
+      (c || []).forEach((course: any) => { courseMap[course.id] = course.title; });
+
+      const studentMap: Record<string, { display_name: string; email: string }> = {};
+      (s || []).forEach((p: any) => { studentMap[p.id] = { display_name: p.display_name, email: p.email }; });
+
+      const enriched = (rawCerts || []).map((cert: any) => ({
+        ...cert,
+        student: cert.student_id ? (studentMap[cert.student_id] || null) : null,
+        course: cert.course_id ? { title: courseMap[cert.course_id] } || null : null,
+      }));
+
+      setCerts(enriched);
       setCourses(c || []);
       setStudents(s || []);
     } catch {

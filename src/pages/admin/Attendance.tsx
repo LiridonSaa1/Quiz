@@ -72,25 +72,28 @@ export default function AdminAttendance() {
   const fetchData = async () => {
     setLoading(true);
     try {
-      const { data, error } = await supabase
-        .from('attendance')
-        .select(`
-          *,
-          student:profiles!student_id(display_name, email),
-          class:classes!class_id(name),
-          marker:profiles!marked_by(display_name)
-        `)
-        .order('date', { ascending: false })
-        .order('created_at', { ascending: false })
-        .limit(200);
-      if (error) throw error;
-      setRecords(data || []);
-
-      const [{ data: cls }, { data: stu }, { data: tch }] = await Promise.all([
+      const [{ data: rawData, error }, { data: cls }, { data: stu }, { data: tch }] = await Promise.all([
+        supabase.from('attendance').select('*').order('date', { ascending: false }).order('created_at', { ascending: false }).limit(200),
         supabase.from('classes').select('id,name'),
         supabase.from('profiles').select('id,display_name,email').eq('role', 'student'),
         supabase.from('profiles').select('id,display_name,email').in('role', ['teacher', 'admin']),
       ]);
+      if (error) throw error;
+
+      const classMap: Record<string, string> = {};
+      (cls || []).forEach((c: any) => { classMap[c.id] = c.name; });
+      const studentMap: Record<string, { display_name: string; email: string }> = {};
+      (stu || []).forEach((p: any) => { studentMap[p.id] = { display_name: p.display_name, email: p.email }; });
+      const teacherMap: Record<string, string> = {};
+      (tch || []).forEach((p: any) => { teacherMap[p.id] = p.display_name; });
+
+      setRecords((rawData || []).map((r: any) => ({
+        ...r,
+        student: r.student_id ? (studentMap[r.student_id] || null) : null,
+        class: r.class_id ? { name: classMap[r.class_id] } : null,
+        marker: r.marked_by ? { display_name: teacherMap[r.marked_by] } : null,
+      })));
+
       setClasses(cls || []);
       setStudents(stu || []);
       setTeachers(tch || []);

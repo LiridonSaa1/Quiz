@@ -86,33 +86,29 @@ export default function AdminAssignments() {
   const fetchData = async () => {
     setLoading(true);
     try {
-      const { data, error } = await supabase
-        .from('assignments')
-        .select(`
-          *,
-          course:courses!course_id(title),
-          teacher:profiles!teacher_id(display_name)
-        `)
-        .order('created_at', { ascending: false });
+      const [{ data: rawData, error }, { data: c }, { data: t }, { data: cl }] = await Promise.all([
+        supabase.from('assignments').select('*').order('created_at', { ascending: false }),
+        supabase.from('courses').select('id,title'),
+        supabase.from('profiles').select('id,display_name').in('role', ['teacher', 'admin']),
+        supabase.from('classes').select('id,name'),
+      ]);
       if (error) throw error;
 
-      const classIds = [...new Set((data || []).map((a: any) => a.class_id).filter(Boolean))];
-      let classMap: Record<string, string> = {};
-      if (classIds.length > 0) {
-        const { data: cls } = await supabase.from('classes').select('id,name').in('id', classIds);
-        (cls || []).forEach((c: any) => { classMap[c.id] = c.name; });
-      }
-      setAssignments((data || []).map((a: any) => ({
+      const courseMap: Record<string, string> = {};
+      (c || []).forEach((course: any) => { courseMap[course.id] = course.title; });
+      const teacherMap: Record<string, string> = {};
+      (t || []).forEach((p: any) => { teacherMap[p.id] = p.display_name; });
+      const classMap: Record<string, string> = {};
+      (cl || []).forEach((cls: any) => { classMap[cls.id] = cls.name; });
+
+      setAssignments((rawData || []).map((a: any) => ({
         ...a,
+        course: a.course_id ? { title: courseMap[a.course_id] } : null,
+        teacher: a.teacher_id ? { display_name: teacherMap[a.teacher_id] } : null,
         class_name: a.class_id ? classMap[a.class_id] || null : null,
       })));
 
-      const [{ data: c }, { data: t }, { data: cl }] = await Promise.all([
-        supabase.from('courses').select('id,title').eq('status', 'published'),
-        supabase.from('profiles').select('id,display_name').eq('role', 'teacher'),
-        supabase.from('classes').select('id,name').eq('status', 'active'),
-      ]);
-      setCourses(c || []);
+      setCourses((c || []).filter((course: any) => course));
       setTeachers(t || []);
       setClasses(cl || []);
     } catch {
