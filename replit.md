@@ -17,7 +17,7 @@ A multi-role educational platform for quiz management, course tracking, and resu
   - `App.tsx` — Main app with RBAC routing
   - `supabase.ts` — Supabase client
   - `types.ts` — Shared TypeScript types
-  - `pages/admin/` — Admin pages: Courses, Teachers, Students, Modules, Lessons
+  - `pages/admin/` — Admin pages: Courses, Teachers, Students, Modules, Lessons, Classes, Quizzes, Assignments, Attendance, Certificates
   - `pages/teacher/` — Teacher pages: Courses, Modules, Lessons, Quizzes, Students, Results
   - `pages/student/` — Student pages: Dashboard, Quiz Taking, Results, Profile
   - `components/` — Shared UI components (layouts, NotificationCenter)
@@ -31,6 +31,9 @@ A multi-role educational platform for quiz management, course tracking, and resu
 - **Quizzes**: Full builder with multiple question types (MC, T/F, short/long answer, file upload)
 - **Students**: Teacher can manage enrolled students; Admin views all students
 - **Results**: Teacher views quiz attempt results per student
+- **Assignments**: Admin creates and manages assignments (type, due date, max score, status) linked to courses/classes
+- **Attendance**: Admin marks and tracks student attendance (present/absent/late/excused) per class and date
+- **Certificates**: Admin issues certificates to students with grade, score, cert number, and a visual preview modal
 
 ## Known Schema Constraints
 The live Supabase DB has schema differences from what some pages expect. All affected pages now handle these gracefully (empty state, no crash):

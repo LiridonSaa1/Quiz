@@ -331,3 +331,85 @@ CREATE TRIGGER trg_modules_updated_at   BEFORE UPDATE ON modules   FOR EACH ROW 
 CREATE TRIGGER trg_lessons_updated_at   BEFORE UPDATE ON lessons   FOR EACH ROW EXECUTE FUNCTION update_updated_at();
 CREATE TRIGGER trg_classes_updated_at   BEFORE UPDATE ON classes   FOR EACH ROW EXECUTE FUNCTION update_updated_at();
 CREATE TRIGGER trg_quizzes_updated_at   BEFORE UPDATE ON quizzes   FOR EACH ROW EXECUTE FUNCTION update_updated_at();
+
+-- ============================================================
+-- 12. ASSIGNMENTS
+-- ============================================================
+CREATE TABLE IF NOT EXISTS assignments (
+  id             UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  title          TEXT NOT NULL,
+  description    TEXT,
+  course_id      UUID REFERENCES courses(id) ON DELETE SET NULL,
+  teacher_id     UUID REFERENCES profiles(id) ON DELETE SET NULL,
+  class_id       UUID REFERENCES classes(id) ON DELETE SET NULL,
+  type           TEXT NOT NULL DEFAULT 'homework' CHECK (type IN ('homework','project','essay','quiz','lab','other')),
+  due_date       TIMESTAMPTZ,
+  max_score      INTEGER NOT NULL DEFAULT 100,
+  status         TEXT NOT NULL DEFAULT 'draft' CHECK (status IN ('draft','published','closed')),
+  created_at     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at     TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_assignments_course_id   ON assignments(course_id);
+CREATE INDEX IF NOT EXISTS idx_assignments_teacher_id  ON assignments(teacher_id);
+CREATE INDEX IF NOT EXISTS idx_assignments_class_id    ON assignments(class_id);
+CREATE INDEX IF NOT EXISTS idx_assignments_status      ON assignments(status);
+
+ALTER TABLE assignments ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "assignments_read_auth"  ON assignments FOR SELECT USING (auth.role() = 'authenticated');
+CREATE POLICY "assignments_write_auth" ON assignments FOR ALL   USING (
+  EXISTS (SELECT 1 FROM profiles WHERE profiles.id = auth.uid() AND profiles.role IN ('admin','teacher'))
+);
+
+CREATE TRIGGER trg_assignments_updated_at BEFORE UPDATE ON assignments FOR EACH ROW EXECUTE FUNCTION update_updated_at();
+
+-- ============================================================
+-- 13. ATTENDANCE
+-- ============================================================
+CREATE TABLE IF NOT EXISTS attendance (
+  id         UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  class_id   UUID REFERENCES classes(id) ON DELETE SET NULL,
+  student_id UUID NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
+  date       DATE NOT NULL,
+  status     TEXT NOT NULL DEFAULT 'present' CHECK (status IN ('present','absent','late','excused')),
+  notes      TEXT,
+  marked_by  UUID REFERENCES profiles(id) ON DELETE SET NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_attendance_student_id ON attendance(student_id);
+CREATE INDEX IF NOT EXISTS idx_attendance_class_id   ON attendance(class_id);
+CREATE INDEX IF NOT EXISTS idx_attendance_date       ON attendance(date);
+CREATE INDEX IF NOT EXISTS idx_attendance_status     ON attendance(status);
+
+ALTER TABLE attendance ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "attendance_read_auth"  ON attendance FOR SELECT USING (auth.role() = 'authenticated');
+CREATE POLICY "attendance_write_auth" ON attendance FOR ALL   USING (
+  EXISTS (SELECT 1 FROM profiles WHERE profiles.id = auth.uid() AND profiles.role IN ('admin','teacher'))
+);
+
+-- ============================================================
+-- 14. CERTIFICATES
+-- ============================================================
+CREATE TABLE IF NOT EXISTS certificates (
+  id                 UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  student_id         UUID NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
+  course_id          UUID REFERENCES courses(id) ON DELETE SET NULL,
+  title              TEXT NOT NULL,
+  issued_at          DATE NOT NULL DEFAULT CURRENT_DATE,
+  certificate_number TEXT NOT NULL UNIQUE,
+  grade              TEXT,
+  score              NUMERIC(5, 2),
+  status             TEXT NOT NULL DEFAULT 'issued' CHECK (status IN ('issued','revoked')),
+  created_at         TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_certificates_student_id ON certificates(student_id);
+CREATE INDEX IF NOT EXISTS idx_certificates_course_id  ON certificates(course_id);
+CREATE INDEX IF NOT EXISTS idx_certificates_status     ON certificates(status);
+
+ALTER TABLE certificates ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "certificates_read_auth"  ON certificates FOR SELECT USING (auth.role() = 'authenticated');
+CREATE POLICY "certificates_write_auth" ON certificates FOR ALL   USING (
+  EXISTS (SELECT 1 FROM profiles WHERE profiles.id = auth.uid() AND profiles.role IN ('admin','teacher'))
+);

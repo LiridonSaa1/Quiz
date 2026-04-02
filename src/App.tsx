@@ -27,6 +27,9 @@ import AdminModules from './pages/admin/Modules';
 import AdminLessons from './pages/admin/Lessons';
 import AdminQuizzes from './pages/admin/Quizzes';
 import AdminClasses from './pages/admin/Classes';
+import AdminAssignments from './pages/admin/Assignments';
+import AdminAttendance from './pages/admin/Attendance';
+import AdminCertificates from './pages/admin/Certificates';
 import StudentDashboard from './pages/student/Dashboard';
 
 export default function App() {
@@ -151,6 +154,9 @@ function AdminRoutes() {
       <Route path="/lessons" element={<AdminLessons />} />
       <Route path="/quizzes" element={<AdminQuizzes />} />
       <Route path="/classes" element={<AdminClasses />} />
+      <Route path="/assignments" element={<AdminAssignments />} />
+      <Route path="/attendance" element={<AdminAttendance />} />
+      <Route path="/certificates" element={<AdminCertificates />} />
     </Routes>
   );
 }
