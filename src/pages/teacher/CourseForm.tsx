@@ -96,14 +96,22 @@ export default function TeacherCourseForm() {
       };
 
       if (isEditing) {
-        const { error } = await supabase.from('courses').update(payload).eq('id', id);
-        if (error) throw error;
+        const res = await fetch(`/api/admin/update-course/${id}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        });
+        const json = await res.json();
+        if (!res.ok) throw new Error(json.error || 'Failed to update course');
         toast.success(publishNow ? 'Course published!' : 'Course saved');
       } else {
-        const { error } = await supabase.from('courses').insert({
-          ...payload, teacher_id: session.user.id, created_at: new Date().toISOString()
+        const res = await fetch('/api/admin/create-course', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ ...payload, teacher_id: session.user.id }),
         });
-        if (error) throw error;
+        const json = await res.json();
+        if (!res.ok) throw new Error(json.error || 'Failed to create course');
         toast.success(publishNow ? 'Course created & published!' : 'Course saved as draft');
       }
       navigate('/teacher/courses');
