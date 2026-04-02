@@ -419,3 +419,66 @@ CREATE POLICY "certificates_read_auth"  ON certificates FOR SELECT USING (auth.r
 CREATE POLICY "certificates_write_auth" ON certificates FOR ALL   USING (
   EXISTS (SELECT 1 FROM profiles WHERE profiles.id = auth.uid() AND profiles.role IN ('admin','teacher'))
 );
+
+-- ============================================================
+-- INTERACTION TABLES (Live Sessions, Community, Announcements)
+-- Run these in your Supabase SQL Editor
+-- ============================================================
+
+-- Live Sessions
+CREATE TABLE IF NOT EXISTS live_sessions (
+  id                UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  title             TEXT NOT NULL,
+  description       TEXT,
+  host_id           UUID REFERENCES profiles(id) ON DELETE SET NULL,
+  course_id         UUID REFERENCES courses(id) ON DELETE SET NULL,
+  scheduled_at      TIMESTAMPTZ NOT NULL,
+  duration_minutes  INTEGER NOT NULL DEFAULT 60,
+  meeting_url       TEXT,
+  status            TEXT NOT NULL DEFAULT 'scheduled' CHECK (status IN ('scheduled','live','ended','cancelled')),
+  max_participants  INTEGER DEFAULT 100,
+  created_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at        TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+ALTER TABLE live_sessions ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "live_sessions_read"  ON live_sessions FOR SELECT USING (auth.role() = 'authenticated');
+CREATE POLICY "live_sessions_write" ON live_sessions FOR ALL USING (
+  EXISTS (SELECT 1 FROM profiles WHERE profiles.id = auth.uid() AND profiles.role IN ('admin','teacher'))
+);
+
+-- Community Posts
+CREATE TABLE IF NOT EXISTS community_posts (
+  id            UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  title         TEXT NOT NULL,
+  content       TEXT,
+  author_id     UUID REFERENCES profiles(id) ON DELETE SET NULL,
+  category      TEXT NOT NULL DEFAULT 'general' CHECK (category IN ('general','q_and_a','resources','showcase')),
+  status        TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active','pinned','archived')),
+  likes_count   INTEGER NOT NULL DEFAULT 0,
+  replies_count INTEGER NOT NULL DEFAULT 0,
+  created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+ALTER TABLE community_posts ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "community_read"  ON community_posts FOR SELECT USING (auth.role() = 'authenticated');
+CREATE POLICY "community_write" ON community_posts FOR ALL USING (auth.role() = 'authenticated');
+
+-- Announcements
+CREATE TABLE IF NOT EXISTS announcements (
+  id               UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  title            TEXT NOT NULL,
+  content          TEXT NOT NULL,
+  author_id        UUID REFERENCES profiles(id) ON DELETE SET NULL,
+  target_audience  TEXT NOT NULL DEFAULT 'all' CHECK (target_audience IN ('all','students','teachers')),
+  priority         TEXT NOT NULL DEFAULT 'normal' CHECK (priority IN ('normal','important','urgent')),
+  status           TEXT NOT NULL DEFAULT 'draft' CHECK (status IN ('draft','published','archived')),
+  published_at     TIMESTAMPTZ,
+  expires_at       TIMESTAMPTZ,
+  created_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at       TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+ALTER TABLE announcements ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "announcements_read"  ON announcements FOR SELECT USING (auth.role() = 'authenticated');
+CREATE POLICY "announcements_write" ON announcements FOR ALL USING (
+  EXISTS (SELECT 1 FROM profiles WHERE profiles.id = auth.uid() AND profiles.role IN ('admin','teacher'))
+);

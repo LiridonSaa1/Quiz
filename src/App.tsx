@@ -30,6 +30,9 @@ import AdminClasses from './pages/admin/Classes';
 import AdminAssignments from './pages/admin/Assignments';
 import AdminAttendance from './pages/admin/Attendance';
 import AdminCertificates from './pages/admin/Certificates';
+import AdminLiveSessions from './pages/admin/LiveSessions';
+import AdminCommunity from './pages/admin/Community';
+import AdminAnnouncements from './pages/admin/Announcements';
 import StudentDashboard from './pages/student/Dashboard';
 
 export default function App() {
@@ -157,6 +160,9 @@ function AdminRoutes() {
       <Route path="/assignments" element={<AdminAssignments />} />
       <Route path="/attendance" element={<AdminAttendance />} />
       <Route path="/certificates" element={<AdminCertificates />} />
+      <Route path="/live-sessions" element={<AdminLiveSessions />} />
+      <Route path="/community" element={<AdminCommunity />} />
+      <Route path="/announcements" element={<AdminAnnouncements />} />
     </Routes>
   );
 }

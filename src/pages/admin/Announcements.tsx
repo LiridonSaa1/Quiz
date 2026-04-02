@@ -1,0 +1,370 @@
+import React, { useEffect, useState } from 'react';
+import AdminLayout from '../../components/layout/AdminLayout';
+import { toast } from 'sonner';
+import { format, formatDistanceToNow, isPast } from 'date-fns';
+import {
+  Megaphone, Plus, Search, Trash2, Pencil, X,
+  Users, GraduationCap, Globe, AlertTriangle,
+  Info, Zap, Send, FileText, Archive, Clock
+} from 'lucide-react';
+import { cn } from '../../lib/utils';
+
+type Audience = 'all' | 'students' | 'teachers';
+type Priority  = 'normal' | 'important' | 'urgent';
+type AnnStatus = 'draft' | 'published' | 'archived';
+
+interface Announcement {
+  id: string;
+  title: string;
+  content: string;
+  author_id: string | null;
+  target_audience: Audience;
+  priority: Priority;
+  status: AnnStatus;
+  published_at: string | null;
+  expires_at: string | null;
+  created_at: string;
+  author?: { id: string; display_name: string; email: string } | null;
+}
+
+const AUDIENCE_CFG: Record<Audience, { label: string; icon: React.ElementType; color: string }> = {
+  all:      { label: 'Everyone', icon: Globe,          color: 'text-slate-600'   },
+  students: { label: 'Students', icon: GraduationCap,  color: 'text-blue-600'    },
+  teachers: { label: 'Teachers', icon: Users,           color: 'text-violet-600'  },
+};
+
+const PRIORITY_CFG: Record<Priority, { label: string; bg: string; text: string; icon: React.ElementType; border: string }> = {
+  normal:    { label: 'Normal',    bg: 'bg-slate-100',  text: 'text-slate-600',  icon: Info,          border: 'border-slate-200'  },
+  important: { label: 'Important', bg: 'bg-amber-50',   text: 'text-amber-700',  icon: AlertTriangle, border: 'border-amber-200'  },
+  urgent:    { label: 'Urgent',    bg: 'bg-rose-50',    text: 'text-rose-700',   icon: Zap,           border: 'border-rose-200'   },
+};
+
+const STATUS_CFG: Record<AnnStatus, { label: string; bg: string; text: string; dot: string; icon: React.ElementType }> = {
+  draft:     { label: 'Draft',     bg: 'bg-slate-100',    text: 'text-slate-600',   dot: 'bg-slate-400',   icon: FileText },
+  published: { label: 'Published', bg: 'bg-emerald-50',   text: 'text-emerald-700', dot: 'bg-emerald-500', icon: Send     },
+  archived:  { label: 'Archived',  bg: 'bg-slate-100',    text: 'text-slate-400',   dot: 'bg-slate-300',   icon: Archive  },
+};
+
+const emptyForm = {
+  title: '', content: '', author_id: '',
+  target_audience: 'all' as Audience,
+  priority: 'normal' as Priority,
+  status: 'draft' as AnnStatus,
+  expires_at: '',
+};
+
+export default function AdminAnnouncements() {
+  const [announcements, setAnnouncements] = useState<Announcement[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [search, setSearch] = useState('');
+  const [priorityFilter, setPriorityFilter] = useState('all');
+  const [statusFilter, setStatusFilter] = useState('all');
+  const [showModal, setShowModal] = useState(false);
+  const [editing, setEditing] = useState<Announcement | null>(null);
+  const [form, setForm] = useState(emptyForm);
+  const [saving, setSaving] = useState(false);
+  const [deleting, setDeleting] = useState<string | null>(null);
+
+  const set = (k: string, v: any) => setForm(p => ({ ...p, [k]: v }));
+
+  useEffect(() => { fetchAll(); }, []);
+
+  const fetchAll = async () => {
+    setLoading(true);
+    try {
+      const res = await fetch('/api/admin/announcements');
+      const json = await res.json();
+      if (json.success) setAnnouncements(json.announcements || []);
+      else toast.error(json.error || 'Failed to load announcements');
+    } catch { toast.error('Failed to load announcements'); }
+    finally { setLoading(false); }
+  };
+
+  const openCreate = () => { setEditing(null); setForm(emptyForm); setShowModal(true); };
+  const openEdit = (a: Announcement) => {
+    setEditing(a);
+    setForm({
+      title: a.title, content: a.content, author_id: a.author_id || '',
+      target_audience: a.target_audience, priority: a.priority, status: a.status,
+      expires_at: a.expires_at ? a.expires_at.slice(0, 10) : '',
+    });
+    setShowModal(true);
+  };
+
+  const handleSave = async (overrideStatus?: AnnStatus) => {
+    if (!form.title.trim()) { toast.error('Title is required'); return; }
+    if (!form.content.trim()) { toast.error('Content is required'); return; }
+    setSaving(true);
+    try {
+      const status = overrideStatus ?? form.status;
+      const payload = {
+        ...form,
+        status,
+        author_id: form.author_id || null,
+        expires_at: form.expires_at ? new Date(form.expires_at).toISOString() : null,
+      };
+      const url = editing ? `/api/admin/announcements/${editing.id}` : '/api/admin/announcements';
+      const method = editing ? 'PATCH' : 'POST';
+      const res = await fetch(url, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+      const json = await res.json();
+      if (!json.success) throw new Error(json.error);
+      toast.success(editing ? 'Announcement updated' : status === 'published' ? 'Announcement published!' : 'Draft saved');
+      setShowModal(false);
+      fetchAll();
+    } catch (e: any) { toast.error(e.message || 'Save failed'); }
+    finally { setSaving(false); }
+  };
+
+  const handleDelete = async (id: string) => {
+    if (!confirm('Delete this announcement?')) return;
+    setDeleting(id);
+    try {
+      const res = await fetch(`/api/admin/announcements/${id}`, { method: 'DELETE' });
+      const json = await res.json();
+      if (!json.success) throw new Error(json.error);
+      toast.success('Announcement deleted');
+      setAnnouncements(p => p.filter(x => x.id !== id));
+    } catch (e: any) { toast.error(e.message || 'Delete failed'); }
+    finally { setDeleting(null); }
+  };
+
+  const quickPublish = async (a: Announcement) => {
+    try {
+      const res = await fetch(`/api/admin/announcements/${a.id}`, {
+        method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: 'published' }),
+      });
+      const json = await res.json();
+      if (!json.success) throw new Error(json.error);
+      toast.success('Published!');
+      fetchAll();
+    } catch (e: any) { toast.error(e.message); }
+  };
+
+  const filtered = announcements.filter(a => {
+    const q = search.toLowerCase();
+    const matchQ = a.title.toLowerCase().includes(q) || a.content.toLowerCase().includes(q);
+    const matchP = priorityFilter === 'all' || a.priority === priorityFilter;
+    const matchS = statusFilter === 'all' || a.status === statusFilter;
+    return matchQ && matchP && matchS;
+  });
+
+  const stats = {
+    total: announcements.length,
+    published: announcements.filter(a => a.status === 'published').length,
+    drafts: announcements.filter(a => a.status === 'draft').length,
+    urgent: announcements.filter(a => a.priority === 'urgent' && a.status === 'published').length,
+  };
+
+  return (
+    <AdminLayout>
+      <div className="space-y-6">
+        {/* Header */}
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          <div>
+            <h1 className="text-2xl font-bold text-slate-900">Announcements</h1>
+            <p className="text-slate-500 text-sm mt-0.5">Broadcast messages to students, teachers, or everyone</p>
+          </div>
+          <button onClick={openCreate}
+            className="flex items-center gap-2 px-4 py-2.5 bg-indigo-600 text-white rounded-xl font-semibold text-sm hover:bg-indigo-700 transition-all shadow-lg shadow-indigo-200 active:scale-[0.98]">
+            <Plus className="w-4 h-4" /> New Announcement
+          </button>
+        </div>
+
+        {/* Stats */}
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+          {[
+            { label: 'Total', value: stats.total, color: 'bg-indigo-50 text-indigo-700', icon: Megaphone },
+            { label: 'Published', value: stats.published, color: 'bg-emerald-50 text-emerald-700', icon: Send },
+            { label: 'Drafts', value: stats.drafts, color: 'bg-amber-50 text-amber-700', icon: FileText },
+            { label: 'Urgent', value: stats.urgent, color: 'bg-rose-50 text-rose-700', icon: Zap },
+          ].map(({ label, value, color, icon: Icon }) => (
+            <div key={label} className="bg-white rounded-2xl border border-slate-100 shadow-sm p-4 flex items-center gap-3">
+              <div className={cn('w-10 h-10 rounded-xl flex items-center justify-center shrink-0', color)}>
+                <Icon className="w-5 h-5" />
+              </div>
+              <div>
+                <p className="text-2xl font-bold text-slate-900">{value}</p>
+                <p className="text-xs text-slate-500 font-medium">{label}</p>
+              </div>
+            </div>
+          ))}
+        </div>
+
+        {/* Filters */}
+        <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-4 flex flex-col sm:flex-row gap-3">
+          <div className="relative flex-1">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+            <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search announcements..."
+              className="w-full pl-9 pr-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500" />
+          </div>
+          <select value={priorityFilter} onChange={e => setPriorityFilter(e.target.value)}
+            className="px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500">
+            <option value="all">All Priorities</option>
+            {Object.entries(PRIORITY_CFG).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
+          </select>
+          <select value={statusFilter} onChange={e => setStatusFilter(e.target.value)}
+            className="px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500">
+            <option value="all">All Status</option>
+            {Object.entries(STATUS_CFG).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
+          </select>
+        </div>
+
+        {/* Announcements List */}
+        <div className="space-y-3">
+          {loading ? (
+            <div className="bg-white rounded-2xl border border-slate-100 shadow-sm flex items-center justify-center h-48">
+              <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-indigo-600" />
+            </div>
+          ) : filtered.length === 0 ? (
+            <div className="bg-white rounded-2xl border border-slate-100 shadow-sm flex flex-col items-center justify-center h-48 text-slate-400">
+              <Megaphone className="w-10 h-10 mb-3 opacity-40" />
+              <p className="font-medium">No announcements yet</p>
+              <p className="text-sm mt-1">Create your first announcement to reach your community</p>
+            </div>
+          ) : filtered.map(ann => {
+            const priCfg = PRIORITY_CFG[ann.priority];
+            const statCfg = STATUS_CFG[ann.status];
+            const audCfg = AUDIENCE_CFG[ann.target_audience];
+            const PriIcon = priCfg.icon;
+            const AudIcon = audCfg.icon;
+            const isExpired = ann.expires_at && isPast(new Date(ann.expires_at));
+            return (
+              <div key={ann.id} className={cn(
+                'bg-white rounded-2xl border shadow-sm p-5 hover:shadow-md transition-all',
+                ann.priority === 'urgent' ? 'border-rose-200' : ann.priority === 'important' ? 'border-amber-200' : 'border-slate-100'
+              )}>
+                <div className="flex items-start gap-4">
+                  <div className={cn('w-11 h-11 rounded-xl flex items-center justify-center shrink-0', priCfg.bg)}>
+                    <PriIcon className={cn('w-5 h-5', priCfg.text)} />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className={cn('inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold', priCfg.bg, priCfg.text)}>
+                          <PriIcon className="w-3 h-3" />{priCfg.label}
+                        </span>
+                        <span className={cn('inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold', statCfg.bg, statCfg.text)}>
+                          <span className={cn('w-1.5 h-1.5 rounded-full', statCfg.dot)} />
+                          {statCfg.label}
+                        </span>
+                        <span className={cn('inline-flex items-center gap-1 text-xs font-medium text-slate-500')}>
+                          <AudIcon className="w-3.5 h-3.5" />{audCfg.label}
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-1.5 shrink-0">
+                        {ann.status === 'draft' && (
+                          <button onClick={() => quickPublish(ann)}
+                            className="flex items-center gap-1.5 px-2.5 py-1.5 bg-emerald-600 text-white rounded-lg text-xs font-semibold hover:bg-emerald-700 transition-all">
+                            <Send className="w-3 h-3" /> Publish
+                          </button>
+                        )}
+                        <button onClick={() => openEdit(ann)} className="p-1.5 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-all">
+                          <Pencil className="w-4 h-4" />
+                        </button>
+                        <button onClick={() => handleDelete(ann.id)} disabled={deleting === ann.id}
+                          className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-all disabled:opacity-40">
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </div>
+                    </div>
+                    <h3 className="font-bold text-slate-900 mt-2 text-base">{ann.title}</h3>
+                    <p className="text-slate-500 text-sm mt-1.5 line-clamp-2 leading-relaxed">{ann.content}</p>
+                    <div className="flex items-center gap-4 mt-3 text-xs text-slate-400 flex-wrap">
+                      {ann.author && <span className="font-medium text-slate-500">{ann.author.display_name}</span>}
+                      <span className="flex items-center gap-1">
+                        <Clock className="w-3.5 h-3.5" />
+                        {ann.published_at ? `Published ${formatDistanceToNow(new Date(ann.published_at), { addSuffix: true })}` : `Created ${formatDistanceToNow(new Date(ann.created_at), { addSuffix: true })}`}
+                      </span>
+                      {ann.expires_at && (
+                        <span className={cn('flex items-center gap-1', isExpired ? 'text-rose-400' : 'text-amber-500')}>
+                          <AlertTriangle className="w-3.5 h-3.5" />
+                          {isExpired ? 'Expired' : `Expires ${format(new Date(ann.expires_at), 'MMM d, yyyy')}`}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* Modal */}
+      {showModal && (
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4" onClick={() => setShowModal(false)}>
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between p-5 border-b border-slate-100">
+              <div>
+                <h2 className="text-lg font-bold text-slate-900">{editing ? 'Edit Announcement' : 'New Announcement'}</h2>
+                <p className="text-slate-400 text-sm">{editing ? 'Update announcement details' : 'Broadcast a message to your community'}</p>
+              </div>
+              <button onClick={() => setShowModal(false)} className="p-2 hover:bg-slate-100 rounded-xl transition-all">
+                <X className="w-5 h-5 text-slate-500" />
+              </button>
+            </div>
+            <div className="p-5 space-y-4">
+              <div>
+                <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">Title <span className="text-red-400">*</span></label>
+                <input value={form.title} onChange={e => set('title', e.target.value)}
+                  className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                  placeholder="e.g. Platform Maintenance on Saturday" />
+              </div>
+              <div>
+                <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">Content <span className="text-red-400">*</span></label>
+                <textarea rows={5} value={form.content} onChange={e => set('content', e.target.value)}
+                  className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 resize-none leading-relaxed"
+                  placeholder="Write your full announcement message here..." />
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">Target Audience</label>
+                  <select value={form.target_audience} onChange={e => set('target_audience', e.target.value as Audience)}
+                    className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500">
+                    {Object.entries(AUDIENCE_CFG).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">Priority</label>
+                  <select value={form.priority} onChange={e => set('priority', e.target.value as Priority)}
+                    className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500">
+                    {Object.entries(PRIORITY_CFG).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
+                  </select>
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">Status</label>
+                  <select value={form.status} onChange={e => set('status', e.target.value as AnnStatus)}
+                    className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500">
+                    {Object.entries(STATUS_CFG).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">Expires On</label>
+                  <input type="date" value={form.expires_at} onChange={e => set('expires_at', e.target.value)}
+                    className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500" />
+                </div>
+              </div>
+            </div>
+            <div className="flex gap-3 p-5 border-t border-slate-100">
+              <button onClick={() => setShowModal(false)}
+                className="flex-1 py-3 bg-slate-100 text-slate-600 rounded-xl font-semibold text-sm hover:bg-slate-200 transition-all">
+                Cancel
+              </button>
+              <button onClick={() => handleSave('draft')} disabled={saving}
+                className="flex-1 py-3 bg-white border border-slate-200 text-slate-700 rounded-xl font-semibold text-sm hover:bg-slate-50 transition-all disabled:opacity-50">
+                Save Draft
+              </button>
+              <button onClick={() => handleSave('published')} disabled={saving}
+                className="flex-1 py-3 bg-indigo-600 text-white rounded-xl font-semibold text-sm hover:bg-indigo-700 transition-all disabled:opacity-50 shadow-lg shadow-indigo-200">
+                {saving ? 'Saving...' : 'Publish'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </AdminLayout>
+  );
+}

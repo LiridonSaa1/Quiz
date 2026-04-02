@@ -444,6 +444,138 @@ async function startServer() {
     }
   });
 
+  // Courses list (for dropdowns)
+  app.get('/api/admin/courses-list', async (req, res) => {
+    try {
+      const { data, error } = await supabaseAdmin.from('courses').select('id, title').order('title');
+      if (error) throw error;
+      res.json({ success: true, courses: data });
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  // ── LIVE SESSIONS ──────────────────────────────────────────
+  app.get('/api/admin/live-sessions', async (req, res) => {
+    try {
+      const { data, error } = await supabaseAdmin
+        .from('live_sessions')
+        .select('*, host:profiles!host_id(id,display_name,email), course:courses!course_id(id,title)')
+        .order('scheduled_at', { ascending: false });
+      if (error) throw error;
+      res.json({ success: true, sessions: data });
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  app.post('/api/admin/live-sessions', async (req, res) => {
+    try {
+      const { data, error } = await supabaseAdmin
+        .from('live_sessions').insert({ ...req.body, created_at: new Date().toISOString(), updated_at: new Date().toISOString() }).select().single();
+      if (error) throw error;
+      res.json({ success: true, session: data });
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  app.patch('/api/admin/live-sessions/:id', async (req, res) => {
+    try {
+      const { data, error } = await supabaseAdmin
+        .from('live_sessions').update({ ...req.body, updated_at: new Date().toISOString() }).eq('id', req.params.id).select().single();
+      if (error) throw error;
+      res.json({ success: true, session: data });
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  app.delete('/api/admin/live-sessions/:id', async (req, res) => {
+    try {
+      const { error } = await supabaseAdmin.from('live_sessions').delete().eq('id', req.params.id);
+      if (error) throw error;
+      res.json({ success: true });
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  // ── COMMUNITY POSTS ─────────────────────────────────────────
+  app.get('/api/admin/community', async (req, res) => {
+    try {
+      const { data, error } = await supabaseAdmin
+        .from('community_posts')
+        .select('*, author:profiles!author_id(id,display_name,email)')
+        .order('created_at', { ascending: false });
+      if (error) throw error;
+      res.json({ success: true, posts: data });
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  app.post('/api/admin/community', async (req, res) => {
+    try {
+      const { data, error } = await supabaseAdmin
+        .from('community_posts').insert({ ...req.body, created_at: new Date().toISOString(), updated_at: new Date().toISOString() }).select().single();
+      if (error) throw error;
+      res.json({ success: true, post: data });
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  app.patch('/api/admin/community/:id', async (req, res) => {
+    try {
+      const { data, error } = await supabaseAdmin
+        .from('community_posts').update({ ...req.body, updated_at: new Date().toISOString() }).eq('id', req.params.id).select().single();
+      if (error) throw error;
+      res.json({ success: true, post: data });
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  app.delete('/api/admin/community/:id', async (req, res) => {
+    try {
+      const { error } = await supabaseAdmin.from('community_posts').delete().eq('id', req.params.id);
+      if (error) throw error;
+      res.json({ success: true });
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  // ── ANNOUNCEMENTS ────────────────────────────────────────────
+  app.get('/api/admin/announcements', async (req, res) => {
+    try {
+      const { data, error } = await supabaseAdmin
+        .from('announcements')
+        .select('*, author:profiles!author_id(id,display_name,email)')
+        .order('created_at', { ascending: false });
+      if (error) throw error;
+      res.json({ success: true, announcements: data });
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  app.post('/api/admin/announcements', async (req, res) => {
+    try {
+      const payload = {
+        ...req.body,
+        published_at: req.body.status === 'published' ? new Date().toISOString() : null,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      };
+      const { data, error } = await supabaseAdmin.from('announcements').insert(payload).select().single();
+      if (error) throw error;
+      res.json({ success: true, announcement: data });
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  app.patch('/api/admin/announcements/:id', async (req, res) => {
+    try {
+      const payload = {
+        ...req.body,
+        updated_at: new Date().toISOString(),
+        ...(req.body.status === 'published' ? { published_at: new Date().toISOString() } : {}),
+      };
+      const { data, error } = await supabaseAdmin.from('announcements').update(payload).eq('id', req.params.id).select().single();
+      if (error) throw error;
+      res.json({ success: true, announcement: data });
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  app.delete('/api/admin/announcements/:id', async (req, res) => {
+    try {
+      const { error } = await supabaseAdmin.from('announcements').delete().eq('id', req.params.id);
+      if (error) throw error;
+      res.json({ success: true });
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
   // Vite middleware for development
   if (process.env.NODE_ENV !== "production") {
     const vite = await createViteServer({
