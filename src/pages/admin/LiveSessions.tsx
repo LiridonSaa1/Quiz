@@ -1,11 +1,12 @@
 import React, { useEffect, useState } from 'react';
 import AdminLayout from '../../components/layout/AdminLayout';
+import { Link } from 'react-router-dom';
 import { toast } from 'sonner';
 import { format, formatDistanceToNow, isPast } from 'date-fns';
 import {
   Video, Plus, Search, Trash2, Pencil, X, ExternalLink,
   Clock, Users, BookOpen, CalendarDays, Radio, CheckCircle2,
-  XCircle, AlertCircle, Filter
+  XCircle, Play
 } from 'lucide-react';
 import { cn } from '../../lib/utils';
 
@@ -269,12 +270,10 @@ export default function AdminLiveSessions() {
                         </td>
                         <td className="px-5 py-4">
                           <div className="flex items-center justify-end gap-2">
-                            {s.meeting_url && (
-                              <a href={s.meeting_url} target="_blank" rel="noreferrer"
-                                className="p-1.5 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-all" title="Join">
-                                <ExternalLink className="w-4 h-4" />
-                              </a>
-                            )}
+                            <Link to={`/admin/live-sessions/${s.id}/room`}
+                              className="flex items-center gap-1.5 px-3 py-1.5 bg-indigo-600 text-white rounded-lg text-xs font-semibold hover:bg-indigo-700 transition-all shadow-sm shadow-indigo-200">
+                              <Play className="w-3 h-3" /> Enter Room
+                            </Link>
                             <button onClick={() => openEdit(s)} className="p-1.5 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-all">
                               <Pencil className="w-4 h-4" />
                             </button>

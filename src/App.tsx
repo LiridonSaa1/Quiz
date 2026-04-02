@@ -31,6 +31,7 @@ import AdminAssignments from './pages/admin/Assignments';
 import AdminAttendance from './pages/admin/Attendance';
 import AdminCertificates from './pages/admin/Certificates';
 import AdminLiveSessions from './pages/admin/LiveSessions';
+import AdminLiveSessionRoom from './pages/admin/LiveSessionRoom';
 import AdminCommunity from './pages/admin/Community';
 import AdminAnnouncements from './pages/admin/Announcements';
 import StudentDashboard from './pages/student/Dashboard';
@@ -161,6 +162,7 @@ function AdminRoutes() {
       <Route path="/attendance" element={<AdminAttendance />} />
       <Route path="/certificates" element={<AdminCertificates />} />
       <Route path="/live-sessions" element={<AdminLiveSessions />} />
+      <Route path="/live-sessions/:id/room" element={<AdminLiveSessionRoom />} />
       <Route path="/community" element={<AdminCommunity />} />
       <Route path="/announcements" element={<AdminAnnouncements />} />
     </Routes>

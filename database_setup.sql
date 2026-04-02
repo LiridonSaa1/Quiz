@@ -482,3 +482,6 @@ CREATE POLICY "announcements_read"  ON announcements FOR SELECT USING (auth.role
 CREATE POLICY "announcements_write" ON announcements FOR ALL USING (
   EXISTS (SELECT 1 FROM profiles WHERE profiles.id = auth.uid() AND profiles.role IN ('admin','teacher'))
 );
+
+-- Add recording_url to live_sessions (run if table already exists)
+ALTER TABLE live_sessions ADD COLUMN IF NOT EXISTS recording_url TEXT;

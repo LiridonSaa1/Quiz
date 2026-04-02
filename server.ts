@@ -453,6 +453,34 @@ async function startServer() {
     } catch (e: any) { res.status(500).json({ error: e.message }); }
   });
 
+  // ── LIVE SESSION RECORDING UPLOAD ──────────────────────────
+  app.post('/api/admin/live-sessions/:id/upload-url', async (req, res) => {
+    try {
+      const { id } = req.params;
+      const filename = `session-${id}-${Date.now()}.webm`;
+      const storagePath = `recordings/${filename}`;
+      // Create bucket if it doesn't exist
+      await supabaseAdmin.storage.createBucket('recordings', { public: true }).catch(() => {});
+      const { data, error } = await supabaseAdmin.storage.from('recordings').createSignedUploadUrl(storagePath);
+      if (error) throw error;
+      const { data: { publicUrl } } = supabaseAdmin.storage.from('recordings').getPublicUrl(storagePath);
+      res.json({ success: true, signedUrl: data.signedUrl, publicUrl });
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  // Single session fetch
+  app.get('/api/admin/live-sessions/:id', async (req, res) => {
+    try {
+      const { data, error } = await supabaseAdmin
+        .from('live_sessions')
+        .select('*, host:profiles!host_id(id,display_name,email), course:courses!course_id(id,title)')
+        .eq('id', req.params.id)
+        .single();
+      if (error) throw error;
+      res.json({ success: true, session: data });
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
   // ── LIVE SESSIONS ──────────────────────────────────────────
   app.get('/api/admin/live-sessions', async (req, res) => {
     try {
