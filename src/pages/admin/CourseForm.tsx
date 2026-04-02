@@ -64,13 +64,25 @@ export default function AdminCourseForm() {
 
   useEffect(() => {
     const fetchTeachers = async () => {
-      const { data } = await supabase
-        .from('profiles')
-        .select('id, display_name, email, role')
-        .in('role', ['teacher', 'admin'])
-        .eq('status', 'active')
-        .order('display_name');
-      setTeachers(data || []);
+      try {
+        const res = await fetch('/api/admin/teachers');
+        const json = await res.json();
+        if (json.success) {
+          setTeachers(json.teachers.map((t: any) => ({
+            id: t.uid,
+            display_name: t.displayName,
+            email: t.email,
+            role: t.role,
+          })));
+        }
+      } catch {
+        const { data } = await supabase
+          .from('profiles')
+          .select('id, display_name, email, role')
+          .eq('role', 'teacher')
+          .order('display_name');
+        setTeachers(data || []);
+      }
     };
     fetchTeachers();
 
@@ -241,7 +253,7 @@ export default function AdminCourseForm() {
                         <option value="">— Select a teacher —</option>
                         {teachers.map(t => (
                           <option key={t.id} value={t.id}>
-                            {t.display_name} ({t.email}){t.role === 'admin' ? ' — Admin' : ''}
+                            {t.display_name} ({t.email})
                           </option>
                         ))}
                       </select>
