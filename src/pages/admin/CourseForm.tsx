@@ -64,7 +64,12 @@ export default function AdminCourseForm() {
 
   useEffect(() => {
     const fetchTeachers = async () => {
-      const { data } = await supabase.from('profiles').select('id, display_name, email').eq('role', 'teacher');
+      const { data } = await supabase
+        .from('profiles')
+        .select('id, display_name, email, role')
+        .in('role', ['teacher', 'admin'])
+        .eq('status', 'active')
+        .order('display_name');
       setTeachers(data || []);
     };
     fetchTeachers();
@@ -225,7 +230,9 @@ export default function AdminCourseForm() {
                       />
                     </div>
                     <div>
-                      <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">Assign Teacher</label>
+                      <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">
+                        Assign Teacher
+                      </label>
                       <select
                         value={form.teacher_id}
                         onChange={e => set('teacher_id', e.target.value)}
@@ -233,9 +240,16 @@ export default function AdminCourseForm() {
                       >
                         <option value="">— Select a teacher —</option>
                         {teachers.map(t => (
-                          <option key={t.id} value={t.id}>{t.display_name} ({t.email})</option>
+                          <option key={t.id} value={t.id}>
+                            {t.display_name} ({t.email}){t.role === 'admin' ? ' — Admin' : ''}
+                          </option>
                         ))}
                       </select>
+                      {teachers.length === 0 && (
+                        <p className="mt-1.5 text-xs text-amber-600">
+                          No teachers found. Create teacher accounts first under Users → Teachers.
+                        </p>
+                      )}
                     </div>
                   </div>
                 )}
