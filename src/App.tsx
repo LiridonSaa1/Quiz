@@ -42,6 +42,8 @@ import AdminSettings from './pages/admin/Settings';
 import AdminBranding from './pages/admin/Branding';
 import AdminDomain from './pages/admin/Domain';
 import AdminRoles from './pages/admin/Roles';
+import AdminProfile from './pages/admin/Profile';
+import AdminSecurityPage from './pages/admin/Security';
 import StudentDashboard from './pages/student/Dashboard';
 
 export default function App() {
@@ -181,6 +183,8 @@ function AdminRoutes() {
       <Route path="/branding" element={<AdminBranding />} />
       <Route path="/domain" element={<AdminDomain />} />
       <Route path="/roles" element={<AdminRoles />} />
+      <Route path="/profile" element={<AdminProfile />} />
+      <Route path="/security" element={<AdminSecurityPage />} />
     </Routes>
   );
 }
