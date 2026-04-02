@@ -138,9 +138,9 @@ export default function AdminReports() {
     toast.success(`${filename} downloaded`);
   };
 
-  const students = sortAndFilter(studentData, ['name', 'email']);
-  const courses  = sortAndFilter(courseData,  ['title', 'category']);
-  const quizzes  = sortAndFilter(quizData,    ['title']);
+  const students = sortAndFilter<StudentRow>(studentData, ['name', 'email']);
+  const courses  = sortAndFilter<CourseRow>(courseData,  ['title', 'category']);
+  const quizzes  = sortAndFilter<QuizRow>(quizData,    ['title']);
 
   return (
     <AdminLayout>

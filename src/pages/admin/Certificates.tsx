@@ -107,7 +107,7 @@ export default function AdminCertificates() {
       const enriched = (rawCerts || []).map((cert: any) => ({
         ...cert,
         student: cert.student_id ? (studentMap[cert.student_id] || null) : null,
-        course: cert.course_id ? { title: courseMap[cert.course_id] } || null : null,
+        course: cert.course_id ? (courseMap[cert.course_id] ? { title: courseMap[cert.course_id] } : null) : null,
       }));
 
       setCerts(enriched);

@@ -246,7 +246,7 @@ export default function QuizManagement() {
             {filtered.map(quiz => (
               <QuizCard
                 key={quiz.id}
-                quiz={quiz}
+                quiz={quiz as QuizWithCount}
                 gradient={getGradient(quiz.id)}
                 onEdit={() => navigate(`/teacher/quizzes/edit/${quiz.id}`)}
                 onDelete={() => handleDelete(quiz.id)}
@@ -344,9 +344,10 @@ export default function QuizManagement() {
 function QuizCard({ quiz, gradient, onEdit, onDelete, onTogglePublish }: {
   quiz: QuizWithCount;
   gradient: string;
-  onEdit: () => void;
-  onDelete: () => void;
-  onTogglePublish: () => void;
+  key?: React.Key;
+  onEdit: () => void | Promise<void>;
+  onDelete: () => void | Promise<void>;
+  onTogglePublish: () => void | Promise<void>;
 }) {
   return (
     <div className="bg-white rounded-2xl border border-slate-100 shadow-sm hover:shadow-lg transition-all group overflow-hidden flex flex-col">

@@ -197,7 +197,7 @@ export default function AdminQuizzes() {
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-5">
             {filtered.map(quiz => (
-              <AdminQuizCard key={quiz.id} quiz={quiz} gradient={getGradient(quiz.id)} />
+              <AdminQuizCard key={quiz.id} quiz={quiz as QuizRow} gradient={getGradient(quiz.id)} />
             ))}
           </div>
         )}
@@ -304,7 +304,7 @@ export default function AdminQuizzes() {
   );
 }
 
-function AdminQuizCard({ quiz, gradient }: { quiz: QuizRow; gradient: string }) {
+function AdminQuizCard({ quiz, gradient }: { quiz: QuizRow; gradient: string; key?: React.Key }) {
   return (
     <div className="bg-white rounded-2xl border border-slate-100 shadow-sm hover:shadow-lg transition-all overflow-hidden flex flex-col">
       {/* Card header */}

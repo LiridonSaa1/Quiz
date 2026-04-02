@@ -71,7 +71,7 @@ export default function StudentLayout({ children }: { children: React.ReactNode 
     navigate('/login');
   };
 
-  const NavItem = ({ item, onClick }: { item: any, onClick?: () => void }) => (
+  const NavItem = ({ item, onClick }: { item: any; key?: React.Key; onClick?: () => void }) => (
     <Link
       to={item.path}
       onClick={onClick}

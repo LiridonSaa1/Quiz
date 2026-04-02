@@ -63,7 +63,7 @@ export default function AdminModules() {
 
   useEffect(() => { fetchData(); }, []);
 
-  const courseOptions = Object.entries(courses).map(([id, val]) => ({ id, title: val.title }));
+  const courseOptions = (Object.entries(courses) as [string, { title: string; teacher: string }][]).map(([id, val]) => ({ id, title: val.title }));
 
   const filtered = modules.filter(m => {
     const matchSearch =
