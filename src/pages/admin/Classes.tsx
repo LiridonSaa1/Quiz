@@ -82,12 +82,25 @@ export default function AdminClasses() {
     setLoading(true);
     try {
       const [classesRes, coursesRes, teachersRes] = await Promise.all([
-        supabase.from('classes').select('*, course:courses(title), teacher:profiles!classes_teacher_id_fkey(display_name, email)').order('created_at', { ascending: false }),
+        supabase.from('classes').select('*').order('created_at', { ascending: false }),
         supabase.from('courses').select('id, title').eq('status', 'published'),
         supabase.from('profiles').select('id, display_name, email').eq('role', 'teacher'),
       ]);
       if (classesRes.error) throw classesRes.error;
-      setClasses((classesRes.data || []) as ClassRecord[]);
+
+      const courseMap: Record<string, { title: string }> = {};
+      (coursesRes.data || []).forEach((c: any) => { courseMap[c.id] = { title: c.title }; });
+
+      const teacherMap: Record<string, { display_name: string; email: string }> = {};
+      (teachersRes.data || []).forEach((t: any) => { teacherMap[t.id] = { display_name: t.display_name, email: t.email }; });
+
+      const enriched = (classesRes.data || []).map((cls: any) => ({
+        ...cls,
+        course: cls.course_id ? (courseMap[cls.course_id] || null) : null,
+        teacher: cls.teacher_id ? (teacherMap[cls.teacher_id] ? { display_name: teacherMap[cls.teacher_id].display_name, email: teacherMap[cls.teacher_id].email } : null) : null,
+      }));
+
+      setClasses(enriched as ClassRecord[]);
       setCourses(coursesRes.data || []);
       setTeachers((teachersRes.data || []).map((t: any) => ({ id: t.id, displayName: t.display_name, email: t.email })));
     } catch (err: any) {
