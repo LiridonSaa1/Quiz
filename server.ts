@@ -254,7 +254,12 @@ async function startServer() {
   // Route to create a course (bypasses RLS using service role)
   app.post("/api/admin/create-course", async (req, res) => {
     try {
-      const payload = { ...req.body, created_at: new Date().toISOString() };
+      const baseSlug = (req.body.title || 'course')
+        .toLowerCase().trim()
+        .replace(/[^a-z0-9]+/g, '-')
+        .replace(/^-|-$/g, '');
+      const slug = `${baseSlug}-${Date.now()}`;
+      const payload = { ...req.body, slug, created_at: new Date().toISOString() };
       const { data, error } = await supabaseAdmin.from('courses').insert(payload).select().single();
       if (error) throw error;
       res.json({ success: true, course: data });
