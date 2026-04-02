@@ -7,6 +7,7 @@ import {
 import { toast } from 'sonner';
 import { Module } from '../../types';
 import { cn } from '../../lib/utils';
+import StyledSelect from '../../components/ui/StyledSelect';
 
 export default function AdminModules() {
   const [modules, setModules] = useState<Module[]>([]);

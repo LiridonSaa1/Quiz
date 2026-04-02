@@ -8,6 +8,7 @@ import {
   GraduationCap, Clock, Star, Filter, ChevronDown
 } from 'lucide-react';
 import { toast } from 'sonner';
+import StyledSelect from '../../components/ui/StyledSelect';
 
 const GRADIENT_PALETTES = [
   'from-indigo-500 to-violet-600',

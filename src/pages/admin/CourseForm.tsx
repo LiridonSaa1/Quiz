@@ -8,6 +8,7 @@ import {
   Image, Type, AlignLeft, DollarSign, Award, Settings2
 } from 'lucide-react';
 import { toast } from 'sonner';
+import StyledSelect from '../../components/ui/StyledSelect';
 
 const GRADIENTS = [
   { label: 'Indigo', value: 'from-indigo-500 to-violet-600' },

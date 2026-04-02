@@ -8,6 +8,7 @@ import {
 import { toast } from 'sonner';
 import { Lesson } from '../../types';
 import { cn } from '../../lib/utils';
+import StyledSelect from '../../components/ui/StyledSelect';
 
 const LESSON_TYPES = [
   { value: 'video', label: 'Video', icon: Video, color: 'text-blue-600', bg: 'bg-blue-50' },

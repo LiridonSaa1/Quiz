@@ -6,6 +6,7 @@ import { toast } from 'sonner';
 import AdminLayout from '../../components/layout/AdminLayout';
 import { cn } from '../../lib/utils';
 import AddStudentModal from '../../components/AddStudentModal';
+import StyledSelect from '../../components/ui/StyledSelect';
 
 interface StudentWithMeta extends UserProfile {
   teacherName: string;
