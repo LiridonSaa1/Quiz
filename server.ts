@@ -453,6 +453,227 @@ async function startServer() {
     } catch (e: any) { res.status(500).json({ error: e.message }); }
   });
 
+  // ── ANALYTICS ──────────────────────────────────────────────
+  app.get('/api/admin/analytics', async (req, res) => {
+    try {
+      const [profilesRes, coursesRes, quizzesRes, attemptsRes, certsRes, assignmentsRes, lessonsRes, attendanceRes] = await Promise.all([
+        supabaseAdmin.from('profiles').select('id, role, created_at, status'),
+        supabaseAdmin.from('courses').select('id, category, status, created_at, total_students, level'),
+        supabaseAdmin.from('quizzes').select('id, title, created_at, published'),
+        supabaseAdmin.from('attempts').select('id, score, total_points, status, correct_answers, total_questions, started_at, completed_at, quiz_id, student_id'),
+        supabaseAdmin.from('certificates').select('id, status, created_at'),
+        supabaseAdmin.from('assignments').select('id, status, created_at'),
+        supabaseAdmin.from('lessons').select('id, created_at, type'),
+        supabaseAdmin.from('attendance').select('id, status, date'),
+      ]);
+
+      const profiles = profilesRes.data || [];
+      const courses = coursesRes.data || [];
+      const quizzes = quizzesRes.data || [];
+      const attempts = attemptsRes.data || [];
+      const certs = certsRes.data || [];
+      const assignments = assignmentsRes.data || [];
+      const lessons = lessonsRes.data || [];
+      const attendance = attendanceRes.data || [];
+
+      const completedAttempts = attempts.filter(a => a.status === 'completed');
+      const passedAttempts = completedAttempts.filter(a => a.total_points > 0 && (a.score / a.total_points) >= 0.5);
+      const passRate = completedAttempts.length > 0 ? Math.round((passedAttempts.length / completedAttempts.length) * 100) : 0;
+      const avgScore = completedAttempts.length > 0
+        ? Math.round(completedAttempts.reduce((sum, a) => sum + (a.total_points > 0 ? (a.score / a.total_points) * 100 : 0), 0) / completedAttempts.length)
+        : 0;
+
+      // Last 30 days trend
+      const now = new Date();
+      const days30: string[] = [];
+      for (let i = 29; i >= 0; i--) {
+        const d = new Date(now); d.setDate(d.getDate() - i);
+        days30.push(d.toISOString().slice(0, 10));
+      }
+
+      const signupMap: Record<string, number> = Object.fromEntries(days30.map(d => [d, 0]));
+      profiles.filter(p => p.role === 'student').forEach(p => {
+        const day = (p.created_at || '').slice(0, 10);
+        if (signupMap[day] !== undefined) signupMap[day]++;
+      });
+
+      const attemptsMap: Record<string, number> = Object.fromEntries(days30.map(d => [d, 0]));
+      attempts.forEach(a => {
+        const day = (a.started_at || '').slice(0, 10);
+        if (attemptsMap[day] !== undefined) attemptsMap[day]++;
+      });
+
+      const trend = days30.map(date => ({
+        date: date.slice(5), // MM-DD
+        signups: signupMap[date],
+        attempts: attemptsMap[date],
+      }));
+
+      // Course by category
+      const catMap: Record<string, number> = {};
+      courses.forEach(c => { catMap[c.category || 'Other'] = (catMap[c.category || 'Other'] || 0) + 1; });
+      const courseByCategory = Object.entries(catMap).map(([name, value]) => ({ name, value }));
+
+      // Course by level
+      const lvlMap: Record<string, number> = {};
+      courses.forEach(c => { lvlMap[c.level || 'beginner'] = (lvlMap[c.level || 'beginner'] || 0) + 1; });
+      const courseByLevel = Object.entries(lvlMap).map(([name, value]) => ({ name, value }));
+
+      // Score distribution
+      const buckets: Record<string, number> = { '0-20': 0, '21-40': 0, '41-60': 0, '61-80': 0, '81-100': 0 };
+      completedAttempts.forEach(a => {
+        const pct = a.total_points > 0 ? (a.score / a.total_points) * 100 : 0;
+        if (pct <= 20) buckets['0-20']++;
+        else if (pct <= 40) buckets['21-40']++;
+        else if (pct <= 60) buckets['41-60']++;
+        else if (pct <= 80) buckets['61-80']++;
+        else buckets['81-100']++;
+      });
+      const scoreDistribution = Object.entries(buckets).map(([range, count]) => ({ range, count }));
+
+      // Attendance rate
+      const presentCount = attendance.filter(a => a.status === 'present').length;
+      const attendanceRate = attendance.length > 0 ? Math.round((presentCount / attendance.length) * 100) : 0;
+
+      res.json({
+        success: true,
+        overview: {
+          totalStudents: profiles.filter(p => p.role === 'student').length,
+          activeStudents: profiles.filter(p => p.role === 'student' && p.status === 'active').length,
+          totalTeachers: profiles.filter(p => p.role === 'teacher').length,
+          totalCourses: courses.length,
+          publishedCourses: courses.filter(c => c.status === 'published').length,
+          totalQuizzes: quizzes.length,
+          publishedQuizzes: quizzes.filter(q => q.published).length,
+          totalAttempts: attempts.length,
+          completedAttempts: completedAttempts.length,
+          totalCertificates: certs.filter(c => c.status === 'issued').length,
+          totalLessons: lessons.length,
+          totalAssignments: assignments.length,
+          passRate,
+          avgScore,
+          attendanceRate,
+          totalAttendance: attendance.length,
+        },
+        trend,
+        courseByCategory,
+        courseByLevel,
+        scoreDistribution,
+      });
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  // ── REPORTS ─────────────────────────────────────────────────
+  app.get('/api/admin/reports/students', async (req, res) => {
+    try {
+      const [studentsRes, attemptsRes, certsRes, enrollmentsRes] = await Promise.all([
+        supabaseAdmin.from('profiles').select('id, display_name, email, status, created_at').eq('role', 'student'),
+        supabaseAdmin.from('attempts').select('student_id, score, total_points, status, started_at'),
+        supabaseAdmin.from('certificates').select('student_id, status'),
+        supabaseAdmin.from('courses').select('id, student_ids'),
+      ]);
+
+      const students = studentsRes.data || [];
+      const attempts = attemptsRes.data || [];
+      const certs = certsRes.data || [];
+      const courses = enrollmentsRes.data || [];
+
+      const enrollmentMap: Record<string, number> = {};
+      courses.forEach((c: any) => {
+        (c.student_ids || []).forEach((sid: string) => {
+          enrollmentMap[sid] = (enrollmentMap[sid] || 0) + 1;
+        });
+      });
+
+      const report = students.map(s => {
+        const myAttempts = attempts.filter(a => a.student_id === s.id && a.status === 'completed');
+        const avgScore = myAttempts.length > 0
+          ? Math.round(myAttempts.reduce((sum, a) => sum + (a.total_points > 0 ? (a.score / a.total_points) * 100 : 0), 0) / myAttempts.length)
+          : null;
+        return {
+          id: s.id,
+          name: s.display_name,
+          email: s.email,
+          status: s.status,
+          joinedAt: s.created_at,
+          enrolledCourses: enrollmentMap[s.id] || 0,
+          totalAttempts: attempts.filter(a => a.student_id === s.id).length,
+          completedQuizzes: myAttempts.length,
+          avgScore,
+          certificates: certs.filter(c => c.student_id === s.id && c.status === 'issued').length,
+        };
+      });
+
+      res.json({ success: true, report });
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  app.get('/api/admin/reports/courses', async (req, res) => {
+    try {
+      const [coursesRes, attemptsRes, certsRes, lessonsRes] = await Promise.all([
+        supabaseAdmin.from('courses').select('id, title, category, level, status, created_at, total_students, teacher_id, student_ids'),
+        supabaseAdmin.from('attempts').select('quiz_id, score, total_points, status'),
+        supabaseAdmin.from('certificates').select('course_id, status'),
+        supabaseAdmin.from('lessons').select('course_id'),
+      ]);
+
+      const courses = coursesRes.data || [];
+      const certs = certsRes.data || [];
+      const lessonsList = lessonsRes.data || [];
+
+      const report = courses.map(c => ({
+        id: c.id,
+        title: c.title,
+        category: c.category || 'Other',
+        level: c.level || 'beginner',
+        status: c.status,
+        createdAt: c.created_at,
+        enrolledStudents: (c.student_ids || []).length,
+        totalLessons: lessonsList.filter((l: any) => l.course_id === c.id).length,
+        certificatesIssued: certs.filter((cert: any) => cert.course_id === c.id && cert.status === 'issued').length,
+      }));
+
+      res.json({ success: true, report });
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  app.get('/api/admin/reports/quizzes', async (req, res) => {
+    try {
+      const [quizzesRes, attemptsRes] = await Promise.all([
+        supabaseAdmin.from('quizzes').select('id, title, published, created_at, settings, course_id'),
+        supabaseAdmin.from('attempts').select('quiz_id, score, total_points, status, student_id'),
+      ]);
+
+      const quizzes = quizzesRes.data || [];
+      const attempts = attemptsRes.data || [];
+
+      const report = quizzes.map(q => {
+        const myAttempts = attempts.filter(a => a.quiz_id === q.id);
+        const completed = myAttempts.filter(a => a.status === 'completed');
+        const passed = completed.filter(a => a.total_points > 0 && (a.score / a.total_points) * 100 >= (q.settings?.passingScore || 50));
+        const avgScore = completed.length > 0
+          ? Math.round(completed.reduce((sum, a) => sum + (a.total_points > 0 ? (a.score / a.total_points) * 100 : 0), 0) / completed.length)
+          : null;
+        const uniqueStudents = new Set(myAttempts.map(a => a.student_id)).size;
+        return {
+          id: q.id,
+          title: q.title,
+          published: q.published,
+          createdAt: q.created_at,
+          passingScore: q.settings?.passingScore || 50,
+          totalAttempts: myAttempts.length,
+          completedAttempts: completed.length,
+          passedAttempts: passed.length,
+          passRate: completed.length > 0 ? Math.round((passed.length / completed.length) * 100) : null,
+          avgScore,
+          uniqueStudents,
+        };
+      });
+
+      res.json({ success: true, report });
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
   // ── LIVE SESSION RECORDING UPLOAD ──────────────────────────
   app.post('/api/admin/live-sessions/:id/upload-url', async (req, res) => {
     try {
