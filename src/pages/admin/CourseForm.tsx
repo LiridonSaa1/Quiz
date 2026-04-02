@@ -5,21 +5,10 @@ import AdminLayout from '../../components/layout/AdminLayout';
 import {
   ChevronRight, BookOpen, Users, Globe, BarChart2,
   Save, Send, Check, AlertCircle, X, Plus, Trash2,
-  Image, Type, AlignLeft, DollarSign, Award, Settings2
+  Type, AlignLeft, DollarSign, Award, Settings2
 } from 'lucide-react';
 import { toast } from 'sonner';
 import StyledSelect from '../../components/ui/StyledSelect';
-
-const GRADIENTS = [
-  { label: 'Indigo', value: 'from-indigo-500 to-violet-600' },
-  { label: 'Violet', value: 'from-violet-500 to-purple-600' },
-  { label: 'Blue', value: 'from-blue-500 to-indigo-600' },
-  { label: 'Emerald', value: 'from-emerald-500 to-teal-600' },
-  { label: 'Rose', value: 'from-rose-500 to-pink-600' },
-  { label: 'Amber', value: 'from-amber-500 to-orange-600' },
-  { label: 'Cyan', value: 'from-cyan-500 to-blue-600' },
-  { label: 'Fuchsia', value: 'from-fuchsia-500 to-violet-600' },
-];
 
 const LANGUAGES = ['English', 'Albanian', 'Spanish', 'French', 'German', 'Italian', 'Portuguese', 'Arabic', 'Chinese'];
 const LEVELS = ['Beginner', 'Intermediate', 'Advanced', 'All Levels'];
@@ -34,7 +23,6 @@ const initialForm = {
   is_free: true,
   status: 'draft' as 'draft' | 'published',
   certificate_enabled: false,
-  gradient: 'from-indigo-500 to-violet-600',
   teacher_id: '',
   tags: [] as string[],
 };
@@ -42,7 +30,6 @@ const initialForm = {
 const TABS = [
   { id: 'basic', label: 'Basic Info', icon: Type },
   { id: 'details', label: 'Details', icon: BarChart2 },
-  { id: 'appearance', label: 'Appearance', icon: Image },
   { id: 'settings', label: 'Settings', icon: Settings2 },
 ];
 
@@ -98,7 +85,6 @@ export default function AdminCourseForm() {
           is_free: data.is_free ?? true,
           status: data.status || 'draft',
           certificate_enabled: data.certificate_enabled || false,
-          gradient: data.gradient || 'from-indigo-500 to-violet-600',
           teacher_id: data.teacher_id || '',
           tags: data.tags || [],
         });
@@ -123,7 +109,6 @@ export default function AdminCourseForm() {
         is_free: form.is_free,
         status: publishNow ? 'published' : form.status,
         certificate_enabled: form.certificate_enabled,
-        gradient: form.gradient,
         teacher_id: form.teacher_id || null,
         tags: form.tags,
         updated_at: new Date().toISOString(),
@@ -343,40 +328,6 @@ export default function AdminCourseForm() {
                           ))}
                         </div>
                       )}
-                    </div>
-                  </div>
-                )}
-
-                {/* Appearance Tab */}
-                {activeTab === 'appearance' && (
-                  <div className="space-y-5">
-                    <div>
-                      <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-3">Course Color Theme</label>
-                      <div className="grid grid-cols-4 gap-3">
-                        {GRADIENTS.map(g => (
-                          <button
-                            key={g.value}
-                            type="button"
-                            onClick={() => set('gradient', g.value)}
-                            className={`relative h-16 rounded-xl bg-gradient-to-br ${g.value} transition-all hover:scale-105 ${form.gradient === g.value ? 'ring-2 ring-offset-2 ring-indigo-500 scale-105' : ''}`}
-                          >
-                            {form.gradient === g.value && (
-                              <div className="absolute inset-0 flex items-center justify-center">
-                                <div className="w-6 h-6 bg-white/30 rounded-full flex items-center justify-center">
-                                  <Check className="w-4 h-4 text-white" />
-                                </div>
-                              </div>
-                            )}
-                            <span className="absolute bottom-1.5 left-0 right-0 text-center text-[9px] font-bold text-white/80 uppercase tracking-wider">{g.label}</span>
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-                    <div className="mt-4 p-4 bg-slate-50 rounded-xl border border-slate-100">
-                      <p className="text-xs text-slate-500 mb-2 font-medium">Preview</p>
-                      <div className={`h-24 rounded-xl bg-gradient-to-br ${form.gradient} flex items-center justify-center`}>
-                        <BookOpen className="w-8 h-8 text-white opacity-80" />
-                      </div>
                     </div>
                   </div>
                 )}
