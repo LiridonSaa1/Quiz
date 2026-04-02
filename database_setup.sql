@@ -83,9 +83,15 @@ CREATE TABLE IF NOT EXISTS courses (
   total_lessons       INTEGER DEFAULT 0,
   total_students      INTEGER DEFAULT 0,
   certificate_enabled BOOLEAN DEFAULT FALSE,
+  gradient            TEXT DEFAULT 'from-indigo-500 to-violet-600',
+  category            TEXT DEFAULT 'Other',
   created_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at          TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+
+-- Add gradient and category columns if they don't exist (for existing databases)
+ALTER TABLE courses ADD COLUMN IF NOT EXISTS gradient TEXT DEFAULT 'from-indigo-500 to-violet-600';
+ALTER TABLE courses ADD COLUMN IF NOT EXISTS category TEXT DEFAULT 'Other';
 
 -- ============================================================
 -- 5. MODULES
