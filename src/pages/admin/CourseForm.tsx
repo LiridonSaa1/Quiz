@@ -23,7 +23,6 @@ const GRADIENTS = [
 
 const LANGUAGES = ['English', 'Albanian', 'Spanish', 'French', 'German', 'Italian', 'Portuguese', 'Arabic', 'Chinese'];
 const LEVELS = ['Beginner', 'Intermediate', 'Advanced', 'All Levels'];
-const CATEGORIES = ['Mathematics', 'Science', 'Programming', 'Language Arts', 'History', 'Arts', 'Music', 'Physical Education', 'Other'];
 
 const initialForm = {
   name: '',
@@ -31,7 +30,6 @@ const initialForm = {
   short_description: '',
   language: 'English',
   level: 'All Levels',
-  category: 'Other',
   price: 0,
   is_free: true,
   status: 'draft' as 'draft' | 'published',
@@ -96,7 +94,6 @@ export default function AdminCourseForm() {
           short_description: data.short_description || '',
           language: data.language || 'English',
           level: data.level || 'All Levels',
-          category: data.category || 'Other',
           price: data.price || 0,
           is_free: data.is_free ?? true,
           status: data.status || 'draft',
@@ -122,7 +119,6 @@ export default function AdminCourseForm() {
         short_description: form.short_description,
         language: form.language,
         level: form.level,
-        category: form.category,
         price: form.is_free ? 0 : form.price,
         is_free: form.is_free,
         status: publishNow ? 'published' : form.status,
@@ -284,13 +280,6 @@ export default function AdminCourseForm() {
                           {LEVELS.map(l => <option key={l}>{l}</option>)}
                         </select>
                       </div>
-                    </div>
-                    <div>
-                      <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">Category</label>
-                      <select value={form.category} onChange={e => set('category', e.target.value)}
-                        className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 transition-all">
-                        {CATEGORIES.map(c => <option key={c}>{c}</option>)}
-                      </select>
                     </div>
                     <div>
                       <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-3">Pricing</label>
