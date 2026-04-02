@@ -25,11 +25,11 @@ interface Post {
   author?: { id: string; display_name: string; email: string } | null;
 }
 
-const CATEGORY_CFG: Record<PostCategory, { label: string; bg: string; text: string; icon: React.ElementType }> = {
-  general:   { label: 'General',   bg: 'bg-slate-100',   text: 'text-slate-600',   icon: Globe        },
-  q_and_a:   { label: 'Q&A',       bg: 'bg-amber-50',    text: 'text-amber-700',   icon: HelpCircle   },
-  resources: { label: 'Resources', bg: 'bg-blue-50',     text: 'text-blue-700',    icon: BookMarked   },
-  showcase:  { label: 'Showcase',  bg: 'bg-violet-50',   text: 'text-violet-700',  icon: Sparkles     },
+const CATEGORY_CFG: Record<PostCategory, { label: string; bg: string; text: string; icon: React.ElementType; iconBg: string; ring: string; grad: string }> = {
+  general:   { label: 'General',   bg: 'bg-slate-100',   text: 'text-slate-600',   icon: Globe,     iconBg: 'bg-slate-100 text-slate-600',   ring: 'ring-slate-100',   grad: 'from-slate-400 to-slate-500'   },
+  q_and_a:   { label: 'Q&A',       bg: 'bg-amber-50',    text: 'text-amber-700',   icon: HelpCircle, iconBg: 'bg-amber-100 text-amber-600',  ring: 'ring-amber-100',   grad: 'from-amber-500 to-orange-500'  },
+  resources: { label: 'Resources', bg: 'bg-blue-50',     text: 'text-blue-700',    icon: BookMarked, iconBg: 'bg-blue-100 text-blue-600',    ring: 'ring-blue-100',    grad: 'from-blue-500 to-cyan-500'     },
+  showcase:  { label: 'Showcase',  bg: 'bg-violet-50',   text: 'text-violet-700',  icon: Sparkles,   iconBg: 'bg-violet-100 text-violet-600', ring: 'ring-violet-100',  grad: 'from-violet-500 to-purple-500' },
 };
 
 const STATUS_CFG: Record<PostStatus, { label: string; icon: React.ElementType; color: string }> = {
@@ -158,13 +158,14 @@ export default function AdminCommunity() {
             const Icon = v.icon;
             const count = posts.filter(p => p.category === k).length;
             return (
-              <div key={k} className="bg-white rounded-2xl border border-slate-100 shadow-sm p-4 flex items-center gap-3">
-                <div className={cn('w-10 h-10 rounded-xl flex items-center justify-center shrink-0', v.bg)}>
-                  <Icon className={cn('w-5 h-5', v.text)} />
-                </div>
-                <div>
-                  <p className="text-2xl font-bold text-slate-900">{count}</p>
-                  <p className="text-xs text-slate-500 font-medium">{v.label}</p>
+              <div key={k} className="bg-white rounded-2xl border border-slate-100 shadow-sm hover:shadow-md transition-all overflow-hidden">
+                <div className={cn("h-0.5 bg-gradient-to-r", v.grad)} />
+                <div className="p-5">
+                  <div className={cn("p-2.5 rounded-xl ring-4 inline-flex mb-4", v.iconBg, v.ring)}>
+                    <Icon className="w-5 h-5" />
+                  </div>
+                  <p className="text-2xl font-bold text-slate-900 tracking-tight">{count}</p>
+                  <p className="text-sm font-medium text-slate-700 mt-0.5">{v.label}</p>
                 </div>
               </div>
             );

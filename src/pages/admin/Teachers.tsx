@@ -60,9 +60,9 @@ export default function AdminTeachers() {
   );
 
   const stats = [
-    { label: 'Total Teachers', value: users.length, color: 'text-violet-600', bg: 'bg-violet-50', border: 'border-violet-100' },
-    { label: 'Active', value: users.filter(u => u.status === 'active').length, color: 'text-indigo-600', bg: 'bg-indigo-50', border: 'border-indigo-100' },
-    { label: 'Inactive', value: users.filter(u => u.status !== 'active').length, color: 'text-slate-500', bg: 'bg-slate-50', border: 'border-slate-100' },
+    { label: 'Total Teachers', value: users.length, icon: ShieldCheck, iconBg: 'bg-violet-100 text-violet-600', grad: 'from-violet-500 to-purple-500', ring: 'ring-violet-100' },
+    { label: 'Active', value: users.filter(u => u.status === 'active').length, icon: UserCheck, iconBg: 'bg-indigo-100 text-indigo-600', grad: 'from-indigo-500 to-violet-500', ring: 'ring-indigo-100' },
+    { label: 'Inactive', value: users.filter(u => u.status !== 'active').length, icon: UserX, iconBg: 'bg-slate-100 text-slate-500', grad: 'from-slate-400 to-slate-500', ring: 'ring-slate-100' },
   ];
 
   return (
@@ -86,10 +86,16 @@ export default function AdminTeachers() {
 
         {/* Stats */}
         <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
-          {stats.map(stat => (
-            <div key={stat.label} className={`${stat.bg} border ${stat.border} rounded-2xl p-4 shadow-sm`}>
-              <div className={`text-2xl font-bold ${stat.color}`}>{stat.value}</div>
-              <div className="text-xs text-slate-500 font-medium mt-0.5">{stat.label}</div>
+          {stats.map(s => (
+            <div key={s.label} className="bg-white rounded-2xl border border-slate-100 shadow-sm hover:shadow-md transition-all overflow-hidden">
+              <div className={cn("h-0.5 bg-gradient-to-r", s.grad)} />
+              <div className="p-5">
+                <div className={cn("p-2.5 rounded-xl ring-4 inline-flex mb-4", s.iconBg, s.ring)}>
+                  <s.icon className="w-5 h-5" />
+                </div>
+                <p className="text-2xl font-bold text-slate-900 tracking-tight">{s.value}</p>
+                <p className="text-sm font-medium text-slate-700 mt-0.5">{s.label}</p>
+              </div>
             </div>
           ))}
         </div>

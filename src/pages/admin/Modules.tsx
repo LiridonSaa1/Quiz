@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { supabase } from '../../supabase';
 import AdminLayout from '../../components/layout/AdminLayout';
 import {
-  Search, Layers, BookOpen, PlayCircle, CheckCircle2, XCircle, Users, GripVertical
+  Search, Layers, BookOpen, PlayCircle, CheckCircle2, XCircle, Users, GripVertical, FileText
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { Module } from '../../types';
@@ -75,10 +75,10 @@ export default function AdminModules() {
   });
 
   const stats = [
-    { label: 'Total Modules', value: modules.length, color: 'text-indigo-600', bg: 'bg-indigo-50', border: 'border-indigo-100' },
-    { label: 'Published', value: modules.filter(m => m.status === 'published').length, color: 'text-emerald-600', bg: 'bg-emerald-50', border: 'border-emerald-100' },
-    { label: 'Drafts', value: modules.filter(m => m.status !== 'published').length, color: 'text-amber-600', bg: 'bg-amber-50', border: 'border-amber-100' },
-    { label: 'Across Courses', value: new Set(modules.map(m => m.courseId)).size, color: 'text-violet-600', bg: 'bg-violet-50', border: 'border-violet-100' },
+    { label: 'Total Modules', value: modules.length, icon: Layers, iconBg: 'bg-indigo-100 text-indigo-600', grad: 'from-indigo-500 to-violet-500', ring: 'ring-indigo-100' },
+    { label: 'Published', value: modules.filter(m => m.status === 'published').length, icon: CheckCircle2, iconBg: 'bg-emerald-100 text-emerald-600', grad: 'from-emerald-500 to-teal-500', ring: 'ring-emerald-100' },
+    { label: 'Drafts', value: modules.filter(m => m.status !== 'published').length, icon: FileText, iconBg: 'bg-amber-100 text-amber-600', grad: 'from-amber-500 to-orange-500', ring: 'ring-amber-100' },
+    { label: 'Across Courses', value: new Set(modules.map(m => m.courseId)).size, icon: BookOpen, iconBg: 'bg-violet-100 text-violet-600', grad: 'from-violet-500 to-purple-500', ring: 'ring-violet-100' },
   ];
 
   return (
@@ -92,10 +92,16 @@ export default function AdminModules() {
 
         {/* Stats */}
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-          {stats.map(stat => (
-            <div key={stat.label} className={`bg-white border ${stat.border} rounded-2xl p-4 shadow-sm`}>
-              <div className={`text-2xl font-bold ${stat.color}`}>{stat.value}</div>
-              <div className="text-xs text-slate-500 font-medium mt-0.5">{stat.label}</div>
+          {stats.map(s => (
+            <div key={s.label} className="bg-white rounded-2xl border border-slate-100 shadow-sm hover:shadow-md transition-all overflow-hidden">
+              <div className={cn("h-0.5 bg-gradient-to-r", s.grad)} />
+              <div className="p-5">
+                <div className={cn("p-2.5 rounded-xl ring-4 inline-flex mb-4", s.iconBg, s.ring)}>
+                  <s.icon className="w-5 h-5" />
+                </div>
+                <p className="text-2xl font-bold text-slate-900 tracking-tight">{s.value}</p>
+                <p className="text-sm font-medium text-slate-700 mt-0.5">{s.label}</p>
+              </div>
             </div>
           ))}
         </div>

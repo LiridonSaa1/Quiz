@@ -102,10 +102,10 @@ export default function AdminLessons() {
   const mins = totalDuration % 60;
 
   const stats = [
-    { label: 'Total Lessons', value: lessons.length, color: 'text-indigo-600', bg: 'bg-indigo-50', border: 'border-indigo-100' },
-    { label: 'Video', value: lessons.filter(l => l.type === 'video').length, color: 'text-blue-600', bg: 'bg-blue-50', border: 'border-blue-100' },
-    { label: 'Text', value: lessons.filter(l => l.type === 'text').length, color: 'text-amber-600', bg: 'bg-amber-50', border: 'border-amber-100' },
-    { label: 'Total Duration', value: `${hours}h ${mins}m`, color: 'text-violet-600', bg: 'bg-violet-50', border: 'border-violet-100' },
+    { label: 'Total Lessons', value: lessons.length, icon: BookOpen, iconBg: 'bg-indigo-100 text-indigo-600', grad: 'from-indigo-500 to-violet-500', ring: 'ring-indigo-100' },
+    { label: 'Video', value: lessons.filter(l => l.type === 'video').length, icon: Video, iconBg: 'bg-blue-100 text-blue-600', grad: 'from-blue-500 to-cyan-500', ring: 'ring-blue-100' },
+    { label: 'Text', value: lessons.filter(l => l.type === 'text').length, icon: FileText, iconBg: 'bg-amber-100 text-amber-600', grad: 'from-amber-500 to-orange-500', ring: 'ring-amber-100' },
+    { label: 'Total Duration', value: `${hours}h ${mins}m`, icon: Clock, iconBg: 'bg-violet-100 text-violet-600', grad: 'from-violet-500 to-purple-500', ring: 'ring-violet-100' },
   ];
 
   return (
@@ -121,9 +121,15 @@ export default function AdminLessons() {
         {/* Stats */}
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
           {stats.map(s => (
-            <div key={s.label} className={`bg-white border ${s.border} rounded-2xl p-4 shadow-sm`}>
-              <div className={`text-2xl font-bold ${s.color}`}>{s.value}</div>
-              <div className="text-xs text-slate-500 font-medium mt-0.5">{s.label}</div>
+            <div key={s.label} className="bg-white rounded-2xl border border-slate-100 shadow-sm hover:shadow-md transition-all overflow-hidden">
+              <div className={cn("h-0.5 bg-gradient-to-r", s.grad)} />
+              <div className="p-5">
+                <div className={cn("p-2.5 rounded-xl ring-4 inline-flex mb-4", s.iconBg, s.ring)}>
+                  <s.icon className="w-5 h-5" />
+                </div>
+                <p className="text-2xl font-bold text-slate-900 tracking-tight">{s.value}</p>
+                <p className="text-sm font-medium text-slate-700 mt-0.5">{s.label}</p>
+              </div>
             </div>
           ))}
         </div>

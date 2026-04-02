@@ -118,10 +118,10 @@ export default function AdminAttendance() {
   });
 
   const stats = [
-    { label: 'Total Records', value: records.length, color: 'text-sky-600', bg: 'bg-sky-50', border: 'border-sky-100' },
-    { label: 'Present', value: records.filter(r => r.status === 'present').length, color: 'text-emerald-600', bg: 'bg-emerald-50', border: 'border-emerald-100' },
-    { label: 'Absent', value: records.filter(r => r.status === 'absent').length, color: 'text-rose-600', bg: 'bg-rose-50', border: 'border-rose-100' },
-    { label: 'Late / Excused', value: records.filter(r => r.status === 'late' || r.status === 'excused').length, color: 'text-amber-600', bg: 'bg-amber-50', border: 'border-amber-100' },
+    { label: 'Total Records', value: records.length, icon: CalendarCheck, iconBg: 'bg-sky-100 text-sky-600', grad: 'from-sky-500 to-cyan-500', ring: 'ring-sky-100' },
+    { label: 'Present', value: records.filter(r => r.status === 'present').length, icon: CheckCircle2, iconBg: 'bg-emerald-100 text-emerald-600', grad: 'from-emerald-500 to-teal-500', ring: 'ring-emerald-100' },
+    { label: 'Absent', value: records.filter(r => r.status === 'absent').length, icon: XCircle, iconBg: 'bg-rose-100 text-rose-600', grad: 'from-rose-500 to-pink-500', ring: 'ring-rose-100' },
+    { label: 'Late / Excused', value: records.filter(r => r.status === 'late' || r.status === 'excused').length, icon: Clock, iconBg: 'bg-amber-100 text-amber-600', grad: 'from-amber-500 to-orange-500', ring: 'ring-amber-100' },
   ];
 
   const attendanceRate = records.length > 0
@@ -210,9 +210,15 @@ export default function AdminAttendance() {
         {/* Stats + Rate */}
         <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
           {stats.map(s => (
-            <div key={s.label} className={cn('rounded-xl border p-4', s.bg, s.border)}>
-              <div className={cn('text-2xl font-bold', s.color)}>{s.value}</div>
-              <div className="text-xs text-slate-500 mt-0.5">{s.label}</div>
+            <div key={s.label} className="bg-white rounded-2xl border border-slate-100 shadow-sm hover:shadow-md transition-all overflow-hidden">
+              <div className={cn("h-0.5 bg-gradient-to-r", s.grad)} />
+              <div className="p-5">
+                <div className={cn("p-2.5 rounded-xl ring-4 inline-flex mb-4", s.iconBg, s.ring)}>
+                  <s.icon className="w-5 h-5" />
+                </div>
+                <p className="text-2xl font-bold text-slate-900 tracking-tight">{s.value}</p>
+                <p className="text-sm font-medium text-slate-700 mt-0.5">{s.label}</p>
+              </div>
             </div>
           ))}
           <div className="rounded-xl border border-indigo-100 bg-indigo-50 p-4 flex flex-col items-center justify-center">

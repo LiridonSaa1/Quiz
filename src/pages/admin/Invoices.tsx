@@ -505,57 +505,49 @@ export default function AdminInvoices() {
 
         {/* Stats */}
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-          <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-5 hover:shadow-md transition-all">
-            <div className="w-10 h-10 rounded-xl bg-indigo-100 text-indigo-600 flex items-center justify-center mb-3">
-              <Receipt className="w-5 h-5" />
+          <div className="bg-white rounded-2xl border border-slate-100 shadow-sm hover:shadow-md transition-all overflow-hidden">
+            <div className="h-0.5 bg-gradient-to-r from-indigo-500 to-violet-500" />
+            <div className="p-5">
+              <div className="p-2.5 rounded-xl ring-4 inline-flex mb-4 bg-indigo-100 text-indigo-600 ring-indigo-100">
+                <Receipt className="w-5 h-5" />
+              </div>
+              <p className="text-2xl font-bold text-slate-900 tracking-tight">{stats.total}</p>
+              <p className="text-sm font-medium text-slate-700 mt-0.5">Total Invoices</p>
+              <p className="text-xs text-slate-400 mt-0.5">{fmtCurrency(stats.totalAmt)} total value</p>
             </div>
-            <p className="text-2xl font-bold text-slate-900">{stats.total}</p>
-            <p className="text-sm font-semibold text-slate-700 mt-0.5">
-              Total Invoices
-            </p>
-            <p className="text-xs text-slate-400 mt-0.5">
-              {fmtCurrency(stats.totalAmt)} total value
-            </p>
           </div>
-          <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-5 hover:shadow-md transition-all">
-            <div className="w-10 h-10 rounded-xl bg-emerald-100 text-emerald-600 flex items-center justify-center mb-3">
-              <CheckCircle2 className="w-5 h-5" />
+          <div className="bg-white rounded-2xl border border-slate-100 shadow-sm hover:shadow-md transition-all overflow-hidden">
+            <div className="h-0.5 bg-gradient-to-r from-emerald-500 to-teal-500" />
+            <div className="p-5">
+              <div className="p-2.5 rounded-xl ring-4 inline-flex mb-4 bg-emerald-100 text-emerald-600 ring-emerald-100">
+                <CheckCircle2 className="w-5 h-5" />
+              </div>
+              <p className="text-2xl font-bold text-slate-900 tracking-tight">{stats.paidCount}</p>
+              <p className="text-sm font-medium text-slate-700 mt-0.5">Paid</p>
+              <p className="text-xs text-slate-400 mt-0.5">{fmtCurrency(stats.paidAmt)} collected</p>
             </div>
-            <p className="text-2xl font-bold text-slate-900">
-              {stats.paidCount}
-            </p>
-            <p className="text-sm font-semibold text-slate-700 mt-0.5">Paid</p>
-            <p className="text-xs text-slate-400 mt-0.5">
-              {fmtCurrency(stats.paidAmt)} collected
-            </p>
           </div>
-          <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-5 hover:shadow-md transition-all">
-            <div className="w-10 h-10 rounded-xl bg-amber-100 text-amber-600 flex items-center justify-center mb-3">
-              <Clock className="w-5 h-5" />
+          <div className="bg-white rounded-2xl border border-slate-100 shadow-sm hover:shadow-md transition-all overflow-hidden">
+            <div className="h-0.5 bg-gradient-to-r from-amber-500 to-orange-500" />
+            <div className="p-5">
+              <div className="p-2.5 rounded-xl ring-4 inline-flex mb-4 bg-amber-100 text-amber-600 ring-amber-100">
+                <Clock className="w-5 h-5" />
+              </div>
+              <p className="text-2xl font-bold text-slate-900 tracking-tight">{stats.pendingCount}</p>
+              <p className="text-sm font-medium text-slate-700 mt-0.5">Pending</p>
+              <p className="text-xs text-slate-400 mt-0.5">{fmtCurrency(stats.pendingAmt)} outstanding</p>
             </div>
-            <p className="text-2xl font-bold text-slate-900">
-              {stats.pendingCount}
-            </p>
-            <p className="text-sm font-semibold text-slate-700 mt-0.5">
-              Pending
-            </p>
-            <p className="text-xs text-slate-400 mt-0.5">
-              {fmtCurrency(stats.pendingAmt)} outstanding
-            </p>
           </div>
-          <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-5 hover:shadow-md transition-all">
-            <div className="w-10 h-10 rounded-xl bg-rose-100 text-rose-600 flex items-center justify-center mb-3">
-              <AlertCircle className="w-5 h-5" />
+          <div className="bg-white rounded-2xl border border-slate-100 shadow-sm hover:shadow-md transition-all overflow-hidden">
+            <div className="h-0.5 bg-gradient-to-r from-rose-500 to-pink-500" />
+            <div className="p-5">
+              <div className="p-2.5 rounded-xl ring-4 inline-flex mb-4 bg-rose-100 text-rose-600 ring-rose-100">
+                <AlertCircle className="w-5 h-5" />
+              </div>
+              <p className="text-2xl font-bold text-slate-900 tracking-tight">{stats.overdueCount}</p>
+              <p className="text-sm font-medium text-slate-700 mt-0.5">Overdue</p>
+              <p className="text-xs text-slate-400 mt-0.5">{fmtCurrency(stats.overdueAmt)} overdue</p>
             </div>
-            <p className="text-2xl font-bold text-slate-900">
-              {stats.overdueCount}
-            </p>
-            <p className="text-sm font-semibold text-slate-700 mt-0.5">
-              Overdue
-            </p>
-            <p className="text-xs text-slate-400 mt-0.5">
-              {fmtCurrency(stats.overdueAmt)} overdue
-            </p>
           </div>
         </div>
 

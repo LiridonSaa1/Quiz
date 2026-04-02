@@ -174,18 +174,19 @@ export default function AdminAnnouncements() {
         {/* Stats */}
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
           {[
-            { label: 'Total', value: stats.total, color: 'bg-indigo-50 text-indigo-700', icon: Megaphone },
-            { label: 'Published', value: stats.published, color: 'bg-emerald-50 text-emerald-700', icon: Send },
-            { label: 'Drafts', value: stats.drafts, color: 'bg-amber-50 text-amber-700', icon: FileText },
-            { label: 'Urgent', value: stats.urgent, color: 'bg-rose-50 text-rose-700', icon: Zap },
-          ].map(({ label, value, color, icon: Icon }) => (
-            <div key={label} className="bg-white rounded-2xl border border-slate-100 shadow-sm p-4 flex items-center gap-3">
-              <div className={cn('w-10 h-10 rounded-xl flex items-center justify-center shrink-0', color)}>
-                <Icon className="w-5 h-5" />
-              </div>
-              <div>
-                <p className="text-2xl font-bold text-slate-900">{value}</p>
-                <p className="text-xs text-slate-500 font-medium">{label}</p>
+            { label: 'Total', value: stats.total, iconBg: 'bg-indigo-100 text-indigo-600', ring: 'ring-indigo-100', grad: 'from-indigo-500 to-violet-500', icon: Megaphone },
+            { label: 'Published', value: stats.published, iconBg: 'bg-emerald-100 text-emerald-600', ring: 'ring-emerald-100', grad: 'from-emerald-500 to-teal-500', icon: Send },
+            { label: 'Drafts', value: stats.drafts, iconBg: 'bg-amber-100 text-amber-600', ring: 'ring-amber-100', grad: 'from-amber-500 to-orange-500', icon: FileText },
+            { label: 'Urgent', value: stats.urgent, iconBg: 'bg-rose-100 text-rose-600', ring: 'ring-rose-100', grad: 'from-rose-500 to-pink-500', icon: Zap },
+          ].map(({ label, value, iconBg, ring, grad, icon: Icon }) => (
+            <div key={label} className="bg-white rounded-2xl border border-slate-100 shadow-sm hover:shadow-md transition-all overflow-hidden">
+              <div className={cn("h-0.5 bg-gradient-to-r", grad)} />
+              <div className="p-5">
+                <div className={cn("p-2.5 rounded-xl ring-4 inline-flex mb-4", iconBg, ring)}>
+                  <Icon className="w-5 h-5" />
+                </div>
+                <p className="text-2xl font-bold text-slate-900 tracking-tight">{value}</p>
+                <p className="text-sm font-medium text-slate-700 mt-0.5">{label}</p>
               </div>
             </div>
           ))}

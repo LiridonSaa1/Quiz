@@ -174,18 +174,19 @@ export default function AdminLiveSessions() {
         {/* Stats */}
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
           {[
-            { label: 'Total Sessions', value: stats.total, color: 'bg-indigo-50 text-indigo-700', icon: Video },
-            { label: 'Live Now', value: stats.live, color: 'bg-rose-50 text-rose-700', icon: Radio },
-            { label: 'Upcoming', value: stats.upcoming, color: 'bg-blue-50 text-blue-700', icon: CalendarDays },
-            { label: 'Completed', value: stats.ended, color: 'bg-emerald-50 text-emerald-700', icon: CheckCircle2 },
-          ].map(({ label, value, color, icon: Icon }) => (
-            <div key={label} className="bg-white rounded-2xl border border-slate-100 shadow-sm p-4 flex items-center gap-3">
-              <div className={cn('w-10 h-10 rounded-xl flex items-center justify-center shrink-0', color)}>
-                <Icon className="w-5 h-5" />
-              </div>
-              <div>
-                <p className="text-2xl font-bold text-slate-900">{value}</p>
-                <p className="text-xs text-slate-500 font-medium">{label}</p>
+            { label: 'Total Sessions', value: stats.total, iconBg: 'bg-indigo-100 text-indigo-600', ring: 'ring-indigo-100', grad: 'from-indigo-500 to-violet-500', icon: Video },
+            { label: 'Live Now', value: stats.live, iconBg: 'bg-rose-100 text-rose-600', ring: 'ring-rose-100', grad: 'from-rose-500 to-pink-500', icon: Radio },
+            { label: 'Upcoming', value: stats.upcoming, iconBg: 'bg-blue-100 text-blue-600', ring: 'ring-blue-100', grad: 'from-blue-500 to-cyan-500', icon: CalendarDays },
+            { label: 'Completed', value: stats.ended, iconBg: 'bg-emerald-100 text-emerald-600', ring: 'ring-emerald-100', grad: 'from-emerald-500 to-teal-500', icon: CheckCircle2 },
+          ].map(({ label, value, iconBg, ring, grad, icon: Icon }) => (
+            <div key={label} className="bg-white rounded-2xl border border-slate-100 shadow-sm hover:shadow-md transition-all overflow-hidden">
+              <div className={cn("h-0.5 bg-gradient-to-r", grad)} />
+              <div className="p-5">
+                <div className={cn("p-2.5 rounded-xl ring-4 inline-flex mb-4", iconBg, ring)}>
+                  <Icon className="w-5 h-5" />
+                </div>
+                <p className="text-2xl font-bold text-slate-900 tracking-tight">{value}</p>
+                <p className="text-sm font-medium text-slate-700 mt-0.5">{label}</p>
               </div>
             </div>
           ))}
