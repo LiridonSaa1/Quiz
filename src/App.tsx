@@ -36,6 +36,8 @@ import AdminCommunity from './pages/admin/Community';
 import AdminAnnouncements from './pages/admin/Announcements';
 import AdminAnalytics from './pages/admin/Analytics';
 import AdminReports from './pages/admin/Reports';
+import AdminPayments from './pages/admin/Payments';
+import AdminInvoices from './pages/admin/Invoices';
 import StudentDashboard from './pages/student/Dashboard';
 
 export default function App() {
@@ -169,6 +171,8 @@ function AdminRoutes() {
       <Route path="/announcements" element={<AdminAnnouncements />} />
       <Route path="/analytics" element={<AdminAnalytics />} />
       <Route path="/reports" element={<AdminReports />} />
+      <Route path="/payments" element={<AdminPayments />} />
+      <Route path="/invoices" element={<AdminInvoices />} />
     </Routes>
   );
 }
