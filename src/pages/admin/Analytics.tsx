@@ -30,21 +30,22 @@ interface AnalyticsData {
 
 const PIE_COLORS = ['#6366f1', '#8b5cf6', '#06b6d4', '#10b981', '#f59e0b', '#ef4444', '#ec4899', '#14b8a6'];
 
-const StatCard = ({ icon: Icon, label, value, sub, color, trend }: any) => (
-  <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-5 hover:shadow-md transition-all">
-    <div className="flex items-start justify-between">
-      <div className={cn('w-11 h-11 rounded-xl flex items-center justify-center shrink-0', color)}>
-        <Icon className="w-5 h-5" />
+const StatCard = ({ icon: Icon, label, value, sub, color, trend, grad, ring }: any) => (
+  <div className="bg-white rounded-2xl border border-slate-100 shadow-sm hover:shadow-md transition-all overflow-hidden">
+    <div className={cn('h-0.5 bg-gradient-to-r', grad)} />
+    <div className="p-5">
+      <div className="flex items-start justify-between mb-4">
+        <div className={cn('p-2.5 rounded-xl ring-4 inline-flex', color, ring)}>
+          <Icon className="w-5 h-5" />
+        </div>
+        {trend !== undefined && (
+          <span className={cn('text-xs font-bold px-2 py-0.5 rounded-full mt-0.5', trend >= 0 ? 'bg-emerald-50 text-emerald-600' : 'bg-rose-50 text-rose-600')}>
+            {trend >= 0 ? '↑' : '↓'} {Math.abs(trend)}%
+          </span>
+        )}
       </div>
-      {trend !== undefined && (
-        <span className={cn('text-xs font-bold px-2 py-0.5 rounded-full', trend >= 0 ? 'bg-emerald-50 text-emerald-600' : 'bg-rose-50 text-rose-600')}>
-          {trend >= 0 ? '↑' : '↓'} {Math.abs(trend)}%
-        </span>
-      )}
-    </div>
-    <div className="mt-3">
-      <p className="text-3xl font-bold text-slate-900">{value}</p>
-      <p className="text-sm font-semibold text-slate-700 mt-0.5">{label}</p>
+      <p className="text-3xl font-bold text-slate-900 tracking-tight">{value}</p>
+      <p className="text-sm font-medium text-slate-700 mt-0.5">{label}</p>
       {sub && <p className="text-xs text-slate-400 mt-0.5">{sub}</p>}
     </div>
   </div>
@@ -142,13 +143,13 @@ export default function AdminAnalytics() {
           <h2 className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-3">Users & Content</h2>
           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4">
             <StatCard icon={GraduationCap} label="Total Students" value={ov?.totalStudents ?? 0}
-              sub={`${ov?.activeStudents ?? 0} active`} color="bg-indigo-50 text-indigo-600" />
+              sub={`${ov?.activeStudents ?? 0} active`} color="bg-indigo-50 text-indigo-600" grad="from-indigo-500 to-violet-500" ring="ring-indigo-100" />
             <StatCard icon={Users} label="Teachers" value={ov?.totalTeachers ?? 0}
-              color="bg-violet-50 text-violet-600" />
+              color="bg-violet-50 text-violet-600" grad="from-violet-500 to-purple-600" ring="ring-violet-100" />
             <StatCard icon={BookOpen} label="Courses" value={ov?.totalCourses ?? 0}
-              sub={`${ov?.publishedCourses ?? 0} published`} color="bg-blue-50 text-blue-600" />
+              sub={`${ov?.publishedCourses ?? 0} published`} color="bg-blue-50 text-blue-600" grad="from-blue-500 to-indigo-500" ring="ring-blue-100" />
             <StatCard icon={Layers} label="Lessons" value={ov?.totalLessons ?? 0}
-              color="bg-cyan-50 text-cyan-600" />
+              color="bg-cyan-50 text-cyan-600" grad="from-cyan-500 to-sky-500" ring="ring-cyan-100" />
           </div>
         </div>
 
@@ -157,13 +158,16 @@ export default function AdminAnalytics() {
           <h2 className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-3">Performance & Results</h2>
           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4">
             <StatCard icon={FileText} label="Quiz Attempts" value={ov?.totalAttempts ?? 0}
-              sub={`${ov?.completedAttempts ?? 0} completed`} color="bg-amber-50 text-amber-600" />
+              sub={`${ov?.completedAttempts ?? 0} completed`} color="bg-amber-50 text-amber-600" grad="from-amber-500 to-orange-500" ring="ring-amber-100" />
             <StatCard icon={Target} label="Pass Rate" value={`${ov?.passRate ?? 0}%`}
-              sub="of completed attempts" color={ov?.passRate && ov.passRate >= 60 ? 'bg-emerald-50 text-emerald-600' : 'bg-rose-50 text-rose-600'} />
+              sub="of completed attempts"
+              color={ov?.passRate && ov.passRate >= 60 ? 'bg-emerald-50 text-emerald-600' : 'bg-rose-50 text-rose-600'}
+              grad={ov?.passRate && ov.passRate >= 60 ? 'from-emerald-500 to-teal-500' : 'from-rose-500 to-pink-500'}
+              ring={ov?.passRate && ov.passRate >= 60 ? 'ring-emerald-100' : 'ring-rose-100'} />
             <StatCard icon={TrendingUp} label="Avg Score" value={`${ov?.avgScore ?? 0}%`}
-              color="bg-teal-50 text-teal-600" />
+              color="bg-teal-50 text-teal-600" grad="from-teal-500 to-cyan-500" ring="ring-teal-100" />
             <StatCard icon={Award} label="Certificates" value={ov?.totalCertificates ?? 0}
-              sub="issued" color="bg-yellow-50 text-yellow-600" />
+              sub="issued" color="bg-yellow-50 text-yellow-600" grad="from-yellow-400 to-amber-500" ring="ring-yellow-100" />
           </div>
         </div>
 
@@ -172,13 +176,15 @@ export default function AdminAnalytics() {
           <h2 className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-3">Activity</h2>
           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4">
             <StatCard icon={FileText} label="Quizzes" value={ov?.totalQuizzes ?? 0}
-              sub={`${ov?.publishedQuizzes ?? 0} published`} color="bg-rose-50 text-rose-600" />
+              sub={`${ov?.publishedQuizzes ?? 0} published`} color="bg-rose-50 text-rose-600" grad="from-rose-500 to-pink-500" ring="ring-rose-100" />
             <StatCard icon={ClipboardList} label="Assignments" value={ov?.totalAssignments ?? 0}
-              color="bg-orange-50 text-orange-600" />
+              color="bg-orange-50 text-orange-600" grad="from-orange-500 to-amber-500" ring="ring-orange-100" />
             <StatCard icon={CalendarCheck} label="Attendance Records" value={ov?.totalAttendance ?? 0}
-              sub={`${ov?.attendanceRate ?? 0}% present rate`} color="bg-green-50 text-green-600" />
+              sub={`${ov?.attendanceRate ?? 0}% present rate`} color="bg-green-50 text-green-600" grad="from-green-500 to-emerald-500" ring="ring-green-100" />
             <StatCard icon={CheckCircle2} label="Attendance Rate" value={`${ov?.attendanceRate ?? 0}%`}
-              color={ov?.attendanceRate && ov.attendanceRate >= 75 ? 'bg-emerald-50 text-emerald-600' : 'bg-amber-50 text-amber-600'} />
+              color={ov?.attendanceRate && ov.attendanceRate >= 75 ? 'bg-emerald-50 text-emerald-600' : 'bg-amber-50 text-amber-600'}
+              grad={ov?.attendanceRate && ov.attendanceRate >= 75 ? 'from-emerald-500 to-teal-500' : 'from-amber-500 to-orange-500'}
+              ring={ov?.attendanceRate && ov.attendanceRate >= 75 ? 'ring-emerald-100' : 'ring-amber-100'} />
           </div>
         </div>
 

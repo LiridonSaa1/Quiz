@@ -376,6 +376,8 @@ export default function AdminPayments() {
             sub={`${stats.total} transactions`}
             iconBg="bg-indigo-100 text-indigo-600"
             trend={12}
+            grad="from-indigo-500 to-violet-500"
+            ring="ring-indigo-100"
           />
           <StatCard
             icon={TrendingUp}
@@ -384,6 +386,8 @@ export default function AdminPayments() {
             sub="Completed payments"
             iconBg="bg-emerald-100 text-emerald-600"
             trend={8}
+            grad="from-emerald-500 to-teal-500"
+            ring="ring-emerald-100"
           />
           <StatCard
             icon={Clock}
@@ -391,6 +395,8 @@ export default function AdminPayments() {
             value={fmtCurrency(stats.pendingAmt)}
             sub={`${stats.pendingCount} payments`}
             iconBg="bg-amber-100 text-amber-600"
+            grad="from-amber-500 to-orange-500"
+            ring="ring-amber-100"
           />
           <StatCard
             icon={RefreshCw}
@@ -398,6 +404,8 @@ export default function AdminPayments() {
             value={fmtCurrency(stats.refundedAmt)}
             sub={`${stats.failedCount} failed`}
             iconBg="bg-rose-100 text-rose-600"
+            grad="from-rose-500 to-pink-500"
+            ring="ring-rose-100"
           />
         </div>
 
@@ -664,6 +672,8 @@ function StatCard({
   sub,
   iconBg,
   trend,
+  grad,
+  ring,
 }: {
   icon: React.ElementType;
   label: string;
@@ -671,28 +681,26 @@ function StatCard({
   sub: string;
   iconBg: string;
   trend?: number;
+  grad: string;
+  ring: string;
 }) {
   return (
-    <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-5 hover:shadow-md transition-all">
-      <div className="flex items-start justify-between">
-        <div
-          className={cn(
-            "w-10 h-10 rounded-xl flex items-center justify-center shrink-0",
-            iconBg,
+    <div className="bg-white rounded-2xl border border-slate-100 shadow-sm hover:shadow-md transition-all overflow-hidden">
+      <div className={cn("h-0.5 bg-gradient-to-r", grad)} />
+      <div className="p-5">
+        <div className="flex items-start justify-between mb-4">
+          <div className={cn("p-2.5 rounded-xl ring-4 inline-flex", iconBg, ring)}>
+            <Icon className="w-5 h-5" />
+          </div>
+          {trend !== undefined && (
+            <span className="flex items-center gap-0.5 text-xs font-bold text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-full mt-0.5">
+              <ArrowUpRight className="w-3 h-3" />
+              {trend}%
+            </span>
           )}
-        >
-          <Icon className="w-5 h-5" />
         </div>
-        {trend !== undefined && (
-          <span className="flex items-center gap-0.5 text-xs font-bold text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-full">
-            <ArrowUpRight className="w-3 h-3" />
-            {trend}%
-          </span>
-        )}
-      </div>
-      <div className="mt-3">
-        <p className="text-2xl font-bold text-slate-900">{value}</p>
-        <p className="text-sm font-semibold text-slate-700 mt-0.5">{label}</p>
+        <p className="text-2xl font-bold text-slate-900 tracking-tight">{value}</p>
+        <p className="text-sm font-medium text-slate-700 mt-0.5">{label}</p>
         <p className="text-xs text-slate-400 mt-0.5">{sub}</p>
       </div>
     </div>
