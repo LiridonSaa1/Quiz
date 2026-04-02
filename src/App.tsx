@@ -24,6 +24,7 @@ import StudentProfile from './pages/student/Profile';
 import TeacherResults from './pages/teacher/Results';
 import TeacherModules from './pages/teacher/Modules';
 import TeacherLessons from './pages/teacher/Lessons';
+import TeacherAssignments from './pages/teacher/Assignments';
 import AdminModules from './pages/admin/Modules';
 import AdminLessons from './pages/admin/Lessons';
 import AdminQuizzes from './pages/admin/Quizzes';
@@ -205,6 +206,7 @@ function TeacherRoutes() {
       <Route path="/results" element={<TeacherResults />} />
       <Route path="/modules" element={<TeacherModules />} />
       <Route path="/lessons" element={<TeacherLessons />} />
+      <Route path="/assignments" element={<TeacherAssignments />} />
     </Routes>
   );
 }
