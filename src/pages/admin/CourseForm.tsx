@@ -112,6 +112,7 @@ export default function AdminCourseForm() {
 
   const handleSave = async (publishNow = false) => {
     if (!form.name.trim()) { toast.error('Course title is required'); setActiveTab('basic'); return; }
+    if (!form.teacher_id) { toast.error('Please assign a teacher to this course'); setActiveTab('basic'); return; }
     setSaving(true);
     try {
       const payload = {
@@ -126,7 +127,7 @@ export default function AdminCourseForm() {
         certificate_enabled: form.certificate_enabled,
         gradient: form.gradient,
         category: form.category,
-        teacher_id: form.teacher_id || null,
+        teacher_id: form.teacher_id,
         updated_at: new Date().toISOString(),
       };
 
@@ -250,7 +251,7 @@ export default function AdminCourseForm() {
                     </div>
                     <div>
                       <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">
-                        Assign Teacher
+                        Assign Teacher <span className="text-red-400">*</span>
                       </label>
                       <select
                         value={form.teacher_id}
