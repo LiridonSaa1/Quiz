@@ -26,6 +26,7 @@ import TeacherModules from './pages/teacher/Modules';
 import TeacherLessons from './pages/teacher/Lessons';
 import TeacherAssignments from './pages/teacher/Assignments';
 import TeacherAttendance from './pages/teacher/Attendance';
+import TeacherCertificates from './pages/teacher/Certificates';
 import AdminModules from './pages/admin/Modules';
 import AdminLessons from './pages/admin/Lessons';
 import AdminQuizzes from './pages/admin/Quizzes';
@@ -209,6 +210,7 @@ function TeacherRoutes() {
       <Route path="/lessons" element={<TeacherLessons />} />
       <Route path="/assignments" element={<TeacherAssignments />} />
       <Route path="/attendance" element={<TeacherAttendance />} />
+      <Route path="/certificates" element={<TeacherCertificates />} />
     </Routes>
   );
 }
