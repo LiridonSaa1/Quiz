@@ -2,11 +2,11 @@ import React, { useEffect, useState, useCallback } from 'react';
 import TeacherLayout from '../../components/layout/TeacherLayout';
 import { Link } from 'react-router-dom';
 import { toast } from 'sonner';
-import { format, formatDistanceToNow, isPast } from 'date-fns';
+import { format, formatDistanceToNow, isPast, isFuture } from 'date-fns';
 import {
   Video, Plus, Search, Trash2, Pencil, X,
   Clock, BookOpen, CalendarDays, Radio, CheckCircle2,
-  XCircle, Play, Link2, Copy
+  XCircle, Play, Link2, Users, Zap, ChevronRight, Wifi
 } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { supabase } from '../../supabase';
@@ -31,12 +31,20 @@ interface LiveSession {
 
 interface Course { id: string; title: string }
 
-const STATUS_CFG: Record<SessionStatus, { label: string; bg: string; text: string; dot: string; icon: React.ElementType }> = {
-  scheduled: { label: 'Scheduled', bg: 'bg-blue-50',   text: 'text-blue-700',   dot: 'bg-blue-500',   icon: CalendarDays },
-  live:      { label: 'Live Now',  bg: 'bg-rose-50',   text: 'text-rose-700',   dot: 'bg-rose-500',   icon: Radio        },
-  ended:     { label: 'Ended',     bg: 'bg-slate-100', text: 'text-slate-600',  dot: 'bg-slate-400',  icon: CheckCircle2 },
-  cancelled: { label: 'Cancelled', bg: 'bg-amber-50',  text: 'text-amber-700',  dot: 'bg-amber-500',  icon: XCircle      },
+const STATUS_CFG: Record<SessionStatus, { label: string; bg: string; text: string; dot: string; border: string; icon: React.ElementType }> = {
+  scheduled: { label: 'Scheduled', bg: 'bg-blue-50',    text: 'text-blue-700',   dot: 'bg-blue-500',   border: 'border-blue-200',   icon: CalendarDays },
+  live:      { label: 'Live Now',  bg: 'bg-rose-50',    text: 'text-rose-700',   dot: 'bg-rose-500',   border: 'border-rose-200',   icon: Radio        },
+  ended:     { label: 'Ended',     bg: 'bg-slate-100',  text: 'text-slate-500',  dot: 'bg-slate-400',  border: 'border-slate-200',  icon: CheckCircle2 },
+  cancelled: { label: 'Cancelled', bg: 'bg-amber-50',   text: 'text-amber-700',  dot: 'bg-amber-500',  border: 'border-amber-200',  icon: XCircle      },
 };
+
+const TABS = [
+  { key: 'all',       label: 'All Sessions' },
+  { key: 'live',      label: 'Live Now'     },
+  { key: 'scheduled', label: 'Upcoming'     },
+  { key: 'ended',     label: 'Ended'        },
+  { key: 'cancelled', label: 'Cancelled'    },
+];
 
 const defaultForm = () => ({
   title: '', description: '', course_id: '',
@@ -51,7 +59,7 @@ export default function TeacherLiveSessions() {
   const [courses, setCourses] = useState<Course[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
-  const [statusFilter, setStatusFilter] = useState('all');
+  const [activeTab, setActiveTab] = useState('all');
   const [showModal, setShowModal] = useState(false);
   const [editing, setEditing] = useState<LiveSession | null>(null);
   const [form, setForm] = useState(defaultForm());
@@ -145,317 +153,440 @@ export default function TeacherLiveSessions() {
   const filtered = sessions.filter(s => {
     const q = search.toLowerCase();
     const matchQ = s.title.toLowerCase().includes(q) || (s.course?.title || '').toLowerCase().includes(q);
-    const matchS = statusFilter === 'all' || s.status === statusFilter;
-    return matchQ && matchS;
+    const matchTab = activeTab === 'all' || s.status === activeTab;
+    return matchQ && matchTab;
   });
 
   const stats = {
     total: sessions.length,
     live: sessions.filter(s => s.status === 'live').length,
-    upcoming: sessions.filter(s => s.status === 'scheduled' && !isPast(new Date(s.scheduled_at))).length,
+    upcoming: sessions.filter(s => s.status === 'scheduled' && isFuture(new Date(s.scheduled_at))).length,
     ended: sessions.filter(s => s.status === 'ended').length,
+  };
+
+  const nextSession = sessions
+    .filter(s => s.status === 'scheduled' && isFuture(new Date(s.scheduled_at)))
+    .sort((a, b) => new Date(a.scheduled_at).getTime() - new Date(b.scheduled_at).getTime())[0];
+
+  const liveSession = sessions.find(s => s.status === 'live');
+
+  const tabCounts: Record<string, number> = {
+    all: sessions.length,
+    live: stats.live,
+    scheduled: stats.upcoming,
+    ended: stats.ended,
+    cancelled: sessions.filter(s => s.status === 'cancelled').length,
   };
 
   return (
     <TeacherLayout>
-      <div className="space-y-6">
-        {/* Header */}
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-          <div>
-            <h1 className="text-2xl font-bold text-slate-900">Live Sessions</h1>
-            <p className="text-slate-500 text-sm mt-0.5">Schedule and host live sessions for your students</p>
-          </div>
-          <button onClick={openCreate}
-            className="flex items-center gap-2 px-4 py-2.5 bg-violet-600 text-white rounded-xl font-semibold text-sm hover:bg-violet-700 transition-all shadow-lg shadow-violet-200 active:scale-[0.98]">
-            <Plus className="w-4 h-4" /> Schedule Session
-          </button>
-        </div>
+      <div className="space-y-6 pb-6">
 
-        {/* Stats */}
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-          {[
-            { label: 'Total Sessions', value: stats.total,    iconBg: 'bg-violet-100 text-violet-600', ring: 'ring-violet-100', grad: 'from-violet-500 to-purple-500', icon: Video        },
-            { label: 'Live Now',       value: stats.live,     iconBg: 'bg-rose-100 text-rose-600',     ring: 'ring-rose-100',   grad: 'from-rose-500 to-pink-500',     icon: Radio        },
-            { label: 'Upcoming',       value: stats.upcoming, iconBg: 'bg-blue-100 text-blue-600',     ring: 'ring-blue-100',   grad: 'from-blue-500 to-cyan-500',     icon: CalendarDays },
-            { label: 'Completed',      value: stats.ended,    iconBg: 'bg-emerald-100 text-emerald-600', ring: 'ring-emerald-100', grad: 'from-emerald-500 to-teal-500', icon: CheckCircle2 },
-          ].map(({ label, value, iconBg, ring, grad, icon: Icon }) => (
-            <div key={label} className="bg-white rounded-2xl border border-slate-100 shadow-sm hover:shadow-md transition-all overflow-hidden">
-              <div className={cn("h-0.5 bg-gradient-to-r", grad)} />
-              <div className="p-5">
-                <div className={cn("p-2.5 rounded-xl ring-4 inline-flex mb-4", iconBg, ring)}>
-                  <Icon className="w-5 h-5" />
+        {/* ── Hero Header ───────────────────────────────── */}
+        <div className="relative rounded-2xl overflow-hidden bg-gradient-to-br from-slate-900 via-violet-950 to-slate-900 p-6 sm:p-8">
+          <div className="absolute inset-0 opacity-20"
+            style={{ backgroundImage: 'radial-gradient(circle at 20% 50%, #7c3aed 0%, transparent 50%), radial-gradient(circle at 80% 20%, #3b82f6 0%, transparent 40%)' }} />
+          <div className="absolute top-4 right-4 w-48 h-48 rounded-full bg-violet-500/10 blur-3xl" />
+          <div className="relative flex flex-col sm:flex-row sm:items-center justify-between gap-5">
+            <div>
+              <div className="flex items-center gap-2 mb-2">
+                <span className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-white/10 text-white/70 text-xs font-medium border border-white/10">
+                  <Wifi className="w-3 h-3" /> Broadcast Studio
+                </span>
+                {stats.live > 0 && (
+                  <span className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-rose-500/20 text-rose-300 text-xs font-bold border border-rose-500/30 animate-pulse">
+                    <span className="w-1.5 h-1.5 rounded-full bg-rose-400" /> ON AIR
+                  </span>
+                )}
+              </div>
+              <h1 className="text-3xl font-bold text-white tracking-tight">Live Sessions</h1>
+              <p className="text-slate-400 text-sm mt-1">Host and manage real-time classes for your students</p>
+              <div className="flex items-center gap-5 mt-4">
+                <div className="text-center">
+                  <p className="text-2xl font-bold text-white">{stats.total}</p>
+                  <p className="text-xs text-slate-400 mt-0.5">Total</p>
                 </div>
-                <p className="text-2xl font-bold text-slate-900 tracking-tight">{value}</p>
-                <p className="text-sm font-medium text-slate-700 mt-0.5">{label}</p>
+                <div className="w-px h-8 bg-white/10" />
+                <div className="text-center">
+                  <p className="text-2xl font-bold text-rose-400">{stats.live}</p>
+                  <p className="text-xs text-slate-400 mt-0.5">Live</p>
+                </div>
+                <div className="w-px h-8 bg-white/10" />
+                <div className="text-center">
+                  <p className="text-2xl font-bold text-blue-400">{stats.upcoming}</p>
+                  <p className="text-xs text-slate-400 mt-0.5">Upcoming</p>
+                </div>
+                <div className="w-px h-8 bg-white/10" />
+                <div className="text-center">
+                  <p className="text-2xl font-bold text-emerald-400">{stats.ended}</p>
+                  <p className="text-xs text-slate-400 mt-0.5">Completed</p>
+                </div>
               </div>
             </div>
-          ))}
-        </div>
-
-        {/* Filters */}
-        <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-4 flex flex-col sm:flex-row gap-3">
-          <div className="relative flex-1">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
-            <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search sessions or courses..."
-              className="w-full pl-9 pr-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-violet-500/40" />
+            <button onClick={openCreate}
+              className="flex items-center gap-2 px-5 py-3 bg-violet-500 hover:bg-violet-400 text-white rounded-xl font-semibold text-sm transition-all shadow-xl shadow-violet-900/50 active:scale-[0.97] shrink-0">
+              <Plus className="w-4 h-4" /> Schedule Session
+            </button>
           </div>
-          <select value={statusFilter} onChange={e => setStatusFilter(e.target.value)}
-            className="px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-violet-500/40">
-            <option value="all">All Status</option>
-            {Object.entries(STATUS_CFG).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
-          </select>
         </div>
 
-        {/* Sessions */}
-        <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
-          {loading ? (
-            <div className="flex items-center justify-center h-48 gap-3 text-slate-400">
-              <div className="w-6 h-6 border-2 border-slate-200 border-t-violet-500 rounded-full animate-spin" />
-              Loading sessions...
-            </div>
-          ) : filtered.length === 0 ? (
-            <div className="flex flex-col items-center justify-center h-52 text-slate-400 gap-3">
-              <div className="w-16 h-16 bg-violet-50 rounded-2xl flex items-center justify-center">
-                <Video className="w-8 h-8 text-violet-300" />
-              </div>
-              <div className="text-center">
-                <p className="font-semibold text-slate-500">No sessions found</p>
-                <p className="text-sm mt-1">Schedule your first live session to get started</p>
-              </div>
-              <button onClick={openCreate}
-                className="mt-1 px-4 py-2 bg-violet-600 text-white rounded-xl text-sm font-semibold hover:bg-violet-700 transition-all shadow-md shadow-violet-200">
-                Schedule Now
-              </button>
-            </div>
-          ) : (
-            <>
-              {/* Desktop table */}
-              <div className="hidden md:block overflow-x-auto">
-                <table className="w-full text-sm">
-                  <thead>
-                    <tr className="border-b border-slate-100 bg-slate-50/60">
-                      <th className="text-left px-5 py-3 text-xs font-bold text-slate-500 uppercase tracking-wider">Session</th>
-                      <th className="text-left px-5 py-3 text-xs font-bold text-slate-500 uppercase tracking-wider hidden lg:table-cell">Scheduled</th>
-                      <th className="text-left px-5 py-3 text-xs font-bold text-slate-500 uppercase tracking-wider">Duration</th>
-                      <th className="text-left px-5 py-3 text-xs font-bold text-slate-500 uppercase tracking-wider">Status</th>
-                      <th className="text-right px-5 py-3 text-xs font-bold text-slate-500 uppercase tracking-wider">Actions</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-50">
-                    {filtered.map(s => {
-                      const cfg = STATUS_CFG[s.status];
-                      return (
-                        <tr key={s.id} className="hover:bg-slate-50/50 transition-colors group">
-                          <td className="px-5 py-4">
-                            <div className="flex items-center gap-3">
-                              <div className={cn(
-                                'w-10 h-10 rounded-xl flex items-center justify-center shrink-0',
-                                s.status === 'live' ? 'bg-gradient-to-br from-rose-500 to-pink-600 shadow-lg shadow-rose-200' : 'bg-gradient-to-br from-violet-500 to-purple-600'
-                              )}>
-                                <Video className="w-4.5 h-4.5 text-white w-5 h-5" />
-                              </div>
-                              <div>
-                                <p className="font-semibold text-slate-900 leading-tight">{s.title}</p>
-                                {s.course && (
-                                  <p className="text-xs text-slate-400 mt-0.5 flex items-center gap-1">
-                                    <BookOpen className="w-3 h-3" />{s.course.title}
-                                  </p>
-                                )}
-                                {s.description && <p className="text-xs text-slate-400 mt-0.5 truncate max-w-xs">{s.description}</p>}
-                              </div>
-                            </div>
-                          </td>
-                          <td className="px-5 py-4 hidden lg:table-cell">
-                            <p className="font-medium text-slate-700">{format(new Date(s.scheduled_at), 'MMM d, yyyy')}</p>
-                            <p className="text-xs text-slate-400">
-                              {format(new Date(s.scheduled_at), 'h:mm a')}
-                              {!isPast(new Date(s.scheduled_at)) && s.status === 'scheduled' && (
-                                <span className="ml-1.5 text-violet-500 font-medium">· {formatDistanceToNow(new Date(s.scheduled_at), { addSuffix: true })}</span>
-                              )}
-                            </p>
-                          </td>
-                          <td className="px-5 py-4">
-                            <div className="flex items-center gap-1 text-slate-600 font-medium">
-                              <Clock className="w-3.5 h-3.5 text-slate-400" />
-                              {s.duration_minutes} min
-                            </div>
-                          </td>
-                          <td className="px-5 py-4">
-                            <span className={cn('inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold', cfg.bg, cfg.text)}>
-                              <span className={cn('w-1.5 h-1.5 rounded-full', cfg.dot, s.status === 'live' ? 'animate-pulse' : '')} />
-                              {cfg.label}
-                            </span>
-                          </td>
-                          <td className="px-5 py-4">
-                            <div className="flex items-center justify-end gap-2">
-                              <Link to={`/teacher/live-sessions/${s.id}/room`}
-                                className="flex items-center gap-1.5 px-3 py-1.5 bg-violet-600 text-white rounded-lg text-xs font-semibold hover:bg-violet-700 transition-all shadow-sm shadow-violet-200">
-                                <Play className="w-3 h-3" /> Enter Room
-                              </Link>
-                              <button onClick={() => openEdit(s)}
-                                className="p-1.5 text-slate-400 hover:text-violet-600 hover:bg-violet-50 rounded-lg transition-all opacity-0 group-hover:opacity-100">
-                                <Pencil className="w-4 h-4" />
-                              </button>
-                              <button onClick={() => setDeleteId(s.id)}
-                                className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-all opacity-0 group-hover:opacity-100">
-                                <Trash2 className="w-4 h-4" />
-                              </button>
-                            </div>
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
-
-              {/* Mobile cards */}
-              <div className="md:hidden divide-y divide-slate-100">
-                {filtered.map(s => {
-                  const cfg = STATUS_CFG[s.status];
-                  return (
-                    <div key={s.id} className="p-4 space-y-3">
-                      <div className="flex items-start gap-3">
-                        <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-violet-500 to-purple-600 flex items-center justify-center shrink-0">
-                          <Video className="w-5 h-5 text-white" />
-                        </div>
-                        <div className="flex-1 min-w-0">
-                          <div className="flex items-start justify-between gap-2">
-                            <p className="font-semibold text-slate-900 text-sm leading-tight">{s.title}</p>
-                            <span className={cn('inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold shrink-0', cfg.bg, cfg.text)}>
-                              <span className={cn('w-1.5 h-1.5 rounded-full', cfg.dot, s.status === 'live' ? 'animate-pulse' : '')} />
-                              {cfg.label}
-                            </span>
-                          </div>
-                          {s.course && <p className="text-xs text-slate-400 mt-0.5 flex items-center gap-1"><BookOpen className="w-3 h-3" />{s.course.title}</p>}
-                          <p className="text-xs text-slate-400 mt-1">
-                            {format(new Date(s.scheduled_at), 'MMM d · h:mm a')} · {s.duration_minutes} min
-                          </p>
-                        </div>
-                      </div>
-                      <div className="flex gap-2">
-                        <Link to={`/teacher/live-sessions/${s.id}/room`}
-                          className="flex-1 flex items-center justify-center gap-1.5 py-2 bg-violet-600 text-white rounded-lg text-xs font-semibold hover:bg-violet-700 transition-all">
-                          <Play className="w-3 h-3" /> Enter Room
-                        </Link>
-                        <button onClick={() => openEdit(s)} className="p-2 hover:bg-violet-50 rounded-lg border border-slate-200"><Pencil className="w-4 h-4 text-slate-400" /></button>
-                        <button onClick={() => setDeleteId(s.id)} className="p-2 hover:bg-rose-50 rounded-lg border border-slate-200"><Trash2 className="w-4 h-4 text-slate-400" /></button>
-                      </div>
+        {/* ── Featured: Live or Next Session ──────────── */}
+        {(liveSession || nextSession) && (() => {
+          const featured = liveSession || nextSession!;
+          const isLive = featured.status === 'live';
+          return (
+            <div className={cn(
+              'relative rounded-2xl p-5 sm:p-6 overflow-hidden border',
+              isLive
+                ? 'bg-gradient-to-r from-rose-600 to-pink-600 border-rose-500/30'
+                : 'bg-gradient-to-r from-violet-600 to-blue-600 border-violet-500/30'
+            )}>
+              <div className="absolute inset-0 opacity-10" style={{ backgroundImage: 'radial-gradient(circle at 80% 50%, white 0%, transparent 60%)' }} />
+              <div className="relative flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                <div className="flex items-start gap-4">
+                  <div className={cn(
+                    'w-12 h-12 rounded-xl flex items-center justify-center shrink-0',
+                    isLive ? 'bg-white/20' : 'bg-white/15'
+                  )}>
+                    {isLive
+                      ? <Radio className="w-6 h-6 text-white animate-pulse" />
+                      : <Zap className="w-6 h-6 text-white" />
+                    }
+                  </div>
+                  <div>
+                    <p className="text-xs font-bold text-white/70 uppercase tracking-wider mb-1">
+                      {isLive ? 'Happening Right Now' : 'Up Next'}
+                    </p>
+                    <h2 className="text-lg font-bold text-white leading-tight">{featured.title}</h2>
+                    <div className="flex items-center gap-3 mt-1.5 flex-wrap">
+                      {featured.course && (
+                        <span className="flex items-center gap-1 text-white/70 text-xs">
+                          <BookOpen className="w-3 h-3" /> {featured.course.title}
+                        </span>
+                      )}
+                      <span className="flex items-center gap-1 text-white/70 text-xs">
+                        <Clock className="w-3 h-3" /> {featured.duration_minutes} min
+                      </span>
+                      <span className="flex items-center gap-1 text-white/70 text-xs">
+                        <CalendarDays className="w-3 h-3" />
+                        {isLive ? 'Started ' : ''}{formatDistanceToNow(new Date(featured.scheduled_at), { addSuffix: true })}
+                      </span>
                     </div>
-                  );
-                })}
+                  </div>
+                </div>
+                <Link to={`/teacher/live-sessions/${featured.id}/room`}
+                  className="flex items-center gap-2 px-5 py-2.5 bg-white text-slate-900 rounded-xl text-sm font-bold hover:bg-white/90 transition-all shadow-lg shrink-0">
+                  <Play className="w-4 h-4" />
+                  {isLive ? 'Join Now' : 'Enter Room'}
+                </Link>
               </div>
+            </div>
+          );
+        })()}
 
-              <div className="px-5 py-3 border-t border-slate-100 text-xs text-slate-400">
-                Showing {filtered.length} of {sessions.length} sessions
-              </div>
-            </>
-          )}
+        {/* ── Search + Tabs ─────────────────────────── */}
+        <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
+          <div className="p-4 border-b border-slate-100">
+            <div className="relative">
+              <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+              <input value={search} onChange={e => setSearch(e.target.value)}
+                placeholder="Search sessions or courses..."
+                className="w-full pl-10 pr-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-violet-500/30 focus:border-violet-300 transition-all" />
+            </div>
+          </div>
+          <div className="flex overflow-x-auto px-4 gap-1 py-2 scrollbar-hide">
+            {TABS.map(tab => (
+              <button key={tab.key} onClick={() => setActiveTab(tab.key)}
+                className={cn(
+                  'flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold whitespace-nowrap transition-all',
+                  activeTab === tab.key
+                    ? 'bg-violet-600 text-white shadow-md shadow-violet-200'
+                    : 'text-slate-500 hover:bg-slate-100 hover:text-slate-700'
+                )}>
+                {tab.label}
+                {tabCounts[tab.key] > 0 && (
+                  <span className={cn(
+                    'px-1.5 py-0.5 rounded-md text-xs font-bold',
+                    activeTab === tab.key ? 'bg-white/20 text-white' : 'bg-slate-100 text-slate-500'
+                  )}>{tabCounts[tab.key]}</span>
+                )}
+              </button>
+            ))}
+          </div>
         </div>
+
+        {/* ── Sessions Grid ──────────────────────────── */}
+        {loading ? (
+          <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">
+            {[...Array(3)].map((_, i) => (
+              <div key={i} className="bg-white rounded-2xl border border-slate-100 p-5 animate-pulse">
+                <div className="flex items-start gap-3 mb-4">
+                  <div className="w-11 h-11 rounded-xl bg-slate-100 shrink-0" />
+                  <div className="flex-1 space-y-2">
+                    <div className="h-4 bg-slate-100 rounded w-3/4" />
+                    <div className="h-3 bg-slate-100 rounded w-1/2" />
+                  </div>
+                </div>
+                <div className="space-y-2">
+                  <div className="h-3 bg-slate-100 rounded" />
+                  <div className="h-3 bg-slate-100 rounded w-5/6" />
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : filtered.length === 0 ? (
+          <div className="bg-white rounded-2xl border border-slate-100 shadow-sm flex flex-col items-center justify-center py-20 text-center px-4">
+            <div className="w-20 h-20 rounded-2xl bg-gradient-to-br from-violet-100 to-purple-100 flex items-center justify-center mb-4">
+              <Video className="w-10 h-10 text-violet-400" />
+            </div>
+            <h3 className="text-lg font-bold text-slate-800 mb-1">
+              {search ? 'No sessions match your search' : 'No sessions yet'}
+            </h3>
+            <p className="text-slate-400 text-sm max-w-xs">
+              {search ? 'Try a different keyword or clear the search.' : 'Schedule your first live session and start teaching in real time.'}
+            </p>
+            {!search && (
+              <button onClick={openCreate}
+                className="mt-5 flex items-center gap-2 px-5 py-2.5 bg-violet-600 text-white rounded-xl text-sm font-semibold hover:bg-violet-700 transition-all shadow-lg shadow-violet-200">
+                <Plus className="w-4 h-4" /> Schedule Now
+              </button>
+            )}
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">
+            {filtered.map(s => {
+              const cfg = STATUS_CFG[s.status];
+              const isLive = s.status === 'live';
+              const isUpcoming = s.status === 'scheduled' && isFuture(new Date(s.scheduled_at));
+
+              return (
+                <div key={s.id}
+                  className={cn(
+                    'group bg-white rounded-2xl border shadow-sm hover:shadow-md transition-all overflow-hidden flex flex-col',
+                    isLive ? 'border-rose-200 ring-2 ring-rose-100' : 'border-slate-100'
+                  )}>
+                  <div className={cn(
+                    'h-1.5',
+                    isLive ? 'bg-gradient-to-r from-rose-500 to-pink-500' :
+                    isUpcoming ? 'bg-gradient-to-r from-violet-500 to-blue-500' :
+                    s.status === 'ended' ? 'bg-gradient-to-r from-slate-300 to-slate-400' :
+                    'bg-gradient-to-r from-amber-400 to-orange-400'
+                  )} />
+
+                  <div className="p-5 flex-1 flex flex-col">
+                    <div className="flex items-start justify-between gap-3 mb-3">
+                      <div className={cn(
+                        'w-11 h-11 rounded-xl flex items-center justify-center shrink-0',
+                        isLive
+                          ? 'bg-gradient-to-br from-rose-500 to-pink-600 shadow-lg shadow-rose-200'
+                          : isUpcoming
+                            ? 'bg-gradient-to-br from-violet-500 to-purple-600 shadow-lg shadow-violet-200'
+                            : 'bg-slate-100'
+                      )}>
+                        {isLive
+                          ? <Radio className="w-5 h-5 text-white animate-pulse" />
+                          : <Video className={cn('w-5 h-5', isUpcoming ? 'text-white' : 'text-slate-400')} />
+                        }
+                      </div>
+                      <span className={cn('flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold border', cfg.bg, cfg.text, cfg.border)}>
+                        <span className={cn('w-1.5 h-1.5 rounded-full', cfg.dot, isLive ? 'animate-pulse' : '')} />
+                        {cfg.label}
+                      </span>
+                    </div>
+
+                    <h3 className="font-bold text-slate-900 leading-snug mb-1 line-clamp-2">{s.title}</h3>
+                    {s.description && (
+                      <p className="text-slate-400 text-xs line-clamp-2 mb-3">{s.description}</p>
+                    )}
+
+                    <div className="flex flex-col gap-1.5 mt-auto pt-3 border-t border-slate-50">
+                      {s.course && (
+                        <div className="flex items-center gap-1.5 text-xs text-slate-500">
+                          <BookOpen className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                          <span className="truncate">{s.course.title}</span>
+                        </div>
+                      )}
+                      <div className="flex items-center gap-1.5 text-xs text-slate-500">
+                        <CalendarDays className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                        <span>{format(new Date(s.scheduled_at), 'MMM d, yyyy · h:mm a')}</span>
+                      </div>
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-1.5 text-xs text-slate-500">
+                          <Clock className="w-3.5 h-3.5 text-slate-400" />
+                          <span>{s.duration_minutes} min</span>
+                        </div>
+                        <div className="flex items-center gap-1.5 text-xs text-slate-500">
+                          <Users className="w-3.5 h-3.5 text-slate-400" />
+                          <span>Up to {s.max_participants}</span>
+                        </div>
+                      </div>
+                      {isUpcoming && (
+                        <p className="text-xs font-semibold text-violet-600 flex items-center gap-1">
+                          <Zap className="w-3 h-3" />
+                          {formatDistanceToNow(new Date(s.scheduled_at), { addSuffix: true })}
+                        </p>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="px-5 pb-4 flex items-center gap-2">
+                    <Link to={`/teacher/live-sessions/${s.id}/room`}
+                      className={cn(
+                        'flex-1 flex items-center justify-center gap-1.5 py-2.5 rounded-xl text-sm font-bold transition-all',
+                        isLive
+                          ? 'bg-rose-600 text-white hover:bg-rose-700 shadow-md shadow-rose-200'
+                          : 'bg-violet-600 text-white hover:bg-violet-700 shadow-md shadow-violet-200'
+                      )}>
+                      <Play className="w-3.5 h-3.5" />
+                      {isLive ? 'Join Now' : 'Enter Room'}
+                    </Link>
+                    <button onClick={() => openEdit(s)}
+                      className="p-2.5 text-slate-400 hover:text-violet-600 hover:bg-violet-50 rounded-xl transition-all border border-slate-100">
+                      <Pencil className="w-4 h-4" />
+                    </button>
+                    <button onClick={() => setDeleteId(s.id)}
+                      className="p-2.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-xl transition-all border border-slate-100">
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+
+        {!loading && filtered.length > 0 && (
+          <p className="text-center text-xs text-slate-400">
+            Showing {filtered.length} of {sessions.length} sessions
+          </p>
+        )}
       </div>
 
-      {/* Schedule / Edit Modal */}
+      {/* ── Schedule / Edit Modal ─────────────────────── */}
       {showModal && (
-        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4" onClick={() => setShowModal(false)}>
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
-            <div className="flex items-center justify-between p-5 border-b border-slate-100">
-              <div className="flex items-center gap-2.5">
-                <div className="w-8 h-8 bg-violet-100 rounded-lg flex items-center justify-center">
-                  <Video className="w-4 h-4 text-violet-600" />
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4"
+          onClick={() => setShowModal(false)}>
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto"
+            onClick={e => e.stopPropagation()}>
+
+            <div className="sticky top-0 bg-white z-10 flex items-center justify-between px-6 py-4 border-b border-slate-100 rounded-t-2xl">
+              <div className="flex items-center gap-3">
+                <div className="w-9 h-9 bg-gradient-to-br from-violet-500 to-purple-600 rounded-xl flex items-center justify-center shadow-lg shadow-violet-200">
+                  <Video className="w-4.5 h-4.5 text-white w-5 h-5" />
                 </div>
                 <div>
-                  <h2 className="text-lg font-bold text-slate-900">{editing ? 'Edit Session' : 'Schedule Session'}</h2>
-                  <p className="text-slate-400 text-xs">{editing ? 'Update session details' : 'Set up a new live session for your students'}</p>
+                  <h2 className="text-base font-bold text-slate-900">{editing ? 'Edit Session' : 'Schedule New Session'}</h2>
+                  <p className="text-slate-400 text-xs">{editing ? 'Update session details' : 'Fill in the details below to get started'}</p>
                 </div>
               </div>
               <button onClick={() => setShowModal(false)} className="p-2 hover:bg-slate-100 rounded-xl transition-all">
-                <X className="w-5 h-5 text-slate-500" />
+                <X className="w-5 h-5 text-slate-400" />
               </button>
             </div>
-            <div className="p-5 space-y-4">
+
+            <div className="p-6 space-y-5">
               <div>
-                <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">Title <span className="text-rose-400">*</span></label>
+                <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">
+                  Session Title <span className="text-rose-400 normal-case font-normal tracking-normal">required</span>
+                </label>
                 <input value={form.title} onChange={e => set('title', e.target.value)}
-                  className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-violet-500/40"
-                  placeholder="e.g. Weekly Q&A Session" />
+                  className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-violet-500/30 focus:border-violet-300 transition-all"
+                  placeholder="e.g. Weekly Q&A · Chapter 3 Review" />
               </div>
+
               <div>
-                <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">Description</label>
+                <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Description</label>
                 <textarea rows={3} value={form.description} onChange={e => set('description', e.target.value)}
-                  className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-violet-500/40 resize-none"
-                  placeholder="What will be covered in this session?" />
+                  className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-violet-500/30 focus:border-violet-300 transition-all resize-none"
+                  placeholder="What will you cover? Help students know what to expect." />
               </div>
+
               <div>
-                <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">Course</label>
+                <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Course</label>
                 <select value={form.course_id} onChange={e => set('course_id', e.target.value)}
-                  className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-violet-500/40">
-                  <option value="">— No course —</option>
+                  className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-violet-500/30 focus:border-violet-300 transition-all">
+                  <option value="">— Not linked to a course —</option>
                   {courses.map(c => <option key={c.id} value={c.id}>{c.title}</option>)}
                 </select>
               </div>
+
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">Date & Time <span className="text-rose-400">*</span></label>
+                  <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">
+                    Date & Time <span className="text-rose-400 normal-case font-normal tracking-normal">required</span>
+                  </label>
                   <input type="datetime-local" value={form.scheduled_at} onChange={e => set('scheduled_at', e.target.value)}
-                    className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-violet-500/40" />
+                    className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-violet-500/30 focus:border-violet-300 transition-all" />
                 </div>
                 <div>
-                  <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">Duration (min)</label>
-                  <input type="number" min={15} max={480} value={form.duration_minutes} onChange={e => set('duration_minutes', parseInt(e.target.value) || 60)}
-                    className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-violet-500/40" />
+                  <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Duration (min)</label>
+                  <input type="number" min={15} max={480} value={form.duration_minutes}
+                    onChange={e => set('duration_minutes', parseInt(e.target.value) || 60)}
+                    className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-violet-500/30 focus:border-violet-300 transition-all" />
                 </div>
               </div>
+
               <div>
-                <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">
-                  <span className="flex items-center gap-1.5"><Link2 className="w-3.5 h-3.5" /> External Meeting URL (optional)</span>
+                <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">
+                  <span className="flex items-center gap-1.5"><Link2 className="w-3.5 h-3.5" />External Meeting URL <span className="normal-case font-normal tracking-normal text-slate-400">(optional)</span></span>
                 </label>
                 <input value={form.meeting_url} onChange={e => set('meeting_url', e.target.value)}
-                  className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-violet-500/40"
+                  className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-violet-500/30 focus:border-violet-300 transition-all"
                   placeholder="https://zoom.us/j/... or https://meet.google.com/..." />
               </div>
+
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">Status</label>
+                  <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Status</label>
                   <select value={form.status} onChange={e => set('status', e.target.value as SessionStatus)}
-                    className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-violet-500/40">
+                    className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-violet-500/30 focus:border-violet-300 transition-all">
                     {Object.entries(STATUS_CFG).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
                   </select>
                 </div>
                 <div>
-                  <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">Max Participants</label>
-                  <input type="number" min={1} value={form.max_participants} onChange={e => set('max_participants', parseInt(e.target.value) || 100)}
-                    className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-violet-500/40" />
+                  <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Max Participants</label>
+                  <input type="number" value={form.max_participants}
+                    onChange={e => set('max_participants', parseInt(e.target.value) || 100)}
+                    className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-violet-500/30 focus:border-violet-300 transition-all" />
                 </div>
               </div>
             </div>
-            <div className="flex gap-3 p-5 border-t border-slate-100">
+
+            <div className="sticky bottom-0 bg-slate-50/80 backdrop-blur-sm px-6 py-4 border-t border-slate-100 rounded-b-2xl flex items-center justify-end gap-3">
               <button onClick={() => setShowModal(false)}
-                className="flex-1 py-3 bg-slate-100 text-slate-600 rounded-xl font-semibold text-sm hover:bg-slate-200 transition-all">
+                className="px-4 py-2.5 text-sm font-semibold text-slate-600 hover:text-slate-800 hover:bg-slate-100 rounded-xl transition-all">
                 Cancel
               </button>
               <button onClick={handleSave} disabled={saving}
-                className="flex-1 py-3 bg-violet-600 text-white rounded-xl font-semibold text-sm hover:bg-violet-700 transition-all disabled:opacity-50 shadow-lg shadow-violet-200">
-                {saving ? 'Saving...' : editing ? 'Update Session' : 'Schedule Session'}
+                className="flex items-center gap-2 px-6 py-2.5 bg-violet-600 text-white rounded-xl text-sm font-bold hover:bg-violet-700 transition-all shadow-lg shadow-violet-200 disabled:opacity-50">
+                {saving && <div className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />}
+                {editing ? 'Save Changes' : 'Schedule Session'}
               </button>
             </div>
           </div>
         </div>
       )}
 
-      {/* Delete Confirm */}
+      {/* ── Delete Confirmation ───────────────────────── */}
       {deleteId && (
-        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm p-6 text-center">
-            <div className="w-12 h-12 bg-rose-50 rounded-full flex items-center justify-center mx-auto mb-3">
-              <Trash2 className="w-6 h-6 text-rose-500" />
+        <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-[60] flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden">
+            <div className="p-6 text-center">
+              <div className="w-16 h-16 bg-rose-50 rounded-2xl flex items-center justify-center mx-auto mb-4 border border-rose-100">
+                <Trash2 className="w-8 h-8 text-rose-500" />
+              </div>
+              <h3 className="text-xl font-bold text-slate-900 mb-2">Delete this session?</h3>
+              <p className="text-slate-500 text-sm leading-relaxed">This can't be undone. Students will no longer be able to join or see this session.</p>
             </div>
-            <h3 className="text-lg font-bold text-slate-800 mb-1">Delete Session?</h3>
-            <p className="text-sm text-slate-500 mb-5">This live session will be permanently removed.</p>
-            <div className="flex gap-3">
-              <button onClick={() => setDeleteId(null)} className="flex-1 px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-100 rounded-lg border border-slate-200">Cancel</button>
+            <div className="p-4 bg-slate-50 flex gap-3">
+              <button onClick={() => setDeleteId(null)}
+                className="flex-1 px-4 py-2.5 bg-white border border-slate-200 text-slate-700 rounded-xl text-sm font-bold hover:bg-slate-100 transition-all">
+                Keep It
+              </button>
               <button onClick={handleDelete} disabled={deleting}
-                className="flex-1 px-4 py-2 text-sm font-semibold bg-rose-500 hover:bg-rose-600 text-white rounded-lg disabled:opacity-50">
-                {deleting ? 'Deleting...' : 'Delete'}
+                className="flex-1 px-4 py-2.5 bg-rose-600 text-white rounded-xl text-sm font-bold hover:bg-rose-700 transition-all shadow-lg shadow-rose-200 disabled:opacity-50 flex items-center justify-center gap-2">
+                {deleting && <div className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />}
+                Delete
               </button>
             </div>
           </div>
