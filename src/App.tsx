@@ -27,6 +27,8 @@ import TeacherLessons from './pages/teacher/Lessons';
 import TeacherAssignments from './pages/teacher/Assignments';
 import TeacherAttendance from './pages/teacher/Attendance';
 import TeacherCertificates from './pages/teacher/Certificates';
+import TeacherLiveSessions from './pages/teacher/LiveSessions';
+import TeacherLiveSessionRoom from './pages/teacher/LiveSessionRoom';
 import TeacherCommunity from './pages/teacher/Community';
 import TeacherAnnouncements from './pages/teacher/Announcements';
 import AdminModules from './pages/admin/Modules';
@@ -213,6 +215,8 @@ function TeacherRoutes() {
       <Route path="/assignments" element={<TeacherAssignments />} />
       <Route path="/attendance" element={<TeacherAttendance />} />
       <Route path="/certificates" element={<TeacherCertificates />} />
+      <Route path="/live-sessions" element={<TeacherLiveSessions />} />
+      <Route path="/live-sessions/:id/room" element={<TeacherLiveSessionRoom />} />
       <Route path="/community" element={<TeacherCommunity />} />
       <Route path="/announcements" element={<TeacherAnnouncements />} />
     </Routes>
