@@ -18,7 +18,8 @@ import {
   LogOut,
   Menu,
   X,
-  GraduationCap
+  GraduationCap,
+  ScrollText
 } from 'lucide-react';
 
 const studentNavSections = [
@@ -35,6 +36,7 @@ const studentNavSections = [
     items: [
       { icon: BookOpen, label: 'Lessons', path: '/student/lessons' },
       { icon: HelpCircle, label: 'Quizzes', path: '/student/quizzes' },
+      { icon: ScrollText, label: 'Exams', path: '/student/exams' },
       { icon: ClipboardList, label: 'Assignments', path: '/student/assignments' },
     ]
   },

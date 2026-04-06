@@ -21,7 +21,8 @@ import {
   Megaphone,
   FileBarChart,
   User,
-  GraduationCap
+  GraduationCap,
+  ScrollText
 } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import NotificationCenter from '../NotificationCenter';
@@ -35,6 +36,7 @@ const teacherNavSections = [
       { icon: Layers, label: 'Modules', path: '/teacher/modules' },
       { icon: PlayCircle, label: 'Lessons', path: '/teacher/lessons' },
       { icon: FileText, label: 'Quizzes', path: '/teacher/quizzes' },
+      { icon: ScrollText, label: 'Exams', path: '/teacher/exams' },
     ]
   },
   {

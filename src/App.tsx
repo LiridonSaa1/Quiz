@@ -64,6 +64,8 @@ import StudentResults from './pages/student/Results';
 import StudentCertificates from './pages/student/Certificates';
 import StudentCommunity from './pages/student/Community';
 import StudentLiveClasses from './pages/student/LiveClasses';
+import StudentExams from './pages/student/Exams';
+import TeacherExams from './pages/teacher/Exams';
 
 export default function App() {
   const [user, setUser] = useState<UserProfile | null>(null);
@@ -220,6 +222,7 @@ function TeacherRoutes() {
       <Route path="/quizzes" element={<QuizManagement />} />
       <Route path="/quizzes/new" element={<QuizBuilder />} />
       <Route path="/quizzes/edit/:quizId" element={<QuizBuilder />} />
+      <Route path="/exams" element={<TeacherExams />} />
       <Route path="/results" element={<TeacherResults />} />
       <Route path="/modules" element={<TeacherModules />} />
       <Route path="/lessons" element={<TeacherLessons />} />
@@ -249,6 +252,7 @@ function StudentRoutes() {
       <Route path="/certificates" element={<StudentCertificates />} />
       <Route path="/community" element={<StudentCommunity />} />
       <Route path="/live-classes" element={<StudentLiveClasses />} />
+      <Route path="/exams" element={<StudentExams />} />
       <Route path="/quiz/:quizId" element={<QuizTaking />} />
       <Route path="/results/:attemptId" element={<QuizResults />} />
       <Route path="/profile" element={<StudentProfile />} />
