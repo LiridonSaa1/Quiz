@@ -366,6 +366,16 @@ async function startServer() {
     } = req.body;
     
     try {
+      // Resolve teacher ID — prefer the verified JWT identity over the body value
+      const authHeader = req.headers.authorization as string | undefined;
+      const token = authHeader?.replace('Bearer ', '');
+      let resolvedTeacherId: string | undefined = teacherId;
+      if (token) {
+        const { data: { user: callerUser } } = await supabaseAdmin.auth.getUser(token);
+        if (callerUser?.id) resolvedTeacherId = callerUser.id;
+      }
+      if (!resolvedTeacherId) throw new Error('Could not determine teacher identity.');
+
       // 1. Create or find user in Supabase Auth
       const { data: authData, error: authError } = await supabaseAdmin.auth.admin.createUser({
         email,
@@ -394,20 +404,31 @@ async function startServer() {
         throw new Error("Could not find or create user in Supabase Auth.");
       }
 
-      // 2. Create profile in public.profiles table
-      const { error: profileError } = await supabaseAdmin
-        .from('profiles')
-        .upsert({
-          id: userId,
-          email,
-          display_name: name,
-          role: 'student',
-          teacher_id: teacherId,
-          status: 'active',
-          created_at: new Date().toISOString()
-        });
+      // 2. Upsert profile — insert if new, update all key fields if the row already exists
+      // (Supabase Auth may auto-create a bare profile row via trigger; the update ensures
+      //  teacher_id and role are always written correctly.)
+      const profilePayload = {
+        id: userId,
+        email,
+        display_name: name,
+        role: 'student',
+        teacher_id: resolvedTeacherId,
+        status: 'active',
+      };
 
-      if (profileError) throw profileError;
+      const { error: upsertError } = await supabaseAdmin
+        .from('profiles')
+        .upsert(profilePayload, { onConflict: 'id' });
+
+      // If the upsert silently skipped (e.g. existing row with different owner), force an update
+      if (!upsertError) {
+        await supabaseAdmin
+          .from('profiles')
+          .update({ teacher_id: resolvedTeacherId, role: 'student', display_name: name, status: 'active', email })
+          .eq('id', userId);
+      } else {
+        throw upsertError;
+      }
 
       // 3. Create student record with all available fields
       const names = name.trim().split(' ');
