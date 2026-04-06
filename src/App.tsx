@@ -56,6 +56,14 @@ import AdminSecurityPage from './pages/admin/Security';
 import StudentDashboard from './pages/student/Dashboard';
 import StudentCourses from './pages/student/Courses';
 import ContinueLearning from './pages/student/ContinueLearning';
+import StudentQuizzes from './pages/student/Quizzes';
+import StudentLessons from './pages/student/Lessons';
+import StudentAssignments from './pages/student/Assignments';
+import StudentProgress from './pages/student/Progress';
+import StudentResults from './pages/student/Results';
+import StudentCertificates from './pages/student/Certificates';
+import StudentCommunity from './pages/student/Community';
+import StudentLiveClasses from './pages/student/LiveClasses';
 
 export default function App() {
   const [user, setUser] = useState<UserProfile | null>(null);
@@ -233,6 +241,14 @@ function StudentRoutes() {
       <Route path="/" element={<StudentDashboard />} />
       <Route path="/courses" element={<StudentCourses />} />
       <Route path="/continue" element={<ContinueLearning />} />
+      <Route path="/lessons" element={<StudentLessons />} />
+      <Route path="/quizzes" element={<StudentQuizzes />} />
+      <Route path="/assignments" element={<StudentAssignments />} />
+      <Route path="/progress" element={<StudentProgress />} />
+      <Route path="/results" element={<StudentResults />} />
+      <Route path="/certificates" element={<StudentCertificates />} />
+      <Route path="/community" element={<StudentCommunity />} />
+      <Route path="/live-classes" element={<StudentLiveClasses />} />
       <Route path="/quiz/:quizId" element={<QuizTaking />} />
       <Route path="/results/:attemptId" element={<QuizResults />} />
       <Route path="/profile" element={<StudentProfile />} />
