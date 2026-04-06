@@ -327,7 +327,7 @@ export default function StudentCourses() {
 
   return (
     <StudentLayout>
-      <div className="space-y-8 max-w-6xl mx-auto">
+      <div className="space-y-8 max-w-8xl mx-auto">
 
         {/* ── Hero welcome banner ── */}
         <div className="relative rounded-3xl overflow-hidden bg-gradient-to-br from-slate-900 via-emerald-950 to-slate-900 p-8 shadow-2xl">
