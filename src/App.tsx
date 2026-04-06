@@ -55,6 +55,7 @@ import AdminProfile from './pages/admin/Profile';
 import AdminSecurityPage from './pages/admin/Security';
 import StudentDashboard from './pages/student/Dashboard';
 import StudentCourses from './pages/student/Courses';
+import ContinueLearning from './pages/student/ContinueLearning';
 
 export default function App() {
   const [user, setUser] = useState<UserProfile | null>(null);
@@ -231,6 +232,7 @@ function StudentRoutes() {
     <Routes>
       <Route path="/" element={<StudentDashboard />} />
       <Route path="/courses" element={<StudentCourses />} />
+      <Route path="/continue" element={<ContinueLearning />} />
       <Route path="/quiz/:quizId" element={<QuizTaking />} />
       <Route path="/results/:attemptId" element={<QuizResults />} />
       <Route path="/profile" element={<StudentProfile />} />
