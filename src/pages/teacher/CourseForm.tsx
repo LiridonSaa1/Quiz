@@ -91,7 +91,7 @@ export default function TeacherCourseForm() {
         price: form.is_free ? 0 : form.price, is_free: form.is_free,
         status: publishNow ? 'published' : form.status,
         certificate_enabled: form.certificate_enabled,
-        gradient: form.gradient, tags: form.tags,
+        gradient: form.gradient,
         updated_at: new Date().toISOString(),
       };
 
