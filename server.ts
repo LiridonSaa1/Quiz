@@ -717,7 +717,28 @@ async function startServer() {
   });
 
   // ── ANALYTICS ──────────────────────────────────────────────
-  app.get('/api/admin/analytics', async (req, res) => {
+    // Teacher courses (service-role query to avoid RLS/ID-mapping mismatches)
+  app.get('/api/teacher/courses', async (req, res) => {
+    try {
+      const userId = typeof req.query.userId === 'string' ? req.query.userId.trim() : '';
+      if (!userId) return res.status(400).json({ error: 'userId is required' });
+
+      const teacherIds = await getTeacherIdCandidates(userId);
+      const scopedIds = teacherIds.length > 0 ? teacherIds : [userId];
+
+      const { data, error } = await supabaseAdmin
+        .from('courses')
+        .select('*')
+        .in('teacher_id', scopedIds)
+        .order('created_at', { ascending: false });
+
+      if (error) throw error;
+      res.json({ success: true, courses: data || [] });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+app.get('/api/admin/analytics', async (req, res) => {
     try {
       const [profilesRes, coursesRes, quizzesRes, certsRes, assignmentsRes, lessonsRes, attendanceRes] = await Promise.all([
         supabaseAdmin.from('profiles').select('id, role, created_at, status'),
@@ -1167,3 +1188,4 @@ async function startServer() {
 }
 
 startServer();
+
