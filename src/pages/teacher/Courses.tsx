@@ -36,15 +36,46 @@ export default function TeacherCourses() {
   const fetchCourses = async () => {
     setLoading(true);
     const { data: { session } } = await supabase.auth.getSession();
-    if (!session) return;
+    if (!session) {
+      setCourses([]);
+      setLoading(false);
+      return;
+    }
     try {
+      const backendRes = await fetch(`/api/teacher/courses?userId=${encodeURIComponent(session.user.id)}`);
+      if (backendRes.ok) {
+        const backendJson = await backendRes.json();
+        if (backendJson?.success && Array.isArray(backendJson.courses)) {
+          setCourses(backendJson.courses);
+          return;
+        }
+      }
+
+      const teacherIdCandidates = new Set<string>([session.user.id]);
+      const teachersRes = await supabase
+        .from('teachers')
+        .select('id,user_id')
+        .or(`id.eq.${session.user.id},user_id.eq.${session.user.id}`)
+        .limit(2);
+
+      if (!teachersRes.error) {
+        (teachersRes.data || []).forEach((row: any) => {
+          if (row?.id) teacherIdCandidates.add(String(row.id));
+          if (row?.user_id) teacherIdCandidates.add(String(row.user_id));
+        });
+      }
+
       const { data, error } = await supabase
-        .from('courses').select('*')
-        .eq('teacher_id', session.user.id)
+        .from('courses')
+        .select('*')
+        .in('teacher_id', [...teacherIdCandidates])
         .order('created_at', { ascending: false });
-      if (error && error.code !== 'PGRST116' && (error as any).status !== 400) throw error;
+
+      if (error && error.code !== 'PGRST116') throw error;
       setCourses(data || []);
-    } catch { toast.error('Failed to load courses'); }
+    } catch (error: any) {
+      toast.error(error?.message || 'Failed to load courses');
+    }
     finally { setLoading(false); }
   };
 

@@ -9,6 +9,7 @@ import {
   XCircle, Play
 } from 'lucide-react';
 import { cn } from '../../lib/utils';
+import { TableRowsSkeleton } from '../../components/ui/Skeleton';
 
 type SessionStatus = 'scheduled' | 'live' | 'ended' | 'cancelled';
 
@@ -209,9 +210,7 @@ export default function AdminLiveSessions() {
         {/* Table */}
         <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
           {loading ? (
-            <div className="flex items-center justify-center h-48">
-              <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-indigo-600" />
-            </div>
+            <TableRowsSkeleton rows={5} className="p-6" />
           ) : filtered.length === 0 ? (
             <div className="flex flex-col items-center justify-center h-48 text-slate-400">
               <Video className="w-10 h-10 mb-3 opacity-40" />

@@ -9,6 +9,7 @@ import {
 } from 'lucide-react';
 import { toast } from 'sonner';
 import StyledSelect from '../../components/ui/StyledSelect';
+import { FormPageSkeleton } from '../../components/ui/Skeleton';
 
 const GRADIENTS = [
   { label: 'Indigo', value: 'from-indigo-500 to-violet-600' },
@@ -68,7 +69,7 @@ export default function AdminCourseForm() {
         const json = await res.json();
         if (json.success) {
           setTeachers(json.teachers.map((t: any) => ({
-            id: t.uid,
+            id: t.teacherId || t.uid,
             display_name: t.displayName,
             email: t.email,
             role: t.role,
@@ -167,7 +168,11 @@ export default function AdminCourseForm() {
   };
 
   if (loading) {
-    return <AdminLayout><div className="flex items-center justify-center h-64"><div className="animate-spin rounded-full h-10 w-10 border-b-2 border-indigo-600" /></div></AdminLayout>;
+    return (
+      <AdminLayout>
+        <FormPageSkeleton />
+      </AdminLayout>
+    );
   }
 
   return (

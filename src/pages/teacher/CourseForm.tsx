@@ -7,6 +7,8 @@ import {
   X, Plus, Award, Settings2, Image, Type, BarChart2
 } from 'lucide-react';
 import { toast } from 'sonner';
+import { FormPageSkeleton } from '../../components/ui/Skeleton';
+import StyledSelect from '../../components/ui/StyledSelect';
 
 const GRADIENTS = [
   { label: 'Indigo', value: 'from-indigo-500 to-violet-600' },
@@ -128,7 +130,11 @@ export default function TeacherCourseForm() {
   };
 
   if (loading) {
-    return <TeacherLayout><div className="flex items-center justify-center h-64"><div className="animate-spin rounded-full h-10 w-10 border-b-2 border-violet-600" /></div></TeacherLayout>;
+    return (
+      <TeacherLayout>
+        <FormPageSkeleton />
+      </TeacherLayout>
+    );
   }
 
   return (
@@ -195,25 +201,28 @@ export default function TeacherCourseForm() {
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
                       <div>
                         <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">Language</label>
-                        <select value={form.language} onChange={e => set('language', e.target.value)}
-                          className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-violet-500 transition-all">
+                        <StyledSelect value={form.language} onChange={e => set('language', e.target.value)}
+                          wrapperClassName="w-full"
+                          className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:ring-violet-500/30">
                           {LANGUAGES.map(l => <option key={l}>{l}</option>)}
-                        </select>
+                        </StyledSelect>
                       </div>
                       <div>
                         <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">Level</label>
-                        <select value={form.level} onChange={e => set('level', e.target.value)}
-                          className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-violet-500 transition-all">
+                        <StyledSelect value={form.level} onChange={e => set('level', e.target.value)}
+                          wrapperClassName="w-full"
+                          className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:ring-violet-500/30">
                           {LEVELS.map(l => <option key={l}>{l}</option>)}
-                        </select>
+                        </StyledSelect>
                       </div>
                     </div>
                     <div>
                       <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">Category</label>
-                      <select value={form.category} onChange={e => set('category', e.target.value)}
-                        className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-violet-500 transition-all">
+                      <StyledSelect value={form.category} onChange={e => set('category', e.target.value)}
+                        wrapperClassName="w-full"
+                        className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:ring-violet-500/30">
                         {CATEGORIES.map(c => <option key={c}>{c}</option>)}
-                      </select>
+                      </StyledSelect>
                     </div>
                     <div>
                       <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-3">Pricing</label>

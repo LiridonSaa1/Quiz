@@ -13,6 +13,7 @@ import {
 } from 'lucide-react';
 import { toast } from 'sonner';
 import AdminLayout from '../components/layout/AdminLayout';
+import { TableRowsSkeleton } from '../components/ui/Skeleton';
 
 export default function AdminDashboard() {
   const [users, setUsers] = useState<UserProfile[]>([]);
@@ -171,7 +172,11 @@ export default function AdminDashboard() {
               </thead>
               <tbody className="divide-y divide-slate-50">
                 {loading ? (
-                  <tr><td colSpan={5} className="px-6 py-16 text-center text-slate-400 text-sm">Loading users...</td></tr>
+                  <tr>
+                    <td colSpan={5}>
+                      <TableRowsSkeleton rows={5} className="p-6" />
+                    </td>
+                  </tr>
                 ) : filteredUsers.length > 0 ? (
                   filteredUsers.map((user) => (
                     <tr key={user.uid} className="hover:bg-slate-50/70 transition-all group">
@@ -233,7 +238,7 @@ export default function AdminDashboard() {
           {/* Mobile Card View */}
           <div className="md:hidden divide-y divide-slate-50">
             {loading ? (
-              <div className="p-6 text-center text-slate-400 text-sm">Loading users...</div>
+              <TableRowsSkeleton rows={4} />
             ) : filteredUsers.length > 0 ? (
               filteredUsers.map((user) => (
                 <div key={user.uid} className="p-4 flex items-center justify-between gap-3">

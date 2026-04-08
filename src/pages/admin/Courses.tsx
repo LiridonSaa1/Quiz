@@ -21,21 +21,44 @@ const GRADIENT_PALETTES = [
   'from-fuchsia-500 to-violet-600',
 ];
 
-const getCourseGradient = (id: string) => {
+const getCourseGradient = (course: any) => {
+  const savedGradient = typeof course?.gradient === 'string' ? course.gradient.trim() : '';
+  if (savedGradient) return savedGradient;
+
+  const id = typeof course?.id === 'string' ? course.id : '';
   let hash = 0;
   for (let i = 0; i < id.length; i++) hash = id.charCodeAt(i) + ((hash << 5) - hash);
   return GRADIENT_PALETTES[Math.abs(hash) % GRADIENT_PALETTES.length];
 };
 
 const LEVELS = ['All Levels', 'Beginner', 'Intermediate', 'Advanced'];
-const STATUSES = ['All', 'published', 'draft'];
+const STATUSES = [
+  { label: 'All', value: 'all' },
+  { label: 'published', value: 'published' },
+  { label: 'unpublished', value: 'draft' },
+];
+
+const getNormalizedCourseStatus = (status?: string) =>
+  (status || '').toLowerCase() === 'published' ? 'published' : 'draft';
+
+const getCourseStatusLabel = (status?: string) =>
+  getNormalizedCourseStatus(status) === 'published' ? 'published' : 'unpublished';
+
+type TeacherOption = {
+  id?: string;
+  uid?: string;
+  teacherId?: string | null;
+  display_name?: string;
+  displayName?: string;
+  email?: string;
+};
 
 export default function AdminCourses() {
   const [courses, setCourses] = useState<any[]>([]);
-  const [teachers, setTeachers] = useState<any[]>([]);
+  const [teachers, setTeachers] = useState<TeacherOption[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
-  const [statusFilter, setStatusFilter] = useState('All');
+  const [statusFilter, setStatusFilter] = useState('all');
   const [levelFilter, setLevelFilter] = useState('All Levels');
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
   const navigate = useNavigate();
@@ -43,13 +66,19 @@ export default function AdminCourses() {
   const fetchData = async () => {
     setLoading(true);
     try {
-      const [coursesRes, teachersRes] = await Promise.all([
+      const [coursesRes, teachersApiRes] = await Promise.all([
         supabase.from('courses').select('*').order('created_at', { ascending: false }),
-        supabase.from('profiles').select('id, display_name, email').eq('role', 'teacher')
+        fetch('/api/admin/teachers').then(async (res) => {
+          if (!res.ok) throw new Error('Failed to load teachers');
+          return res.json();
+        }),
       ]);
+
       if (coursesRes.error) throw coursesRes.error;
+      if (!teachersApiRes.success) throw new Error(teachersApiRes.error || 'Failed to load teachers');
+
       setCourses(coursesRes.data || []);
-      setTeachers(teachersRes.data || []);
+      setTeachers(teachersApiRes.teachers || []);
     } catch (err) {
       toast.error('Failed to load courses');
     } finally {
@@ -70,25 +99,44 @@ export default function AdminCourses() {
   };
 
   const toggleStatus = async (course: any) => {
-    const newStatus = course.status === 'published' ? 'draft' : 'published';
+    const currentStatus = getNormalizedCourseStatus(course.status);
+    const newStatus = currentStatus === 'published' ? 'draft' : 'published';
     try {
-      const { error } = await supabase.from('courses').update({ status: newStatus }).eq('id', course.id);
-      if (error) throw error;
+      const res = await fetch(`/api/admin/update-course/${course.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: newStatus, updated_at: new Date().toISOString() }),
+      });
+      const json = await res.json();
+      if (!res.ok || !json.success) throw new Error(json.error || 'Failed to update status');
+
+      setCourses((prev) => prev.map((c) => (c.id === course.id ? { ...c, status: newStatus } : c)));
       toast.success(`Course ${newStatus === 'published' ? 'published' : 'unpublished'}`);
-      fetchData();
     } catch { toast.error('Failed to update status'); }
   };
 
   const getTeacherName = (teacherId: string) => {
-    const t = teachers.find(t => t.id === teacherId);
-    return t?.display_name || 'Unknown';
+    const normalizedTeacherId = (teacherId || '').trim();
+    if (!normalizedTeacherId) return 'Unknown';
+
+    const t = teachers.find((teacher) =>
+      teacher.teacherId === normalizedTeacherId ||
+      teacher.uid === normalizedTeacherId ||
+      teacher.id === normalizedTeacherId,
+    );
+
+    return t?.displayName || t?.display_name || 'Unknown';
   };
 
   const filtered = courses.filter(c => {
-    const q = search.toLowerCase();
+    const q = search.trim().toLowerCase();
     const matchSearch = (c.name || c.title || '').toLowerCase().includes(q) || (c.description || '').toLowerCase().includes(q);
-    const matchStatus = statusFilter === 'All' || c.status === statusFilter;
-    const matchLevel = levelFilter === 'All Levels' || c.level === levelFilter;
+    const normalizedStatusFilter = statusFilter.toLowerCase();
+    const normalizedLevelFilter = levelFilter.toLowerCase();
+    const courseStatus = getNormalizedCourseStatus(c.status);
+    const courseLevel = (c.level || '').toLowerCase();
+    const matchStatus = normalizedStatusFilter === 'all' || courseStatus === normalizedStatusFilter;
+    const matchLevel = normalizedLevelFilter === 'all levels' || courseLevel === normalizedLevelFilter;
     return matchSearch && matchStatus && matchLevel;
   });
 
@@ -149,7 +197,7 @@ export default function AdminCourses() {
             onChange={e => setStatusFilter(e.target.value)}
             className="px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 transition-all"
           >
-            {STATUSES.map(s => <option key={s}>{s}</option>)}
+            {STATUSES.map(s => <option key={s.value} value={s.value}>{s.label}</option>)}
           </select>
           <select
             value={levelFilter}
@@ -202,7 +250,7 @@ export default function AdminCourses() {
                 key={course.id}
                 course={course}
                 teacherName={getTeacherName(course.teacher_id)}
-                gradient={getCourseGradient(course.id)}
+                gradient={getCourseGradient(course)}
                 onEdit={() => navigate(`/admin/courses/${course.id}/edit`)}
                 onDelete={() => handleDelete(course.id)}
                 onToggleStatus={() => toggleStatus(course)}
@@ -230,7 +278,7 @@ export default function AdminCourses() {
                     <tr key={course.id} className="hover:bg-slate-50/60 transition-all group">
                       <td className="px-5 py-4">
                         <div className="flex items-center gap-3">
-                          <div className={`w-10 h-10 rounded-xl bg-gradient-to-br ${getCourseGradient(course.id)} flex items-center justify-center shadow-sm`}>
+                          <div className={`w-10 h-10 rounded-xl bg-gradient-to-br ${getCourseGradient(course)} flex items-center justify-center shadow-sm`}>
                             <BookOpen className="w-5 h-5 text-white" />
                           </div>
                           <div>
@@ -252,20 +300,32 @@ export default function AdminCourses() {
                         </div>
                       </td>
                       <td className="px-5 py-4">
-                        <span className={`inline-flex items-center gap-1.5 text-xs font-semibold px-2.5 py-1 rounded-lg ${
-                          course.status === 'published' ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-700'
-                        }`}>
-                          <span className={`w-1.5 h-1.5 rounded-full ${course.status === 'published' ? 'bg-emerald-500' : 'bg-amber-500'}`} />
-                          {course.status || 'draft'}
-                        </span>
+                        {(() => {
+                          const isPublished = getNormalizedCourseStatus(course.status) === 'published';
+                          return (
+                            <span className={`inline-flex items-center gap-1.5 text-xs font-semibold px-2.5 py-1 rounded-lg ${
+                              isPublished ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-700'
+                            }`}>
+                              <span className={`w-1.5 h-1.5 rounded-full ${isPublished ? 'bg-emerald-500' : 'bg-amber-500'}`} />
+                              {getCourseStatusLabel(course.status)}
+                            </span>
+                          );
+                        })()}
                       </td>
                       <td className="px-5 py-4 text-right">
                         <div className="flex items-center justify-end gap-1 opacity-0 group-hover:opacity-100 transition-all">
-                          <button onClick={() => toggleStatus(course)}
-                            className={`p-2 rounded-lg text-xs transition-all ${course.status === 'published' ? 'text-slate-400 hover:text-amber-600 hover:bg-amber-50' : 'text-slate-400 hover:text-emerald-600 hover:bg-emerald-50'}`}
-                            title={course.status === 'published' ? 'Unpublish' : 'Publish'}>
-                            {course.status === 'published' ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                          </button>
+                          {(() => {
+                            const isPublished = getNormalizedCourseStatus(course.status) === 'published';
+                            return (
+                              <button
+                                onClick={() => toggleStatus(course)}
+                                className={`p-2 rounded-lg text-xs transition-all ${isPublished ? 'text-slate-400 hover:text-amber-600 hover:bg-amber-50' : 'text-slate-400 hover:text-emerald-600 hover:bg-emerald-50'}`}
+                                title={isPublished ? 'Unpublish' : 'Publish'}
+                              >
+                                {isPublished ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                              </button>
+                            );
+                          })()}
                           <button onClick={() => navigate(`/admin/courses/${course.id}/edit`)}
                             className="p-2 rounded-lg text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 transition-all">
                             <Edit2 className="w-4 h-4" />
@@ -291,7 +351,7 @@ export default function AdminCourses() {
 function CourseCard({ course, teacherName, gradient, onEdit, onDelete, onToggleStatus }: any) {
   const name = course.name || course.title || 'Untitled';
   const students = course.student_ids?.length || course.total_students || 0;
-  const isPublished = course.status === 'published';
+  const isPublished = getNormalizedCourseStatus(course.status) === 'published';
 
   return (
     <div className="bg-white rounded-2xl border border-slate-100 shadow-sm hover:shadow-lg transition-all group overflow-hidden flex flex-col">
@@ -304,7 +364,7 @@ function CourseCard({ course, teacherName, gradient, onEdit, onDelete, onToggleS
           <span className={`text-[10px] font-bold uppercase tracking-wider px-2.5 py-1 rounded-lg ${
             isPublished ? 'bg-emerald-500/30 text-white border border-emerald-400/30' : 'bg-white/20 text-white border border-white/20'
           }`}>
-            {course.status || 'draft'}
+            {getCourseStatusLabel(course.status)}
           </span>
         </div>
         <div>
@@ -313,22 +373,6 @@ function CourseCard({ course, teacherName, gradient, onEdit, onDelete, onToggleS
               {course.level}
             </span>
           )}
-        </div>
-        {/* Hover Actions */}
-        <div className="absolute top-3 right-3 flex gap-1.5 opacity-0 group-hover:opacity-100 transition-all">
-          <button onClick={onToggleStatus}
-            className={`p-1.5 rounded-lg text-white backdrop-blur-sm transition-all ${isPublished ? 'bg-amber-500/40 hover:bg-amber-500/70' : 'bg-emerald-500/40 hover:bg-emerald-500/70'}`}
-            title={isPublished ? 'Unpublish' : 'Publish'}>
-            {isPublished ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
-          </button>
-          <button onClick={onEdit}
-            className="p-1.5 bg-white/20 hover:bg-white/40 backdrop-blur-sm rounded-lg text-white transition-all">
-            <Edit2 className="w-3.5 h-3.5" />
-          </button>
-          <button onClick={onDelete}
-            className="p-1.5 bg-red-500/30 hover:bg-red-500/60 backdrop-blur-sm rounded-lg text-white transition-all">
-            <Trash2 className="w-3.5 h-3.5" />
-          </button>
         </div>
       </div>
 
@@ -351,10 +395,33 @@ function CourseCard({ course, teacherName, gradient, onEdit, onDelete, onToggleS
             <span className="flex items-center gap-1"><Users className="w-3.5 h-3.5" />{students}</span>
             {course.language && <span className="flex items-center gap-1"><Globe className="w-3.5 h-3.5" />{course.language}</span>}
           </div>
-          <button onClick={onEdit}
-            className="text-xs font-semibold text-indigo-600 hover:text-indigo-700 flex items-center gap-1 px-2.5 py-1.5 hover:bg-indigo-50 rounded-lg transition-all">
-            Edit
-          </button>
+          <div className="flex items-center gap-1">
+            <button
+              onClick={onToggleStatus}
+              className={`p-1.5 rounded-lg transition-all ${
+                isPublished
+                  ? 'text-slate-400 hover:text-amber-600 hover:bg-amber-50'
+                  : 'text-slate-400 hover:text-emerald-600 hover:bg-emerald-50'
+              }`}
+              title={isPublished ? 'Unpublish' : 'Publish'}
+            >
+              {isPublished ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+            </button>
+            <button
+              onClick={onEdit}
+              className="p-1.5 rounded-lg text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 transition-all"
+              title="Edit"
+            >
+              <Edit2 className="w-3.5 h-3.5" />
+            </button>
+            <button
+              onClick={onDelete}
+              className="p-1.5 rounded-lg text-slate-400 hover:text-red-600 hover:bg-red-50 transition-all"
+              title="Delete"
+            >
+              <Trash2 className="w-3.5 h-3.5" />
+            </button>
+          </div>
         </div>
       </div>
     </div>

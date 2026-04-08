@@ -12,6 +12,7 @@ import {
 } from 'recharts';
 import { toast } from 'sonner';
 import { cn } from '../../lib/utils';
+import { fetchAttemptRowsByQuizIds, normalizeAttempts } from '../../lib/quizAttempts';
 
 type TabFilter = 'all' | 'passed' | 'failed';
 type SortField = 'student' | 'quiz' | 'score' | 'date' | 'duration';
@@ -22,10 +23,98 @@ export default function TeacherResults() {
   const [students, setStudents] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
-  const [tab, setTab] = useState<TabFilter>('all');
-  const [sortBy, setSortBy] = useState<SortField>('date');
-  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
-  const [selectedQuiz, setSelectedQuiz] = useState('all');
+
+  const isMissingTeacherIdColumn = (error: any) => {
+    const haystack = `${error?.message || ''} ${error?.details || ''}`.toLowerCase();
+    return error?.code === 'PGRST204' && haystack.includes('teacher_id');
+  };
+
+  const getPassingScore = (quizRow: any) => {
+    const raw = quizRow?.settings?.passingScore ?? quizRow?.passing_score ?? quizRow?.pass_mark ?? quizRow?.passMark;
+    const parsed = Number(raw);
+    return Number.isFinite(parsed) ? parsed : 50;
+  };
+
+  const fetchData = async () => {
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session) return;
+    try {
+      let attemptsData: any[] = [];
+      let quizzesMap: Record<string, string> = {};
+      let studentsMap: Record<string, string> = {};
+
+      const coursesSnap = await supabase
+        .from('courses')
+        .select('id')
+        .eq('teacher_id', session.user.id);
+      if (coursesSnap.error) throw coursesSnap.error;
+      const teacherCourseIds = (coursesSnap.data || []).map((course: any) => course.id);
+
+      const quizzesByTeacherSnap = await supabase
+        .from('quizzes')
+        .select('*')
+        .eq('teacher_id', session.user.id);
+
+      let quizRows: any[] = [];
+      if (!quizzesByTeacherSnap.error) {
+        quizRows = quizzesByTeacherSnap.data || [];
+      } else if (isMissingTeacherIdColumn(quizzesByTeacherSnap.error)) {
+        if (teacherCourseIds.length > 0) {
+          const quizzesByCourseSnap = await supabase
+            .from('quizzes')
+            .select('*')
+            .in('course_id', teacherCourseIds);
+          if (quizzesByCourseSnap.error) throw quizzesByCourseSnap.error;
+          quizRows = quizzesByCourseSnap.data || [];
+        }
+      } else {
+        throw quizzesByTeacherSnap.error;
+      }
+
+      const quizIds = quizRows.map((q: any) => q.id);
+      const passingScoreByQuiz = quizRows.reduce((acc: Record<string, number>, q: any) => {
+        const value = getPassingScore(q);
+        acc[q.id] = Number.isFinite(value) ? value : 50;
+        return acc;
+      }, {});
+
+      quizRows.forEach((d: any) => {
+        quizzesMap[d.id] = d.title;
+      });
+
+      const attemptsRows = await fetchAttemptRowsByQuizIds(supabase, quizIds);
+      const normalizedAttempts = normalizeAttempts(attemptsRows, passingScoreByQuiz);
+      attemptsData = normalizedAttempts.map((a) => ({
+        id: a.id,
+        quizId: a.quiz_id,
+        studentId: a.student_id,
+        scorePercent: a.score_percent,
+        passed: a.passed,
+        completedAt: a.completed_at,
+      }));
+
+      const studentIds = [...new Set(normalizedAttempts.map((a) => a.student_id).filter(Boolean))];
+      if (studentIds.length > 0) {
+        const studentsSnap = await supabase
+          .from('profiles')
+          .select('id, display_name')
+          .in('id', studentIds);
+        if (!studentsSnap.error) {
+          (studentsSnap.data || []).forEach((d: any) => {
+            studentsMap[d.id] = d.display_name;
+          });
+        }
+      }
+
+      setQuizzes(quizzesMap);
+      setStudents(studentsMap);
+      setAttempts(attemptsData);
+    } catch (error) {
+      toast.error('Failed to fetch results');
+    } finally {
+      setLoading(false);
+    }
+  };
 
   useEffect(() => {
     const fetchData = async () => {
@@ -68,10 +157,14 @@ export default function TeacherResults() {
     fetchData();
   }, []);
 
-  const getDuration = (start: string, end: string) => {
-    if (!start || !end) return null;
-    const diff = (new Date(end).getTime() - new Date(start).getTime()) / 1000 / 60;
-    return Math.round(diff);
+  const stats = {
+    totalAttempts: attempts.length,
+    avgScore: attempts.length > 0 
+      ? Math.round(attempts.reduce((acc, curr) => acc + curr.scorePercent, 0) / attempts.length)
+      : 0,
+    passRate: attempts.length > 0
+      ? Math.round((attempts.filter(a => a.passed).length / attempts.length) * 100)
+      : 0
   };
 
   const getPct = (a: any) => a.totalPoints > 0 ? Math.round((a.score / a.totalPoints) * 100) : 0;
@@ -370,7 +463,58 @@ export default function TeacherResults() {
                       ))}
                     </tr>
                   ))
-                ) : filtered.length === 0 ? (
+                ) : filtered.length > 0 ? (
+                  filtered.map((attempt) => (
+                    <tr key={attempt.id} className="hover:bg-slate-50 transition-all group">
+                      <td className="px-6 py-4">
+                        <div className="flex items-center gap-3">
+                          <div className="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center text-slate-600 font-bold text-xs">
+                            {students[attempt.studentId]?.[0] || 'S'}
+                          </div>
+                          <span className="font-semibold text-slate-900">{students[attempt.studentId] || 'Unknown Student'}</span>
+                        </div>
+                      </td>
+                      <td className="px-6 py-4">
+                        <span className="text-slate-600 font-medium">{quizzes[attempt.quizId] || 'Unknown Quiz'}</span>
+                      </td>
+                      <td className="px-6 py-4">
+                        <div className="flex items-center gap-2">
+                          <div className="flex-1 h-1.5 w-16 bg-slate-100 rounded-full overflow-hidden">
+                            <div 
+                              className={cn(
+                                "h-full rounded-full transition-all",
+                                attempt.passed ? "bg-green-500" : "bg-red-500"
+                              )}
+                              style={{ width: `${attempt.scorePercent}%` }}
+                            />
+                          </div>
+                          <span className="text-sm font-bold text-slate-900">
+                            {attempt.scorePercent}%
+                          </span>
+                        </div>
+                      </td>
+                      <td className="px-6 py-4">
+                        <span className={cn(
+                          "inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold",
+                          attempt.passed 
+                            ? "bg-green-50 text-green-600" 
+                            : "bg-red-50 text-red-600"
+                        )}>
+                          {attempt.passed ? <CheckCircle2 className="w-3 h-3" /> : <XCircle className="w-3 h-3" />}
+                          {attempt.passed ? 'Passed' : 'Failed'}
+                        </span>
+                      </td>
+                      <td className="px-6 py-4 text-slate-500 text-sm">
+                        {attempt.completedAt ? new Date(attempt.completedAt).toLocaleDateString() : '--'}
+                      </td>
+                      <td className="px-6 py-4 text-right">
+                        <button className="p-2 text-slate-400 hover:text-slate-900 hover:bg-slate-100 rounded-lg transition-all">
+                          <ChevronRight className="w-5 h-5" />
+                        </button>
+                      </td>
+                    </tr>
+                  ))
+                ) : (
                   <tr>
                     <td colSpan={6} className="px-6 py-20 text-center">
                       <BarChart3 className="w-14 h-14 text-slate-200 mx-auto mb-4" />

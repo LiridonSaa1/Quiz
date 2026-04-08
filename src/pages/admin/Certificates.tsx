@@ -9,6 +9,7 @@ import {
 } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { format } from 'date-fns';
+import { TableRowsSkeleton } from '../../components/ui/Skeleton';
 
 type CertStatus = 'issued' | 'revoked';
 
@@ -273,7 +274,9 @@ export default function AdminCertificates() {
 
         {/* Cards grid on desktop, list on mobile */}
         {loading ? (
-          <div className="flex items-center justify-center py-20 text-slate-400 text-sm bg-white rounded-xl border border-slate-200">Loading certificates...</div>
+          <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
+            <TableRowsSkeleton rows={6} className="p-6" />
+          </div>
         ) : filtered.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-20 gap-3 text-slate-400 bg-white rounded-xl border border-slate-200">
             <Award className="w-10 h-10 opacity-30" />

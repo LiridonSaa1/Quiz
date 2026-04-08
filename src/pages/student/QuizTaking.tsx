@@ -15,6 +15,17 @@ import {
 import { toast } from 'sonner';
 import { cn } from '../../lib/utils';
 import { motion, AnimatePresence } from 'motion/react';
+import { QuizPageSkeleton } from '../../components/ui/Skeleton';
+import { insertAttemptWithFallback } from '../../lib/quizAttempts';
+
+const DEFAULT_QUIZ_SETTINGS = {
+  shuffleQuestions: false,
+  shuffleAnswers: false,
+  showCorrectAnswers: true,
+  passingScore: 50,
+  maxAttempts: 0,
+  allowRetry: false,
+};
 
 export default function QuizTaking() {
   const { quizId } = useParams();
@@ -50,7 +61,7 @@ export default function QuizTaking() {
         teacherId: quizData.teacher_id,
         timeLimit: quizData.time_limit,
         published: quizData.published,
-        settings: quizData.settings,
+        settings: quizData.settings || DEFAULT_QUIZ_SETTINGS,
         createdAt: quizData.created_at
       } as Quiz;
 
@@ -137,26 +148,21 @@ export default function QuizTaking() {
         }
       });
 
-      const passingScore = (quiz.settings.passingScore / 100) * totalPoints;
+      const passingPercent = Number(quiz.settings?.passingScore ?? 50);
+      const passingScore = ((Number.isFinite(passingPercent) ? passingPercent : 50) / 100) * totalPoints;
       const passed = score >= passingScore;
 
-      const { data: attempt, error: attemptError } = await supabase
-        .from('attempts')
-        .insert({
-          quiz_id: quiz.id,
-          student_id: session.user.id,
-          teacher_id: quiz.teacherId,
-          score,
-          total_points: totalPoints,
-          passed,
-          started_at: new Date().toISOString(),
-          completed_at: new Date().toISOString(),
-          answers
-        })
-        .select()
-        .single();
-
-      if (attemptError) throw attemptError;
+      const attempt = await insertAttemptWithFallback(supabase, {
+        quiz_id: quiz.id,
+        student_id: session.user.id,
+        teacher_id: quiz.teacherId,
+        score,
+        total_points: totalPoints,
+        passed,
+        started_at: new Date().toISOString(),
+        completed_at: new Date().toISOString(),
+        answers,
+      });
       
       // Notify teacher
       sendNotification(
@@ -174,7 +180,7 @@ export default function QuizTaking() {
     }
   };
 
-  if (loading) return <div className="flex items-center justify-center min-h-screen">Loading quiz...</div>;
+  if (loading) return <QuizPageSkeleton />;
   if (!quiz) return null;
 
   const currentQuestion = questions[currentQuestionIndex];

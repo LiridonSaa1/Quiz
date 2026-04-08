@@ -10,6 +10,7 @@ import {
 } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import StyledSelect from '../../components/ui/StyledSelect';
+import { TableRowsSkeleton } from '../../components/ui/Skeleton';
 
 type ClassStatus = 'active' | 'upcoming' | 'completed' | 'archived';
 
@@ -486,7 +487,7 @@ export default function AdminClasses() {
           {/* Mobile Cards */}
           <div className="md:hidden divide-y divide-slate-50">
             {loading ? (
-              <div className="p-6 text-center text-slate-400 text-sm">Loading classes...</div>
+              <TableRowsSkeleton rows={4} />
             ) : filtered.length > 0 ? (
               filtered.map(cls => {
                 const sc = STATUS_CONFIG[cls.status];

@@ -10,6 +10,7 @@ import {
   CheckCircle2, Loader2, Trash2, ExternalLink, X
 } from 'lucide-react';
 import { cn } from '../../lib/utils';
+import { LayoutPageSkeleton } from '../../components/ui/Skeleton';
 
 interface LiveSession {
   id: string;
@@ -213,9 +214,7 @@ export default function LiveSessionRoom() {
   if (loading) {
     return (
       <AdminLayout>
-        <div className="flex items-center justify-center h-64">
-          <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-indigo-600" />
-        </div>
+        <LayoutPageSkeleton />
       </AdminLayout>
     );
   }

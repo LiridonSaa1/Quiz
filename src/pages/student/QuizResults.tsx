@@ -15,6 +15,17 @@ import {
 import { QuizAttempt, Quiz, Question } from '../../types';
 import { cn } from '../../lib/utils';
 import { motion } from 'motion/react';
+import { LayoutPageSkeleton } from '../../components/ui/Skeleton';
+import { fetchAttemptRowById, normalizeAttempts } from '../../lib/quizAttempts';
+
+const DEFAULT_QUIZ_SETTINGS = {
+  shuffleQuestions: false,
+  shuffleAnswers: false,
+  showCorrectAnswers: true,
+  passingScore: 50,
+  maxAttempts: 0,
+  allowRetry: false,
+};
 
 export default function QuizResults() {
   const { attemptId } = useParams();
@@ -28,36 +39,32 @@ export default function QuizResults() {
     const fetchData = async () => {
       if (!attemptId) return;
       try {
-        const { data: attemptData, error: attemptError } = await supabase
-          .from('attempts')
-          .select('*')
-          .eq('id', attemptId)
-          .single();
-
-        if (attemptError || !attemptData) {
+        const attemptData = await fetchAttemptRowById(supabase, attemptId);
+        if (!attemptData) {
           navigate('/student');
           return;
         }
+        const normalizedAttempt = normalizeAttempts([attemptData])[0];
 
         const formattedAttempt = {
-          id: attemptData.id,
-          quizId: attemptData.quiz_id,
-          studentId: attemptData.student_id,
-          teacherId: attemptData.teacher_id,
-          score: attemptData.score,
-          totalPoints: attemptData.total_points,
-          passed: attemptData.passed,
-          startedAt: attemptData.started_at,
-          completedAt: attemptData.completed_at,
-          answers: attemptData.answers,
-          createdAt: attemptData.created_at
+          id: normalizedAttempt.id,
+          quizId: normalizedAttempt.quiz_id,
+          studentId: normalizedAttempt.student_id,
+          teacherId: normalizedAttempt.teacher_id,
+          score: normalizedAttempt.score,
+          totalPoints: normalizedAttempt.total_points,
+          passed: normalizedAttempt.passed,
+          startedAt: normalizedAttempt.started_at,
+          completedAt: normalizedAttempt.completed_at,
+          answers: normalizedAttempt.answers,
+          createdAt: normalizedAttempt.created_at
         };
         setAttempt(formattedAttempt);
 
         const { data: quizData, error: quizError } = await supabase
           .from('quizzes')
           .select('*')
-          .eq('id', attemptData.quiz_id)
+          .eq('id', normalizedAttempt.quiz_id)
           .single();
 
         if (quizError || !quizData) throw quizError;
@@ -70,14 +77,14 @@ export default function QuizResults() {
           teacherId: quizData.teacher_id,
           timeLimit: quizData.time_limit,
           published: quizData.published,
-          settings: quizData.settings,
+          settings: quizData.settings || DEFAULT_QUIZ_SETTINGS,
           createdAt: quizData.created_at
         } as Quiz);
 
         const { data: questionsData, error: questionsError } = await supabase
           .from('questions')
           .select('*')
-          .eq('quiz_id', attemptData.quiz_id)
+          .eq('quiz_id', normalizedAttempt.quiz_id)
           .order('order_index', { ascending: true });
 
         if (questionsError) throw questionsError;
@@ -105,10 +112,17 @@ export default function QuizResults() {
     fetchData();
   }, [attemptId, navigate]);
 
-  if (loading) return <div className="p-10 text-center">Loading results...</div>;
+  if (loading) {
+    return (
+      <StudentLayout>
+        <LayoutPageSkeleton cards={3} rows={5} />
+      </StudentLayout>
+    );
+  }
   if (!attempt || !quiz) return null;
 
   const scorePercentage = Math.round((attempt.score / attempt.totalPoints) * 100);
+  const passingPercent = Number(quiz.settings?.passingScore ?? 50);
 
   return (
     <StudentLayout>
@@ -155,7 +169,7 @@ export default function QuizResults() {
               </div>
               <div className="bg-white/50 backdrop-blur-md px-6 py-3 rounded-2xl border border-white/50">
                 <div className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-1">Passing Score</div>
-                <div className="text-2xl font-black text-slate-900">{quiz.settings.passingScore}%</div>
+                <div className="text-2xl font-black text-slate-900">{Number.isFinite(passingPercent) ? passingPercent : 50}%</div>
               </div>
             </div>
           </div>

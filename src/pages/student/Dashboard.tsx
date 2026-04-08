@@ -5,6 +5,7 @@ import { BookOpen, Clock, CheckCircle2, Trophy, ArrowRight, Flame } from 'lucide
 import { Link } from 'react-router-dom';
 import { Quiz } from '../../types';
 import { cn } from '../../lib/utils';
+import { fetchAttemptRowsByStudentId, normalizeAttempts } from '../../lib/quizAttempts';
 
 export default function StudentDashboard() {
   const [enrolledCourses, setEnrolledCourses] = useState<any[]>([]);
@@ -44,14 +45,15 @@ export default function StudentDashboard() {
         }
         setAvailableQuizzes(quizzes);
 
-        const attemptsSnap = await supabase
-          .from('attempts')
-          .select('*')
-          .eq('student_id', studentId)
-          .order('completed_at', { ascending: false });
-        if (!attemptsSnap.error) {
-          attempts = attemptsSnap.data || [];
-        }
+        const attemptsRows = await fetchAttemptRowsByStudentId(supabase, studentId);
+        attempts = normalizeAttempts(attemptsRows).map((a) => ({
+          id: a.id,
+          quiz_id: a.quiz_id,
+          score: a.score,
+          total_points: a.total_points,
+          score_percent: a.score_percent,
+          completed_at: a.completed_at,
+        }));
         setRecentAttempts(attempts);
       } catch (error) {
         console.error('Error fetching student data:', error);
@@ -67,7 +69,7 @@ export default function StudentDashboard() {
     quizzes: availableQuizzes.length,
     completed: recentAttempts.length,
     avgScore: recentAttempts.length > 0
-      ? Math.round(recentAttempts.reduce((acc, curr) => acc + (curr.score / curr.total_points * 100), 0) / recentAttempts.length)
+      ? Math.round(recentAttempts.reduce((acc, curr) => acc + curr.score_percent, 0) / recentAttempts.length)
       : 0
   };
 
@@ -168,7 +170,7 @@ export default function StudentDashboard() {
               <div className="p-5 space-y-3">
                 {recentAttempts.length > 0 ? (
                   recentAttempts.slice(0, 5).map((attempt) => {
-                    const pct = Math.round((attempt.score / attempt.total_points) * 100);
+                    const pct = attempt.score_percent;
                     return (
                       <div
                         key={attempt.id}

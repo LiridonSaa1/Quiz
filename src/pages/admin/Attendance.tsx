@@ -8,6 +8,7 @@ import {
 } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { format } from 'date-fns';
+import { TableRowsSkeleton } from '../../components/ui/Skeleton';
 
 type AttendanceStatus = 'present' | 'absent' | 'late' | 'excused';
 
@@ -256,7 +257,7 @@ export default function AdminAttendance() {
         {/* Table */}
         <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
           {loading ? (
-            <div className="flex items-center justify-center py-20 text-slate-400 text-sm">Loading records...</div>
+            <TableRowsSkeleton rows={6} className="p-6" />
           ) : filtered.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-20 gap-3 text-slate-400">
               <CalendarCheck className="w-10 h-10 opacity-30" />

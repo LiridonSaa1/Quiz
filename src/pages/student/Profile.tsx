@@ -4,6 +4,7 @@ import { User, Mail, Shield, Save, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
 import StudentLayout from '../../components/layout/StudentLayout';
 import { UserProfile } from '../../types';
+import { LayoutPageSkeleton } from '../../components/ui/Skeleton';
 
 export default function StudentProfile() {
   const [profile, setProfile] = useState<UserProfile | null>(null);
@@ -74,9 +75,7 @@ export default function StudentProfile() {
   if (loading) {
     return (
       <StudentLayout>
-        <div className="flex items-center justify-center h-64">
-          <Loader2 className="w-8 h-8 animate-spin text-blue-600" />
-        </div>
+        <LayoutPageSkeleton cards={2} rows={4} />
       </StudentLayout>
     );
   }

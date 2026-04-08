@@ -8,6 +8,7 @@ import {
   Info, Zap, Send, FileText, Archive, Clock
 } from 'lucide-react';
 import { cn } from '../../lib/utils';
+import { TableRowsSkeleton } from '../../components/ui/Skeleton';
 
 type Audience = 'all' | 'students' | 'teachers';
 type Priority  = 'normal' | 'important' | 'urgent';
@@ -214,8 +215,8 @@ export default function AdminAnnouncements() {
         {/* Announcements List */}
         <div className="space-y-3">
           {loading ? (
-            <div className="bg-white rounded-2xl border border-slate-100 shadow-sm flex items-center justify-center h-48">
-              <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-indigo-600" />
+            <div className="bg-white rounded-2xl border border-slate-100 shadow-sm">
+              <TableRowsSkeleton rows={4} />
             </div>
           ) : filtered.length === 0 ? (
             <div className="bg-white rounded-2xl border border-slate-100 shadow-sm flex flex-col items-center justify-center h-48 text-slate-400">

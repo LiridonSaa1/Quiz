@@ -9,6 +9,7 @@ import {
   Award, Users, BarChart3, Minus
 } from 'lucide-react';
 import { cn } from '../../lib/utils';
+import { TableRowsSkeleton } from '../../components/ui/Skeleton';
 
 type ReportType = 'students' | 'courses' | 'quizzes';
 
@@ -195,9 +196,7 @@ export default function AdminReports() {
           </div>
 
           {loading ? (
-            <div className="flex items-center justify-center h-48">
-              <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-indigo-600" />
-            </div>
+            <TableRowsSkeleton rows={6} className="p-6" />
           ) : (
             <div className="overflow-x-auto">
 

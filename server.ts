@@ -1,3 +1,4 @@
+import "dotenv/config";
 import express from "express";
 import { createServer as createViteServer } from "vite";
 import path from "path";
@@ -42,9 +43,131 @@ const supabaseAdmin = new Proxy({} as any, {
 
 async function startServer() {
   const app = express();
-  const PORT = 5000;
+  const parsedPort = Number(process.env.PORT);
+  const preferredPort = Number.isInteger(parsedPort) && parsedPort > 0 ? parsedPort : 5000;
+  const preferredHost = process.env.HOST || "127.0.0.1";
+  const hostCandidates = preferredHost === "127.0.0.1" ? [preferredHost] : [preferredHost, "127.0.0.1"];
+  const maxPortAttempts = 10;
+  const recoverableListenErrors = new Set(["EACCES", "EADDRINUSE"]);
 
   app.use(express.json());
+
+  const COURSE_MUTABLE_KEYS = new Set([
+    "teacher_id",
+    "title",
+    "description",
+    "short_description",
+    "language",
+    "level",
+    "price",
+    "is_free",
+    "status",
+    "thumbnail",
+    "student_ids",
+    "total_lessons",
+    "total_students",
+    "certificate_enabled",
+    "gradient",
+    "category",
+    "updated_at",
+  ]);
+
+  const sanitizeCoursePayload = (payload: any) => {
+    const sanitized: Record<string, any> = {};
+    if (!payload || typeof payload !== "object") return sanitized;
+
+    Object.keys(payload).forEach((key) => {
+      if (COURSE_MUTABLE_KEYS.has(key) && payload[key] !== undefined) {
+        sanitized[key] = payload[key];
+      }
+    });
+
+    return sanitized;
+  };
+
+  const normalizeTeacherId = (value: unknown) =>
+    typeof value === "string" ? value.trim() : "";
+
+  const toFiniteNumber = (value: unknown, fallback = 0) => {
+    const n = typeof value === "number" ? value : Number(value);
+    return Number.isFinite(n) ? n : fallback;
+  };
+
+  const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
+
+  const toAttemptPercent = (scoreValue: unknown, totalPointsValue: unknown) => {
+    const score = toFiniteNumber(scoreValue, 0);
+    const totalPoints = toFiniteNumber(totalPointsValue, 0);
+    if (totalPoints > 0) return clamp(Math.round((score / totalPoints) * 100), 0, 100);
+    if (score >= 0 && score <= 1) return clamp(Math.round(score * 100), 0, 100);
+    return clamp(Math.round(score), 0, 100);
+  };
+
+  const isAttemptsTableMissing = (error: any) => {
+    const haystack = `${error?.message || ""} ${error?.details || ""}`.toLowerCase();
+    return (
+      (error?.code === "PGRST205" && haystack.includes("public.attempts")) ||
+      (error?.code === "42P01" && haystack.includes("attempts")) ||
+      haystack.includes("could not find the table 'public.attempts'")
+    );
+  };
+
+  const normalizeAttempts = (rows: any[], passingScoreByQuiz: Record<string, number> = {}) => {
+    return (rows || []).map((row: any) => {
+      const rawScore = toFiniteNumber(row?.score, 0);
+      const totalPointsRaw = toFiniteNumber(row?.total_points, 0);
+      const totalPoints = totalPointsRaw > 0 ? totalPointsRaw : 100;
+      const scorePercent = toAttemptPercent(rawScore, totalPointsRaw);
+      const score = totalPointsRaw > 0 ? rawScore : Math.round((scorePercent / 100) * totalPoints);
+      const quizId = row?.quiz_id ? String(row.quiz_id) : "";
+      const passingScore = passingScoreByQuiz[quizId] ?? 50;
+      const passed = typeof row?.passed === "boolean" ? row.passed : scorePercent >= passingScore;
+      return {
+        ...row,
+        id: row?.id ? String(row.id) : "",
+        quiz_id: quizId,
+        student_id: row?.student_id ? String(row.student_id) : "",
+        score,
+        total_points: totalPoints,
+        score_percent: scorePercent,
+        passed,
+        status: row?.status || ((row?.completed_at || row?.created_at) ? "completed" : "in_progress"),
+        started_at: row?.started_at || row?.created_at || null,
+        completed_at: row?.completed_at || row?.created_at || row?.started_at || null,
+        created_at: row?.created_at || row?.completed_at || row?.started_at || null,
+      };
+    });
+  };
+
+  const fetchAllAttemptRows = async () => {
+    const legacy = await supabaseAdmin.from("attempts").select("*");
+    if (!legacy.error) return legacy.data || [];
+    if (!isAttemptsTableMissing(legacy.error)) throw legacy.error;
+
+    const modern = await supabaseAdmin.from("quiz_attempts").select("*");
+    if (modern.error) throw modern.error;
+    return modern.data || [];
+  };
+
+  const getTeacherIdCandidates = async (teacherId: string) => {
+    const candidates = new Set<string>();
+    if (teacherId) candidates.add(teacherId);
+
+    const { data: teacherRows, error: teacherLookupError } = await supabaseAdmin
+      .from("teachers")
+      .select("id, user_id")
+      .or(`id.eq.${teacherId},user_id.eq.${teacherId}`)
+      .limit(2);
+
+    if (teacherLookupError) throw teacherLookupError;
+
+    (teacherRows || []).forEach((row: any) => {
+      if (row?.id) candidates.add(String(row.id));
+      if (row?.user_id) candidates.add(String(row.user_id));
+    });
+
+    return [...candidates];
+  };
 
   // API routes FIRST
   app.get("/api/health", async (req, res) => {
@@ -131,13 +254,24 @@ async function startServer() {
   // Route to fetch all teachers (bypasses RLS using service role)
   app.get("/api/admin/teachers", async (req, res) => {
     try {
-      const { data, error } = await supabaseAdmin
-        .from('profiles')
-        .select('*')
-        .eq('role', 'teacher');
-      if (error) throw error;
-      const teachers = (data || []).map((p: any) => ({
+      const [profilesRes, teachersRes] = await Promise.all([
+        supabaseAdmin.from("profiles").select("*").eq("role", "teacher"),
+        supabaseAdmin.from("teachers").select("id, user_id"),
+      ]);
+
+      if (profilesRes.error) throw profilesRes.error;
+      if (teachersRes.error) throw teachersRes.error;
+
+      const teacherIdByUserId: Record<string, string> = {};
+      (teachersRes.data || []).forEach((t: any) => {
+        if (t?.user_id && t?.id) {
+          teacherIdByUserId[t.user_id] = t.id;
+        }
+      });
+
+      const teachers = (profilesRes.data || []).map((p: any) => ({
         uid: p.id,
+        teacherId: teacherIdByUserId[p.id] || null,
         email: p.email,
         displayName: p.display_name,
         role: p.role,
@@ -254,15 +388,60 @@ async function startServer() {
   // Route to create a course (bypasses RLS using service role)
   app.post("/api/admin/create-course", async (req, res) => {
     try {
+      const requestedTeacherId = normalizeTeacherId(req.body.teacher_id);
+      if (!requestedTeacherId) {
+        return res.status(400).json({ error: "teacher_id is required." });
+      }
+
+      const teacherIdCandidates = await getTeacherIdCandidates(requestedTeacherId);
+      if (teacherIdCandidates.length === 0) {
+        return res.status(400).json({ error: "Selected teacher was not found." });
+      }
+
       const baseSlug = (req.body.title || 'course')
         .toLowerCase().trim()
         .replace(/[^a-z0-9]+/g, '-')
         .replace(/^-|-$/g, '');
       const slug = `${baseSlug}-${Date.now()}`;
-      const payload = { ...req.body, slug, created_at: new Date().toISOString() };
-      const { data, error } = await supabaseAdmin.from('courses').insert(payload).select().single();
-      if (error) throw error;
-      res.json({ success: true, course: data });
+      const payloadBase = {
+        ...sanitizeCoursePayload(req.body),
+        slug,
+        created_at: new Date().toISOString(),
+      };
+
+      let createdCourse: any = null;
+      let lastForeignKeyError: any = null;
+
+      for (const teacherId of teacherIdCandidates) {
+        const payload = { ...payloadBase, teacher_id: teacherId };
+        const { data, error } = await supabaseAdmin.from("courses").insert(payload).select().single();
+        if (!error) {
+          createdCourse = data;
+          break;
+        }
+
+        const isTeacherFkError =
+          error.code === "23503" &&
+          typeof error.message === "string" &&
+          error.message.includes("courses_teacher_id_fkey");
+
+        if (!isTeacherFkError) {
+          throw error;
+        }
+
+        lastForeignKeyError = error;
+      }
+
+      if (!createdCourse) {
+        if (lastForeignKeyError) {
+          return res.status(400).json({
+            error: "Selected teacher is invalid for courses. Please re-select a teacher and try again.",
+          });
+        }
+        throw new Error("Could not create course for the selected teacher.");
+      }
+
+      res.json({ success: true, course: createdCourse });
     } catch (error: any) {
       console.error('Error creating course:', error);
       res.status(500).json({ error: error.message });
@@ -273,7 +452,70 @@ async function startServer() {
   app.patch("/api/admin/update-course/:id", async (req, res) => {
     try {
       const { id } = req.params;
-      const { data, error } = await supabaseAdmin.from('courses').update(req.body).eq('id', id).select().single();
+      const updates = sanitizeCoursePayload(req.body);
+
+      if (Object.keys(updates).length === 0) {
+        return res.status(400).json({ error: "No valid course fields provided for update." });
+      }
+
+      if (Object.prototype.hasOwnProperty.call(updates, "teacher_id")) {
+        const requestedTeacherId = normalizeTeacherId(updates.teacher_id);
+        if (!requestedTeacherId) {
+          return res.status(400).json({ error: "teacher_id cannot be empty." });
+        }
+
+        const teacherIdCandidates = await getTeacherIdCandidates(requestedTeacherId);
+        if (teacherIdCandidates.length === 0) {
+          return res.status(400).json({ error: "Selected teacher was not found." });
+        }
+
+        let updatedCourse: any = null;
+        let lastForeignKeyError: any = null;
+
+        for (const teacherId of teacherIdCandidates) {
+          const candidateUpdates = { ...updates, teacher_id: teacherId };
+          const { data, error } = await supabaseAdmin
+            .from("courses")
+            .update(candidateUpdates)
+            .eq("id", id)
+            .select()
+            .single();
+
+          if (!error) {
+            updatedCourse = data;
+            break;
+          }
+
+          const isTeacherFkError =
+            error.code === "23503" &&
+            typeof error.message === "string" &&
+            error.message.includes("courses_teacher_id_fkey");
+
+          if (!isTeacherFkError) {
+            throw error;
+          }
+
+          lastForeignKeyError = error;
+        }
+
+        if (!updatedCourse) {
+          if (lastForeignKeyError) {
+            return res.status(400).json({
+              error: "Selected teacher is invalid for courses. Please re-select a teacher and try again.",
+            });
+          }
+          throw new Error("Could not update course teacher.");
+        }
+
+        return res.json({ success: true, course: updatedCourse });
+      }
+
+      const { data, error } = await supabaseAdmin
+        .from("courses")
+        .update(updates)
+        .eq("id", id)
+        .select()
+        .single();
       if (error) throw error;
       res.json({ success: true, course: data });
     } catch (error: any) {
@@ -477,31 +719,39 @@ async function startServer() {
   // ── ANALYTICS ──────────────────────────────────────────────
   app.get('/api/admin/analytics', async (req, res) => {
     try {
-      const [profilesRes, coursesRes, quizzesRes, attemptsRes, certsRes, assignmentsRes, lessonsRes, attendanceRes] = await Promise.all([
+      const [profilesRes, coursesRes, quizzesRes, certsRes, assignmentsRes, lessonsRes, attendanceRes] = await Promise.all([
         supabaseAdmin.from('profiles').select('id, role, created_at, status'),
         supabaseAdmin.from('courses').select('id, category, status, created_at, total_students, level'),
         supabaseAdmin.from('quizzes').select('id, title, created_at, published'),
-        supabaseAdmin.from('attempts').select('id, score, total_points, status, correct_answers, total_questions, started_at, completed_at, quiz_id, student_id'),
         supabaseAdmin.from('certificates').select('id, status, created_at'),
         supabaseAdmin.from('assignments').select('id, status, created_at'),
         supabaseAdmin.from('lessons').select('id, created_at, type'),
         supabaseAdmin.from('attendance').select('id, status, date'),
       ]);
 
+      if (profilesRes.error) throw profilesRes.error;
+      if (coursesRes.error) throw coursesRes.error;
+      if (quizzesRes.error) throw quizzesRes.error;
+      if (certsRes.error) throw certsRes.error;
+      if (assignmentsRes.error) throw assignmentsRes.error;
+      if (lessonsRes.error) throw lessonsRes.error;
+      if (attendanceRes.error) throw attendanceRes.error;
+
       const profiles = profilesRes.data || [];
       const courses = coursesRes.data || [];
       const quizzes = quizzesRes.data || [];
-      const attempts = attemptsRes.data || [];
       const certs = certsRes.data || [];
       const assignments = assignmentsRes.data || [];
       const lessons = lessonsRes.data || [];
       const attendance = attendanceRes.data || [];
 
+      const attempts = normalizeAttempts(await fetchAllAttemptRows());
+
       const completedAttempts = attempts.filter(a => a.status === 'completed');
-      const passedAttempts = completedAttempts.filter(a => a.total_points > 0 && (a.score / a.total_points) >= 0.5);
+      const passedAttempts = completedAttempts.filter(a => a.passed);
       const passRate = completedAttempts.length > 0 ? Math.round((passedAttempts.length / completedAttempts.length) * 100) : 0;
       const avgScore = completedAttempts.length > 0
-        ? Math.round(completedAttempts.reduce((sum, a) => sum + (a.total_points > 0 ? (a.score / a.total_points) * 100 : 0), 0) / completedAttempts.length)
+        ? Math.round(completedAttempts.reduce((sum, a) => sum + a.score_percent, 0) / completedAttempts.length)
         : 0;
 
       // Last 30 days trend
@@ -543,7 +793,7 @@ async function startServer() {
       // Score distribution
       const buckets: Record<string, number> = { '0-20': 0, '21-40': 0, '41-60': 0, '61-80': 0, '81-100': 0 };
       completedAttempts.forEach(a => {
-        const pct = a.total_points > 0 ? (a.score / a.total_points) * 100 : 0;
+        const pct = a.score_percent;
         if (pct <= 20) buckets['0-20']++;
         else if (pct <= 40) buckets['21-40']++;
         else if (pct <= 60) buckets['41-60']++;
@@ -587,15 +837,18 @@ async function startServer() {
   // ── REPORTS ─────────────────────────────────────────────────
   app.get('/api/admin/reports/students', async (req, res) => {
     try {
-      const [studentsRes, attemptsRes, certsRes, enrollmentsRes] = await Promise.all([
+      const [studentsRes, certsRes, enrollmentsRes] = await Promise.all([
         supabaseAdmin.from('profiles').select('id, display_name, email, status, created_at').eq('role', 'student'),
-        supabaseAdmin.from('attempts').select('student_id, score, total_points, status, started_at'),
         supabaseAdmin.from('certificates').select('student_id, status'),
         supabaseAdmin.from('courses').select('id, student_ids'),
       ]);
 
+      if (studentsRes.error) throw studentsRes.error;
+      if (certsRes.error) throw certsRes.error;
+      if (enrollmentsRes.error) throw enrollmentsRes.error;
+
       const students = studentsRes.data || [];
-      const attempts = attemptsRes.data || [];
+      const attempts = normalizeAttempts(await fetchAllAttemptRows());
       const certs = certsRes.data || [];
       const courses = enrollmentsRes.data || [];
 
@@ -609,7 +862,7 @@ async function startServer() {
       const report = students.map(s => {
         const myAttempts = attempts.filter(a => a.student_id === s.id && a.status === 'completed');
         const avgScore = myAttempts.length > 0
-          ? Math.round(myAttempts.reduce((sum, a) => sum + (a.total_points > 0 ? (a.score / a.total_points) * 100 : 0), 0) / myAttempts.length)
+          ? Math.round(myAttempts.reduce((sum, a) => sum + a.score_percent, 0) / myAttempts.length)
           : null;
         return {
           id: s.id,
@@ -631,12 +884,15 @@ async function startServer() {
 
   app.get('/api/admin/reports/courses', async (req, res) => {
     try {
-      const [coursesRes, attemptsRes, certsRes, lessonsRes] = await Promise.all([
+      const [coursesRes, certsRes, lessonsRes] = await Promise.all([
         supabaseAdmin.from('courses').select('id, title, category, level, status, created_at, total_students, teacher_id, student_ids'),
-        supabaseAdmin.from('attempts').select('quiz_id, score, total_points, status'),
         supabaseAdmin.from('certificates').select('course_id, status'),
         supabaseAdmin.from('lessons').select('course_id'),
       ]);
+
+      if (coursesRes.error) throw coursesRes.error;
+      if (certsRes.error) throw certsRes.error;
+      if (lessonsRes.error) throw lessonsRes.error;
 
       const courses = coursesRes.data || [];
       const certs = certsRes.data || [];
@@ -660,20 +916,25 @@ async function startServer() {
 
   app.get('/api/admin/reports/quizzes', async (req, res) => {
     try {
-      const [quizzesRes, attemptsRes] = await Promise.all([
-        supabaseAdmin.from('quizzes').select('id, title, published, created_at, settings, course_id'),
-        supabaseAdmin.from('attempts').select('quiz_id, score, total_points, status, student_id'),
-      ]);
+      const { data: quizzesData, error: quizzesError } = await supabaseAdmin
+        .from('quizzes')
+        .select('*');
+      if (quizzesError) throw quizzesError;
 
-      const quizzes = quizzesRes.data || [];
-      const attempts = attemptsRes.data || [];
+      const quizzes = quizzesData || [];
+      const passingScoreByQuiz = quizzes.reduce((acc: Record<string, number>, q: any) => {
+        const value = Number(q?.settings?.passingScore ?? q?.passing_score ?? q?.pass_mark ?? q?.passMark);
+        acc[q.id] = Number.isFinite(value) ? value : 50;
+        return acc;
+      }, {});
+      const attempts = normalizeAttempts(await fetchAllAttemptRows(), passingScoreByQuiz);
 
       const report = quizzes.map(q => {
         const myAttempts = attempts.filter(a => a.quiz_id === q.id);
         const completed = myAttempts.filter(a => a.status === 'completed');
-        const passed = completed.filter(a => a.total_points > 0 && (a.score / a.total_points) * 100 >= (q.settings?.passingScore || 50));
+        const passed = completed.filter(a => a.passed);
         const avgScore = completed.length > 0
-          ? Math.round(completed.reduce((sum, a) => sum + (a.total_points > 0 ? (a.score / a.total_points) * 100 : 0), 0) / completed.length)
+          ? Math.round(completed.reduce((sum, a) => sum + a.score_percent, 0) / completed.length)
           : null;
         const uniqueStudents = new Set(myAttempts.map(a => a.student_id)).size;
         return {
@@ -681,7 +942,7 @@ async function startServer() {
           title: q.title,
           published: q.published,
           createdAt: q.created_at,
-          passingScore: q.settings?.passingScore || 50,
+          passingScore: Number(q?.settings?.passingScore ?? q?.passing_score ?? q?.pass_mark ?? q?.passMark) || 50,
           totalAttempts: myAttempts.length,
           completedAttempts: completed.length,
           passedAttempts: passed.length,
@@ -861,9 +1122,48 @@ async function startServer() {
     });
   }
 
-  app.listen(PORT, "0.0.0.0", () => {
-    console.log(`Server running on http://localhost:${PORT}`);
-  });
+  const tryListen = (port: number, host: string) =>
+    new Promise<void>((resolve, reject) => {
+      const server = app.listen(port, host, () => {
+        const displayHost = host === "0.0.0.0" ? "localhost" : host;
+        console.log(`Server running on http://${displayHost}:${port}`);
+        resolve();
+      });
+      server.once("error", (error) => reject(error));
+    });
+
+  let lastRecoverableError: NodeJS.ErrnoException | null = null;
+
+  for (let portOffset = 0; portOffset < maxPortAttempts; portOffset++) {
+    const portToTry = preferredPort + portOffset;
+
+    for (const hostToTry of hostCandidates) {
+      try {
+        await tryListen(portToTry, hostToTry);
+        return;
+      } catch (error) {
+        const listenError = error as NodeJS.ErrnoException;
+        if (!listenError.code || !recoverableListenErrors.has(listenError.code)) {
+          throw listenError;
+        }
+
+        lastRecoverableError = listenError;
+        const triedFinalCandidate =
+          portOffset === maxPortAttempts - 1 &&
+          hostToTry === hostCandidates[hostCandidates.length - 1];
+
+        if (!triedFinalCandidate) {
+          console.warn(
+            `Could not bind to ${hostToTry}:${portToTry} (${listenError.code}). Trying another address...`,
+          );
+        }
+      }
+    }
+  }
+
+  throw new Error(
+    `Unable to start server after trying ports ${preferredPort}-${preferredPort + maxPortAttempts - 1}. Last error: ${lastRecoverableError?.code ?? "unknown"}`,
+  );
 }
 
 startServer();

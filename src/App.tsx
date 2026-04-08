@@ -3,6 +3,7 @@ import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-d
 import { Toaster, toast } from 'sonner';
 import { supabase } from './supabase';
 import { UserProfile } from './types';
+import { AppBootSkeleton } from './components/ui/Skeleton';
 
 // Pages
 import Login from './pages/Login';
@@ -28,7 +29,6 @@ import TeacherAssignments from './pages/teacher/Assignments';
 import TeacherAttendance from './pages/teacher/Attendance';
 import TeacherCertificates from './pages/teacher/Certificates';
 import TeacherLiveSessions from './pages/teacher/LiveSessions';
-import TeacherLiveSessionRoom from './pages/teacher/LiveSessionRoom';
 import TeacherCommunity from './pages/teacher/Community';
 import TeacherAnnouncements from './pages/teacher/Announcements';
 import TeacherProgress from './pages/teacher/Progress';
@@ -54,18 +54,7 @@ import AdminRoles from './pages/admin/Roles';
 import AdminProfile from './pages/admin/Profile';
 import AdminSecurityPage from './pages/admin/Security';
 import StudentDashboard from './pages/student/Dashboard';
-import StudentCourses from './pages/student/Courses';
-import ContinueLearning from './pages/student/ContinueLearning';
-import StudentQuizzes from './pages/student/Quizzes';
-import StudentLessons from './pages/student/Lessons';
-import StudentAssignments from './pages/student/Assignments';
-import StudentProgress from './pages/student/Progress';
-import StudentResults from './pages/student/Results';
-import StudentCertificates from './pages/student/Certificates';
-import StudentCommunity from './pages/student/Community';
-import StudentLiveClasses from './pages/student/LiveClasses';
-import StudentExams from './pages/student/Exams';
-import TeacherExams from './pages/teacher/Exams';
+import NotFound from './pages/NotFound';
 
 export default function App() {
   const [user, setUser] = useState<UserProfile | null>(null);
@@ -141,19 +130,7 @@ export default function App() {
   };
 
   if (loading) {
-    return (
-      <div className="flex items-center justify-center min-h-screen bg-slate-50">
-        <div className="flex flex-col items-center gap-4">
-          <div className="w-10 h-10 bg-indigo-600 rounded-xl flex items-center justify-center animate-pulse">
-            <svg className="w-5 h-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 14l9-5-9-5-9 5 9 5z" />
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 14l6.16-3.422a12.083 12.083 0 01.665 6.479A11.952 11.952 0 0012 20.055a11.952 11.952 0 00-6.824-2.998 12.078 12.078 0 01.665-6.479L12 14z" />
-            </svg>
-          </div>
-          <div className="text-slate-500 text-sm font-medium">Loading QuizMaster...</div>
-        </div>
-      </div>
-    );
+    return <AppBootSkeleton />;
   }
 
   return (
@@ -161,6 +138,7 @@ export default function App() {
       <Toaster position="top-right" richColors />
       <Routes>
         <Route path="/login" element={!user ? <Login /> : <Navigate to="/" />} />
+        <Route path="/not-found" element={<NotFound />} />
         <Route path="/" element={
           user ? (
             user.role === 'admin' ? <Navigate to="/admin" /> :
@@ -171,6 +149,7 @@ export default function App() {
         <Route path="/admin/*" element={user?.role === 'admin' ? <AdminRoutes /> : <Navigate to="/login" />} />
         <Route path="/teacher/*" element={user?.role === 'teacher' ? <TeacherRoutes /> : <Navigate to="/login" />} />
         <Route path="/student/*" element={user?.role === 'student' ? <StudentRoutes /> : <Navigate to="/login" />} />
+        <Route path="*" element={<Navigate to="/not-found" replace />} />
       </Routes>
     </Router>
   );
@@ -206,6 +185,7 @@ function AdminRoutes() {
       <Route path="/roles" element={<AdminRoles />} />
       <Route path="/profile" element={<AdminProfile />} />
       <Route path="/security" element={<AdminSecurityPage />} />
+      <Route path="*" element={<Navigate to="/not-found" replace />} />
     </Routes>
   );
 }
@@ -230,10 +210,10 @@ function TeacherRoutes() {
       <Route path="/attendance" element={<TeacherAttendance />} />
       <Route path="/certificates" element={<TeacherCertificates />} />
       <Route path="/live-sessions" element={<TeacherLiveSessions />} />
-      <Route path="/live-sessions/:id/room" element={<TeacherLiveSessionRoom />} />
       <Route path="/community" element={<TeacherCommunity />} />
       <Route path="/announcements" element={<TeacherAnnouncements />} />
       <Route path="/progress" element={<TeacherProgress />} />
+      <Route path="*" element={<Navigate to="/not-found" replace />} />
     </Routes>
   );
 }
@@ -256,6 +236,7 @@ function StudentRoutes() {
       <Route path="/quiz/:quizId" element={<QuizTaking />} />
       <Route path="/results/:attemptId" element={<QuizResults />} />
       <Route path="/profile" element={<StudentProfile />} />
+      <Route path="*" element={<Navigate to="/not-found" replace />} />
     </Routes>
   );
 }

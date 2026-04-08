@@ -11,6 +11,7 @@ import {
   CalendarCheck, BarChart3, RefreshCw, Layers
 } from 'lucide-react';
 import { cn } from '../../lib/utils';
+import { LayoutPageSkeleton } from '../../components/ui/Skeleton';
 
 interface Overview {
   totalStudents: number; activeStudents: number; totalTeachers: number;
@@ -95,9 +96,7 @@ export default function AdminAnalytics() {
   if (loading) {
     return (
       <AdminLayout>
-        <div className="flex items-center justify-center h-64">
-          <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-indigo-600" />
-        </div>
+        <LayoutPageSkeleton />
       </AdminLayout>
     );
   }

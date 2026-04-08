@@ -8,6 +8,7 @@ import {
 } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { format, isPast, isToday } from 'date-fns';
+import { TableRowsSkeleton } from '../../components/ui/Skeleton';
 
 type AssignmentStatus = 'draft' | 'published' | 'closed';
 type AssignmentType = 'homework' | 'project' | 'essay' | 'quiz' | 'lab' | 'other';
@@ -273,7 +274,7 @@ export default function AdminAssignments() {
         {/* Table */}
         <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
           {loading ? (
-            <div className="flex items-center justify-center py-20 text-slate-400 text-sm">Loading assignments...</div>
+            <TableRowsSkeleton rows={6} className="p-6" />
           ) : filtered.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-20 gap-3 text-slate-400">
               <ClipboardList className="w-10 h-10 opacity-30" />

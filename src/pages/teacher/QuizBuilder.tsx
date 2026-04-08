@@ -23,6 +23,7 @@ import { toast } from 'sonner';
 import { Quiz, Question, Course, QuestionType } from '../../types';
 import { cn } from '../../lib/utils';
 import { useNavigate, useParams } from 'react-router-dom';
+import { FormPageSkeleton } from '../../components/ui/Skeleton';
 
 export default function QuizBuilder() {
   const { quizId } = useParams();
@@ -211,7 +212,13 @@ export default function QuizBuilder() {
     }
   };
 
-  if (loading) return <div className="p-10 text-center">Loading...</div>;
+  if (loading) {
+    return (
+      <TeacherLayout>
+        <FormPageSkeleton />
+      </TeacherLayout>
+    );
+  }
 
   return (
     <TeacherLayout>
