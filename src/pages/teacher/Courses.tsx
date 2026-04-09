@@ -353,37 +353,71 @@ function TeacherCourseCard({ course, gradient, onEdit, onDelete, onToggleStatus 
   const name = course.name || course.title || 'Untitled';
   const students = course.student_ids?.length || course.total_students || 0;
   const isPublished = course.status === 'published';
+
   return (
-    <div className="bg-white rounded-2xl border border-slate-100 shadow-sm hover:shadow-lg transition-all group overflow-hidden flex flex-col">
-      <div className={`relative h-36 bg-gradient-to-br ${gradient} p-5 flex flex-col justify-between`}>
-        <div className="flex items-start justify-between">
-          <div className="p-2.5 bg-white/20 backdrop-blur-sm rounded-xl">
-            <BookOpen className="w-5 h-5 text-white" />
-          </div>
-          <span className={`text-[10px] font-bold uppercase tracking-wider px-2.5 py-1 rounded-lg ${isPublished ? 'bg-emerald-500/30 text-white border border-emerald-400/30' : 'bg-white/20 text-white border border-white/20'}`}>
-            {course.status || 'draft'}
-          </span>
+    <div className="bg-white border border-violet-100 rounded-2xl p-4 shadow-sm hover:shadow-md hover:border-violet-200 transition-all group flex flex-col gap-3">
+
+      {/* Top row: icon + title + status */}
+      <div className="flex items-start gap-3">
+        <div className={`w-10 h-10 rounded-xl bg-gradient-to-br ${gradient} flex items-center justify-center shrink-0 shadow-sm`}>
+          <BookOpen className="w-[18px] h-[18px] text-white" />
         </div>
-        {course.level && <span className="text-[10px] font-semibold bg-white/20 text-white px-2 py-0.5 rounded-md w-fit">{course.level}</span>}
-        <div className="absolute top-3 right-3 flex gap-1.5 opacity-0 group-hover:opacity-100 transition-all">
-          <button onClick={onToggleStatus} className={`p-1.5 rounded-lg backdrop-blur-sm text-white transition-all ${isPublished ? 'bg-amber-500/40 hover:bg-amber-500/70' : 'bg-emerald-500/40 hover:bg-emerald-500/70'}`}>
-            {isPublished ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
-          </button>
-          <button onClick={onEdit} className="p-1.5 bg-white/20 hover:bg-white/40 backdrop-blur-sm rounded-lg text-white transition-all"><Edit2 className="w-3.5 h-3.5" /></button>
-          <button onClick={onDelete} className="p-1.5 bg-red-500/30 hover:bg-red-500/60 backdrop-blur-sm rounded-lg text-white transition-all"><Trash2 className="w-3.5 h-3.5" /></button>
+        <div className="flex-1 min-w-0">
+          <h3 className="font-bold text-slate-900 text-sm leading-tight line-clamp-1">{name}</h3>
+          <p className="text-slate-400 text-xs mt-0.5 line-clamp-2 leading-relaxed">{course.description || 'No description provided.'}</p>
         </div>
+        <span className={`shrink-0 inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-wide px-2 py-0.5 rounded-full ${
+          isPublished ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-700'
+        }`}>
+          <span className={`w-1.5 h-1.5 rounded-full ${isPublished ? 'bg-emerald-500' : 'bg-amber-400'}`} />
+          {course.status || 'draft'}
+        </span>
       </div>
-      <div className="p-5 flex flex-col flex-1">
-        <h3 className="font-bold text-slate-900 text-sm line-clamp-1 mb-1">{name}</h3>
-        <p className="text-slate-400 text-xs line-clamp-2 mb-4 leading-relaxed flex-1">{course.description || 'No description provided.'}</p>
-        <div className="flex items-center justify-between pt-4 border-t border-slate-50">
-          <div className="flex items-center gap-3 text-xs text-slate-400">
-            <span className="flex items-center gap-1"><Users className="w-3.5 h-3.5" />{students}</span>
-            {course.language && <span className="flex items-center gap-1"><Globe className="w-3.5 h-3.5" />{course.language}</span>}
-            {course.certificate_enabled && <span className="flex items-center gap-1 text-amber-600"><Award className="w-3.5 h-3.5" /></span>}
-          </div>
-          <button onClick={onEdit} className="text-xs font-semibold text-violet-600 hover:text-violet-700 px-2.5 py-1.5 hover:bg-violet-50 rounded-lg transition-all">Edit</button>
-        </div>
+
+      {/* Meta pills */}
+      <div className="flex flex-wrap gap-1.5">
+        {course.level && (
+          <span className="text-[10px] font-semibold bg-violet-50 text-violet-600 border border-violet-100 px-2 py-0.5 rounded-full">{course.level}</span>
+        )}
+        {course.language && (
+          <span className="inline-flex items-center gap-1 text-[10px] font-medium bg-slate-50 text-slate-500 border border-slate-100 px-2 py-0.5 rounded-full">
+            <Globe className="w-2.5 h-2.5" />{course.language}
+          </span>
+        )}
+        {course.certificate_enabled && (
+          <span className="inline-flex items-center gap-1 text-[10px] font-medium bg-amber-50 text-amber-600 border border-amber-100 px-2 py-0.5 rounded-full">
+            <Award className="w-2.5 h-2.5" />Certificate
+          </span>
+        )}
+        <span className="inline-flex items-center gap-1 text-[10px] font-medium bg-slate-50 text-slate-500 border border-slate-100 px-2 py-0.5 rounded-full ml-auto">
+          <Users className="w-2.5 h-2.5" />{students} students
+        </span>
+      </div>
+
+      {/* Action row */}
+      <div className="flex items-center gap-1.5 pt-1 border-t border-violet-50">
+        <button
+          onClick={onEdit}
+          className="flex-1 flex items-center justify-center gap-1.5 py-1.5 text-xs font-semibold text-violet-600 hover:bg-violet-50 rounded-lg transition-colors"
+        >
+          <Edit2 className="w-3.5 h-3.5" /> Edit
+        </button>
+        <button
+          onClick={onToggleStatus}
+          className={`flex items-center justify-center gap-1.5 py-1.5 px-2.5 text-xs font-semibold rounded-lg transition-colors ${
+            isPublished
+              ? 'text-amber-600 hover:bg-amber-50'
+              : 'text-emerald-600 hover:bg-emerald-50'
+          }`}
+        >
+          {isPublished ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+        </button>
+        <button
+          onClick={onDelete}
+          className="flex items-center justify-center gap-1.5 py-1.5 px-2.5 text-xs font-semibold text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+        >
+          <Trash2 className="w-3.5 h-3.5" />
+        </button>
       </div>
     </div>
   );
