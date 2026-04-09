@@ -45,8 +45,8 @@ async function startServer() {
   const app = express();
   const parsedPort = Number(process.env.PORT);
   const preferredPort = Number.isInteger(parsedPort) && parsedPort > 0 ? parsedPort : 5000;
-  const preferredHost = process.env.HOST || "127.0.0.1";
-  const hostCandidates = preferredHost === "127.0.0.1" ? [preferredHost] : [preferredHost, "127.0.0.1"];
+  const preferredHost = process.env.HOST || "0.0.0.0";
+  const hostCandidates = preferredHost === "0.0.0.0" ? [preferredHost] : [preferredHost, "0.0.0.0"];
   const maxPortAttempts = 10;
   const recoverableListenErrors = new Set(["EACCES", "EADDRINUSE"]);
 
