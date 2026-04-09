@@ -221,7 +221,7 @@ export default function TeacherLayout({ children }: { children: React.ReactNode 
 
       {/* Main */}
       <main className="flex-1 lg:ml-60 pt-14 min-h-screen">
-        <div className="px-4 sm:px-6 lg:px-8 py-7 max-w-[1400px] mx-auto">
+        <div className="px-4 sm:px-6 lg:px-8 py-7">
           {children}
         </div>
       </main>
