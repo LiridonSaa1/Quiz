@@ -4,11 +4,13 @@ import { supabase } from '../../supabase';
 import TeacherLayout from '../../components/layout/TeacherLayout';
 import {
   Plus, Search, BookOpen, Users, Globe, Eye, EyeOff,
-  LayoutGrid, List, Edit2, Trash2, Award, Layers, AlertTriangle
+  LayoutGrid, List, Edit2, Trash2, Award, AlertTriangle
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { resolveTeacherIdCandidates } from '../../lib/teacherScope';
 import { apiUrl } from '../../lib/apiUrl';
+import { AIPanel, AITriggerButton } from '../../components/AIPanel';
+import { generateCourseData } from '../../lib/gemini';
 
 const GRADIENT_PALETTES = [
   'from-indigo-500 to-violet-600',
@@ -35,7 +37,13 @@ export default function TeacherCourses() {
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
   const [courseToDelete, setCourseToDelete] = useState<{ id: string; title: string } | null>(null);
   const [deleting, setDeleting] = useState(false);
+  const [aiOpen, setAiOpen] = useState(false);
   const navigate = useNavigate();
+
+  const handleAICreate = async (input: string) => {
+    const aiData = await generateCourseData(input);
+    navigate('/teacher/courses/new', { state: { aiData } });
+  };
 
   const fetchCourses = async () => {
     setLoading(true);
@@ -179,12 +187,25 @@ export default function TeacherCourses() {
             <h1 className="text-2xl font-bold text-slate-900">My Courses</h1>
             <p className="text-slate-500 text-sm mt-1">Build and manage your educational courses.</p>
           </div>
-          <Link to="/teacher/courses/new"
-            className="inline-flex items-center gap-2 px-5 py-2.5 bg-violet-600 text-white rounded-xl font-semibold text-sm hover:bg-violet-700 transition-all shadow-lg shadow-violet-200 active:scale-[0.98]">
-            <Plus className="w-4 h-4" />
-            New Course
-          </Link>
+          <div className="flex items-center gap-2">
+            <AITriggerButton onClick={() => setAiOpen(true)} label="AI Create" />
+            <Link to="/teacher/courses/new"
+              className="inline-flex items-center gap-2 px-5 py-2.5 bg-slate-900 text-white rounded-xl font-semibold text-sm hover:bg-slate-800 transition-all shadow-lg shadow-slate-200 active:scale-[0.98]">
+              <Plus className="w-4 h-4" />
+              New Course
+            </Link>
+          </div>
         </div>
+
+        <AIPanel
+          open={aiOpen}
+          onClose={() => setAiOpen(false)}
+          label="AI Course Creator"
+          description="Describe your course — AI will fill the form automatically"
+          placeholder='e.g. "Create an intermediate JavaScript course for web developers covering async/await, APIs, and DOM manipulation, with tags and free access"'
+          buttonLabel="Create Course"
+          onSubmit={handleAICreate}
+        />
 
         {/* Stats */}
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">

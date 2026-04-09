@@ -1,16 +1,18 @@
 import React, { useEffect, useState } from 'react';
-import { useNavigate, useParams, Link } from 'react-router-dom';
+import { useNavigate, useParams, useLocation, Link } from 'react-router-dom';
 import { supabase } from '../../supabase';
 import TeacherLayout from '../../components/layout/TeacherLayout';
 import {
   ChevronRight, BookOpen, Globe, Save, Send, Check,
-  X, Plus, Award, Settings2, Image, Type, BarChart2
+  X, Plus, Award, Settings2, Image, Type, BarChart2, Sparkles
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { FormPageSkeleton } from '../../components/ui/Skeleton';
 import StyledSelect from '../../components/ui/StyledSelect';
 import { resolveTeacherIdCandidates } from '../../lib/teacherScope';
 import { apiUrl } from '../../lib/apiUrl';
+import { AIPanel, AITriggerButton } from '../../components/AIPanel';
+import { generateCourseData } from '../../lib/gemini';
 
 const GRADIENTS = [
   { label: 'Indigo', value: 'from-indigo-500 to-violet-600' },
@@ -45,6 +47,7 @@ const initialForm = {
 export default function TeacherCourseForm() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  const location = useLocation();
   const isEditing = Boolean(id);
 
   const [form, setForm] = useState(initialForm);
@@ -52,8 +55,50 @@ export default function TeacherCourseForm() {
   const [saving, setSaving] = useState(false);
   const [activeTab, setActiveTab] = useState('basic');
   const [tagInput, setTagInput] = useState('');
+  const [aiOpen, setAiOpen] = useState(false);
 
   const set = (key: string, value: any) => setForm(prev => ({ ...prev, [key]: value }));
+
+  // Pre-fill from AI state passed via navigation (from Courses list page)
+  useEffect(() => {
+    const state = location.state as { aiData?: any } | null;
+    if (state?.aiData && !isEditing) {
+      const d = state.aiData;
+      setForm(prev => ({
+        ...prev,
+        name: d.name || prev.name,
+        description: d.description || prev.description,
+        short_description: d.short_description || prev.short_description,
+        language: d.language || prev.language,
+        level: d.level || prev.level,
+        category: d.category || prev.category,
+        tags: d.tags || prev.tags,
+        is_free: d.is_free ?? prev.is_free,
+        price: d.price ?? prev.price,
+      }));
+      toast.success('AI has pre-filled the form for you!');
+      // Clear the state so refreshing doesn't re-apply
+      window.history.replaceState({}, '');
+    }
+  }, []);
+
+  const handleAIFill = async (input: string) => {
+    const data = await generateCourseData(input);
+    setForm(prev => ({
+      ...prev,
+      name: data.name || prev.name,
+      description: data.description || prev.description,
+      short_description: data.short_description || prev.short_description,
+      language: data.language || prev.language,
+      level: data.level || prev.level,
+      category: data.category || prev.category,
+      tags: data.tags.length ? data.tags : prev.tags,
+      is_free: data.is_free,
+      price: data.price,
+    }));
+    toast.success('AI filled the form — review and adjust as needed!');
+    setActiveTab('basic');
+  };
 
   useEffect(() => {
     if (!isEditing || !id) return;
@@ -184,11 +229,27 @@ export default function TeacherCourseForm() {
           <div className="xl:col-span-2 space-y-5">
             <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
               <div className="h-1.5 bg-gradient-to-r from-violet-500 via-purple-500 to-fuchsia-500" />
-              <div className="p-5">
-                <h1 className="text-xl font-bold text-slate-900">{isEditing ? 'Edit Course' : 'Create New Course'}</h1>
-                <p className="text-slate-400 text-sm mt-0.5">{isEditing ? 'Update course details and settings.' : 'Fill in the details to create your course.'}</p>
+              <div className="p-5 flex items-center justify-between gap-4">
+                <div>
+                  <h1 className="text-xl font-bold text-slate-900">{isEditing ? 'Edit Course' : 'Create New Course'}</h1>
+                  <p className="text-slate-400 text-sm mt-0.5">{isEditing ? 'Update course details and settings.' : 'Fill in the details to create your course.'}</p>
+                </div>
+                <AITriggerButton
+                  onClick={() => setAiOpen(true)}
+                  label={isEditing ? 'AI Rewrite' : 'AI Fill'}
+                />
               </div>
             </div>
+
+            <AIPanel
+              open={aiOpen}
+              onClose={() => setAiOpen(false)}
+              label="AI Course Assistant"
+              description="Describe your course and AI will fill all the fields"
+              placeholder='e.g. "Create a beginner Python programming course for high school students covering variables, loops, and functions with free access"'
+              buttonLabel="Fill Course"
+              onSubmit={handleAIFill}
+            />
 
             <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
               <div className="flex border-b border-slate-100 bg-slate-50/50 px-2 pt-2 gap-1">

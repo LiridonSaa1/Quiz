@@ -24,10 +24,13 @@ import { Quiz, Question, Course, QuestionType } from '../../types';
 import { cn } from '../../lib/utils';
 import { useNavigate, useParams } from 'react-router-dom';
 import { FormPageSkeleton } from '../../components/ui/Skeleton';
+import { AIPanel, AITriggerButton } from '../../components/AIPanel';
+import { generateQuizQuestions } from '../../lib/gemini';
 
 export default function QuizBuilder() {
   const { quizId } = useParams();
   const navigate = useNavigate();
+  const [aiOpen, setAiOpen] = useState(false);
   const [loading, setLoading] = useState(true);
   const [courses, setCourses] = useState<Course[]>([]);
   
@@ -119,6 +122,20 @@ export default function QuizBuilder() {
 
     fetchData();
   }, [quizId]);
+
+  const handleAIGenerateQuestions = async (input: string) => {
+    const generated = await generateQuizQuestions(input, 5);
+    const mapped: Partial<Question>[] = generated.map(q => ({
+      type: q.type as QuestionType,
+      text: q.text,
+      options: q.options,
+      correctAnswer: q.correctAnswer,
+      explanation: q.explanation,
+      points: q.points,
+    }));
+    setQuestions(prev => [...prev, ...mapped]);
+    toast.success(`Added ${mapped.length} AI-generated questions!`);
+  };
 
   const addQuestion = (type: QuestionType) => {
     const newQuestion: Partial<Question> = {
@@ -233,14 +250,27 @@ export default function QuizBuilder() {
               <p className="text-slate-500">Design your quiz and add questions.</p>
             </div>
           </div>
-          <button
-            onClick={handleSave}
-            className="inline-flex items-center gap-2 bg-slate-900 text-white px-8 py-3 rounded-xl font-semibold hover:bg-slate-800 transition-all shadow-lg shadow-slate-200"
-          >
-            <Save className="w-5 h-5" />
-            Save Quiz
-          </button>
+          <div className="flex items-center gap-3">
+            <AITriggerButton onClick={() => setAiOpen(true)} label="AI Questions" />
+            <button
+              onClick={handleSave}
+              className="inline-flex items-center gap-2 bg-slate-900 text-white px-8 py-3 rounded-xl font-semibold hover:bg-slate-800 transition-all shadow-lg shadow-slate-200"
+            >
+              <Save className="w-5 h-5" />
+              Save Quiz
+            </button>
+          </div>
         </div>
+
+        <AIPanel
+          open={aiOpen}
+          onClose={() => setAiOpen(false)}
+          label="AI Question Generator"
+          description="Describe a topic — AI will generate 5 quiz questions"
+          placeholder='e.g. "Generate questions about the French Revolution, causes, key events, and aftermath — mix multiple choice and true/false"'
+          buttonLabel="Generate Questions"
+          onSubmit={handleAIGenerateQuestions}
+        />
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
           {/* Quiz Settings */}
