@@ -4,9 +4,11 @@ import { supabase } from '../../supabase';
 import TeacherLayout from '../../components/layout/TeacherLayout';
 import {
   Plus, Search, BookOpen, Users, Globe, Eye, EyeOff,
-  LayoutGrid, List, Edit2, Trash2, Award, Layers
+  LayoutGrid, List, Edit2, Trash2, Award, Layers, AlertTriangle
 } from 'lucide-react';
 import { toast } from 'sonner';
+import { resolveTeacherIdCandidates } from '../../lib/teacherScope';
+import { apiUrl } from '../../lib/apiUrl';
 
 const GRADIENT_PALETTES = [
   'from-indigo-500 to-violet-600',
@@ -31,6 +33,8 @@ export default function TeacherCourses() {
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('All');
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
+  const [courseToDelete, setCourseToDelete] = useState<{ id: string; title: string } | null>(null);
+  const [deleting, setDeleting] = useState(false);
   const navigate = useNavigate();
 
   const fetchCourses = async () => {
@@ -42,7 +46,7 @@ export default function TeacherCourses() {
       return;
     }
     try {
-      const backendRes = await fetch(`/api/teacher/courses?userId=${encodeURIComponent(session.user.id)}`);
+      const backendRes = await fetch(apiUrl(`/api/teacher/courses?userId=${encodeURIComponent(session.user.id)}`));
       if (backendRes.ok) {
         const backendJson = await backendRes.json();
         if (backendJson?.success && Array.isArray(backendJson.courses)) {
@@ -51,24 +55,12 @@ export default function TeacherCourses() {
         }
       }
 
-      const teacherIdCandidates = new Set<string>([session.user.id]);
-      const teachersRes = await supabase
-        .from('teachers')
-        .select('id,user_id')
-        .or(`id.eq.${session.user.id},user_id.eq.${session.user.id}`)
-        .limit(2);
-
-      if (!teachersRes.error) {
-        (teachersRes.data || []).forEach((row: any) => {
-          if (row?.id) teacherIdCandidates.add(String(row.id));
-          if (row?.user_id) teacherIdCandidates.add(String(row.user_id));
-        });
-      }
+      const scopedIds = await resolveTeacherIdCandidates(session.user.id);
 
       const { data, error } = await supabase
         .from('courses')
         .select('*')
-        .in('teacher_id', [...teacherIdCandidates])
+        .in('teacher_id', scopedIds)
         .order('created_at', { ascending: false });
 
       if (error && error.code !== 'PGRST116') throw error;
@@ -81,13 +73,79 @@ export default function TeacherCourses() {
 
   useEffect(() => { fetchCourses(); }, []);
 
-  const handleDelete = async (id: string) => {
-    if (!window.confirm('Delete this course?')) return;
+  const requestDeleteCourse = (course: { id: string; name?: string; title?: string }) => {
+    const title = (course.name || course.title || 'Untitled').trim() || 'Untitled';
+    setCourseToDelete({ id: course.id, title });
+  };
+
+  const performDeleteCourse = async () => {
+    if (!courseToDelete) return;
+    const courseId = courseToDelete.id;
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session) {
+      toast.error('Not signed in');
+      return;
+    }
+
+    const fail = (message: string) => toast.error(message);
+    setDeleting(true);
+
     try {
-      await supabase.from('courses').delete().eq('id', id);
+      const res = await fetch(
+        apiUrl(`/api/teacher/courses/${encodeURIComponent(courseId)}/delete?userId=${encodeURIComponent(session.user.id)}`),
+        { method: 'POST' }
+      );
+
+      let body: { error?: string } = {};
+      try {
+        body = await res.json();
+      } catch { /* non-JSON response */ }
+
+      if (res.ok) {
+        toast.success('Course deleted');
+        setCourseToDelete(null);
+        fetchCourses();
+        return;
+      }
+
+      const apiMessage = typeof body?.error === 'string' ? body.error : '';
+
+      if (apiMessage) {
+        fail(apiMessage);
+        return;
+      }
+
+      if (res.status === 403 || res.status === 404 || res.status === 409) {
+        fail('Could not delete this course.');
+        return;
+      }
+
+      const scopedIds = await resolveTeacherIdCandidates(session.user.id);
+      const { data: deleted, error } = await supabase
+        .from('courses')
+        .delete()
+        .eq('id', courseId)
+        .in('teacher_id', scopedIds)
+        .select('id');
+
+      if (error) {
+        fail(error.message || 'Failed to delete course');
+        return;
+      }
+      if (!deleted?.length) {
+        fail(
+          'Could not delete this course. If you are the owner, restart the app server so the API is available, or remove related quizzes and classes in the database first.'
+        );
+        return;
+      }
       toast.success('Course deleted');
+      setCourseToDelete(null);
       fetchCourses();
-    } catch { toast.error('Failed to delete'); }
+    } catch (e: any) {
+      fail(e?.message || 'Failed to delete');
+    } finally {
+      setDeleting(false);
+    }
   };
 
   const toggleStatus = async (course: any) => {
@@ -181,7 +239,7 @@ export default function TeacherCourses() {
             {filtered.map(course => (
               <TeacherCourseCard key={course.id} course={course} gradient={getCourseGradient(course.id)}
                 onEdit={() => navigate(`/teacher/courses/${course.id}/edit`)}
-                onDelete={() => handleDelete(course.id)}
+                onDelete={() => requestDeleteCourse(course)}
                 onToggleStatus={() => toggleStatus(course)} />
             ))}
           </div>
@@ -230,7 +288,7 @@ export default function TeacherCourses() {
                             {course.status === 'published' ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                           </button>
                           <button onClick={() => navigate(`/teacher/courses/${course.id}/edit`)} className="p-2 rounded-lg text-slate-400 hover:text-violet-600 hover:bg-violet-50 transition-all"><Edit2 className="w-4 h-4" /></button>
-                          <button onClick={() => handleDelete(course.id)} className="p-2 rounded-lg text-slate-400 hover:text-red-600 hover:bg-red-50 transition-all"><Trash2 className="w-4 h-4" /></button>
+                          <button onClick={() => requestDeleteCourse(course)} className="p-2 rounded-lg text-slate-400 hover:text-red-600 hover:bg-red-50 transition-all"><Trash2 className="w-4 h-4" /></button>
                         </div>
                       </td>
                     </tr>
@@ -238,6 +296,52 @@ export default function TeacherCourses() {
                 })}
               </tbody>
             </table>
+          </div>
+        )}
+
+        {courseToDelete && (
+          <div className="fixed inset-0 z-[80] flex items-center justify-center p-4" role="dialog" aria-modal="true" aria-labelledby="delete-course-title">
+            <button
+              type="button"
+              className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm"
+              aria-label="Close"
+              disabled={deleting}
+              onClick={() => !deleting && setCourseToDelete(null)}
+            />
+            <div className="relative bg-white rounded-2xl shadow-xl max-w-md w-full p-6 border border-slate-100">
+              <div className="flex gap-4">
+                <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-red-50">
+                  <AlertTriangle className="h-6 w-6 text-red-600" aria-hidden />
+                </div>
+                <div className="min-w-0 flex-1">
+                  <h3 id="delete-course-title" className="text-lg font-bold text-slate-900">
+                    Delete this course?
+                  </h3>
+                  <p className="text-slate-600 text-sm mt-2 leading-relaxed">
+                    <span className="font-semibold text-slate-800">&ldquo;{courseToDelete.title}&rdquo;</span>{' '}
+                    will be permanently removed. Modules, lessons, and enrollments tied to it may be affected. This cannot be undone.
+                  </p>
+                </div>
+              </div>
+              <div className="flex flex-col-reverse sm:flex-row gap-2 sm:justify-end mt-6">
+                <button
+                  type="button"
+                  disabled={deleting}
+                  onClick={() => setCourseToDelete(null)}
+                  className="px-4 py-2.5 rounded-xl text-sm font-semibold text-slate-700 bg-slate-100 hover:bg-slate-200 transition-colors disabled:opacity-50"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  disabled={deleting}
+                  onClick={() => void performDeleteCourse()}
+                  className="px-4 py-2.5 rounded-xl text-sm font-semibold text-white bg-red-600 hover:bg-red-700 transition-colors disabled:opacity-50"
+                >
+                  {deleting ? 'Deleting…' : 'Delete course'}
+                </button>
+              </div>
+            </div>
           </div>
         )}
       </div>

@@ -9,6 +9,8 @@ import {
 import { toast } from 'sonner';
 import { FormPageSkeleton } from '../../components/ui/Skeleton';
 import StyledSelect from '../../components/ui/StyledSelect';
+import { resolveTeacherIdCandidates } from '../../lib/teacherScope';
+import { apiUrl } from '../../lib/apiUrl';
 
 const GRADIENTS = [
   { label: 'Indigo', value: 'from-indigo-500 to-violet-600' },
@@ -54,12 +56,43 @@ export default function TeacherCourseForm() {
   const set = (key: string, value: any) => setForm(prev => ({ ...prev, [key]: value }));
 
   useEffect(() => {
-    if (!isEditing) return;
+    if (!isEditing || !id) return;
     const fetchCourse = async () => {
       const { data: { session } } = await supabase.auth.getSession();
       if (!session) return;
-      const { data, error } = await supabase.from('courses').select('*').eq('id', id).eq('teacher_id', session.user.id).single();
-      if (error) { toast.error('Course not found'); navigate('/teacher/courses'); return; }
+
+      let data: any = null;
+
+      const backendRes = await fetch(apiUrl(`/api/teacher/courses?userId=${encodeURIComponent(session.user.id)}`));
+      if (backendRes.ok) {
+        const backendJson = await backendRes.json();
+        if (backendJson?.success && Array.isArray(backendJson.courses)) {
+          data = backendJson.courses.find((c: { id: string }) => c.id === id) ?? null;
+        }
+      }
+
+      if (!data) {
+        const scopedIds = await resolveTeacherIdCandidates(session.user.id);
+        const res = await supabase
+          .from('courses')
+          .select('*')
+          .eq('id', id)
+          .in('teacher_id', scopedIds)
+          .maybeSingle();
+        if (res.error) {
+          toast.error(res.error.message || 'Failed to load course');
+          navigate('/teacher/courses');
+          return;
+        }
+        data = res.data;
+      }
+
+      if (!data) {
+        toast.error('Course not found or you do not have access');
+        navigate('/teacher/courses');
+        return;
+      }
+
       setForm({
         name: data.name || data.title || '',
         description: data.description || '',
@@ -77,7 +110,7 @@ export default function TeacherCourseForm() {
       setLoading(false);
     };
     fetchCourse();
-  }, [id]);
+  }, [id, navigate]);
 
   const handleSave = async (publishNow = false) => {
     if (!form.name.trim()) { toast.error('Course title is required'); setActiveTab('basic'); return; }
@@ -98,7 +131,7 @@ export default function TeacherCourseForm() {
       };
 
       if (isEditing) {
-        const res = await fetch(`/api/admin/update-course/${id}`, {
+        const res = await fetch(apiUrl(`/api/admin/update-course/${id}`), {
           method: 'PATCH',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(payload),
@@ -107,7 +140,7 @@ export default function TeacherCourseForm() {
         if (!res.ok) throw new Error(json.error || 'Failed to update course');
         toast.success(publishNow ? 'Course published!' : 'Course saved');
       } else {
-        const res = await fetch('/api/admin/create-course', {
+        const res = await fetch(apiUrl('/api/admin/create-course'), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ ...payload, teacher_id: session.user.id }),

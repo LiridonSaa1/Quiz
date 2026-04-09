@@ -8,11 +8,19 @@ import {
 import { toast } from 'sonner';
 import { Module, Course } from '../../types';
 import { cn } from '../../lib/utils';
+import { apiUrl, readApiError } from '../../lib/apiUrl';
+import { resolveTeacherIdCandidates } from '../../lib/teacherScope';
 
 const slugify = (text: string) =>
   text.toLowerCase().replace(/[^\w\s-]/g, '').replace(/\s+/g, '-').replace(/-+/g, '-').trim();
 
-const emptyForm = { title: '', description: '', order: 1, status: 'published' };
+const emptyForm = { title: '', description: '', order: 1, status: 'active' as 'active' | 'inactive' };
+
+const normalizeModuleStatus = (s: string) => {
+  if (s === 'published' || s === 'active') return 'active';
+  if (s === 'draft' || s === 'inactive') return 'inactive';
+  return s === 'inactive' ? 'inactive' : 'active';
+};
 
 export default function TeacherModules() {
   const [modules, setModules] = useState<Module[]>([]);
@@ -31,28 +39,61 @@ export default function TeacherModules() {
     const { data: { session } } = await supabase.auth.getSession();
     if (!session) return;
     try {
-      const { data: coursesData, error: coursesError } = await supabase
-        .from('courses')
-        .select('*')
-        .eq('teacher_id', session.user.id)
-        .order('created_at', { ascending: false });
-      if (coursesError && (coursesError as any).status !== 400) throw coursesError;
+      let courseRows: any[] = [];
 
-      const courseList = coursesData || [];
-      setCourses(courseList.map(c => ({ ...c, id: c.id })) as Course[]);
+      const backendRes = await fetch(apiUrl(`/api/teacher/courses?userId=${encodeURIComponent(session.user.id)}`));
+      if (backendRes.ok) {
+        const backendJson = await backendRes.json();
+        if (backendJson?.success && Array.isArray(backendJson.courses)) {
+          courseRows = backendJson.courses;
+        }
+      }
+
+      if (courseRows.length === 0) {
+        const scopedIds = await resolveTeacherIdCandidates(session.user.id);
+        const { data: coursesData, error: coursesError } = await supabase
+          .from('courses')
+          .select('*')
+          .in('teacher_id', scopedIds)
+          .order('created_at', { ascending: false });
+        if (coursesError && (coursesError as any).code !== 'PGRST116') throw coursesError;
+        courseRows = coursesData || [];
+      }
+
+      const courseList = courseRows.map((c: any) => ({
+        ...c,
+        id: c.id,
+        title: c.title || '',
+        name: c.name || c.title,
+      }));
+      setCourses(courseList as Course[]);
 
       if (courseList.length === 0) {
         setModules([]);
         return;
       }
 
-      const courseIds = courseList.map(c => c.id);
-      const { data: modulesData, error: modulesError } = await supabase
-        .from('modules')
-        .select('*')
-        .in('course_id', courseIds)
-        .order('order', { ascending: true });
-      if (modulesError) throw modulesError;
+      let modulesData: any[] | null = null;
+      const modulesRes = await fetch(
+        apiUrl(`/api/teacher/modules?userId=${encodeURIComponent(session.user.id)}`)
+      );
+      if (modulesRes.ok) {
+        const modulesJson = await modulesRes.json();
+        if (modulesJson?.success && Array.isArray(modulesJson.modules)) {
+          modulesData = modulesJson.modules;
+        }
+      }
+
+      if (modulesData === null) {
+        const courseIds = courseList.map(c => c.id);
+        const { data: fallback, error: modulesError } = await supabase
+          .from('modules')
+          .select('*')
+          .in('course_id', courseIds)
+          .order('order', { ascending: true });
+        if (modulesError) throw modulesError;
+        modulesData = fallback || [];
+      }
 
       setModules((modulesData || []).map(m => ({
         id: m.id,
@@ -61,7 +102,7 @@ export default function TeacherModules() {
         slug: m.slug,
         description: m.description,
         order: m.order,
-        status: m.status,
+        status: normalizeModuleStatus(m.status),
         totalLessons: m.total_lessons || 0,
         createdAt: m.created_at,
         updatedAt: m.updated_at,
@@ -90,7 +131,7 @@ export default function TeacherModules() {
       title: mod.title,
       description: mod.description || '',
       order: mod.order,
-      status: mod.status,
+      status: normalizeModuleStatus(mod.status) as 'active' | 'inactive',
     });
     setShowModal(true);
   };
@@ -106,23 +147,40 @@ export default function TeacherModules() {
     if (!formCourseId) { toast.error('Please select a course'); return; }
     setSaving(true);
     try {
-      const payload = {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) {
+        toast.error('Not signed in');
+        return;
+      }
+
+      const status: 'active' | 'inactive' = form.status === 'inactive' ? 'inactive' : 'active';
+      const body = {
         course_id: formCourseId,
         title: form.title.trim(),
         slug: slugify(form.title),
         description: form.description.trim() || null,
         order: Number(form.order) || 1,
-        status: form.status,
-        total_lessons: editing?.totalLessons || 0,
+        status,
       };
 
       if (editing) {
-        const { error } = await supabase.from('modules').update(payload).eq('id', editing.id);
-        if (error) throw error;
+        const res = await fetch(
+          apiUrl(`/api/teacher/modules/${encodeURIComponent(editing.id)}?userId=${encodeURIComponent(session.user.id)}`),
+          {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(body),
+          }
+        );
+        if (!res.ok) throw new Error(await readApiError(res));
         toast.success('Module updated');
       } else {
-        const { error } = await supabase.from('modules').insert(payload);
-        if (error) throw error;
+        const res = await fetch(apiUrl('/api/teacher/modules'), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ userId: session.user.id, ...body }),
+        });
+        if (!res.ok) throw new Error(await readApiError(res));
         toast.success('Module created');
       }
       closeModal();
@@ -137,24 +195,47 @@ export default function TeacherModules() {
   const handleDelete = async (id: string) => {
     if (!window.confirm('Delete this module? This cannot be undone.')) return;
     try {
-      const { error } = await supabase.from('modules').delete().eq('id', id);
-      if (error) throw error;
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) {
+        toast.error('Not signed in');
+        return;
+      }
+      const res = await fetch(
+        apiUrl(`/api/teacher/modules/${encodeURIComponent(id)}/delete?userId=${encodeURIComponent(session.user.id)}`),
+        { method: 'POST' }
+      );
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(typeof json?.error === 'string' ? json.error : 'Failed to delete module');
       toast.success('Module deleted');
       fetchData();
-    } catch {
-      toast.error('Failed to delete module');
+    } catch (e: any) {
+      toast.error(e?.message || 'Failed to delete module');
     }
   };
 
   const handleToggleStatus = async (mod: Module) => {
-    const newStatus = mod.status === 'published' ? 'draft' : 'published';
+    const cur = normalizeModuleStatus(mod.status);
+    const newStatus = cur === 'active' ? 'inactive' : 'active';
     try {
-      const { error } = await supabase.from('modules').update({ status: newStatus }).eq('id', mod.id);
-      if (error) throw error;
-      toast.success(`Module ${newStatus === 'published' ? 'published' : 'set to draft'}`);
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) {
+        toast.error('Not signed in');
+        return;
+      }
+      const res = await fetch(
+        apiUrl(`/api/teacher/modules/${encodeURIComponent(mod.id)}?userId=${encodeURIComponent(session.user.id)}`),
+        {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ status: newStatus }),
+        }
+      );
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(typeof json?.error === 'string' ? json.error : 'Failed to update status');
+      toast.success(`Module ${newStatus === 'active' ? 'activated' : 'deactivated'}`);
       fetchData();
-    } catch {
-      toast.error('Failed to update status');
+    } catch (e: any) {
+      toast.error(e?.message || 'Failed to update status');
     }
   };
 
@@ -171,8 +252,8 @@ export default function TeacherModules() {
 
   const stats = [
     { label: 'Total Modules', value: modules.length, color: 'text-violet-600', bg: 'bg-violet-50', border: 'border-violet-100' },
-    { label: 'Published', value: modules.filter(m => m.status === 'published').length, color: 'text-emerald-600', bg: 'bg-emerald-50', border: 'border-emerald-100' },
-    { label: 'Drafts', value: modules.filter(m => m.status !== 'published').length, color: 'text-amber-600', bg: 'bg-amber-50', border: 'border-amber-100' },
+    { label: 'Active', value: modules.filter(m => normalizeModuleStatus(m.status) === 'active').length, color: 'text-emerald-600', bg: 'bg-emerald-50', border: 'border-emerald-100' },
+    { label: 'Inactive', value: modules.filter(m => normalizeModuleStatus(m.status) === 'inactive').length, color: 'text-amber-600', bg: 'bg-amber-50', border: 'border-amber-100' },
     { label: 'Total Lessons', value: modules.reduce((acc, m) => acc + (m.totalLessons || 0), 0), color: 'text-indigo-600', bg: 'bg-indigo-50', border: 'border-indigo-100' },
   ];
 
@@ -320,13 +401,13 @@ export default function TeacherModules() {
                         onClick={() => handleToggleStatus(mod)}
                         className={cn(
                           "inline-flex items-center gap-1.5 text-xs font-semibold px-2.5 py-1 rounded-lg transition-all",
-                          mod.status === 'published'
+                          normalizeModuleStatus(mod.status) === 'active'
                             ? 'bg-emerald-50 text-emerald-700 hover:bg-emerald-100'
                             : 'bg-amber-50 text-amber-700 hover:bg-amber-100'
                         )}
                       >
-                        <span className={cn("w-1.5 h-1.5 rounded-full", mod.status === 'published' ? 'bg-emerald-500' : 'bg-amber-500')} />
-                        {mod.status === 'published' ? 'Published' : 'Draft'}
+                        <span className={cn("w-1.5 h-1.5 rounded-full", normalizeModuleStatus(mod.status) === 'active' ? 'bg-emerald-500' : 'bg-amber-500')} />
+                        {normalizeModuleStatus(mod.status) === 'active' ? 'Active' : 'Inactive'}
                       </button>
                     </td>
                     <td className="px-5 py-4 text-right">
@@ -438,8 +519,8 @@ export default function TeacherModules() {
                     onChange={e => setForm(f => ({ ...f, status: e.target.value }))}
                     className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-violet-500 transition-all"
                   >
-                    <option value="published">Published</option>
-                    <option value="draft">Draft</option>
+                    <option value="active">Active</option>
+                    <option value="inactive">Inactive</option>
                   </select>
                 </div>
               </div>

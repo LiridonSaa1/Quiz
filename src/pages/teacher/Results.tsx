@@ -4,7 +4,7 @@ import TeacherLayout from '../../components/layout/TeacherLayout';
 import {
   BarChart3, Search, Download, ChevronDown, ChevronUp,
   CheckCircle2, XCircle, TrendingUp, FileText, Clock,
-  Trophy, Flame, Activity, Eye, ChevronRight
+  Trophy, Flame, Activity
 } from 'lucide-react';
 import {
   AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip,
@@ -23,6 +23,10 @@ export default function TeacherResults() {
   const [students, setStudents] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
+  const [tab, setTab] = useState<TabFilter>('all');
+  const [selectedQuiz, setSelectedQuiz] = useState('all');
+  const [sortBy, setSortBy] = useState<SortField>('date');
+  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
 
   const isMissingTeacherIdColumn = (error: any) => {
     const haystack = `${error?.message || ''} ${error?.details || ''}`.toLowerCase();
@@ -157,17 +161,21 @@ export default function TeacherResults() {
     fetchData();
   }, []);
 
-  const stats = {
-    totalAttempts: attempts.length,
-    avgScore: attempts.length > 0 
-      ? Math.round(attempts.reduce((acc, curr) => acc + curr.scorePercent, 0) / attempts.length)
-      : 0,
-    passRate: attempts.length > 0
-      ? Math.round((attempts.filter(a => a.passed).length / attempts.length) * 100)
-      : 0
+  const getDuration = (startedAt?: string, completedAt?: string): number | null => {
+    if (!startedAt || !completedAt) return null;
+    const s = new Date(startedAt).getTime();
+    const e = new Date(completedAt).getTime();
+    if (!Number.isFinite(s) || !Number.isFinite(e) || e < s) return null;
+    return Math.round((e - s) / 60000);
   };
 
-  const getPct = (a: any) => a.totalPoints > 0 ? Math.round((a.score / a.totalPoints) * 100) : 0;
+  const getPct = (a: any) => {
+    if (typeof a.scorePercent === 'number' && Number.isFinite(a.scorePercent)) {
+      return Math.round(a.scorePercent);
+    }
+    const total = a.totalPoints ?? 0;
+    return total > 0 ? Math.round(((a.score ?? 0) / total) * 100) : 0;
+  };
 
   const stats = useMemo(() => {
     const completed = attempts.filter(a => a.status === 'completed');
@@ -464,67 +472,6 @@ export default function TeacherResults() {
                     </tr>
                   ))
                 ) : filtered.length > 0 ? (
-                  filtered.map((attempt) => (
-                    <tr key={attempt.id} className="hover:bg-slate-50 transition-all group">
-                      <td className="px-6 py-4">
-                        <div className="flex items-center gap-3">
-                          <div className="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center text-slate-600 font-bold text-xs">
-                            {students[attempt.studentId]?.[0] || 'S'}
-                          </div>
-                          <span className="font-semibold text-slate-900">{students[attempt.studentId] || 'Unknown Student'}</span>
-                        </div>
-                      </td>
-                      <td className="px-6 py-4">
-                        <span className="text-slate-600 font-medium">{quizzes[attempt.quizId] || 'Unknown Quiz'}</span>
-                      </td>
-                      <td className="px-6 py-4">
-                        <div className="flex items-center gap-2">
-                          <div className="flex-1 h-1.5 w-16 bg-slate-100 rounded-full overflow-hidden">
-                            <div 
-                              className={cn(
-                                "h-full rounded-full transition-all",
-                                attempt.passed ? "bg-green-500" : "bg-red-500"
-                              )}
-                              style={{ width: `${attempt.scorePercent}%` }}
-                            />
-                          </div>
-                          <span className="text-sm font-bold text-slate-900">
-                            {attempt.scorePercent}%
-                          </span>
-                        </div>
-                      </td>
-                      <td className="px-6 py-4">
-                        <span className={cn(
-                          "inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold",
-                          attempt.passed 
-                            ? "bg-green-50 text-green-600" 
-                            : "bg-red-50 text-red-600"
-                        )}>
-                          {attempt.passed ? <CheckCircle2 className="w-3 h-3" /> : <XCircle className="w-3 h-3" />}
-                          {attempt.passed ? 'Passed' : 'Failed'}
-                        </span>
-                      </td>
-                      <td className="px-6 py-4 text-slate-500 text-sm">
-                        {attempt.completedAt ? new Date(attempt.completedAt).toLocaleDateString() : '--'}
-                      </td>
-                      <td className="px-6 py-4 text-right">
-                        <button className="p-2 text-slate-400 hover:text-slate-900 hover:bg-slate-100 rounded-lg transition-all">
-                          <ChevronRight className="w-5 h-5" />
-                        </button>
-                      </td>
-                    </tr>
-                  ))
-                ) : (
-                  <tr>
-                    <td colSpan={6} className="px-6 py-20 text-center">
-                      <BarChart3 className="w-14 h-14 text-slate-200 mx-auto mb-4" />
-                      <h3 className="text-base font-bold text-slate-900">No results found</h3>
-                      <p className="text-slate-400 text-sm mt-1">
-                        {search || tab !== 'all' ? 'Try adjusting your filters.' : 'Results will appear when students complete quizzes.'}
-                      </p>
-                    </td>
-                  </tr>
-                ) : (
                   filtered.map(attempt => {
                     const pct = getPct(attempt);
                     const duration = getDuration(attempt.startedAt, attempt.completedAt);
@@ -588,6 +535,16 @@ export default function TeacherResults() {
                       </tr>
                     );
                   })
+                ) : (
+                  <tr>
+                    <td colSpan={6} className="px-6 py-20 text-center">
+                      <BarChart3 className="w-14 h-14 text-slate-200 mx-auto mb-4" />
+                      <h3 className="text-base font-bold text-slate-900">No results found</h3>
+                      <p className="text-slate-400 text-sm mt-1">
+                        {search || tab !== 'all' ? 'Try adjusting your filters.' : 'Results will appear when students complete quizzes.'}
+                      </p>
+                    </td>
+                  </tr>
                 )}
               </tbody>
             </table>

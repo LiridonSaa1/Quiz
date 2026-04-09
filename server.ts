@@ -157,7 +157,7 @@ async function startServer() {
       .from("teachers")
       .select("id, user_id")
       .or(`id.eq.${teacherId},user_id.eq.${teacherId}`)
-      .limit(2);
+      .limit(20);
 
     if (teacherLookupError) throw teacherLookupError;
 
@@ -738,7 +738,236 @@ async function startServer() {
       res.status(500).json({ error: e.message });
     }
   });
-app.get('/api/admin/analytics', async (req, res) => {
+
+  // Teacher modules (service role) — same scoping as POST /api/teacher/modules so rows always
+  // show after create even when RLS differs between environments.
+  app.get("/api/teacher/modules", async (req, res) => {
+    try {
+      const userId = typeof req.query.userId === "string" ? req.query.userId.trim() : "";
+      if (!userId) return res.status(400).json({ error: "userId is required" });
+
+      const teacherIds = await getTeacherIdCandidates(userId);
+      const scopedIds = teacherIds.length > 0 ? teacherIds : [userId];
+
+      const { data: courseRows, error: coursesError } = await supabaseAdmin
+        .from("courses")
+        .select("id")
+        .in("teacher_id", scopedIds);
+      if (coursesError) throw coursesError;
+
+      const courseIds = (courseRows || []).map((c: any) => c?.id).filter(Boolean);
+      if (courseIds.length === 0) {
+        return res.json({ success: true, modules: [] });
+      }
+
+      const { data, error } = await supabaseAdmin.from("modules").select("*").in("course_id", courseIds);
+      if (error) throw error;
+
+      const rows = data || [];
+      rows.sort((a: any, b: any) => (Number(a?.order) || 0) - (Number(b?.order) || 0));
+      res.json({ success: true, modules: rows });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  const teacherCourseDeleteHandler = async (req: any, res: any) => {
+    try {
+      const id = typeof req.params.id === "string" ? req.params.id.trim() : "";
+      if (!id) return res.status(400).json({ error: "Course id is required" });
+      const userId = typeof req.query.userId === "string" ? req.query.userId.trim() : "";
+      if (!userId) return res.status(400).json({ error: "userId is required" });
+
+      const teacherIds = await getTeacherIdCandidates(userId);
+      const scopedArr = teacherIds.length > 0 ? teacherIds : [userId];
+
+      const { data: deleted, error: delError } = await supabaseAdmin
+        .from("courses")
+        .delete()
+        .eq("id", id)
+        .in("teacher_id", scopedArr)
+        .select("id");
+
+      if (delError) {
+        if (delError.code === "23503") {
+          return res.status(409).json({
+            error:
+              "This course cannot be deleted because other data still references it. Remove linked quizzes, classes, or enrollments first.",
+          });
+        }
+        throw delError;
+      }
+      if (!deleted || deleted.length === 0) {
+        return res.status(404).json({
+          error:
+            "Course not found or you do not have permission to delete it. Use the app URL printed when you run npm run dev (Express + API on the same port).",
+        });
+      }
+      res.json({ success: true });
+    } catch (e: any) {
+      console.error("/api/teacher/courses delete", e);
+      res.status(500).json({ error: e.message });
+    }
+  };
+
+  app.delete("/api/teacher/courses/:id", teacherCourseDeleteHandler);
+  app.post("/api/teacher/courses/:id/delete", teacherCourseDeleteHandler);
+
+  const assertTeacherOwnsCourse = async (userId: string, courseId: string) => {
+    const teacherIds = await getTeacherIdCandidates(userId);
+    const scoped = new Set((teacherIds.length > 0 ? teacherIds : [userId]).map((x) => String(x)));
+    const { data: course, error } = await supabaseAdmin
+      .from("courses")
+      .select("id, teacher_id")
+      .eq("id", courseId)
+      .maybeSingle();
+    if (error) throw error;
+    if (!course) return { ok: false as const, reason: "not_found" as const };
+    if (!scoped.has(String(course.teacher_id ?? ""))) {
+      return { ok: false as const, reason: "forbidden" as const };
+    }
+    return { ok: true as const, course };
+  };
+
+  app.post("/api/teacher/modules", async (req, res) => {
+    try {
+      const userId = typeof req.body?.userId === "string" ? req.body.userId.trim() : "";
+      if (!userId) return res.status(400).json({ error: "userId is required" });
+      const course_id = req.body?.course_id;
+      const title = req.body?.title;
+      if (!course_id || typeof title !== "string" || !title.trim()) {
+        return res.status(400).json({ error: "course_id and title are required" });
+      }
+
+      const gate = await assertTeacherOwnsCourse(userId, String(course_id));
+      if (!gate.ok) {
+        return res.status(422).json({
+          error:
+            gate.reason === "not_found"
+              ? "Course not found (check that this course exists in Supabase and matches your account)."
+              : "You do not have access to this course.",
+          code: gate.reason,
+        });
+      }
+
+      const slugIn =
+        typeof req.body.slug === "string" && req.body.slug.trim() ? req.body.slug.trim() : String(title)
+          .toLowerCase()
+          .replace(/[^\w\s-]/g, "")
+          .replace(/\s+/g, "-")
+          .replace(/-+/g, "-")
+          .trim();
+      const description =
+        req.body.description === null || req.body.description === undefined || req.body.description === ""
+          ? null
+          : String(req.body.description);
+      const order = Number(req.body.order) || 1;
+      const status =
+        req.body.status === "inactive" || req.body.status === "active" ? req.body.status : "active";
+
+      const insertRow: Record<string, unknown> = {
+        course_id: String(course_id),
+        title: title.trim(),
+        slug: slugIn || null,
+        description,
+        status,
+      };
+      insertRow["order"] = order;
+
+      const { data, error } = await supabaseAdmin.from("modules").insert(insertRow).select().single();
+      if (error) {
+        console.error("POST /api/teacher/modules insert", error);
+        const msg = [error.message, error.details, error.hint].filter((x) => typeof x === "string" && x).join(" — ") || error.code || "Database error";
+        return res.status(400).json({ error: msg, code: error.code });
+      }
+      res.json({ success: true, module: data });
+    } catch (e: any) {
+      console.error("POST /api/teacher/modules", e);
+      const msg =
+        typeof e?.message === "string" && e.message
+          ? e.message
+          : String(e?.details || e || "Server error");
+      res.status(500).json({ error: msg });
+    }
+  });
+
+  app.patch("/api/teacher/modules/:id", async (req, res) => {
+    try {
+      const moduleId = typeof req.params.id === "string" ? req.params.id.trim() : "";
+      const userId = typeof req.query.userId === "string" ? req.query.userId.trim() : "";
+      if (!moduleId) return res.status(400).json({ error: "Module id is required" });
+      if (!userId) return res.status(400).json({ error: "userId is required" });
+
+      const { data: mod, error: mErr } = await supabaseAdmin
+        .from("modules")
+        .select("id, course_id")
+        .eq("id", moduleId)
+        .maybeSingle();
+      if (mErr) throw mErr;
+      if (!mod) return res.status(404).json({ error: "Module not found." });
+
+      const gate = await assertTeacherOwnsCourse(userId, String(mod.course_id));
+      if (!gate.ok) {
+        return res.status(403).json({ error: "You do not have access to this module." });
+      }
+
+      const updates: Record<string, unknown> = { updated_at: new Date().toISOString() };
+      if (typeof req.body.title === "string") updates.title = req.body.title.trim();
+      if (req.body.description !== undefined) {
+        updates.description =
+          req.body.description === null || req.body.description === "" ? null : String(req.body.description);
+      }
+      if (typeof req.body.slug === "string") updates.slug = req.body.slug.trim() || null;
+      if (req.body.order !== undefined) updates["order"] = Number(req.body.order) || 1;
+      if (req.body.status === "active" || req.body.status === "inactive") updates.status = req.body.status;
+      if (typeof req.body.course_id === "string") {
+        const cg = await assertTeacherOwnsCourse(userId, req.body.course_id);
+        if (!cg.ok) return res.status(403).json({ error: "Invalid course for this module." });
+        updates.course_id = req.body.course_id;
+      }
+
+      const { data, error } = await supabaseAdmin.from("modules").update(updates).eq("id", moduleId).select().single();
+      if (error) throw error;
+      res.json({ success: true, module: data });
+    } catch (e: any) {
+      console.error("PATCH /api/teacher/modules/:id", e);
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  const teacherModuleDeleteHandler = async (req: any, res: any) => {
+    try {
+      const moduleId = typeof req.params.id === "string" ? req.params.id.trim() : "";
+      const userId = typeof req.query.userId === "string" ? req.query.userId.trim() : "";
+      if (!moduleId) return res.status(400).json({ error: "Module id is required" });
+      if (!userId) return res.status(400).json({ error: "userId is required" });
+
+      const { data: mod, error: mErr } = await supabaseAdmin
+        .from("modules")
+        .select("id, course_id")
+        .eq("id", moduleId)
+        .maybeSingle();
+      if (mErr) throw mErr;
+      if (!mod) return res.status(404).json({ error: "Module not found." });
+
+      const gate = await assertTeacherOwnsCourse(userId, String(mod.course_id));
+      if (!gate.ok) {
+        return res.status(403).json({ error: "You do not have access to this module." });
+      }
+
+      const { error: dErr } = await supabaseAdmin.from("modules").delete().eq("id", moduleId);
+      if (dErr) throw dErr;
+      res.json({ success: true });
+    } catch (e: any) {
+      console.error("DELETE /api/teacher/modules/:id", e);
+      res.status(500).json({ error: e.message });
+    }
+  };
+
+  app.delete("/api/teacher/modules/:id", teacherModuleDeleteHandler);
+  app.post("/api/teacher/modules/:id/delete", teacherModuleDeleteHandler);
+
+  app.get('/api/admin/analytics', async (req, res) => {
     try {
       const [profilesRes, coursesRes, quizzesRes, certsRes, assignmentsRes, lessonsRes, attendanceRes] = await Promise.all([
         supabaseAdmin.from('profiles').select('id, role, created_at, status'),
@@ -1126,6 +1355,18 @@ app.get('/api/admin/analytics', async (req, res) => {
       if (error) throw error;
       res.json({ success: true });
     } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  app.use((req, res, next) => {
+    if (req.path.startsWith("/api")) {
+      return res.status(404).json({
+        error:
+          "No API route matched. Start the app with npm run dev (tsx server.ts) and use the printed URL, or set VITE_API_BASE_URL to your API server.",
+        method: req.method,
+        path: req.path,
+      });
+    }
+    next();
   });
 
   // Vite middleware for development

@@ -32,6 +32,7 @@ import TeacherLiveSessions from './pages/teacher/LiveSessions';
 import TeacherCommunity from './pages/teacher/Community';
 import TeacherAnnouncements from './pages/teacher/Announcements';
 import TeacherProgress from './pages/teacher/Progress';
+import TeacherExams from './pages/teacher/Exams';
 import AdminModules from './pages/admin/Modules';
 import AdminLessons from './pages/admin/Lessons';
 import AdminQuizzes from './pages/admin/Quizzes';
@@ -54,7 +55,19 @@ import AdminRoles from './pages/admin/Roles';
 import AdminProfile from './pages/admin/Profile';
 import AdminSecurityPage from './pages/admin/Security';
 import StudentDashboard from './pages/student/Dashboard';
+import StudentCourses from './pages/student/Courses';
+import ContinueLearning from './pages/student/ContinueLearning';
+import StudentLessons from './pages/student/Lessons';
+import StudentQuizzes from './pages/student/Quizzes';
+import StudentAssignments from './pages/student/Assignments';
+import StudentProgress from './pages/student/Progress';
+import StudentResults from './pages/student/Results';
+import StudentCertificates from './pages/student/Certificates';
+import StudentCommunity from './pages/student/Community';
+import StudentLiveClasses from './pages/student/LiveClasses';
+import StudentExams from './pages/student/Exams';
 import NotFound from './pages/NotFound';
+import { apiUrl } from './lib/apiUrl';
 
 export default function App() {
   const [user, setUser] = useState<UserProfile | null>(null);
@@ -63,7 +76,7 @@ export default function App() {
   useEffect(() => {
     const checkBackend = async () => {
       try {
-        const res = await fetch('/api/health');
+        const res = await fetch(apiUrl('/api/health'));
         if (!res.ok) throw new Error('Backend not responding');
         console.log('Backend health check: OK');
       } catch (error) {
