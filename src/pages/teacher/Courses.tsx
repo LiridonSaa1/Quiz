@@ -219,8 +219,8 @@ export default function TeacherCourses() {
 
         {/* Content */}
         {loading ? (
-          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-5">
-            {Array(3).fill(0).map((_, i) => <div key={i} className="bg-white rounded-2xl border border-slate-100 h-64 animate-pulse" />)}
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-5">
+            {Array(4).fill(0).map((_, i) => <div key={i} className="bg-white rounded-2xl border border-slate-100 h-64 animate-pulse" />)}
           </div>
         ) : filtered.length === 0 ? (
           <div className="py-20 text-center bg-white rounded-2xl border border-dashed border-slate-200">
@@ -235,7 +235,7 @@ export default function TeacherCourses() {
             </Link>
           </div>
         ) : viewMode === 'grid' ? (
-          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-5">
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-5">
             {filtered.map(course => (
               <TeacherCourseCard key={course.id} course={course} gradient={getCourseGradient(course.id)}
                 onEdit={() => navigate(`/teacher/courses/${course.id}/edit`)}
