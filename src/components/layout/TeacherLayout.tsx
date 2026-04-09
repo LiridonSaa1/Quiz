@@ -1,84 +1,162 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { supabase } from '../../supabase';
-import { 
-  LayoutDashboard, 
-  BookOpen, 
-  Users, 
-  FileText, 
-  BarChart3, 
-  LogOut,
-  Menu,
-  X,
-  Layers,
-  PlayCircle,
-  School,
-  ClipboardList,
-  CalendarCheck,
-  Award,
-  Video,
-  MessageSquare,
-  Megaphone,
-  FileBarChart,
-  User,
-  GraduationCap,
-  ScrollText
+import {
+  LayoutDashboard, BookOpen, Users, FileText, BarChart3, LogOut,
+  Menu, X, Layers, PlayCircle, School, ClipboardList, CalendarCheck,
+  Award, Video, MessageSquare, Megaphone, FileBarChart, User,
+  GraduationCap, ScrollText, ChevronRight
 } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import NotificationCenter from '../NotificationCenter';
 
-const teacherNavSections = [
+const NAV_SECTIONS = [
   {
-    title: 'MAIN',
+    title: 'Main',
     items: [
-      { icon: LayoutDashboard, label: 'Dashboard', path: '/teacher' },
-      { icon: BookOpen, label: 'My Courses', path: '/teacher/courses' },
-      { icon: Layers, label: 'Modules', path: '/teacher/modules' },
-      { icon: PlayCircle, label: 'Lessons', path: '/teacher/lessons' },
-      { icon: FileText, label: 'Quizzes', path: '/teacher/quizzes' },
-      { icon: ScrollText, label: 'Exams', path: '/teacher/exams' },
-    ]
+      { icon: LayoutDashboard, label: 'Dashboard',  path: '/teacher' },
+      { icon: BookOpen,        label: 'My Courses',  path: '/teacher/courses' },
+      { icon: Layers,          label: 'Modules',     path: '/teacher/modules' },
+      { icon: PlayCircle,      label: 'Lessons',     path: '/teacher/lessons' },
+      { icon: FileText,        label: 'Quizzes',     path: '/teacher/quizzes' },
+      { icon: ScrollText,      label: 'Exams',       path: '/teacher/exams' },
+    ],
   },
   {
-    title: 'STUDENTS',
+    title: 'Students',
     items: [
-      { icon: Users, label: 'My Students', path: '/teacher/students' },
-      { icon: School, label: 'Classes', path: '/teacher/classes' },
-    ]
+      { icon: Users,  label: 'My Students', path: '/teacher/students' },
+      { icon: School, label: 'Classes',     path: '/teacher/classes' },
+    ],
   },
   {
-    title: 'LEARNING',
+    title: 'Learning',
     items: [
       { icon: ClipboardList, label: 'Assignments', path: '/teacher/assignments' },
-      { icon: CalendarCheck, label: 'Attendance', path: '/teacher/attendance' },
-      { icon: Award, label: 'Certificates', path: '/teacher/certificates' },
-    ]
+      { icon: CalendarCheck, label: 'Attendance',  path: '/teacher/attendance' },
+      { icon: Award,         label: 'Certificates',path: '/teacher/certificates' },
+    ],
   },
   {
-    title: 'INTERACTION',
+    title: 'Interaction',
     items: [
-      { icon: Video, label: 'Live Sessions', path: '/teacher/live-sessions' },
-      { icon: MessageSquare, label: 'Community', path: '/teacher/community' },
-      { icon: Megaphone, label: 'Announcements', path: '/teacher/announcements' },
-    ]
+      { icon: Video,        label: 'Live Sessions',  path: '/teacher/live-sessions' },
+      { icon: MessageSquare,label: 'Community',      path: '/teacher/community' },
+      { icon: Megaphone,    label: 'Announcements',  path: '/teacher/announcements' },
+    ],
   },
   {
-    title: 'ANALYTICS',
+    title: 'Analytics',
     items: [
-      { icon: BarChart3, label: 'Student Progress', path: '/teacher/progress' },
-      { icon: FileBarChart, label: 'Quiz Results', path: '/teacher/results' },
-    ]
+      { icon: BarChart3,   label: 'Student Progress', path: '/teacher/progress' },
+      { icon: FileBarChart,label: 'Quiz Results',      path: '/teacher/results' },
+    ],
   },
   {
-    title: 'ACCOUNT',
+    title: 'Account',
     items: [
       { icon: User, label: 'Profile', path: '/teacher/profile' },
-    ]
-  }
+    ],
+  },
 ];
 
+function NavItem({ item, active, onClick }: { item: typeof NAV_SECTIONS[0]['items'][0]; active: boolean; onClick?: () => void }) {
+  return (
+    <Link
+      to={item.path}
+      onClick={onClick}
+      className={cn(
+        'group relative flex items-center gap-3 px-3 py-2.5 rounded-xl transition-all duration-150 text-sm',
+        active
+          ? 'bg-white/10 text-white font-semibold'
+          : 'text-slate-400 hover:text-white hover:bg-white/6 font-medium'
+      )}
+    >
+      {active && (
+        <span className="absolute left-0 top-1/2 -translate-y-1/2 w-0.5 h-5 bg-violet-400 rounded-r-full" />
+      )}
+      <item.icon className={cn('w-4 h-4 shrink-0 transition-colors', active ? 'text-violet-400' : 'text-slate-500 group-hover:text-slate-300')} />
+      <span className="truncate">{item.label}</span>
+      {active && <ChevronRight className="w-3.5 h-3.5 ml-auto text-violet-400/60" />}
+    </Link>
+  );
+}
+
+function SidebarContent({ activePath, onLinkClick, onLogout }: { activePath: string; onLinkClick?: () => void; onLogout: () => void }) {
+  const [userEmail, setUserEmail] = useState('');
+  const [displayName, setDisplayName] = useState('');
+
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      if (session?.user) {
+        setUserEmail(session.user.email || '');
+        setDisplayName(session.user.user_metadata?.displayName || session.user.email?.split('@')[0] || 'Teacher');
+      }
+    });
+  }, []);
+
+  const initials = displayName.split(' ').map(w => w[0]).join('').toUpperCase().slice(0, 2);
+
+  return (
+    <div className="flex flex-col h-full" style={{ background: 'linear-gradient(180deg,#0f1117 0%,#111827 100%)' }}>
+      {/* Logo */}
+      <div className="flex items-center gap-3 px-5 py-5 border-b border-white/[0.06]">
+        <div className="relative">
+          <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-violet-500 to-indigo-600 flex items-center justify-center shadow-lg shadow-violet-900/50">
+            <GraduationCap className="w-5 h-5 text-white" />
+          </div>
+          <div className="absolute -inset-0.5 rounded-xl bg-gradient-to-br from-violet-500 to-indigo-600 opacity-20 blur-sm -z-10" />
+        </div>
+        <div>
+          <div className="text-sm font-bold text-white tracking-tight">QuizMaster</div>
+          <div className="text-[9px] text-violet-400/70 font-semibold tracking-[0.18em] uppercase">Teacher Portal</div>
+        </div>
+      </div>
+
+      {/* Nav */}
+      <nav className="flex-1 px-3 py-4 overflow-y-auto space-y-5 scrollbar-none">
+        {NAV_SECTIONS.map(section => (
+          <div key={section.title} className="space-y-0.5">
+            <p className="px-3 mb-1.5 text-[9px] font-bold tracking-[0.18em] uppercase text-slate-600">
+              {section.title}
+            </p>
+            {section.items.map(item => (
+              <NavItem
+                key={item.path}
+                item={item}
+                active={activePath === item.path}
+                onClick={onLinkClick}
+              />
+            ))}
+          </div>
+        ))}
+      </nav>
+
+      {/* User footer */}
+      <div className="px-3 py-3 border-t border-white/[0.06] space-y-1">
+        <div className="flex items-center gap-3 px-3 py-2.5 rounded-xl">
+          <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-violet-500 to-indigo-600 flex items-center justify-center text-white text-xs font-bold shrink-0">
+            {initials || 'T'}
+          </div>
+          <div className="min-w-0 flex-1">
+            <div className="text-xs font-semibold text-white truncate">{displayName}</div>
+            <div className="text-[10px] text-slate-500 truncate">{userEmail}</div>
+          </div>
+        </div>
+        <button
+          onClick={onLogout}
+          className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-slate-500 hover:text-red-400 hover:bg-red-500/8 transition-all text-sm font-medium"
+        >
+          <LogOut className="w-4 h-4 shrink-0" />
+          <span>Sign out</span>
+        </button>
+      </div>
+    </div>
+  );
+}
+
 export default function TeacherLayout({ children }: { children: React.ReactNode }) {
-  const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
   const location = useLocation();
   const navigate = useNavigate();
 
@@ -87,104 +165,63 @@ export default function TeacherLayout({ children }: { children: React.ReactNode 
     navigate('/login');
   };
 
-  const NavItem = ({ item, onClick }: { item: any; key?: React.Key; onClick?: () => void }) => (
-    <Link
-      to={item.path}
-      onClick={onClick}
-      className={cn(
-        "flex items-center gap-3 px-3 py-2 rounded-lg transition-all text-sm font-medium",
-        location.pathname === item.path
-          ? "bg-violet-600 text-white shadow-lg shadow-violet-900/30"
-          : "text-slate-400 hover:bg-slate-700/60 hover:text-white"
-      )}
-    >
-      <item.icon className="w-4 h-4 shrink-0" />
-      <span>{item.label}</span>
-    </Link>
-  );
-
-  const SidebarContent = ({ onLinkClick }: { onLinkClick?: () => void }) => (
-    <>
-      <div className="p-5 border-b border-slate-700/50">
-        <div className="flex items-center gap-3">
-          <div className="w-9 h-9 bg-violet-600 rounded-xl flex items-center justify-center shadow-lg shadow-violet-900/40">
-            <GraduationCap className="w-5 h-5 text-white" />
-          </div>
-          <div>
-            <h1 className="text-base font-bold text-white leading-tight">QuizMaster</h1>
-            <p className="text-[10px] text-slate-400 font-medium uppercase tracking-widest">Teacher Portal</p>
-          </div>
-        </div>
-      </div>
-      <nav className="flex-1 px-3 py-4 space-y-5 overflow-y-auto">
-        {teacherNavSections.map((section) => (
-          <div key={section.title} className="space-y-0.5">
-            <h3 className="px-3 text-[9px] font-bold text-slate-500 uppercase tracking-widest mb-1.5">
-              {section.title}
-            </h3>
-            {section.items.map((item) => (
-              <NavItem key={item.path} item={item} onClick={onLinkClick} />
-            ))}
-          </div>
-        ))}
-        <div className="pt-3 border-t border-slate-700/50">
-          <button
-            onClick={handleLogout}
-            className="flex items-center gap-3 px-3 py-2 w-full text-slate-400 hover:bg-red-500/10 hover:text-red-400 rounded-lg transition-all text-sm font-medium"
-          >
-            <LogOut className="w-4 h-4" />
-            <span>Sign out</span>
-          </button>
-        </div>
-      </nav>
-    </>
-  );
+  const currentLabel = NAV_SECTIONS.flatMap(s => s.items).find(i => i.path === location.pathname)?.label || 'Dashboard';
 
   return (
     <div className="min-h-screen bg-slate-50 flex">
-      {/* Sidebar Desktop */}
-      <aside className="hidden lg:flex flex-col w-60 bg-slate-800 fixed h-full z-30 overflow-hidden">
-        <SidebarContent />
+
+      {/* Desktop Sidebar */}
+      <aside className="hidden lg:flex flex-col w-60 fixed h-full z-30 overflow-hidden border-r border-white/[0.04]">
+        <SidebarContent
+          activePath={location.pathname}
+          onLogout={handleLogout}
+        />
       </aside>
 
-      {/* Top Bar Desktop */}
-      <header className="hidden lg:flex fixed top-0 right-0 left-60 h-14 bg-white border-b border-slate-200 items-center justify-between px-6 z-20">
-        <div className="flex items-center gap-2">
-          <span className="text-sm font-semibold text-slate-500">
-            {teacherNavSections.flatMap(s => s.items).find(i => i.path === location.pathname)?.label || 'Dashboard'}
-          </span>
+      {/* Desktop Topbar */}
+      <header className="hidden lg:flex fixed top-0 right-0 left-60 h-14 bg-white/90 backdrop-blur-sm border-b border-slate-100 items-center justify-between px-6 z-20">
+        <div className="flex items-center gap-2 text-sm">
+          <span className="text-slate-400 text-xs font-medium">Teacher Portal</span>
+          <ChevronRight className="w-3.5 h-3.5 text-slate-300" />
+          <span className="text-slate-800 font-semibold text-sm">{currentLabel}</span>
         </div>
         <NotificationCenter />
       </header>
 
-      {/* Mobile Header */}
-      <div className="lg:hidden fixed top-0 left-0 right-0 h-14 bg-slate-800 flex items-center justify-between px-4 z-50">
+      {/* Mobile Topbar */}
+      <div className="lg:hidden fixed top-0 left-0 right-0 h-14 z-50 flex items-center justify-between px-4 border-b border-white/[0.06]"
+        style={{ background: '#0f1117' }}>
         <div className="flex items-center gap-2.5">
-          <div className="w-8 h-8 bg-violet-600 rounded-lg flex items-center justify-center">
+          <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-violet-500 to-indigo-600 flex items-center justify-center">
             <GraduationCap className="w-4 h-4 text-white" />
           </div>
-          <h1 className="text-base font-bold text-white">QuizMaster</h1>
+          <span className="text-sm font-bold text-white">QuizMaster</span>
         </div>
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-2">
           <NotificationCenter />
-          <button onClick={() => setIsSidebarOpen(!isSidebarOpen)} className="p-1.5 hover:bg-slate-700 rounded-lg">
-            {isSidebarOpen ? <X className="w-5 h-5 text-slate-300" /> : <Menu className="w-5 h-5 text-slate-300" />}
+          <button onClick={() => setSidebarOpen(!sidebarOpen)} className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-white/10 transition-all">
+            {sidebarOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
           </button>
         </div>
       </div>
 
       {/* Mobile Sidebar */}
-      {isSidebarOpen && (
-        <div className="lg:hidden fixed inset-0 bg-black/60 z-40 backdrop-blur-sm" onClick={() => setIsSidebarOpen(false)}>
-          <aside className="w-64 bg-slate-800 h-full flex flex-col overflow-hidden" onClick={e => e.stopPropagation()}>
-            <SidebarContent onLinkClick={() => setIsSidebarOpen(false)} />
+      {sidebarOpen && (
+        <div className="lg:hidden fixed inset-0 z-40 flex">
+          <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setSidebarOpen(false)} />
+          <aside className="relative w-64 h-full z-50">
+            <SidebarContent
+              activePath={location.pathname}
+              onLinkClick={() => setSidebarOpen(false)}
+              onLogout={handleLogout}
+            />
           </aside>
         </div>
       )}
 
-      {/* Main Content */}
-      <main className="flex-1 lg:ml-60 px-3 sm:px-4 md:px-6 lg:px-8 py-4" style={{paddingTop: '3.5rem'}}>
-        <div className="max-w-8xl mx-auto pt-6">
+      {/* Main */}
+      <main className="flex-1 lg:ml-60 pt-14 min-h-screen">
+        <div className="px-4 sm:px-6 lg:px-8 py-7 max-w-[1400px] mx-auto">
           {children}
         </div>
       </main>

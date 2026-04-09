@@ -4,7 +4,7 @@ import TeacherLayout from '../../components/layout/TeacherLayout';
 import { sendNotification } from '../../lib/utils';
 import {
   Plus, Search, FileText, Trash2, Edit2,
-  Clock, BookOpen, CheckCircle2, XCircle,
+  Clock, BookOpen, AlertTriangle,
   HelpCircle, LayoutGrid, List, Shuffle, RotateCcw, Target
 } from 'lucide-react';
 import { toast } from 'sonner';
@@ -41,6 +41,8 @@ export default function QuizManagement() {
   const [statusFilter, setStatusFilter] = useState('all');
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
   const [courseOptions, setCourseOptions] = useState<{ id: string; name: string }[]>([]);
+  const [quizToDelete, setQuizToDelete] = useState<{ id: string; title: string } | null>(null);
+  const [deleting, setDeleting] = useState(false);
   const navigate = useNavigate();
 
   const fetchData = async () => {
@@ -98,15 +100,25 @@ export default function QuizManagement() {
 
   useEffect(() => { fetchData(); }, []);
 
-  const handleDelete = async (id: string) => {
-    if (!window.confirm('Delete this quiz and all its questions? This cannot be undone.')) return;
+  const requestDelete = (quiz: QuizWithCount) => {
+    setQuizToDelete({ id: quiz.id, title: quiz.title });
+  };
+
+  const confirmDelete = async () => {
+    if (!quizToDelete) return;
+    setDeleting(true);
     try {
-      await supabase.from('questions').delete().eq('quiz_id', id);
-      const { error } = await supabase.from('quizzes').delete().eq('id', id);
+      await supabase.from('questions').delete().eq('quiz_id', quizToDelete.id);
+      const { error } = await supabase.from('quizzes').delete().eq('id', quizToDelete.id);
       if (error) throw error;
       toast.success('Quiz deleted');
+      setQuizToDelete(null);
       fetchData();
-    } catch { toast.error('Failed to delete quiz'); }
+    } catch {
+      toast.error('Failed to delete quiz');
+    } finally {
+      setDeleting(false);
+    }
   };
 
   const togglePublish = async (quiz: QuizWithCount) => {
@@ -249,7 +261,7 @@ export default function QuizManagement() {
                 quiz={quiz as QuizWithCount}
                 gradient={getGradient(quiz.id)}
                 onEdit={() => navigate(`/teacher/quizzes/edit/${quiz.id}`)}
-                onDelete={() => handleDelete(quiz.id)}
+                onDelete={() => requestDelete(quiz)}
                 onTogglePublish={() => togglePublish(quiz)}
               />
             ))}
@@ -323,7 +335,7 @@ export default function QuizManagement() {
                           <Edit2 className="w-4 h-4" />
                         </button>
                         <button
-                          onClick={() => handleDelete(quiz.id)}
+                          onClick={() => requestDelete(quiz)}
                           className="p-2 rounded-lg text-slate-400 hover:text-red-600 hover:bg-red-50 transition-all"
                         >
                           <Trash2 className="w-4 h-4" />
@@ -334,6 +346,58 @@ export default function QuizManagement() {
                 ))}
               </tbody>
             </table>
+          </div>
+        )}
+        {/* Delete Confirmation Modal */}
+        {quizToDelete && (
+          <div className="fixed inset-0 z-[80] flex items-center justify-center p-4" role="dialog" aria-modal="true">
+            <button
+              type="button"
+              className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm"
+              aria-label="Close"
+              disabled={deleting}
+              onClick={() => !deleting && setQuizToDelete(null)}
+            />
+            <div className="relative bg-white rounded-2xl shadow-xl max-w-md w-full p-6 border border-slate-100">
+              <div className="flex gap-4">
+                <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-red-50">
+                  <AlertTriangle className="h-6 w-6 text-red-600" aria-hidden />
+                </div>
+                <div className="min-w-0 flex-1">
+                  <h3 className="text-lg font-bold text-slate-900">Delete this quiz?</h3>
+                  <p className="text-slate-600 text-sm mt-2 leading-relaxed">
+                    <span className="font-semibold text-slate-800">&ldquo;{quizToDelete.title}&rdquo;</span>{' '}
+                    and all its questions will be permanently removed. This cannot be undone.
+                  </p>
+                </div>
+              </div>
+              <div className="flex flex-col-reverse sm:flex-row gap-2 sm:justify-end mt-6">
+                <button
+                  type="button"
+                  disabled={deleting}
+                  onClick={() => setQuizToDelete(null)}
+                  className="px-4 py-2.5 rounded-xl text-sm font-semibold text-slate-700 bg-slate-100 hover:bg-slate-200 transition-colors disabled:opacity-50"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  disabled={deleting}
+                  onClick={() => void confirmDelete()}
+                  className="px-4 py-2.5 rounded-xl text-sm font-semibold text-white bg-red-600 hover:bg-red-700 transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
+                >
+                  {deleting ? (
+                    <>
+                      <svg className="animate-spin w-4 h-4" fill="none" viewBox="0 0 24 24">
+                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
+                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/>
+                      </svg>
+                      Deleting…
+                    </>
+                  ) : 'Delete quiz'}
+                </button>
+              </div>
+            </div>
           </div>
         )}
       </div>
