@@ -77,31 +77,36 @@ function NavItem({
         'group relative flex items-center rounded-xl transition-all duration-200 text-sm',
         collapsed ? 'justify-center p-2.5' : 'gap-3 px-3 py-2.5',
         active
-          ? 'bg-white/10 text-white font-semibold'
+          ? 'text-white font-semibold'
           : 'text-slate-400 hover:text-white hover:bg-white/[0.06] font-medium'
       )}
+      style={active ? {
+        background: 'linear-gradient(135deg, rgba(139,92,246,0.22) 0%, rgba(99,102,241,0.18) 100%)',
+        boxShadow: '0 0 0 1px rgba(139,92,246,0.35), 0 4px 16px rgba(139,92,246,0.2)',
+      } : undefined}
     >
       {active && !collapsed && (
-        <span className="absolute left-0 top-1/2 -translate-y-1/2 w-0.5 h-5 bg-violet-400 rounded-r-full" />
-      )}
-      {active && (
-        <span className="absolute inset-0 rounded-xl bg-violet-500/10 -z-10" />
+        <span className="absolute left-0 top-1/2 -translate-y-1/2 w-0.5 h-6 rounded-r-full"
+          style={{ background: 'linear-gradient(180deg,#a78bfa,#818cf8)' }}
+        />
       )}
       <item.icon
         className={cn(
           'shrink-0 transition-colors',
           collapsed ? 'w-5 h-5' : 'w-4 h-4',
-          active ? 'text-violet-400' : 'text-slate-500 group-hover:text-slate-300'
+          active ? 'text-violet-300' : 'text-slate-500 group-hover:text-slate-300'
         )}
       />
       {!collapsed && (
         <>
           <span className="truncate">{item.label}</span>
-          {active && <ChevronRight className="w-3.5 h-3.5 ml-auto text-violet-400/60" />}
+          {active && <ChevronRight className="w-3.5 h-3.5 ml-auto text-violet-400/70" />}
         </>
       )}
       {collapsed && (
-        <div className="absolute left-full ml-3 px-2.5 py-1.5 bg-slate-900 border border-white/10 text-white text-xs font-semibold rounded-lg opacity-0 group-hover:opacity-100 transition-all pointer-events-none whitespace-nowrap z-[999] shadow-xl">
+        <div className="absolute left-full ml-3 px-2.5 py-1.5 bg-slate-900 border border-white/10 text-white text-xs font-semibold rounded-lg opacity-0 group-hover:opacity-100 transition-all pointer-events-none whitespace-nowrap z-[999] shadow-xl"
+          style={{ boxShadow: '0 4px 20px rgba(0,0,0,0.4)' }}
+        >
           {item.label}
         </div>
       )}
@@ -163,11 +168,11 @@ function SidebarContent({
         {NAV_SECTIONS.map((section) => (
           <div key={section.title} className="space-y-0.5">
             {!collapsed ? (
-              <p className="px-3 mb-1.5 text-[9px] font-bold tracking-[0.18em] uppercase text-slate-600">
+              <p className="px-3 mb-2 mt-1 text-[9px] font-bold tracking-[0.2em] uppercase text-slate-500/70">
                 {section.title}
               </p>
             ) : (
-              <div className="h-px bg-white/[0.05] mx-1 mb-2" />
+              <div className="h-px bg-white/[0.06] mx-2 mb-2 mt-1" />
             )}
             {section.items.map((item) => (
               <NavItem
