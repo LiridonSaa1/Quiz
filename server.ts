@@ -968,6 +968,31 @@ async function startServer() {
   app.post("/api/teacher/modules/:id/delete", teacherModuleDeleteHandler);
 
   // ── Teacher Lesson routes (service-role, bypasses RLS) ──────────────────
+  app.get("/api/teacher/lessons", async (req, res) => {
+    try {
+      const userId = typeof req.query.userId === "string" ? req.query.userId.trim() : "";
+      if (!userId) return res.status(400).json({ error: "userId is required" });
+
+      const teacherIds = await getTeacherIdCandidates(userId);
+      const scopedIds = teacherIds.length > 0 ? teacherIds : [userId];
+
+      const { data: courseRows, error: coursesError } = await supabaseAdmin
+        .from("courses").select("id").in("teacher_id", scopedIds);
+      if (coursesError) throw coursesError;
+
+      const courseIds = (courseRows || []).map((c: any) => c?.id).filter(Boolean);
+      if (courseIds.length === 0) return res.json({ success: true, lessons: [] });
+
+      const { data, error } = await supabaseAdmin
+        .from("lessons").select("*").in("course_id", courseIds).order("order", { ascending: true });
+      if (error) throw error;
+      res.json({ success: true, lessons: data || [] });
+    } catch (e: any) {
+      console.error("GET /api/teacher/lessons", e);
+      res.status(500).json({ error: e.message || "Server error" });
+    }
+  });
+
   app.post("/api/teacher/lessons", async (req, res) => {
     try {
       const userId = typeof req.body?.userId === "string" ? req.body.userId.trim() : "";

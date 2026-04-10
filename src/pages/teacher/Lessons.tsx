@@ -138,11 +138,22 @@ export default function TeacherLessons() {
         modulesData = modulesSnap.data || [];
       }
 
-      const lessonsSnap = await supabase.from('lessons').select('*').in('course_id', courseIds).order('order', { ascending: true });
-      if (lessonsSnap.error) throw lessonsSnap.error;
+      // Fetch lessons via backend API (bypasses RLS)
+      let lessonsData: any[] = [];
+      const lessonsApiRes = await fetch(apiUrl(`/api/teacher/lessons?userId=${encodeURIComponent(session.user.id)}`));
+      if (lessonsApiRes.ok) {
+        const lessonsJson = await lessonsApiRes.json();
+        if (lessonsJson?.success && Array.isArray(lessonsJson.lessons)) {
+          lessonsData = lessonsJson.lessons.filter((l: any) => courseIds.includes(l.course_id));
+        }
+      } else {
+        // Fallback: direct Supabase query
+        const lessonsSnap = await supabase.from('lessons').select('*').in('course_id', courseIds).order('order', { ascending: true });
+        if (!lessonsSnap.error) lessonsData = lessonsSnap.data || [];
+      }
 
       setModules(modulesData);
-      setLessons((lessonsSnap.data || []).map(l => ({
+      setLessons(lessonsData.map((l: any) => ({
         id: l.id,
         courseId: l.course_id,
         moduleId: l.module_id,
