@@ -34,6 +34,8 @@ A multi-role educational platform for quiz management, course tracking, and resu
 - **Assignments**: Admin creates and manages assignments (type, due date, max score, status) linked to courses/classes
 - **Attendance**: Admin marks and tracks student attendance (present/absent/late/excused) per class and date
 - **Certificates**: Admin issues certificates to students with grade, score, cert number, and a visual preview modal
+- **Live Sessions (Teacher)**: Full virtual classroom system at `/teacher/live-sessions` — dashboard with stats, tabs (Upcoming/Live/Past), New Session modal with participant inviter (by student search or class), start/end sessions, navigate to room. Room at `/teacher/live-sessions/:id/room` — full-screen Jitsi iframe, collapsible sidebar with Participants + Chat tabs, control bar (mic, camera, screen share, record, raise hand, reactions, end session), recording via MediaRecorder API uploaded to Supabase Storage
+- **Live Sessions (Student)**: Student join page at `/student/live-sessions/:id` — session info, Join button, Jitsi room embed, raise hand, emoji reactions, group chat via Supabase Realtime, attendance logging, recording playback for ended sessions
 
 ## Known Schema Constraints
 The live Supabase DB has schema differences from what some pages expect. All affected pages now handle these gracefully (empty state, no crash):
@@ -59,6 +61,26 @@ Set these in Replit Secrets:
 - `GET /api/admin/seed` — Seeds initial super admin account
 - `POST /api/admin/create-teacher` — Creates a teacher account
 - `POST /api/admin/create-student` — Creates a student account
+- `GET /api/teacher/live-sessions` — List sessions (filter by host_id)
+- `POST /api/teacher/live-sessions` — Create session with participant invites
+- `PATCH /api/teacher/live-sessions/:id` — Update session (triggers notifications on live)
+- `DELETE /api/teacher/live-sessions/:id` — Delete session
+- `GET /api/teacher/live-sessions/:id/participants` — Get session participants
+- `POST /api/teacher/live-sessions/:id/invite` — Invite additional participants
+- `PATCH /api/teacher/live-sessions/:id/participants/:userId` — Update participant status
+- `POST /api/teacher/live-sessions/:id/join` — Log attendance join
+- `POST /api/teacher/live-sessions/:id/leave` — Log attendance leave
+- `GET /api/teacher/live-sessions/:id/chat` — Get chat messages
+- `POST /api/teacher/live-sessions/:id/chat` — Send chat message
+- `POST /api/teacher/live-sessions/:id/upload-url` — Get signed URL for recording upload
+- `GET /api/teacher/users/search` — Search users for invitation
+- `GET /api/teacher/classes` — List classes for session creation
+
+## New Database Tables
+- `session_participants` — Tracks invited/joined participants per session with mute/pin status
+- `session_chat_messages` — Group chat messages per session with Realtime support
+- `session_reactions` — Emoji reactions per session
+- `live_sessions.class_id` — Added column linking sessions to classes
 
 ## Notes
 - Port 5000 is used for both frontend and backend (Express serves Vite middleware)

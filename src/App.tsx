@@ -29,6 +29,7 @@ import TeacherAssignments from './pages/teacher/Assignments';
 import TeacherAttendance from './pages/teacher/Attendance';
 import TeacherCertificates from './pages/teacher/Certificates';
 import TeacherLiveSessions from './pages/teacher/LiveSessions';
+import TeacherLiveSessionRoom from './pages/teacher/LiveSessionRoom';
 import TeacherCommunity from './pages/teacher/Community';
 import TeacherAnnouncements from './pages/teacher/Announcements';
 import TeacherProgress from './pages/teacher/Progress';
@@ -65,6 +66,8 @@ import StudentResults from './pages/student/Results';
 import StudentCertificates from './pages/student/Certificates';
 import StudentCommunity from './pages/student/Community';
 import StudentLiveClasses from './pages/student/LiveClasses';
+import StudentLiveSessionJoin from './pages/student/LiveSessionJoin';
+import StudentLiveSessionsList from './pages/student/LiveSessionsList';
 import StudentExams from './pages/student/Exams';
 import NotFound from './pages/NotFound';
 import { apiUrl } from './lib/apiUrl';
@@ -223,6 +226,7 @@ function TeacherRoutes() {
       <Route path="/attendance" element={<TeacherAttendance />} />
       <Route path="/certificates" element={<TeacherCertificates />} />
       <Route path="/live-sessions" element={<TeacherLiveSessions />} />
+      <Route path="/live-sessions/:id/room" element={<TeacherLiveSessionRoom />} />
       <Route path="/community" element={<TeacherCommunity />} />
       <Route path="/announcements" element={<TeacherAnnouncements />} />
       <Route path="/progress" element={<TeacherProgress />} />
@@ -245,6 +249,8 @@ function StudentRoutes() {
       <Route path="/certificates" element={<StudentCertificates />} />
       <Route path="/community" element={<StudentCommunity />} />
       <Route path="/live-classes" element={<StudentLiveClasses />} />
+      <Route path="/live-sessions" element={<StudentLiveSessionsList />} />
+      <Route path="/live-sessions/:id" element={<StudentLiveSessionJoin />} />
       <Route path="/exams" element={<StudentExams />} />
       <Route path="/quiz/:quizId" element={<QuizTaking />} />
       <Route path="/results/:attemptId" element={<QuizResults />} />

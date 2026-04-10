@@ -485,3 +485,103 @@ CREATE POLICY "announcements_write" ON announcements FOR ALL USING (
 
 -- Add recording_url to live_sessions (run if table already exists)
 ALTER TABLE live_sessions ADD COLUMN IF NOT EXISTS recording_url TEXT;
+
+-- Add class_id to live_sessions
+ALTER TABLE live_sessions ADD COLUMN IF NOT EXISTS class_id UUID REFERENCES classes(id) ON DELETE SET NULL;
+
+-- ============================================================
+-- SESSION PARTICIPANTS
+-- ============================================================
+CREATE TABLE IF NOT EXISTS session_participants (
+  id         UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  session_id UUID NOT NULL REFERENCES live_sessions(id) ON DELETE CASCADE,
+  user_id    UUID NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
+  role       TEXT NOT NULL DEFAULT 'student' CHECK (role IN ('host','student')),
+  joined_at  TIMESTAMPTZ,
+  left_at    TIMESTAMPTZ,
+  is_muted       BOOLEAN DEFAULT FALSE,
+  is_pinned      BOOLEAN DEFAULT FALSE,
+  is_removed     BOOLEAN DEFAULT FALSE,
+  is_hand_raised BOOLEAN DEFAULT FALSE,
+  invited_at     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE(session_id, user_id)
+);
+CREATE INDEX IF NOT EXISTS idx_session_participants_session ON session_participants(session_id);
+CREATE INDEX IF NOT EXISTS idx_session_participants_user    ON session_participants(user_id);
+-- Forward-compatible column migrations (no-op if column already exists)
+ALTER TABLE session_participants ADD COLUMN IF NOT EXISTS is_removed     BOOLEAN DEFAULT FALSE;
+ALTER TABLE session_participants ADD COLUMN IF NOT EXISTS is_hand_raised BOOLEAN DEFAULT FALSE;
+
+ALTER TABLE session_participants ENABLE ROW LEVEL SECURITY;
+-- Only the host of the session or an invited participant can read participant records for that session
+CREATE POLICY "session_participants_read" ON session_participants FOR SELECT USING (
+  auth.uid() = user_id
+  OR auth.uid() IN (SELECT host_id FROM live_sessions WHERE id = session_id)
+  OR EXISTS (SELECT 1 FROM session_participants sp2 WHERE sp2.session_id = session_participants.session_id AND sp2.user_id = auth.uid())
+);
+-- Participants can insert their own row (join); host can insert/update any row
+CREATE POLICY "session_participants_insert" ON session_participants FOR INSERT WITH CHECK (
+  auth.uid() = user_id
+  OR auth.uid() IN (SELECT host_id FROM live_sessions WHERE id = session_id)
+);
+CREATE POLICY "session_participants_update" ON session_participants FOR UPDATE USING (
+  auth.uid() = user_id
+  OR auth.uid() IN (SELECT host_id FROM live_sessions WHERE id = session_id)
+);
+CREATE POLICY "session_participants_delete" ON session_participants FOR DELETE USING (
+  auth.uid() IN (SELECT host_id FROM live_sessions WHERE id = session_id)
+);
+
+-- ============================================================
+-- SESSION CHAT MESSAGES
+-- ============================================================
+CREATE TABLE IF NOT EXISTS session_chat_messages (
+  id         UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  session_id UUID NOT NULL REFERENCES live_sessions(id) ON DELETE CASCADE,
+  sender_id  UUID NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
+  message    TEXT NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_session_chat_session ON session_chat_messages(session_id);
+CREATE INDEX IF NOT EXISTS idx_session_chat_sender  ON session_chat_messages(sender_id);
+ALTER TABLE session_chat_messages ENABLE ROW LEVEL SECURITY;
+-- Only participants or the host of the session can read chat
+CREATE POLICY "session_chat_read" ON session_chat_messages FOR SELECT USING (
+  auth.uid() IN (SELECT host_id FROM live_sessions WHERE id = session_id)
+  OR auth.uid() IN (SELECT user_id FROM session_participants WHERE session_id = session_chat_messages.session_id)
+);
+-- Only participants or host can send messages; sender_id must match own user id
+CREATE POLICY "session_chat_insert" ON session_chat_messages FOR INSERT WITH CHECK (
+  auth.uid() = sender_id
+  AND (
+    auth.uid() IN (SELECT host_id FROM live_sessions WHERE id = session_id)
+    OR auth.uid() IN (SELECT user_id FROM session_participants WHERE session_id = session_chat_messages.session_id)
+  )
+);
+
+-- ============================================================
+-- SESSION REACTIONS
+-- ============================================================
+CREATE TABLE IF NOT EXISTS session_reactions (
+  id         UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  session_id UUID NOT NULL REFERENCES live_sessions(id) ON DELETE CASCADE,
+  user_id    UUID NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
+  emoji      TEXT NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_session_reactions_session ON session_reactions(session_id);
+ALTER TABLE session_reactions ENABLE ROW LEVEL SECURITY;
+-- Only participants or host can read reactions for a session
+CREATE POLICY "session_reactions_read" ON session_reactions FOR SELECT USING (
+  auth.uid() IN (SELECT host_id FROM live_sessions WHERE id = session_id)
+  OR auth.uid() IN (SELECT user_id FROM session_participants WHERE session_id = session_reactions.session_id)
+);
+-- Only participants or host can insert their own reactions
+CREATE POLICY "session_reactions_insert" ON session_reactions FOR INSERT WITH CHECK (
+  auth.uid() = user_id
+  AND (
+    auth.uid() IN (SELECT host_id FROM live_sessions WHERE id = session_id)
+    OR auth.uid() IN (SELECT user_id FROM session_participants WHERE session_id = session_reactions.session_id)
+  )
+);

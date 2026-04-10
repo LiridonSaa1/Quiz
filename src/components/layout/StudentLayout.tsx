@@ -1,6 +1,7 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { supabase } from '../../supabase';
+import { authFetch } from '../../lib/apiUrl';
 import { cn } from '../../lib/utils';
 import NotificationCenter from '../NotificationCenter';
 import { 
@@ -14,6 +15,7 @@ import {
   Award, 
   MessageSquare, 
   Video, 
+  Radio,
   User, 
   LogOut,
   Menu,
@@ -53,6 +55,7 @@ const studentNavSections = [
       { icon: Award, label: 'Certificates', path: '/student/certificates' },
       { icon: MessageSquare, label: 'Community', path: '/student/community' },
       { icon: Video, label: 'Live Classes', path: '/student/live-classes' },
+      { icon: Radio, label: 'Live Sessions', path: '/student/live-sessions' },
     ]
   },
   {
@@ -63,17 +66,39 @@ const studentNavSections = [
   }
 ];
 
+interface NavItemDef { icon: React.ElementType; label: string; path: string; }
+
 export default function StudentLayout({ children }: { children: React.ReactNode }) {
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+  const [liveSessionCount, setLiveSessionCount] = useState(0);
   const location = useLocation();
   const navigate = useNavigate();
+
+  // Poll for live sessions to display badge
+  useEffect(() => {
+    const check = async () => {
+      const { data: { session: authSession } } = await supabase.auth.getSession();
+      if (!authSession) return;
+      try {
+        const res = await authFetch('/api/student/live-sessions?status=live');
+        const json = await res.json();
+        if (json.success) setLiveSessionCount((json.sessions || []).length);
+      } catch { /* silent */ }
+    };
+    check();
+    const interval = setInterval(check, 30000);
+    return () => clearInterval(interval);
+  }, []);
 
   const handleLogout = async () => {
     await supabase.auth.signOut();
     navigate('/login');
   };
 
-  const NavItem = ({ item, onClick }: { item: any; key?: React.Key; onClick?: () => void }) => (
+  const NavItem = ({ item, onClick }: { item: NavItemDef; onClick?: () => void }) => {
+    const isLiveSessions = item.path === '/student/live-sessions';
+    const showBadge = isLiveSessions && liveSessionCount > 0;
+    return (
     <Link
       to={item.path}
       onClick={onClick}
@@ -85,9 +110,15 @@ export default function StudentLayout({ children }: { children: React.ReactNode 
       )}
     >
       <item.icon className="w-4 h-4 shrink-0" />
-      <span>{item.label}</span>
+      <span className="flex-1">{item.label}</span>
+      {showBadge && (
+        <span className="inline-flex items-center justify-center min-w-[18px] h-[18px] px-1 bg-rose-500 text-white text-[10px] font-bold rounded-full animate-pulse">
+          {liveSessionCount}
+        </span>
+      )}
     </Link>
   );
+  };
 
   const SidebarContent = ({ onLinkClick }: { onLinkClick?: () => void }) => (
     <>

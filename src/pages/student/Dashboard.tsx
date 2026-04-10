@@ -1,16 +1,24 @@
 import React, { useEffect, useState } from 'react';
 import { supabase } from '../../supabase';
+import { authFetch } from '../../lib/apiUrl';
 import StudentLayout from '../../components/layout/StudentLayout';
-import { BookOpen, Clock, CheckCircle2, Trophy, ArrowRight, Flame } from 'lucide-react';
+import { BookOpen, Clock, CheckCircle2, Trophy, ArrowRight, Flame, Radio } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { Quiz } from '../../types';
 import { cn } from '../../lib/utils';
 import { fetchAttemptRowsByStudentId, normalizeAttempts } from '../../lib/quizAttempts';
 
+interface LiveSessionBanner {
+  id: string;
+  title: string;
+  host: { display_name: string } | null;
+}
+
 export default function StudentDashboard() {
   const [enrolledCourses, setEnrolledCourses] = useState<any[]>([]);
   const [availableQuizzes, setAvailableQuizzes] = useState<Quiz[]>([]);
   const [recentAttempts, setRecentAttempts] = useState<any[]>([]);
+  const [liveSessions, setLiveSessions] = useState<LiveSessionBanner[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -55,6 +63,15 @@ export default function StudentDashboard() {
           completed_at: a.completed_at,
         }));
         setRecentAttempts(attempts);
+
+        // Fetch live sessions where this student is an invited participant
+        try {
+          const liveRes = await authFetch('/api/student/live-sessions?status=live');
+          const liveJson = await liveRes.json();
+          if (liveJson.success) setLiveSessions(liveJson.sessions || []);
+        } catch {
+          // Non-blocking: live sessions banner is best-effort
+        }
       } catch (error) {
         console.error('Error fetching student data:', error);
       } finally {
@@ -83,6 +100,32 @@ export default function StudentDashboard() {
   return (
     <StudentLayout>
       <div className="space-y-6">
+        {/* Live Session Banner */}
+        {liveSessions.length > 0 && (
+          <div className="space-y-2">
+            {liveSessions.map(ls => (
+              <Link
+                key={ls.id}
+                to={`/student/live-sessions/${ls.id}`}
+                className="flex items-center justify-between gap-4 bg-gradient-to-r from-rose-500 to-pink-600 rounded-2xl p-4 shadow-lg shadow-rose-200 hover:opacity-95 transition-opacity"
+              >
+                <div className="flex items-center gap-3 text-white min-w-0">
+                  <Radio className="w-5 h-5 shrink-0 animate-pulse" />
+                  <div className="min-w-0">
+                    <p className="font-bold truncate">{ls.title}</p>
+                    {ls.host && (
+                      <p className="text-rose-100 text-xs">Hosted by {ls.host.display_name}</p>
+                    )}
+                  </div>
+                </div>
+                <span className="shrink-0 flex items-center gap-1.5 px-4 py-2 bg-white text-rose-600 rounded-xl font-bold text-sm">
+                  Join Now <ArrowRight className="w-3.5 h-3.5" />
+                </span>
+              </Link>
+            ))}
+          </div>
+        )}
+
         {/* Header */}
         <div className="flex items-start justify-between">
           <div>

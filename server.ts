@@ -1,5 +1,5 @@
 import "dotenv/config";
-import express from "express";
+import express, { Request, Response } from "express";
 import { createServer as createViteServer } from "vite";
 import path from "path";
 import { fileURLToPath } from "url";
@@ -1337,6 +1337,644 @@ async function startServer() {
 
       res.json({ success: true, report });
     } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  // ── TEACHER LIVE SESSIONS ───────────────────────────────────
+
+  // Auth helper: validates Bearer token and returns { userId, role } or null
+  const getAuthUser = async (req: Request): Promise<{ userId: string; role: string } | null> => {
+    const auth = req.headers['authorization'] || '';
+    const token = auth.startsWith('Bearer ') ? auth.slice(7).trim() : '';
+    if (!token) return null;
+    const { data: { user }, error } = await supabaseAdmin.auth.getUser(token);
+    if (error || !user) return null;
+    const { data: profile } = await supabaseAdmin.from('profiles').select('role').eq('id', user.id).single();
+    return { userId: user.id, role: profile?.role || 'student' };
+  };
+
+  // Check caller is a teacher/admin who is host of the given session
+  const assertSessionHost = async (req: Request, res: Response, sessionId: string): Promise<string | null> => {
+    const caller = await getAuthUser(req);
+    if (!caller) { res.status(401).json({ error: 'Unauthorized' }); return null; }
+    if (caller.role !== 'teacher' && caller.role !== 'admin') { res.status(403).json({ error: 'Forbidden: teacher or admin role required' }); return null; }
+    // For admins, skip host check
+    if (caller.role === 'admin') return caller.userId;
+    const { data: session } = await supabaseAdmin.from('live_sessions').select('host_id').eq('id', sessionId).single();
+    if (!session || session.host_id !== caller.userId) { res.status(403).json({ error: 'Forbidden: you are not the host of this session' }); return null; }
+    return caller.userId;
+  };
+
+  // Assert authenticated participant (teacher or student who can access the session)
+  const assertAuthenticated = async (req: Request, res: Response): Promise<{ userId: string; role: string } | null> => {
+    const caller = await getAuthUser(req);
+    if (!caller) { res.status(401).json({ error: 'Unauthorized' }); return null; }
+    return caller;
+  };
+
+  // List sessions for logged-in teacher (teacher or admin only)
+  app.get('/api/teacher/live-sessions', async (req, res) => {
+    try {
+      const caller = await assertAuthenticated(req, res);
+      if (!caller) return;
+      if (caller.role !== 'teacher' && caller.role !== 'admin') {
+        return res.status(403).json({ error: 'Forbidden: teacher or admin role required' });
+      }
+      const { host_id } = req.query;
+      // Teachers can only list their own; admins can filter by host_id
+      const effectiveHostId = caller.role === 'admin' ? (host_id as string | undefined) : caller.userId;
+      let query = supabaseAdmin
+        .from('live_sessions')
+        .select('*, host:profiles!host_id(id,display_name,email), course:courses!course_id(id,title)')
+        .order('scheduled_at', { ascending: false });
+      if (effectiveHostId) query = query.eq('host_id', effectiveHostId);
+      const { data, error } = await query;
+      if (error) throw error;
+
+      const ids = (data || []).map((s: { id: string }) => s.id);
+      const invitedCounts: Record<string, number> = {};
+      const joinedCounts: Record<string, number> = {};
+      if (ids.length > 0) {
+        const { data: pData } = await supabaseAdmin
+          .from('session_participants')
+          .select('session_id,joined_at')
+          .in('session_id', ids);
+        (pData || []).forEach((p: { session_id: string; joined_at: string | null }) => {
+          invitedCounts[p.session_id] = (invitedCounts[p.session_id] || 0) + 1;
+          if (p.joined_at) joinedCounts[p.session_id] = (joinedCounts[p.session_id] || 0) + 1;
+        });
+      }
+
+      const sessions = (data || []).map((s: Record<string, unknown>) => ({
+        ...s,
+        participant_count: s.status === 'ended'
+          ? (joinedCounts[s.id as string] || 0)
+          : (invitedCounts[s.id as string] || 0),
+        invited_count: invitedCounts[s.id as string] || 0,
+        joined_count: joinedCounts[s.id as string] || 0,
+      }));
+      res.json({ success: true, sessions });
+    } catch (e: unknown) { res.status(500).json({ error: (e as Error).message }); }
+  });
+
+  // Create session
+  app.post('/api/teacher/live-sessions', async (req, res) => {
+    try {
+      const caller = await assertAuthenticated(req, res);
+      if (!caller) return;
+      if (caller.role !== 'teacher' && caller.role !== 'admin') return res.status(403).json({ error: 'Forbidden: teacher role required' });
+
+      const { participant_ids, class_id, ...sessionData } = req.body;
+      // Force host_id to the authenticated caller
+      const payload = {
+        ...sessionData,
+        host_id: caller.userId,
+        class_id: class_id || null,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      };
+      const { data: session, error } = await supabaseAdmin
+        .from('live_sessions').insert(payload).select().single();
+      if (error) throw error;
+
+      const inviteIds: string[] = Array.isArray(participant_ids) ? [...participant_ids] : [];
+
+      if (class_id) {
+        const { data: classRow } = await supabaseAdmin.from('classes').select('student_ids').eq('id', class_id).single();
+        ((classRow?.student_ids as string[]) || []).forEach((uid: string) => {
+          if (!inviteIds.includes(uid)) inviteIds.push(uid);
+        });
+      }
+
+      if (inviteIds.length > 0) {
+        const participantRows = inviteIds.map((uid: string) => ({
+          session_id: session.id,
+          user_id: uid,
+          role: 'student',
+          invited_at: new Date().toISOString(),
+          created_at: new Date().toISOString(),
+        }));
+        await supabaseAdmin.from('session_participants').upsert(participantRows, { onConflict: 'session_id,user_id' });
+
+        const notifRows = inviteIds.map((uid: string) => ({
+          user_id: uid,
+          title: 'Live Session Invitation',
+          message: `You've been invited to "${session.title}" — join now`,
+          type: 'info',
+          action_url: `/student/live-sessions/${session.id}`,
+          created_at: new Date().toISOString(),
+        }));
+        await supabaseAdmin.from('notifications').insert(notifRows);
+      }
+
+      res.json({ success: true, session });
+    } catch (e: unknown) { res.status(500).json({ error: (e as Error).message }); }
+  });
+
+  // Update session — host only; strict whitelist of mutable fields
+  app.patch('/api/teacher/live-sessions/:id', async (req, res) => {
+    try {
+      const hostId = await assertSessionHost(req, res, req.params.id);
+      if (!hostId) return;
+
+      // Whitelist the fields a host is permitted to change
+      const ALLOWED_FIELDS = ['status', 'title', 'description', 'scheduled_at', 'duration_minutes', 'recording_url', 'jitsi_room_name'];
+      const update: Record<string, unknown> = { updated_at: new Date().toISOString() };
+      for (const key of ALLOWED_FIELDS) {
+        if (key in req.body) update[key] = req.body[key];
+      }
+      if (Object.keys(update).length === 1) {
+        return res.status(400).json({ error: 'No updatable fields provided' });
+      }
+
+      const { data, error } = await supabaseAdmin
+        .from('live_sessions')
+        .update(update)
+        .eq('id', req.params.id).select().single();
+      if (error) throw error;
+
+      if (req.body.status === 'live') {
+        const { data: parts } = await supabaseAdmin
+          .from('session_participants').select('user_id').eq('session_id', req.params.id);
+        if (parts && parts.length > 0) {
+          const notifRows = (parts as Array<{ user_id: string }>).map((p) => ({
+            user_id: p.user_id,
+            title: 'Session is Live Now!',
+            message: `"${data.title}" has started — join now`,
+            type: 'info',
+            action_url: `/student/live-sessions/${req.params.id}`,
+            created_at: new Date().toISOString(),
+          }));
+          await supabaseAdmin.from('notifications').insert(notifRows);
+        }
+      }
+
+      res.json({ success: true, session: data });
+    } catch (e: unknown) { res.status(500).json({ error: (e as Error).message }); }
+  });
+
+  // Delete session (host only)
+  app.delete('/api/teacher/live-sessions/:id', async (req, res) => {
+    try {
+      const hostId = await assertSessionHost(req, res, req.params.id);
+      if (!hostId) return;
+      const { error } = await supabaseAdmin.from('live_sessions').delete().eq('id', req.params.id);
+      if (error) throw error;
+      res.json({ success: true });
+    } catch (e: unknown) { res.status(500).json({ error: (e as Error).message }); }
+  });
+
+  // Helper: check if caller has access to a given session
+  // Access granted if: admin, session host, invited+non-removed participant, OR enrolled in session's course/class (for ended sessions)
+  // assertSessionParticipantAccess — only host, admin, or explicitly invited (non-removed) participants
+  const assertSessionParticipantAccess = async (req: Request, res: Response, sessionId: string): Promise<string | null> => {
+    const caller = await getAuthUser(req);
+    if (!caller) { res.status(401).json({ error: 'Unauthorized' }); return null; }
+    if (caller.role === 'admin') return caller.userId;
+    const { data: sessionRow } = await supabaseAdmin
+      .from('live_sessions').select('host_id').eq('id', sessionId).single();
+    if (!sessionRow) { res.status(404).json({ error: 'Session not found' }); return null; }
+    if (sessionRow.host_id === caller.userId) return caller.userId;
+    const { data: participation } = await supabaseAdmin
+      .from('session_participants').select('id,is_removed').eq('session_id', sessionId).eq('user_id', caller.userId).single();
+    if (participation && (participation as { id: string; is_removed?: boolean }).is_removed) {
+      res.status(403).json({ error: 'Forbidden: you have been removed from this session' }); return null;
+    }
+    if (participation) return caller.userId;
+    res.status(403).json({ error: 'Forbidden: you are not a participant of this session' }); return null;
+  };
+
+  // assertSessionAccess — broader: host/admin/invited participant OR enrolled student for ended sessions (recording access only)
+  const assertSessionAccess = async (req: Request, res: Response, sessionId: string): Promise<string | null> => {
+    const caller = await getAuthUser(req);
+    if (!caller) { res.status(401).json({ error: 'Unauthorized' }); return null; }
+    if (caller.role === 'admin') return caller.userId;
+    // Check if host
+    const { data: sessionRow } = await supabaseAdmin
+      .from('live_sessions').select('host_id,course_id,class_id,status').eq('id', sessionId).single();
+    if (!sessionRow) { res.status(404).json({ error: 'Session not found' }); return null; }
+    if (sessionRow.host_id === caller.userId) return caller.userId;
+    // Check if invited participant AND not removed by host
+    const { data: participation } = await supabaseAdmin
+      .from('session_participants').select('id,is_removed').eq('session_id', sessionId).eq('user_id', caller.userId).single();
+    if (participation && !(participation as { id: string; is_removed?: boolean }).is_removed) {
+      return caller.userId;
+    }
+    if (participation && (participation as { id: string; is_removed?: boolean }).is_removed) {
+      res.status(403).json({ error: 'Forbidden: you have been removed from this session' }); return null;
+    }
+    // For ended sessions: also allow students enrolled in the session's course or class (recording access)
+    if (sessionRow.status === 'ended') {
+      if (sessionRow.course_id) {
+        const { data: course } = await supabaseAdmin
+          .from('courses').select('student_ids').eq('id', sessionRow.course_id).single();
+        if (course && Array.isArray(course.student_ids) && course.student_ids.includes(caller.userId)) {
+          return caller.userId;
+        }
+      }
+      if (sessionRow.class_id) {
+        const { data: cls } = await supabaseAdmin
+          .from('classes').select('student_ids').eq('id', sessionRow.class_id).single();
+        if (cls && Array.isArray(cls.student_ids) && cls.student_ids.includes(caller.userId)) {
+          return caller.userId;
+        }
+      }
+    }
+    res.status(403).json({ error: 'Forbidden: you are not a participant of this session' }); return null;
+  };
+
+  // Student session detail — accessible to invited participants AND enrolled students (for ended sessions)
+  app.get('/api/student/live-sessions/:id', async (req, res) => {
+    try {
+      const userId = await assertSessionAccess(req, res, req.params.id);
+      if (!userId) return;
+      const { data, error } = await supabaseAdmin
+        .from('live_sessions')
+        .select('*, host:profiles!host_id(id,display_name,email), course:courses!course_id(id,title)')
+        .eq('id', req.params.id).single();
+      if (error) throw error;
+      res.json({ success: true, session: data });
+    } catch (e: unknown) { res.status(500).json({ error: (e as Error).message }); }
+  });
+
+  // Student recordings endpoint — list recordings accessible to caller (invited or enrolled)
+  app.get('/api/student/live-sessions/:id/recording', async (req, res) => {
+    try {
+      const userId = await assertSessionAccess(req, res, req.params.id);
+      if (!userId) return;
+      const { data, error } = await supabaseAdmin
+        .from('live_sessions')
+        .select('id,title,recording_url,status,scheduled_at')
+        .eq('id', req.params.id).single();
+      if (error) throw error;
+      if (!data.recording_url) return res.json({ success: true, recording_url: null });
+      res.json({ success: true, recording_url: data.recording_url, title: data.title });
+    } catch (e: unknown) { res.status(500).json({ error: (e as Error).message }); }
+  });
+
+  // Single session fetch — accessible by host or invited participants only (not enrolled-only students)
+  app.get('/api/teacher/live-sessions/:id', async (req, res) => {
+    try {
+      const userId = await assertSessionParticipantAccess(req, res, req.params.id);
+      if (!userId) return;
+      const { data, error } = await supabaseAdmin
+        .from('live_sessions')
+        .select('*, host:profiles!host_id(id,display_name,email), course:courses!course_id(id,title)')
+        .eq('id', req.params.id).single();
+      if (error) throw error;
+      res.json({ success: true, session: data });
+    } catch (e: unknown) { res.status(500).json({ error: (e as Error).message }); }
+  });
+
+  // Get participants — host or explicitly invited participant only
+  app.get('/api/teacher/live-sessions/:id/participants', async (req, res) => {
+    try {
+      const userId = await assertSessionParticipantAccess(req, res, req.params.id);
+      if (!userId) return;
+      const { data, error } = await supabaseAdmin
+        .from('session_participants')
+        .select('*, user:profiles!user_id(id,display_name,email,avatar_url)')
+        .eq('session_id', req.params.id);
+      if (error) throw error;
+      res.json({ success: true, participants: data || [] });
+    } catch (e: unknown) { res.status(500).json({ error: (e as Error).message }); }
+  });
+
+  // Invite participants to existing session (host only)
+  app.post('/api/teacher/live-sessions/:id/invite', async (req, res) => {
+    try {
+      const hostId = await assertSessionHost(req, res, req.params.id);
+      if (!hostId) return;
+
+      const { user_ids, class_id } = req.body;
+      const inviteIds: string[] = Array.isArray(user_ids) ? [...user_ids] : [];
+
+      if (class_id) {
+        const { data: classRow } = await supabaseAdmin.from('classes').select('student_ids').eq('id', class_id).single();
+        ((classRow?.student_ids as string[]) || []).forEach((uid: string) => {
+          if (!inviteIds.includes(uid)) inviteIds.push(uid);
+        });
+      }
+
+      if (inviteIds.length === 0) return res.status(400).json({ error: 'No user IDs provided' });
+
+      const { data: session } = await supabaseAdmin.from('live_sessions').select('title').eq('id', req.params.id).single();
+
+      const rows = inviteIds.map((uid: string) => ({
+        session_id: req.params.id,
+        user_id: uid,
+        role: 'student',
+        invited_at: new Date().toISOString(),
+        created_at: new Date().toISOString(),
+      }));
+      await supabaseAdmin.from('session_participants').upsert(rows, { onConflict: 'session_id,user_id' });
+
+      const notifRows = inviteIds.map((uid: string) => ({
+        user_id: uid,
+        title: 'Live Session Invitation',
+        message: `You've been invited to "${session?.title || 'a session'}" — join now`,
+        type: 'info',
+        action_url: `/student/live-sessions/${req.params.id}`,
+        created_at: new Date().toISOString(),
+      }));
+      await supabaseAdmin.from('notifications').insert(notifRows);
+
+      res.json({ success: true, invited: inviteIds.length });
+    } catch (e: unknown) { res.status(500).json({ error: (e as Error).message }); }
+  });
+
+  // Update participant status — host can mute/pin/remove; participants can only update own left_at
+  app.patch('/api/teacher/live-sessions/:id/participants/:userId', async (req, res) => {
+    try {
+      const { id, userId } = req.params;
+      const caller = await getAuthUser(req);
+      if (!caller) { return res.status(401).json({ error: 'Unauthorized' }); }
+
+      // Determine if this is a participant leaving their own record
+      const isSelfLeave = caller.userId === userId;
+
+      if (isSelfLeave) {
+        // Participants may ONLY update their own left_at or is_hand_raised — nothing else
+        const { left_at, is_hand_raised } = req.body;
+        if (left_at === undefined && is_hand_raised === undefined) {
+          return res.status(403).json({ error: 'Forbidden: participants may only set their own left_at or is_hand_raised' });
+        }
+        const selfUpdate: Record<string, unknown> = {};
+        if (left_at !== undefined) selfUpdate.left_at = left_at;
+        if (is_hand_raised !== undefined) selfUpdate.is_hand_raised = is_hand_raised;
+        const { data, error } = await supabaseAdmin
+          .from('session_participants')
+          .update(selfUpdate)
+          .eq('session_id', id).eq('user_id', userId)
+          .select().single();
+        if (error) throw error;
+        return res.json({ success: true, participant: data });
+      }
+
+      // All other updates require host ownership
+      const sessionRow = await assertSessionHost(req, res, id);
+      if (!sessionRow) return;
+
+      // Whitelist host-mutable fields
+      const HOST_FIELDS = ['is_muted', 'is_pinned', 'left_at', 'is_removed', 'is_hand_raised'];
+      const update: Record<string, unknown> = {};
+      for (const key of HOST_FIELDS) {
+        if (key in req.body) update[key] = req.body[key];
+      }
+      if (Object.keys(update).length === 0) {
+        return res.status(400).json({ error: 'No updatable fields provided' });
+      }
+      const { data, error } = await supabaseAdmin
+        .from('session_participants')
+        .update(update)
+        .eq('session_id', id).eq('user_id', userId)
+        .select().single();
+      if (error) throw error;
+      res.json({ success: true, participant: data });
+    } catch (e: unknown) { res.status(500).json({ error: (e as Error).message }); }
+  });
+
+  // Log attendance (join) — session participants only, can only log own join
+  app.post('/api/teacher/live-sessions/:id/join', async (req, res) => {
+    try {
+      const caller = await getAuthUser(req);
+      if (!caller) return res.status(401).json({ error: 'Unauthorized' });
+      const { user_id } = req.body;
+      if (!user_id) return res.status(400).json({ error: 'user_id is required' });
+      if (caller.userId !== user_id && caller.role !== 'admin') {
+        return res.status(403).json({ error: 'Forbidden: can only log own attendance' });
+      }
+
+      // Verify session is currently live
+      const { data: sessionRow, error: sErr } = await supabaseAdmin
+        .from('live_sessions').select('id,status,host_id').eq('id', req.params.id).single();
+      if (sErr || !sessionRow) return res.status(404).json({ error: 'Session not found' });
+      const isHost = caller.userId === sessionRow.host_id || caller.role === 'admin';
+      if (sessionRow.status !== 'live' && !isHost) {
+        return res.status(403).json({ error: 'Session is not live' });
+      }
+
+      // Non-admin non-host callers must be an explicitly invited, non-removed participant
+      if (!isHost) {
+        const { data: pRow } = await supabaseAdmin
+          .from('session_participants')
+          .select('id,is_removed')
+          .eq('session_id', req.params.id).eq('user_id', user_id)
+          .maybeSingle();
+        if (!pRow) return res.status(403).json({ error: 'Not invited to this session' });
+        if (pRow.is_removed) return res.status(403).json({ error: 'You have been removed from this session' });
+      }
+
+      const { data, error } = await supabaseAdmin
+        .from('session_participants')
+        .upsert({ session_id: req.params.id, user_id, role: 'student', joined_at: new Date().toISOString(), created_at: new Date().toISOString() }, { onConflict: 'session_id,user_id' })
+        .select().single();
+      if (error) throw error;
+      res.json({ success: true, participant: data });
+    } catch (e: unknown) { res.status(500).json({ error: (e as Error).message }); }
+  });
+
+  // Log attendance (leave) — must be currently an active invited participant
+  app.post('/api/teacher/live-sessions/:id/leave', async (req, res) => {
+    try {
+      const caller = await getAuthUser(req);
+      if (!caller) return res.status(401).json({ error: 'Unauthorized' });
+      const { user_id } = req.body;
+      if (!user_id) return res.status(400).json({ error: 'user_id is required' });
+      if (caller.userId !== user_id && caller.role !== 'admin') {
+        return res.status(403).json({ error: 'Forbidden: can only log own attendance' });
+      }
+
+      // Verify session exists
+      const { data: sessionRow, error: sErr } = await supabaseAdmin
+        .from('live_sessions').select('id,status,host_id').eq('id', req.params.id).single();
+      if (sErr || !sessionRow) return res.status(404).json({ error: 'Session not found' });
+      const isHost = caller.userId === sessionRow.host_id || caller.role === 'admin';
+
+      // Non-host must have an explicit participant row with a joined_at (and not removed)
+      if (!isHost) {
+        const { data: pRow } = await supabaseAdmin
+          .from('session_participants')
+          .select('id,is_removed,joined_at')
+          .eq('session_id', req.params.id).eq('user_id', user_id)
+          .maybeSingle();
+        if (!pRow) return res.status(403).json({ error: 'Not a participant of this session' });
+        if (pRow.is_removed) return res.status(403).json({ error: 'You have been removed from this session' });
+        if (!pRow.joined_at) return res.status(400).json({ error: 'Cannot leave a session you have not joined' });
+      }
+
+      const { data, error } = await supabaseAdmin
+        .from('session_participants')
+        .update({ left_at: new Date().toISOString() })
+        .eq('session_id', req.params.id).eq('user_id', user_id)
+        .select().single();
+      if (error) throw error;
+      res.json({ success: true, participant: data });
+    } catch (e: unknown) { res.status(500).json({ error: (e as Error).message }); }
+  });
+
+  // Get chat messages — host or explicitly invited participants only (not enrolled-only)
+  app.get('/api/teacher/live-sessions/:id/chat', async (req, res) => {
+    try {
+      const caller = await assertSessionParticipantAccess(req, res, req.params.id);
+      if (!caller) return;
+      const { data, error } = await supabaseAdmin
+        .from('session_chat_messages')
+        .select('*, sender:profiles!sender_id(id,display_name,avatar_url)')
+        .eq('session_id', req.params.id)
+        .order('created_at', { ascending: true });
+      if (error) throw error;
+      res.json({ success: true, messages: data || [] });
+    } catch (e: unknown) { res.status(500).json({ error: (e as Error).message }); }
+  });
+
+  // Send chat message — invited participants only, sender_id must match caller
+  app.post('/api/teacher/live-sessions/:id/chat', async (req, res) => {
+    try {
+      const accessUserId = await assertSessionParticipantAccess(req, res, req.params.id);
+      if (!accessUserId) return;
+      const caller = await getAuthUser(req);
+      if (!caller) return;
+      const { sender_id, message } = req.body;
+      if (caller.userId !== sender_id) {
+        return res.status(403).json({ error: 'Forbidden: sender_id must match authenticated user' });
+      }
+      const { data, error } = await supabaseAdmin
+        .from('session_chat_messages')
+        .insert({ session_id: req.params.id, sender_id, message, created_at: new Date().toISOString() })
+        .select('*, sender:profiles!sender_id(id,display_name,avatar_url)').single();
+      if (error) throw error;
+      res.json({ success: true, message: data });
+    } catch (e: unknown) { res.status(500).json({ error: (e as Error).message }); }
+  });
+
+  // Persist reaction — invited participants/host only (not enrolled-only)
+  app.post('/api/teacher/live-sessions/:id/reactions', async (req, res) => {
+    try {
+      const userId = await assertSessionParticipantAccess(req, res, req.params.id);
+      if (!userId) return;
+      const caller = await getAuthUser(req);
+      if (!caller) return;
+      const { emoji } = req.body;
+      if (!emoji) return res.status(400).json({ error: 'emoji required' });
+      const { data, error } = await supabaseAdmin
+        .from('session_reactions')
+        .insert({ session_id: req.params.id, user_id: caller.userId, emoji, created_at: new Date().toISOString() })
+        .select().single();
+      if (error) throw error;
+      res.json({ success: true, reaction: data });
+    } catch (e: unknown) { res.status(500).json({ error: (e as Error).message }); }
+  });
+
+  // Recording upload URL (host only)
+  app.post('/api/teacher/live-sessions/:id/upload-url', async (req, res) => {
+    try {
+      const hostId = await assertSessionHost(req, res, req.params.id);
+      if (!hostId) return;
+      const { id } = req.params;
+      const filename = `session-${id}-${Date.now()}.webm`;
+      const storagePath = `recordings/${filename}`;
+      await supabaseAdmin.storage.createBucket('live-recordings', { public: true }).catch(() => {});
+      const { data, error } = await supabaseAdmin.storage.from('live-recordings').createSignedUploadUrl(storagePath);
+      if (error) {
+        await supabaseAdmin.storage.createBucket('recordings', { public: true }).catch(() => {});
+        const { data: d2, error: e2 } = await supabaseAdmin.storage.from('recordings').createSignedUploadUrl(storagePath);
+        if (e2) throw e2;
+        const { data: { publicUrl } } = supabaseAdmin.storage.from('recordings').getPublicUrl(storagePath);
+        return res.json({ success: true, signedUrl: d2.signedUrl, publicUrl, bucket: 'recordings' });
+      }
+      const { data: { publicUrl } } = supabaseAdmin.storage.from('live-recordings').getPublicUrl(storagePath);
+      res.json({ success: true, signedUrl: data.signedUrl, publicUrl, bucket: 'live-recordings' });
+    } catch (e: unknown) { res.status(500).json({ error: (e as Error).message }); }
+  });
+
+  // Search users for invitation (teacher only)
+  app.get('/api/teacher/users/search', async (req, res) => {
+    try {
+      const caller = await assertAuthenticated(req, res);
+      if (!caller) return;
+      if (caller.role !== 'teacher' && caller.role !== 'admin') return res.status(403).json({ error: 'Forbidden' });
+      const { q, role } = req.query;
+      let query = supabaseAdmin.from('profiles').select('id, display_name, email, role, avatar_url');
+      if (role) query = query.eq('role', role as string);
+      if (q) query = query.or(`display_name.ilike.%${q}%,email.ilike.%${q}%`);
+      query = query.limit(20);
+      const { data, error } = await query;
+      if (error) throw error;
+      res.json({ success: true, users: data || [] });
+    } catch (e: unknown) { res.status(500).json({ error: (e as Error).message }); }
+  });
+
+  // List classes (teacher only)
+  app.get('/api/teacher/classes', async (req, res) => {
+    try {
+      const caller = await assertAuthenticated(req, res);
+      if (!caller) return;
+      if (caller.role !== 'teacher' && caller.role !== 'admin') return res.status(403).json({ error: 'Forbidden' });
+      const { teacher_id } = req.query;
+      const effectiveTeacherId = caller.role === 'admin' ? (teacher_id as string | undefined) : caller.userId;
+      let query = supabaseAdmin.from('classes').select('id, name, student_ids, course_id');
+      if (effectiveTeacherId) query = query.eq('teacher_id', effectiveTeacherId);
+      const { data, error } = await query;
+      if (error) throw error;
+      res.json({ success: true, classes: data || [] });
+    } catch (e: unknown) { res.status(500).json({ error: (e as Error).message }); }
+  });
+
+  // ── STUDENT LIVE SESSIONS ───────────────────────────────────
+
+  // Get live sessions for which the authenticated student is an invited participant
+  app.get('/api/student/live-sessions', async (req, res) => {
+    try {
+      const caller = await assertAuthenticated(req, res);
+      if (!caller) return;
+      if (caller.role !== 'student' && caller.role !== 'admin') {
+        return res.status(403).json({ error: 'Forbidden: student or admin role required' });
+      }
+      const { status } = req.query;
+
+      // Find session_ids where this user is a non-removed participant
+      const { data: participantRows, error: pErr } = await supabaseAdmin
+        .from('session_participants')
+        .select('session_id,is_removed')
+        .eq('user_id', caller.userId);
+      if (pErr) throw pErr;
+
+      const invitedSessionIds = (participantRows || [])
+        .filter((p: { session_id: string; is_removed?: boolean }) => !p.is_removed)
+        .map((p: { session_id: string }) => p.session_id);
+
+      // Also find ended sessions from courses or classes the student is enrolled in
+      const [{ data: enrolledCourses }, { data: enrolledClasses }] = await Promise.all([
+        supabaseAdmin.from('courses').select('id').contains('student_ids', [caller.userId]),
+        supabaseAdmin.from('classes').select('id').contains('student_ids', [caller.userId]),
+      ]);
+      const courseIds = (enrolledCourses || []).map((c: { id: string }) => c.id);
+      const classIds = (enrolledClasses || []).map((c: { id: string }) => c.id);
+      let enrolledSessionIds: string[] = [];
+      if (courseIds.length > 0) {
+        const { data: rows } = await supabaseAdmin.from('live_sessions').select('id').in('course_id', courseIds).eq('status', 'ended');
+        enrolledSessionIds.push(...(rows || []).map((s: { id: string }) => s.id));
+      }
+      if (classIds.length > 0) {
+        const { data: rows } = await supabaseAdmin.from('live_sessions').select('id').in('class_id', classIds).eq('status', 'ended');
+        enrolledSessionIds.push(...(rows || []).map((s: { id: string }) => s.id));
+      }
+
+      const allSessionIds = Array.from(new Set([...invitedSessionIds, ...enrolledSessionIds]));
+      if (allSessionIds.length === 0) return res.json({ success: true, sessions: [] });
+
+      let query = supabaseAdmin
+        .from('live_sessions')
+        .select('id, title, status, scheduled_at, duration_minutes, recording_url, host:profiles!host_id(id,display_name)')
+        .in('id', allSessionIds)
+        .order('scheduled_at', { ascending: false });
+
+      if (status) query = query.eq('status', status as string);
+
+      const { data, error } = await query;
+      if (error) throw error;
+      res.json({ success: true, sessions: data || [] });
+    } catch (e: unknown) { res.status(500).json({ error: (e as Error).message }); }
   });
 
   // ── LIVE SESSION RECORDING UPLOAD ──────────────────────────
