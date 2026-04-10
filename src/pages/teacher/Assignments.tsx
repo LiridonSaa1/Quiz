@@ -5,7 +5,7 @@ import { supabase } from '../../supabase';
 import {
   ClipboardList, Plus, Search, Star,
   X, Pencil, Trash2, CheckCircle2, Archive, FileText,
-  Calendar, BookOpen, School, Filter
+  AlertCircle, Calendar, BookOpen, School, Filter
 } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { format, isPast, isToday } from 'date-fns';
@@ -143,10 +143,10 @@ export default function TeacherAssignments() {
   });
 
   const stats = [
-    { label: 'Total', value: assignments.length, color: 'text-violet-600', border: 'border-violet-100' },
-    { label: 'Published', value: assignments.filter(a => a.status === 'published').length, color: 'text-emerald-600', border: 'border-emerald-100' },
-    { label: 'Draft', value: assignments.filter(a => a.status === 'draft').length, color: 'text-amber-600', border: 'border-amber-100' },
-    { label: 'Overdue', value: assignments.filter(a => a.due_date && isPast(new Date(a.due_date)) && !isToday(new Date(a.due_date)) && a.status === 'published').length, color: 'text-rose-600', border: 'border-rose-100' },
+    { label: 'Total', value: assignments.length, icon: ClipboardList, iconBg: 'bg-violet-100 text-violet-600', grad: 'from-violet-500 to-purple-500', ring: 'ring-violet-100' },
+    { label: 'Published', value: assignments.filter(a => a.status === 'published').length, icon: CheckCircle2, iconBg: 'bg-emerald-100 text-emerald-600', grad: 'from-emerald-500 to-teal-500', ring: 'ring-emerald-100' },
+    { label: 'Draft', value: assignments.filter(a => a.status === 'draft').length, icon: FileText, iconBg: 'bg-slate-100 text-slate-500', grad: 'from-slate-400 to-slate-500', ring: 'ring-slate-100' },
+    { label: 'Overdue', value: assignments.filter(a => a.due_date && isPast(new Date(a.due_date)) && !isToday(new Date(a.due_date)) && a.status === 'published').length, icon: AlertCircle, iconBg: 'bg-rose-100 text-rose-600', grad: 'from-rose-500 to-pink-500', ring: 'ring-rose-100' },
   ];
 
   const openAdd = () => {
@@ -246,9 +246,15 @@ export default function TeacherAssignments() {
         {/* Stats */}
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
           {stats.map(s => (
-            <div key={s.label} className={cn('bg-white border rounded-2xl p-4 shadow-sm', s.border)}>
-              <div className={cn('text-2xl font-bold', s.color)}>{s.value}</div>
-              <div className="text-xs text-slate-500 font-medium mt-0.5">{s.label}</div>
+            <div key={s.label} className="bg-white rounded-2xl border border-slate-100 shadow-sm hover:shadow-md transition-all overflow-hidden">
+              <div className={cn('h-0.5 bg-gradient-to-r', s.grad)} />
+              <div className="p-5">
+                <div className={cn('p-2.5 rounded-xl ring-4 inline-flex mb-4', s.iconBg, s.ring)}>
+                  <s.icon className="w-5 h-5" />
+                </div>
+                <p className="text-2xl font-bold text-slate-900 tracking-tight">{s.value}</p>
+                <p className="text-sm font-medium text-slate-700 mt-0.5">{s.label}</p>
+              </div>
             </div>
           ))}
         </div>
