@@ -442,10 +442,10 @@ function TeacherCourseCard({ course, gradient, index, onEdit, onDelete, onToggle
       animate={{ opacity: 1, y: 0 }}
       exit={{ opacity: 0, scale: 0.96 }}
       transition={{ delay: index * 0.06, duration: 0.35, ease: [0.22, 1, 0.36, 1] }}
-      className="bg-white rounded-2xl border border-slate-100 shadow-sm hover:shadow-xl hover:-translate-y-1 transition-all duration-300 group overflow-hidden flex flex-col"
+      className="bg-white rounded-2xl border border-slate-100 shadow-sm hover:shadow-xl hover:-translate-y-1 transition-all duration-300 group flex flex-col relative"
     >
       {/* Card Header */}
-      <div className={`relative h-36 bg-gradient-to-br ${gradient} p-5 flex flex-col justify-between overflow-hidden`}>
+      <div className={`relative h-36 bg-gradient-to-br ${gradient} p-5 flex flex-col justify-between overflow-hidden rounded-t-2xl`}>
         {/* Subtle pattern overlay */}
         <div className="absolute inset-0 opacity-10"
           style={{ backgroundImage: 'radial-gradient(circle at 80% 20%, white 1px, transparent 1px)', backgroundSize: '20px 20px' }} />
@@ -454,51 +454,12 @@ function TeacherCourseCard({ course, gradient, index, onEdit, onDelete, onToggle
           <div className="p-2.5 bg-white/20 backdrop-blur-sm rounded-xl border border-white/20">
             <BookOpen className="w-5 h-5 text-white" />
           </div>
-          <div className="flex items-center gap-1.5">
-            <span className={cn(
-              'text-[10px] font-bold uppercase tracking-wider px-2.5 py-1 rounded-lg border',
-              isPublished ? 'bg-emerald-500/30 text-white border-emerald-400/30' : 'bg-white/15 text-white border-white/20'
-            )}>
-              {course.status || 'draft'}
-            </span>
-            <div className="relative">
-              <button
-                onClick={e => { e.stopPropagation(); setMenuOpen(o => !o); }}
-                className="p-1.5 bg-white/15 hover:bg-white/30 backdrop-blur-sm rounded-lg text-white transition-all border border-white/20"
-              >
-                <MoreVertical className="w-3.5 h-3.5" />
-              </button>
-              <AnimatePresence>
-                {menuOpen && (
-                  <>
-                    <div className="fixed inset-0 z-10" onClick={() => setMenuOpen(false)} />
-                    <motion.div
-                      initial={{ opacity: 0, scale: 0.92, y: -4 }}
-                      animate={{ opacity: 1, scale: 1, y: 0 }}
-                      exit={{ opacity: 0, scale: 0.92, y: -4 }}
-                      transition={{ duration: 0.15 }}
-                      className="absolute right-0 top-full mt-1.5 w-44 bg-white rounded-xl shadow-xl border border-slate-100 overflow-hidden z-20 py-1"
-                    >
-                      <button onClick={() => { onToggleStatus(); setMenuOpen(false); }}
-                        className="w-full flex items-center gap-2.5 px-3.5 py-2.5 text-xs font-medium text-slate-700 hover:bg-slate-50 transition-colors">
-                        {isPublished ? <EyeOff className="w-3.5 h-3.5 text-amber-500" /> : <Eye className="w-3.5 h-3.5 text-emerald-500" />}
-                        {isPublished ? 'Set to Draft' : 'Publish'}
-                      </button>
-                      <button onClick={() => { onEdit(); setMenuOpen(false); }}
-                        className="w-full flex items-center gap-2.5 px-3.5 py-2.5 text-xs font-medium text-slate-700 hover:bg-slate-50 transition-colors">
-                        <Edit2 className="w-3.5 h-3.5 text-violet-500" /> Edit Course
-                      </button>
-                      <div className="h-px bg-slate-100 mx-2" />
-                      <button onClick={() => { onDelete(); setMenuOpen(false); }}
-                        className="w-full flex items-center gap-2.5 px-3.5 py-2.5 text-xs font-medium text-red-600 hover:bg-red-50 transition-colors">
-                        <Trash2 className="w-3.5 h-3.5" /> Delete
-                      </button>
-                    </motion.div>
-                  </>
-                )}
-              </AnimatePresence>
-            </div>
-          </div>
+          <span className={cn(
+            'text-[10px] font-bold uppercase tracking-wider px-2.5 py-1 rounded-lg border',
+            isPublished ? 'bg-emerald-500/30 text-white border-emerald-400/30' : 'bg-white/15 text-white border-white/20'
+          )}>
+            {course.status || 'draft'}
+          </span>
         </div>
 
         <div className="relative z-10">
@@ -508,6 +469,45 @@ function TeacherCourseCard({ course, gradient, index, onEdit, onDelete, onToggle
             </span>
           )}
         </div>
+      </div>
+
+      {/* 3-dot menu — outside the header so it's never clipped */}
+      <div className="absolute top-3 right-3 z-30">
+        <button
+          onClick={e => { e.stopPropagation(); setMenuOpen(o => !o); }}
+          className="p-1.5 bg-white/15 hover:bg-white/35 backdrop-blur-sm rounded-lg text-white transition-all border border-white/20"
+        >
+          <MoreVertical className="w-3.5 h-3.5" />
+        </button>
+        <AnimatePresence>
+          {menuOpen && (
+            <>
+              <div className="fixed inset-0 z-10" onClick={() => setMenuOpen(false)} />
+              <motion.div
+                initial={{ opacity: 0, scale: 0.92, y: -4 }}
+                animate={{ opacity: 1, scale: 1, y: 0 }}
+                exit={{ opacity: 0, scale: 0.92, y: -4 }}
+                transition={{ duration: 0.15 }}
+                className="absolute right-0 top-full mt-1.5 w-48 bg-white rounded-xl shadow-2xl border border-slate-100 z-50 py-1"
+              >
+                <button onClick={() => { onToggleStatus(); setMenuOpen(false); }}
+                  className="w-full flex items-center gap-2.5 px-3.5 py-2.5 text-xs font-medium text-slate-700 hover:bg-slate-50 transition-colors">
+                  {isPublished ? <EyeOff className="w-3.5 h-3.5 text-amber-500" /> : <Eye className="w-3.5 h-3.5 text-emerald-500" />}
+                  {isPublished ? 'Set to Draft' : 'Publish'}
+                </button>
+                <button onClick={() => { onEdit(); setMenuOpen(false); }}
+                  className="w-full flex items-center gap-2.5 px-3.5 py-2.5 text-xs font-medium text-slate-700 hover:bg-slate-50 transition-colors">
+                  <Edit2 className="w-3.5 h-3.5 text-violet-500" /> Edit Course
+                </button>
+                <div className="h-px bg-slate-100 mx-2 my-1" />
+                <button onClick={() => { onDelete(); setMenuOpen(false); }}
+                  className="w-full flex items-center gap-2.5 px-3.5 py-2.5 text-xs font-medium text-red-600 hover:bg-red-50 transition-colors">
+                  <Trash2 className="w-3.5 h-3.5" /> Delete Course
+                </button>
+              </motion.div>
+            </>
+          )}
+        </AnimatePresence>
       </div>
 
       {/* Card Body */}
