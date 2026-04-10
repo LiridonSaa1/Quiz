@@ -74,6 +74,7 @@ export default function TeacherLessons() {
   const [lessons, setLessons] = useState<Lesson[]>([]);
   const [courses, setCourses] = useState<any[]>([]);
   const [modules, setModules] = useState<any[]>([]);
+  const [userId, setUserId] = useState('');
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [courseFilter, setCourseFilter] = useState('all');
@@ -90,6 +91,7 @@ export default function TeacherLessons() {
     setLoading(true);
     const { data: { session } } = await supabase.auth.getSession();
     if (!session) return;
+    setUserId(session.user.id);
     try {
       // Try backend API first (same approach as Modules page, handles all teacher_id variants)
       let courseList: any[] = [];
@@ -213,6 +215,7 @@ export default function TeacherLessons() {
     setSaving(true);
     try {
       const payload = {
+        userId,
         course_id: formCourseId,
         module_id: formModuleId,
         title: form.title.trim(),
@@ -226,12 +229,22 @@ export default function TeacherLessons() {
       };
 
       if (editing) {
-        const { error } = await supabase.from('lessons').update(payload).eq('id', editing.id);
-        if (error) throw error;
+        const res = await fetch(apiUrl(`/api/teacher/lessons/${editing.id}?userId=${encodeURIComponent(userId)}`), {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        });
+        const json = await res.json();
+        if (!res.ok) throw new Error(json.error || 'Failed to update lesson');
         toast.success('Lesson updated');
       } else {
-        const { error } = await supabase.from('lessons').insert(payload);
-        if (error) throw error;
+        const res = await fetch(apiUrl('/api/teacher/lessons'), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        });
+        const json = await res.json();
+        if (!res.ok) throw new Error(json.error || 'Failed to create lesson');
         toast.success('Lesson created');
       }
       closeModal();
@@ -246,30 +259,41 @@ export default function TeacherLessons() {
   const handleDelete = async (id: string) => {
     if (!window.confirm('Delete this lesson? This cannot be undone.')) return;
     try {
-      const { error } = await supabase.from('lessons').delete().eq('id', id);
-      if (error) throw error;
+      const res = await fetch(apiUrl(`/api/teacher/lessons/${id}?userId=${encodeURIComponent(userId)}`), { method: 'DELETE' });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error || 'Failed to delete lesson');
       toast.success('Lesson deleted');
       fetchData();
-    } catch { toast.error('Failed to delete lesson'); }
+    } catch (err: any) { toast.error(err.message || 'Failed to delete lesson'); }
   };
 
   const handleToggleStatus = async (lesson: Lesson) => {
     const newStatus = lesson.status === 'published' ? 'draft' : 'published';
     try {
-      const { error } = await supabase.from('lessons').update({ status: newStatus }).eq('id', lesson.id);
-      if (error) throw error;
+      const res = await fetch(apiUrl(`/api/teacher/lessons/${lesson.id}?userId=${encodeURIComponent(userId)}`), {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: newStatus }),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error || 'Failed to update status');
       toast.success(`Lesson ${newStatus === 'published' ? 'published' : 'set to draft'}`);
       fetchData();
-    } catch { toast.error('Failed to update status'); }
+    } catch (err: any) { toast.error(err.message || 'Failed to update status'); }
   };
 
   const handleToggleFreePreview = async (lesson: Lesson) => {
     try {
-      const { error } = await supabase.from('lessons').update({ is_free_preview: !lesson.isFreePreview }).eq('id', lesson.id);
-      if (error) throw error;
+      const res = await fetch(apiUrl(`/api/teacher/lessons/${lesson.id}?userId=${encodeURIComponent(userId)}`), {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ is_free_preview: !lesson.isFreePreview }),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error || 'Failed to update');
       toast.success(lesson.isFreePreview ? 'Free preview removed' : 'Set as free preview');
       fetchData();
-    } catch { toast.error('Failed to update'); }
+    } catch (err: any) { toast.error(err.message || 'Failed to update'); }
   };
 
   const getModuleName = (id: string) =>

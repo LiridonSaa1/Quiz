@@ -967,6 +967,114 @@ async function startServer() {
   app.delete("/api/teacher/modules/:id", teacherModuleDeleteHandler);
   app.post("/api/teacher/modules/:id/delete", teacherModuleDeleteHandler);
 
+  // ── Teacher Lesson routes (service-role, bypasses RLS) ──────────────────
+  app.post("/api/teacher/lessons", async (req, res) => {
+    try {
+      const userId = typeof req.body?.userId === "string" ? req.body.userId.trim() : "";
+      if (!userId) return res.status(400).json({ error: "userId is required" });
+      const { course_id, module_id, title, slug, short_description, type, duration_minutes, order, status, is_free_preview } = req.body;
+      if (!course_id || !module_id || typeof title !== "string" || !title.trim()) {
+        return res.status(400).json({ error: "course_id, module_id and title are required" });
+      }
+      const gate = await assertTeacherOwnsCourse(userId, String(course_id));
+      if (!gate.ok) return res.status(403).json({ error: "You do not have access to this course." });
+
+      const payload: Record<string, unknown> = {
+        course_id: String(course_id),
+        module_id: String(module_id),
+        title: title.trim(),
+        slug: typeof slug === "string" && slug.trim() ? slug.trim() : title.trim().toLowerCase().replace(/[^\w\s-]/g, "").replace(/\s+/g, "-").replace(/-+/g, "-"),
+        short_description: short_description || null,
+        type: type || "video",
+        duration_minutes: Number(duration_minutes) || 0,
+        order: Number(order) || 1,
+        status: status || "published",
+        is_free_preview: Boolean(is_free_preview),
+      };
+
+      const { data, error } = await supabaseAdmin.from("lessons").insert(payload).select().single();
+      if (error) {
+        const msg = [error.message, error.details, error.hint].filter(Boolean).join(" — ") || error.code || "Database error";
+        return res.status(400).json({ error: msg, code: error.code });
+      }
+      res.json({ success: true, lesson: data });
+    } catch (e: any) {
+      console.error("POST /api/teacher/lessons", e);
+      res.status(500).json({ error: e.message || "Server error" });
+    }
+  });
+
+  app.patch("/api/teacher/lessons/:id", async (req, res) => {
+    try {
+      const lessonId = typeof req.params.id === "string" ? req.params.id.trim() : "";
+      const userId = typeof req.query.userId === "string" ? req.query.userId.trim() : "";
+      if (!lessonId) return res.status(400).json({ error: "Lesson id is required" });
+      if (!userId) return res.status(400).json({ error: "userId is required" });
+
+      const { data: lesson, error: lErr } = await supabaseAdmin
+        .from("lessons").select("id, course_id").eq("id", lessonId).maybeSingle();
+      if (lErr) throw lErr;
+      if (!lesson) return res.status(404).json({ error: "Lesson not found." });
+
+      const gate = await assertTeacherOwnsCourse(userId, String(lesson.course_id));
+      if (!gate.ok) return res.status(403).json({ error: "You do not have access to this lesson." });
+
+      const updates: Record<string, unknown> = { updated_at: new Date().toISOString() };
+      if (typeof req.body.title === "string") updates.title = req.body.title.trim();
+      if (req.body.slug !== undefined) updates.slug = req.body.slug || null;
+      if (req.body.short_description !== undefined) updates.short_description = req.body.short_description || null;
+      if (req.body.type !== undefined) updates.type = req.body.type;
+      if (req.body.duration_minutes !== undefined) updates.duration_minutes = Number(req.body.duration_minutes) || 0;
+      if (req.body.order !== undefined) updates.order = Number(req.body.order) || 1;
+      if (req.body.status !== undefined) updates.status = req.body.status;
+      if (req.body.is_free_preview !== undefined) updates.is_free_preview = Boolean(req.body.is_free_preview);
+      if (req.body.module_id !== undefined) updates.module_id = req.body.module_id;
+      if (req.body.course_id !== undefined) {
+        const cg = await assertTeacherOwnsCourse(userId, req.body.course_id);
+        if (!cg.ok) return res.status(403).json({ error: "Invalid course for this lesson." });
+        updates.course_id = req.body.course_id;
+      }
+
+      const { data, error } = await supabaseAdmin.from("lessons").update(updates).eq("id", lessonId).select().single();
+      if (error) {
+        const msg = [error.message, error.details, error.hint].filter(Boolean).join(" — ") || error.code || "Database error";
+        return res.status(400).json({ error: msg, code: error.code });
+      }
+      res.json({ success: true, lesson: data });
+    } catch (e: any) {
+      console.error("PATCH /api/teacher/lessons/:id", e);
+      res.status(500).json({ error: e.message || "Server error" });
+    }
+  });
+
+  const teacherLessonDeleteHandler = async (req: any, res: any) => {
+    try {
+      const lessonId = typeof req.params.id === "string" ? req.params.id.trim() : "";
+      const userId = typeof (req.query.userId ?? req.body?.userId) === "string"
+        ? String(req.query.userId ?? req.body?.userId).trim() : "";
+      if (!lessonId) return res.status(400).json({ error: "Lesson id is required" });
+      if (!userId) return res.status(400).json({ error: "userId is required" });
+
+      const { data: lesson, error: lErr } = await supabaseAdmin
+        .from("lessons").select("id, course_id").eq("id", lessonId).maybeSingle();
+      if (lErr) throw lErr;
+      if (!lesson) return res.status(404).json({ error: "Lesson not found." });
+
+      const gate = await assertTeacherOwnsCourse(userId, String(lesson.course_id));
+      if (!gate.ok) return res.status(403).json({ error: "You do not have access to this lesson." });
+
+      const { error } = await supabaseAdmin.from("lessons").delete().eq("id", lessonId);
+      if (error) throw error;
+      res.json({ success: true });
+    } catch (e: any) {
+      console.error("DELETE /api/teacher/lessons/:id", e);
+      res.status(500).json({ error: e.message || "Server error" });
+    }
+  };
+
+  app.delete("/api/teacher/lessons/:id", teacherLessonDeleteHandler);
+  app.post("/api/teacher/lessons/:id/delete", teacherLessonDeleteHandler);
+
   app.get('/api/admin/analytics', async (req, res) => {
     try {
       const [profilesRes, coursesRes, quizzesRes, certsRes, assignmentsRes, lessonsRes, attendanceRes] = await Promise.all([
