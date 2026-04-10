@@ -5,9 +5,10 @@ import TeacherLayout from '../../components/layout/TeacherLayout';
 import {
   Plus, Search, BookOpen, Users, Globe, Eye, EyeOff,
   LayoutGrid, List, Edit2, Trash2, Award, AlertTriangle,
-  FileText, CheckCircle2, GraduationCap
+  FileText, CheckCircle2, GraduationCap, MoreVertical
 } from 'lucide-react';
 import { cn } from '../../lib/utils';
+import { motion, AnimatePresence } from 'motion/react';
 import { toast } from 'sonner';
 import { resolveTeacherIdCandidates } from '../../lib/teacherScope';
 import { apiUrl } from '../../lib/apiUrl';
@@ -229,13 +230,30 @@ export default function TeacherCourses() {
         <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-4 flex flex-wrap gap-3 items-center">
           <div className="relative flex-1 min-w-[180px]">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
-            <input type="text" placeholder="Search courses..." value={search} onChange={e => setSearch(e.target.value)}
-              className="w-full pl-9 pr-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-violet-500 transition-all" />
+            <input
+              type="text"
+              placeholder="Search courses..."
+              value={search}
+              onChange={e => setSearch(e.target.value)}
+              className="w-full pl-9 pr-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-violet-500/30 focus:border-violet-400 transition-all placeholder-slate-400"
+            />
           </div>
-          <select value={statusFilter} onChange={e => setStatusFilter(e.target.value)}
-            className="px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-violet-500 transition-all">
-            {['All', 'published', 'draft'].map(s => <option key={s}>{s}</option>)}
-          </select>
+          <div className="flex items-center gap-1.5">
+            {(['All', 'published', 'draft'] as const).map(f => (
+              <button
+                key={f}
+                onClick={() => setStatusFilter(f)}
+                className={cn(
+                  'px-3.5 py-2 rounded-xl text-xs font-semibold transition-all duration-200',
+                  statusFilter === f
+                    ? 'bg-violet-600 text-white shadow-sm shadow-violet-200'
+                    : 'bg-slate-100 text-slate-500 hover:bg-slate-200'
+                )}
+              >
+                {f.charAt(0).toUpperCase() + f.slice(1)}
+              </button>
+            ))}
+          </div>
           <div className="flex items-center gap-1 bg-slate-100 rounded-xl p-1 ml-auto">
             {(['grid', 'list'] as const).map(mode => (
               <button key={mode} onClick={() => setViewMode(mode)}
@@ -249,7 +267,7 @@ export default function TeacherCourses() {
         {/* Content */}
         {loading ? (
           <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-5">
-            {Array(4).fill(0).map((_, i) => <div key={i} className="bg-white rounded-2xl border border-slate-100 h-64 animate-pulse" />)}
+            {Array(4).fill(0).map((_, i) => <div key={i} className="bg-white rounded-2xl border border-slate-100 h-72 animate-pulse" />)}
           </div>
         ) : filtered.length === 0 ? (
           <div className="py-20 text-center bg-white rounded-2xl border border-dashed border-slate-200">
@@ -265,12 +283,19 @@ export default function TeacherCourses() {
           </div>
         ) : viewMode === 'grid' ? (
           <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-5">
-            {filtered.map(course => (
-              <TeacherCourseCard key={course.id} course={course} gradient={getCourseGradient(course.id)}
-                onEdit={() => navigate(`/teacher/courses/${course.id}/edit`)}
-                onDelete={() => requestDeleteCourse(course)}
-                onToggleStatus={() => toggleStatus(course)} />
-            ))}
+            <AnimatePresence>
+              {filtered.map((course, i) => (
+                <TeacherCourseCard
+                  key={course.id}
+                  course={course}
+                  index={i}
+                  gradient={getCourseGradient(course.id)}
+                  onEdit={() => navigate(`/teacher/courses/${course.id}/edit`)}
+                  onDelete={() => requestDeleteCourse(course)}
+                  onToggleStatus={() => toggleStatus(course)}
+                />
+              ))}
+            </AnimatePresence>
           </div>
         ) : (
           <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
@@ -378,42 +403,166 @@ export default function TeacherCourses() {
   );
 }
 
-function TeacherCourseCard({ course, gradient, onEdit, onDelete, onToggleStatus }: any) {
+const AVATAR_COLORS = [
+  'from-violet-400 to-indigo-500',
+  'from-emerald-400 to-teal-500',
+  'from-rose-400 to-pink-500',
+  'from-amber-400 to-orange-500',
+  'from-cyan-400 to-blue-500',
+  'from-fuchsia-400 to-purple-500',
+];
+
+function MiniAvatar({ seed, sizePx = 24 }: { seed: string; sizePx?: number }) {
+  let h = 0;
+  for (let i = 0; i < seed.length; i++) h = seed.charCodeAt(i) + ((h << 5) - h);
+  const grad = AVATAR_COLORS[Math.abs(h) % AVATAR_COLORS.length];
+  const letter = seed.charAt(0).toUpperCase();
+  return (
+    <div
+      className={`rounded-full bg-gradient-to-br ${grad} flex items-center justify-center text-white font-bold border-2 border-white`}
+      style={{ width: sizePx, height: sizePx, fontSize: sizePx * 0.45 }}
+    >
+      {letter}
+    </div>
+  );
+}
+
+function TeacherCourseCard({ course, gradient, index, onEdit, onDelete, onToggleStatus }: any) {
+  const [menuOpen, setMenuOpen] = useState(false);
   const name = course.name || course.title || 'Untitled';
   const students = course.student_ids?.length || course.total_students || 0;
   const isPublished = course.status === 'published';
+  const studentCap = Math.max(students, 20);
+  const progress = Math.min(Math.round((students / studentCap) * 100), 100);
+  const fakeAvatarSeeds = Array.from({ length: Math.min(students, 3) }, (_, i) => `${course.id}-${i}`);
+
   return (
-    <div className="bg-white rounded-2xl border border-slate-100 shadow-sm hover:shadow-lg transition-all group overflow-hidden flex flex-col">
-      <div className={`relative h-36 bg-gradient-to-br ${gradient} p-5 flex flex-col justify-between`}>
-        <div className="flex items-start justify-between">
-          <div className="p-2.5 bg-white/20 backdrop-blur-sm rounded-xl">
+    <motion.div
+      initial={{ opacity: 0, y: 20 }}
+      animate={{ opacity: 1, y: 0 }}
+      exit={{ opacity: 0, scale: 0.96 }}
+      transition={{ delay: index * 0.06, duration: 0.35, ease: [0.22, 1, 0.36, 1] }}
+      className="bg-white rounded-2xl border border-slate-100 shadow-sm hover:shadow-xl hover:-translate-y-1 transition-all duration-300 group overflow-hidden flex flex-col"
+    >
+      {/* Card Header */}
+      <div className={`relative h-36 bg-gradient-to-br ${gradient} p-5 flex flex-col justify-between overflow-hidden`}>
+        {/* Subtle pattern overlay */}
+        <div className="absolute inset-0 opacity-10"
+          style={{ backgroundImage: 'radial-gradient(circle at 80% 20%, white 1px, transparent 1px)', backgroundSize: '20px 20px' }} />
+
+        <div className="flex items-start justify-between relative z-10">
+          <div className="p-2.5 bg-white/20 backdrop-blur-sm rounded-xl border border-white/20">
             <BookOpen className="w-5 h-5 text-white" />
           </div>
-          <span className={`text-[10px] font-bold uppercase tracking-wider px-2.5 py-1 rounded-lg ${isPublished ? 'bg-emerald-500/30 text-white border border-emerald-400/30' : 'bg-white/20 text-white border border-white/20'}`}>
-            {course.status || 'draft'}
-          </span>
-        </div>
-        {course.level && <span className="text-[10px] font-semibold bg-white/20 text-white px-2 py-0.5 rounded-md w-fit">{course.level}</span>}
-        <div className="absolute top-3 right-3 flex gap-1.5 opacity-0 group-hover:opacity-100 transition-all">
-          <button onClick={onToggleStatus} className={`p-1.5 rounded-lg backdrop-blur-sm text-white transition-all ${isPublished ? 'bg-amber-500/40 hover:bg-amber-500/70' : 'bg-emerald-500/40 hover:bg-emerald-500/70'}`}>
-            {isPublished ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
-          </button>
-          <button onClick={onEdit} className="p-1.5 bg-white/20 hover:bg-white/40 backdrop-blur-sm rounded-lg text-white transition-all"><Edit2 className="w-3.5 h-3.5" /></button>
-          <button onClick={onDelete} className="p-1.5 bg-red-500/30 hover:bg-red-500/60 backdrop-blur-sm rounded-lg text-white transition-all"><Trash2 className="w-3.5 h-3.5" /></button>
-        </div>
-      </div>
-      <div className="p-5 flex flex-col flex-1">
-        <h3 className="font-bold text-slate-900 text-sm line-clamp-1 mb-1">{name}</h3>
-        <p className="text-slate-400 text-xs line-clamp-2 mb-4 leading-relaxed flex-1">{course.description || 'No description provided.'}</p>
-        <div className="flex items-center justify-between pt-4 border-t border-slate-50">
-          <div className="flex items-center gap-3 text-xs text-slate-400">
-            <span className="flex items-center gap-1"><Users className="w-3.5 h-3.5" />{students}</span>
-            {course.language && <span className="flex items-center gap-1"><Globe className="w-3.5 h-3.5" />{course.language}</span>}
-            {course.certificate_enabled && <span className="flex items-center gap-1 text-amber-600"><Award className="w-3.5 h-3.5" /></span>}
+          <div className="flex items-center gap-1.5">
+            <span className={cn(
+              'text-[10px] font-bold uppercase tracking-wider px-2.5 py-1 rounded-lg border',
+              isPublished ? 'bg-emerald-500/30 text-white border-emerald-400/30' : 'bg-white/15 text-white border-white/20'
+            )}>
+              {course.status || 'draft'}
+            </span>
+            <div className="relative">
+              <button
+                onClick={e => { e.stopPropagation(); setMenuOpen(o => !o); }}
+                className="p-1.5 bg-white/15 hover:bg-white/30 backdrop-blur-sm rounded-lg text-white transition-all border border-white/20"
+              >
+                <MoreVertical className="w-3.5 h-3.5" />
+              </button>
+              <AnimatePresence>
+                {menuOpen && (
+                  <>
+                    <div className="fixed inset-0 z-10" onClick={() => setMenuOpen(false)} />
+                    <motion.div
+                      initial={{ opacity: 0, scale: 0.92, y: -4 }}
+                      animate={{ opacity: 1, scale: 1, y: 0 }}
+                      exit={{ opacity: 0, scale: 0.92, y: -4 }}
+                      transition={{ duration: 0.15 }}
+                      className="absolute right-0 top-full mt-1.5 w-44 bg-white rounded-xl shadow-xl border border-slate-100 overflow-hidden z-20 py-1"
+                    >
+                      <button onClick={() => { onToggleStatus(); setMenuOpen(false); }}
+                        className="w-full flex items-center gap-2.5 px-3.5 py-2.5 text-xs font-medium text-slate-700 hover:bg-slate-50 transition-colors">
+                        {isPublished ? <EyeOff className="w-3.5 h-3.5 text-amber-500" /> : <Eye className="w-3.5 h-3.5 text-emerald-500" />}
+                        {isPublished ? 'Set to Draft' : 'Publish'}
+                      </button>
+                      <button onClick={() => { onEdit(); setMenuOpen(false); }}
+                        className="w-full flex items-center gap-2.5 px-3.5 py-2.5 text-xs font-medium text-slate-700 hover:bg-slate-50 transition-colors">
+                        <Edit2 className="w-3.5 h-3.5 text-violet-500" /> Edit Course
+                      </button>
+                      <div className="h-px bg-slate-100 mx-2" />
+                      <button onClick={() => { onDelete(); setMenuOpen(false); }}
+                        className="w-full flex items-center gap-2.5 px-3.5 py-2.5 text-xs font-medium text-red-600 hover:bg-red-50 transition-colors">
+                        <Trash2 className="w-3.5 h-3.5" /> Delete
+                      </button>
+                    </motion.div>
+                  </>
+                )}
+              </AnimatePresence>
+            </div>
           </div>
-          <button onClick={onEdit} className="text-xs font-semibold text-violet-600 hover:text-violet-700 px-2.5 py-1.5 hover:bg-violet-50 rounded-lg transition-all">Edit</button>
+        </div>
+
+        <div className="relative z-10">
+          {course.level && (
+            <span className="text-[10px] font-semibold bg-white/20 backdrop-blur-sm text-white px-2 py-0.5 rounded-md border border-white/20">
+              {course.level}
+            </span>
+          )}
         </div>
       </div>
-    </div>
+
+      {/* Card Body */}
+      <div className="p-5 flex flex-col flex-1">
+        <h3 className="font-bold text-slate-900 text-sm line-clamp-1 mb-1 group-hover:text-violet-700 transition-colors">{name}</h3>
+        <p className="text-slate-400 text-xs line-clamp-2 leading-relaxed flex-1">{course.description || 'No description provided.'}</p>
+
+        {/* Progress bar */}
+        <div className="mt-4">
+          <div className="flex items-center justify-between mb-1.5">
+            <span className="text-[10px] font-semibold text-slate-400 uppercase tracking-wide">Enrollment</span>
+            <span className="text-[10px] font-bold text-slate-500">{students} students</span>
+          </div>
+          <div className="h-1.5 bg-slate-100 rounded-full overflow-hidden">
+            <motion.div
+              initial={{ width: 0 }}
+              animate={{ width: `${progress}%` }}
+              transition={{ delay: index * 0.06 + 0.3, duration: 0.6, ease: 'easeOut' }}
+              className="h-full rounded-full bg-gradient-to-r from-violet-500 to-indigo-500"
+            />
+          </div>
+        </div>
+
+        {/* Footer */}
+        <div className="flex items-center justify-between pt-4 mt-2 border-t border-slate-50">
+          <div className="flex items-center gap-2">
+            {fakeAvatarSeeds.length > 0 ? (
+              <div className="flex -space-x-1.5">
+                {fakeAvatarSeeds.map(seed => <MiniAvatar key={seed} seed={seed} sizePx={24} />)}
+                {students > 3 && (
+                  <div className="w-6 h-6 rounded-full bg-slate-100 border-2 border-white flex items-center justify-center text-[9px] font-bold text-slate-500">
+                    +{students - 3}
+                  </div>
+                )}
+              </div>
+            ) : (
+              <div className="flex items-center gap-1 text-xs text-slate-400">
+                <Users className="w-3.5 h-3.5" />
+                <span>No students</span>
+              </div>
+            )}
+            {course.certificate_enabled && (
+              <span className="ml-1 p-1 bg-amber-50 rounded-lg" title="Certificate enabled">
+                <Award className="w-3 h-3 text-amber-500" />
+              </span>
+            )}
+          </div>
+          <button
+            onClick={onEdit}
+            className="text-xs font-semibold text-violet-600 hover:text-violet-700 px-2.5 py-1.5 hover:bg-violet-50 rounded-lg transition-all active:scale-95"
+          >
+            Edit →
+          </button>
+        </div>
+      </div>
+    </motion.div>
   );
 }
