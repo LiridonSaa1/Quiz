@@ -1,5 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { supabase } from '../../supabase';
+import { apiUrl } from '../../lib/apiUrl';
+import { resolveTeacherIdCandidates } from '../../lib/teacherScope';
 import TeacherLayout from '../../components/layout/TeacherLayout';
 import {
   Plus, Search, PlayCircle, Trash2, Edit2, X, Save,
@@ -89,13 +91,26 @@ export default function TeacherLessons() {
     const { data: { session } } = await supabase.auth.getSession();
     if (!session) return;
     try {
-      const { data: coursesData, error: coursesError } = await supabase
-        .from('courses')
-        .select('id, title')
-        .eq('teacher_id', session.user.id)
-        .order('created_at', { ascending: false });
-      if (coursesError && (coursesError as any).status !== 400) throw coursesError;
-      const courseList = coursesData || [];
+      // Try backend API first (same approach as Modules page, handles all teacher_id variants)
+      let courseList: any[] = [];
+      const backendRes = await fetch(apiUrl(`/api/teacher/courses?userId=${encodeURIComponent(session.user.id)}`));
+      if (backendRes.ok) {
+        const backendJson = await backendRes.json();
+        if (backendJson?.success && Array.isArray(backendJson.courses)) {
+          courseList = backendJson.courses.map((c: any) => ({ id: c.id, title: c.title || c.name || '' }));
+        }
+      }
+      // Fallback: query Supabase directly using all possible teacher_id candidates
+      if (courseList.length === 0) {
+        const scopedIds = await resolveTeacherIdCandidates(session.user.id);
+        const { data: coursesData, error: coursesError } = await supabase
+          .from('courses')
+          .select('id, title')
+          .in('teacher_id', scopedIds)
+          .order('created_at', { ascending: false });
+        if (coursesError && (coursesError as any).code !== 'PGRST116') throw coursesError;
+        courseList = coursesData || [];
+      }
       setCourses(courseList);
 
       if (courseList.length === 0) {
