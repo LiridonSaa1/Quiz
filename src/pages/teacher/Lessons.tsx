@@ -121,15 +121,25 @@ export default function TeacherLessons() {
 
       const courseIds = courseList.map((c: any) => c.id);
 
-      const [modulesSnap, lessonsSnap] = await Promise.all([
-        supabase.from('modules').select('id, course_id, title').in('course_id', courseIds).order('order'),
-        supabase.from('lessons').select('*').in('course_id', courseIds).order('order', { ascending: true }),
-      ]);
+      // Fetch modules via backend API first (bypasses RLS), same pattern as Modules page
+      let modulesData: any[] | null = null;
+      const modulesApiRes = await fetch(apiUrl(`/api/teacher/modules?userId=${encodeURIComponent(session.user.id)}`));
+      if (modulesApiRes.ok) {
+        const modulesJson = await modulesApiRes.json();
+        if (modulesJson?.success && Array.isArray(modulesJson.modules)) {
+          modulesData = modulesJson.modules.filter((m: any) => courseIds.includes(m.course_id));
+        }
+      }
+      if (modulesData === null) {
+        const modulesSnap = await supabase.from('modules').select('id, course_id, title').in('course_id', courseIds).order('order');
+        if (modulesSnap.error) throw modulesSnap.error;
+        modulesData = modulesSnap.data || [];
+      }
 
-      if (modulesSnap.error) throw modulesSnap.error;
+      const lessonsSnap = await supabase.from('lessons').select('*').in('course_id', courseIds).order('order', { ascending: true });
       if (lessonsSnap.error) throw lessonsSnap.error;
 
-      setModules(modulesSnap.data || []);
+      setModules(modulesData);
       setLessons((lessonsSnap.data || []).map(l => ({
         id: l.id,
         courseId: l.course_id,
