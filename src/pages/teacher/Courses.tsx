@@ -3,7 +3,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import { supabase } from '../../supabase';
 import TeacherLayout from '../../components/layout/TeacherLayout';
 import {
-  Plus, Search, BookOpen, Users, Eye, EyeOff,
+  Plus, Search, BookOpen, Users, Globe, Eye, EyeOff,
   LayoutGrid, List, Edit2, Trash2, Award, AlertTriangle,
   FileText, CheckCircle2, GraduationCap
 } from 'lucide-react';
