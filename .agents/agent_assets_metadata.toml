@@ -1,0 +1,13 @@
+uploads = []
+
+[[generated]]
+id = "NIeAY1AUO8URZy71MwzJq"
+uri = "file://artifacts/mockup-sandbox/public/images/teacher-avatar-command.png"
+type = "image"
+title = "Teacher avatar profile picture"
+
+[[outputs]]
+id = "EkyusWo6_j7CQdOtclgbB"
+uri = "file://artifacts/mockup-sandbox/public/images/teacher-avatar.jpg"
+type = "image"
+title = "professional headshot of a friendly teacher looking at camera warm lighting"
