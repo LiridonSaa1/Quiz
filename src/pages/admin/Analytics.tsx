@@ -15,6 +15,7 @@ import { LayoutPageSkeleton } from '../../components/ui/Skeleton';
 
 interface Overview {
   totalStudents: number; activeStudents: number; totalTeachers: number;
+  totalClasses: number; activeClasses: number; upcomingClasses: number; totalClassEnrollments: number; avgClassFillRate: number;
   totalCourses: number; publishedCourses: number; totalQuizzes: number;
   publishedQuizzes: number; totalAttempts: number; completedAttempts: number;
   totalCertificates: number; totalLessons: number; totalAssignments: number;
@@ -137,7 +138,7 @@ export default function AdminAnalytics() {
           </div>
         </div>
 
-        {/* Stat Cards — Row 1: Users & Courses */}
+        {/* Stat Cards — Row 1: Users, Classes & Courses */}
         <div>
           <h2 className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-3">Users & Content</h2>
           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4">
@@ -145,10 +146,10 @@ export default function AdminAnalytics() {
               sub={`${ov?.activeStudents ?? 0} active`} color="bg-indigo-50 text-indigo-600" grad="from-indigo-500 to-violet-500" ring="ring-indigo-100" />
             <StatCard icon={Users} label="Teachers" value={ov?.totalTeachers ?? 0}
               color="bg-violet-50 text-violet-600" grad="from-violet-500 to-purple-600" ring="ring-violet-100" />
+            <StatCard icon={Layers} label="Classes" value={ov?.totalClasses ?? 0}
+              sub={`${ov?.activeClasses ?? 0} active • ${ov?.upcomingClasses ?? 0} upcoming`} color="bg-cyan-50 text-cyan-600" grad="from-cyan-500 to-sky-500" ring="ring-cyan-100" />
             <StatCard icon={BookOpen} label="Courses" value={ov?.totalCourses ?? 0}
               sub={`${ov?.publishedCourses ?? 0} published`} color="bg-blue-50 text-blue-600" grad="from-blue-500 to-indigo-500" ring="ring-blue-100" />
-            <StatCard icon={Layers} label="Lessons" value={ov?.totalLessons ?? 0}
-              color="bg-cyan-50 text-cyan-600" grad="from-cyan-500 to-sky-500" ring="ring-cyan-100" />
           </div>
         </div>
 
@@ -180,10 +181,11 @@ export default function AdminAnalytics() {
               color="bg-orange-50 text-orange-600" grad="from-orange-500 to-amber-500" ring="ring-orange-100" />
             <StatCard icon={CalendarCheck} label="Attendance Records" value={ov?.totalAttendance ?? 0}
               sub={`${ov?.attendanceRate ?? 0}% present rate`} color="bg-green-50 text-green-600" grad="from-green-500 to-emerald-500" ring="ring-green-100" />
-            <StatCard icon={CheckCircle2} label="Attendance Rate" value={`${ov?.attendanceRate ?? 0}%`}
-              color={ov?.attendanceRate && ov.attendanceRate >= 75 ? 'bg-emerald-50 text-emerald-600' : 'bg-amber-50 text-amber-600'}
-              grad={ov?.attendanceRate && ov.attendanceRate >= 75 ? 'from-emerald-500 to-teal-500' : 'from-amber-500 to-orange-500'}
-              ring={ov?.attendanceRate && ov.attendanceRate >= 75 ? 'ring-emerald-100' : 'ring-amber-100'} />
+            <StatCard icon={CheckCircle2} label="Class Fill Rate" value={`${ov?.avgClassFillRate ?? 0}%`}
+              sub={`${ov?.totalClassEnrollments ?? 0} class enrollments`}
+              color={ov?.avgClassFillRate && ov.avgClassFillRate >= 70 ? 'bg-emerald-50 text-emerald-600' : 'bg-amber-50 text-amber-600'}
+              grad={ov?.avgClassFillRate && ov.avgClassFillRate >= 70 ? 'from-emerald-500 to-teal-500' : 'from-amber-500 to-orange-500'}
+              ring={ov?.avgClassFillRate && ov.avgClassFillRate >= 70 ? 'ring-emerald-100' : 'ring-amber-100'} />
           </div>
         </div>
 

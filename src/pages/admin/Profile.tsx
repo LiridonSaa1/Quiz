@@ -1,7 +1,8 @@
-import React, { useState, useRef } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import AdminLayout from '../../components/layout/AdminLayout';
 import { cn } from '../../lib/utils';
 import { toast } from 'sonner';
+import { supabase } from '../../supabase';
 import {
   User, Mail, Phone, MapPin, Calendar, Camera,
   Save, Briefcase, Globe, Twitter, Linkedin, Github,
@@ -20,38 +21,146 @@ const AVATAR_GRADIENTS = [
 
 export default function AdminProfile() {
   const [saving, setSaving] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
   const [selectedGradient, setSelectedGradient] = useState(0);
   const fileInputRef = useRef<HTMLInputElement>(null);
-
-  const [form, setForm] = useState({
-    display_name: 'Liridon Salihi',
-    email: 'liridon.salihi123@gmail.com',
-    phone: '+1 (555) 010-2030',
-    title: 'Platform Administrator',
-    department: 'Administration',
-    location: 'New York, NY',
-    website: 'www.quizmaster.edu',
-    bio: 'Platform administrator overseeing all aspects of the QuizMaster Academy learning management system.',
-    twitter: '@liridon_s',
-    linkedin: 'linkedin.com/in/liridons',
-    github: 'github.com/liridons',
+  const [activitySummary, setActivitySummary] = useState({
+    coursesManaged: 0,
+    students: 0,
+    teachers: 0,
+    certificates: 0,
+  });
+  const [accountInfo, setAccountInfo] = useState({
+    createdAt: '',
+    lastLoginAt: '',
+    role: '',
+    status: 'active',
   });
 
-  const initials = form.display_name.split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase();
+  const [form, setForm] = useState({
+    display_name: '',
+    email: '',
+    phone: '',
+    title: 'Platform Administrator',
+    department: 'Administration',
+    location: '',
+    website: '',
+    bio: '',
+    twitter: '',
+    linkedin: '',
+    github: '',
+  });
+
+  useEffect(() => {
+    (async () => {
+      try {
+        setLoading(true);
+        const { data: authData, error: authErr } = await supabase.auth.getSession();
+        if (authErr) throw authErr;
+        const user = authData.session?.user;
+        if (!user?.id) return;
+
+        const [profileRes, analyticsRes] = await Promise.all([
+          supabase.from('profiles').select('*').eq('id', user.id).single(),
+          fetch('/api/admin/analytics').then((r) => r.json()).catch(() => null),
+        ]);
+        if (profileRes.error) throw profileRes.error;
+        const p: any = profileRes.data || {};
+        setForm((prev) => ({
+          ...prev,
+          display_name: p.display_name || '',
+          email: p.email || user.email || '',
+          phone: p.phone || '',
+          location: p.location || '',
+          website: p.website || '',
+          bio: p.bio || '',
+          title: p.title || prev.title,
+          department: p.department || prev.department,
+          twitter: p.twitter || '',
+          linkedin: p.linkedin || '',
+          github: p.github || '',
+        }));
+        setAvatarUrl(p.avatar_url || null);
+        setAccountInfo({
+          createdAt: p.created_at || '',
+          lastLoginAt: user.last_sign_in_at || '',
+          role: p.role || 'admin',
+          status: p.status || 'active',
+        });
+
+        if (analyticsRes?.success) {
+          const ov = analyticsRes.overview || {};
+          setActivitySummary({
+            coursesManaged: Number(ov.totalCourses || 0),
+            students: Number(ov.totalStudents || 0),
+            teachers: Number(ov.totalTeachers || 0),
+            certificates: Number(ov.totalCertificates || 0),
+          });
+        }
+      } catch (e: any) {
+        toast.error(e?.message || 'Failed to load profile');
+      } finally {
+        setLoading(false);
+      }
+    })();
+  }, []);
+
+  const initials = useMemo(
+    () =>
+      (form.display_name || 'A')
+        .split(' ')
+        .filter(Boolean)
+        .map((n) => n[0])
+        .join('')
+        .slice(0, 2)
+        .toUpperCase(),
+    [form.display_name],
+  );
 
   const handleAvatarUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    setAvatarUrl(URL.createObjectURL(file));
-    toast.success('Avatar updated.');
+    const reader = new FileReader();
+    reader.onload = () => {
+      const dataUrl = typeof reader.result === 'string' ? reader.result : null;
+      if (!dataUrl) {
+        toast.error('Failed to read avatar image.');
+        return;
+      }
+      setAvatarUrl(dataUrl);
+      toast.success('Avatar updated.');
+    };
+    reader.onerror = () => toast.error('Failed to read avatar image.');
+    reader.readAsDataURL(file);
   };
 
   const handleSave = async () => {
-    setSaving(true);
-    await new Promise(r => setTimeout(r, 900));
-    setSaving(false);
-    toast.success('Profile saved successfully.');
+    try {
+      setSaving(true);
+      const { data: authData, error: authErr } = await supabase.auth.getSession();
+      if (authErr) throw authErr;
+      const userId = authData.session?.user?.id;
+      if (!userId) throw new Error('You are not authenticated.');
+
+      const { error } = await supabase
+        .from('profiles')
+        .update({
+          display_name: form.display_name,
+          email: form.email,
+          phone: form.phone || null,
+          website: form.website || null,
+          bio: form.bio || null,
+          avatar_url: avatarUrl || null,
+        })
+        .eq('id', userId);
+      if (error) throw error;
+      toast.success('Profile saved successfully.');
+    } catch (e: any) {
+      toast.error(e?.message || 'Failed to save profile');
+    } finally {
+      setSaving(false);
+    }
   };
 
   const set = (field: string) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) =>
@@ -137,10 +246,15 @@ export default function AdminProfile() {
               {/* Quick info */}
               <div className="mt-5 w-full space-y-2.5 text-left border-t border-slate-100 pt-4">
                 {[
-                  { icon: Mail, value: form.email },
-                  { icon: Phone, value: form.phone },
-                  { icon: MapPin, value: form.location },
-                  { icon: Calendar, value: `Joined ${format(new Date('2024-01-15'), 'MMM yyyy')}` },
+                  { icon: Mail, value: form.email || 'No email' },
+                  { icon: Phone, value: form.phone || 'No phone' },
+                  { icon: MapPin, value: form.location || 'No location' },
+                  {
+                    icon: Calendar,
+                    value: accountInfo.createdAt
+                      ? `Joined ${format(new Date(accountInfo.createdAt), 'MMM yyyy')}`
+                      : 'Joined —',
+                  },
                 ].map(({ icon: Icon, value }) => (
                   <div key={value} className="flex items-center gap-2.5 text-xs text-slate-500">
                     <Icon className="w-3.5 h-3.5 shrink-0 text-slate-400" />
@@ -209,10 +323,10 @@ export default function AdminProfile() {
             <FormCard title="Activity Summary" icon={CheckCircle2}>
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
                 {[
-                  { label: 'Courses Managed', value: '42' },
-                  { label: 'Students',         value: '318' },
-                  { label: 'Teachers',         value: '14' },
-                  { label: 'Certificates',     value: '127' },
+                  { label: 'Courses Managed', value: String(activitySummary.coursesManaged) },
+                  { label: 'Students',         value: String(activitySummary.students) },
+                  { label: 'Teachers',         value: String(activitySummary.teachers) },
+                  { label: 'Certificates',     value: String(activitySummary.certificates) },
                 ].map(({ label, value }) => (
                   <div key={label} className="bg-slate-50 rounded-xl p-4 text-center">
                     <p className="text-2xl font-bold text-indigo-600">{value}</p>
@@ -223,14 +337,24 @@ export default function AdminProfile() {
 
               <div className="mt-4 border-t border-slate-100 pt-4 space-y-2">
                 {[
-                  ['Account Created',  'January 15, 2024'],
-                  ['Last Login',       format(new Date(), 'MMMM d, yyyy · h:mm a')],
-                  ['Role',             'Super Administrator'],
-                  ['Account Status',   'Active'],
+                  [
+                    'Account Created',
+                    accountInfo.createdAt
+                      ? format(new Date(accountInfo.createdAt), 'MMMM d, yyyy')
+                      : '—',
+                  ],
+                  [
+                    'Last Login',
+                    accountInfo.lastLoginAt
+                      ? format(new Date(accountInfo.lastLoginAt), 'MMMM d, yyyy · h:mm a')
+                      : '—',
+                  ],
+                  ['Role', accountInfo.role ? accountInfo.role : '—'],
+                  ['Account Status', accountInfo.status || 'active'],
                 ].map(([k, v]) => (
                   <div key={k} className="flex justify-between items-center text-sm">
                     <span className="text-slate-400">{k}</span>
-                    <span className={cn('font-semibold', v === 'Active' ? 'text-emerald-600' : 'text-slate-700')}>{v}</span>
+                    <span className={cn('font-semibold', String(v).toLowerCase() === 'active' ? 'text-emerald-600' : 'text-slate-700')}>{v}</span>
                   </div>
                 ))}
               </div>

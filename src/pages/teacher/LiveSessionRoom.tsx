@@ -21,6 +21,7 @@ interface LiveSession {
   scheduled_at: string;
   duration_minutes: number;
   recording_url: string | null;
+  started_at: string | null;
   host_id: string | null;
   course: { id: string; title: string } | null;
 }
@@ -303,8 +304,9 @@ export default function TeacherLiveSessionRoom() {
   };
 
   const startMeeting = async () => {
-    await patchSession({ status: 'live' });
-    setSession(prev => prev ? { ...prev, status: 'live' } : prev);
+    const started_at = new Date().toISOString();
+    await patchSession({ status: 'live', started_at });
+    setSession(prev => prev ? { ...prev, status: 'live', started_at } : prev);
     setMeetingActive(true);
 
     if (userId) {
@@ -340,8 +342,8 @@ export default function TeacherLiveSessionRoom() {
     );
   };
 
-  const endMeeting = async () => {
-    if (!confirm('End the live session for everyone?')) return;
+  const endMeeting = async (auto = false) => {
+    if (!auto && !confirm('End the live session for everyone?')) return;
     if (recordingState === 'recording') await stopRecording();
     // Dispose Jitsi API before marking ended
     if (jitsiApiRef.current) { jitsiApiRef.current.dispose(); jitsiApiRef.current = null; }
@@ -354,7 +356,7 @@ export default function TeacherLiveSessionRoom() {
     }
     setSession(prev => prev ? { ...prev, status: 'ended' } : prev);
     setMeetingActive(false);
-    toast.success('Session ended');
+    toast.success(auto ? 'Session ended automatically (time is up)' : 'Session ended');
   };
 
   const sendChat = async () => {
@@ -480,6 +482,29 @@ export default function TeacherLiveSessionRoom() {
     return `${m}:${sec}`;
   };
 
+  const [timeRemaining, setTimeRemaining] = useState<number | null>(null);
+
+  useEffect(() => {
+    if (!session || session.status !== 'live' || !session.started_at) {
+      setTimeRemaining(null);
+      return;
+    }
+    
+    const interval = setInterval(() => {
+      const start = new Date(session.started_at!).getTime();
+      const end = start + session.duration_minutes * 60 * 1000;
+      const now = Date.now();
+      const remaining = Math.max(0, Math.floor((end - now) / 1000));
+      setTimeRemaining(remaining);
+      
+      if (remaining <= 0 && session.status === 'live') {
+        endMeeting(true);
+      }
+    }, 1000);
+
+    return () => clearInterval(interval);
+  }, [session, meetingActive]);
+
   if (loading) {
     return (
       <div className="min-h-screen bg-slate-950 flex items-center justify-center">
@@ -514,6 +539,14 @@ export default function TeacherLiveSessionRoom() {
             )}>
               {session.status === 'live' ? '● Live' : session.status}
             </span>
+            {session.status === 'live' && timeRemaining !== null && (
+              <span className={cn(
+                'px-2 py-0.5 rounded-full text-[10px] font-bold tracking-wide shrink-0',
+                timeRemaining < 300 ? 'bg-rose-500/20 text-rose-400 animate-pulse' : 'bg-slate-800 text-slate-300'
+              )}>
+                ⏱ {formatTime(timeRemaining)} remaining
+              </span>
+            )}
           </div>
           {session.course && <p className="text-slate-500 text-xs">{session.course.title}</p>}
         </div>

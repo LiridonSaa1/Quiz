@@ -41,6 +41,61 @@ const supabaseAdmin = new Proxy({} as any, {
   },
 });
 
+function addDaysToYmd(ymd: string, days: number): string {
+  const parts = ymd.split("-").map((x) => parseInt(x, 10));
+  if (parts.length < 3 || parts.some((n) => !Number.isFinite(n))) {
+    const d = new Date();
+    d.setUTCHours(0, 0, 0, 0);
+    d.setUTCDate(d.getUTCDate() + days);
+    return d.toISOString().slice(0, 10);
+  }
+  const [y, m, day] = parts;
+  const dt = new Date(Date.UTC(y, m - 1, day));
+  dt.setUTCDate(dt.getUTCDate() + days);
+  return dt.toISOString().slice(0, 10);
+}
+
+function paymentStatusToInvoiceRowStatus(
+  paymentStatus: string,
+): "paid" | "pending" | "draft" {
+  if (paymentStatus === "completed") return "paid";
+  if (paymentStatus === "pending") return "pending";
+  return "draft";
+}
+
+function resolveInvoiceDisplayStatus(
+  dbStatus: string,
+  dueYmd: string,
+): "paid" | "pending" | "overdue" | "draft" {
+  if (dbStatus === "draft") return "draft";
+  if (dbStatus === "paid") return "paid";
+  const due = new Date(`${dueYmd}T12:00:00Z`);
+  const today = new Date();
+  const dueDay = Date.UTC(due.getUTCFullYear(), due.getUTCMonth(), due.getUTCDate());
+  const tDay = Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate());
+  if (dueDay < tDay) return "overdue";
+  return "pending";
+}
+
+async function nextInvoiceNumberForPaymentDate(paymentDateYmd: string): Promise<string> {
+  const yStr = (paymentDateYmd || "").slice(0, 4);
+  const year =
+    yStr.length === 4 && /^\d{4}$/.test(yStr) ? parseInt(yStr, 10) : new Date().getFullYear();
+  const prefix = `INV-${year}-`;
+  const { data, error } = await supabaseAdmin
+    .from("invoices")
+    .select("invoice_number")
+    .like("invoice_number", `${prefix}%`);
+  if (error) throw error;
+  let maxSeq = 0;
+  const re = new RegExp(`^INV-${year}-(\\d+)$`);
+  for (const row of data || []) {
+    const m = String((row as any).invoice_number || "").match(re);
+    if (m) maxSeq = Math.max(maxSeq, parseInt(m[1], 10));
+  }
+  return `${prefix}${String(maxSeq + 1).padStart(4, "0")}`;
+}
+
 async function startServer() {
   const app = express();
   const parsedPort = Number(process.env.PORT);
@@ -149,6 +204,59 @@ async function startServer() {
     return modern.data || [];
   };
 
+  /** Missing-column errors from Postgres/PostgREST; retry with a narrower select. */
+  const isRecoverableSchemaColumnError = (error: any) => {
+    if (!error) return false;
+    if (error.code === "42703") return true;
+    const hay = `${error.message || ""} ${error.details || ""} ${error.hint || ""}`.toLowerCase();
+    return hay.includes("does not exist") && hay.includes("column");
+  };
+
+  /** Older DBs may omit columns referenced in the select list. */
+  const fetchCertificatesSelectWithFallback = async (selects: string[]): Promise<any[]> => {
+    for (const sel of selects) {
+      const res = await supabaseAdmin.from("certificates").select(sel as any);
+      if (!res.error) return res.data || [];
+      if (!isRecoverableSchemaColumnError(res.error)) throw res.error;
+    }
+    return [];
+  };
+
+  /** Analytics needs quiz counts only; avoid depending on `quizzes.published`. */
+  const loadQuizzesRowsForAnalytics = async (): Promise<any[]> => {
+    const selects = [
+      "id, title, created_at",
+      "id, created_at",
+      "id",
+      "*",
+    ];
+    for (const sel of selects) {
+      const res = await supabaseAdmin.from("quizzes").select(sel as any);
+      if (!res.error) return res.data || [];
+      if (!isRecoverableSchemaColumnError(res.error)) throw res.error;
+    }
+    return [];
+  };
+
+  const loadCertificateRowsForReports = async (): Promise<
+    Array<{ student_id: string | null; course_id: string | null; status: string }>
+  > => {
+    const rows = await fetchCertificatesSelectWithFallback([
+      "student_id, course_id, status",
+      "student_id, course_id",
+      "student_id, status",
+      "course_id, status",
+      "student_id",
+      "course_id",
+      "*",
+    ]);
+    return rows.map((c: any) => ({
+      student_id: c.student_id != null ? String(c.student_id) : null,
+      course_id: c.course_id != null ? String(c.course_id) : null,
+      status: c.status != null && String(c.status) !== "" ? String(c.status) : "issued",
+    }));
+  };
+
   const getTeacherIdCandidates = async (teacherId: string) => {
     const candidates = new Set<string>();
     if (teacherId) candidates.add(teacherId);
@@ -167,6 +275,33 @@ async function startServer() {
     });
 
     return [...candidates];
+  };
+
+  const CONFIG_SECTIONS = new Set(["settings", "branding", "domain", "roles"]);
+
+  const getConfigSection = async (section: string) => {
+    const res = await supabaseAdmin
+      .from("platform_config")
+      .select("section, value, updated_at")
+      .eq("section", section)
+      .maybeSingle();
+    if (res.error) throw res.error;
+    return res.data?.value ?? null;
+  };
+
+  const upsertConfigSection = async (section: string, value: unknown) => {
+    const res = await supabaseAdmin
+      .from("platform_config")
+      .upsert({ section, value, updated_at: new Date().toISOString() }, { onConflict: "section" })
+      .select("section, value, updated_at")
+      .single();
+    if (res.error) throw res.error;
+    return res.data;
+  };
+
+  const isPlatformConfigMissing = (error: any) => {
+    const hay = `${error?.message || ""} ${error?.details || ""}`.toLowerCase();
+    return error?.code === "42P01" || (error?.code === "PGRST205" && hay.includes("platform_config"));
   };
 
   // API routes FIRST
@@ -204,6 +339,46 @@ async function startServer() {
         error: supabaseError
       }
     });
+  });
+
+  app.get("/api/admin/config/:section", async (req, res) => {
+    try {
+      const section = String(req.params.section || "").trim();
+      if (!CONFIG_SECTIONS.has(section)) {
+        return res.status(400).json({ error: "Unsupported config section" });
+      }
+      const value = await getConfigSection(section);
+      res.json({ success: true, section, value });
+    } catch (e: any) {
+      if (isPlatformConfigMissing(e)) {
+        return res.status(400).json({
+          error: "platform_config table is missing. Please run the updated database_setup.sql script.",
+        });
+      }
+      res.status(500).json({ error: e.message || "Failed to load config" });
+    }
+  });
+
+  app.put("/api/admin/config/:section", async (req, res) => {
+    try {
+      const section = String(req.params.section || "").trim();
+      if (!CONFIG_SECTIONS.has(section)) {
+        return res.status(400).json({ error: "Unsupported config section" });
+      }
+      const value = req.body?.value;
+      if (value === undefined) {
+        return res.status(400).json({ error: "value is required" });
+      }
+      const data = await upsertConfigSection(section, value);
+      res.json({ success: true, config: data });
+    } catch (e: any) {
+      if (isPlatformConfigMissing(e)) {
+        return res.status(400).json({
+          error: "platform_config table is missing. Please run the updated database_setup.sql script.",
+        });
+      }
+      res.status(500).json({ error: e.message || "Failed to save config" });
+    }
   });
 
   // Route to fetch all students (bypasses RLS using service role)
@@ -739,6 +914,41 @@ async function startServer() {
     }
   });
 
+  // Teacher quizzes (service role) — same scoping as courses; avoids PostgREST 400s when RLS/schema differ.
+  const teacherQuizzesGetHandler = async (req: Request, res: Response) => {
+    try {
+      const userId = typeof req.query.userId === "string" ? req.query.userId.trim() : "";
+      if (!userId) return res.status(400).json({ error: "userId is required" });
+
+      const teacherIds = await getTeacherIdCandidates(userId);
+      const scopedIds = teacherIds.length > 0 ? teacherIds : [userId];
+
+      let { data, error } = await supabaseAdmin
+        .from("quizzes")
+        .select("*")
+        .in("teacher_id", scopedIds)
+        .order("created_at", { ascending: false });
+      if (error) {
+        const retry = await supabaseAdmin.from("quizzes").select("*").in("teacher_id", scopedIds);
+        if (retry.error) throw error;
+        data = retry.data;
+        error = null;
+      }
+      if (error) throw error;
+      const rows = data || [];
+      rows.sort((a: any, b: any) => {
+        const ta = a?.created_at ? new Date(a.created_at).getTime() : 0;
+        const tb = b?.created_at ? new Date(b.created_at).getTime() : 0;
+        return tb - ta;
+      });
+      res.json({ success: true, quizzes: rows });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  };
+  app.get("/api/teacher/quizzes", teacherQuizzesGetHandler);
+  app.get("/api/teacher/quizzes/", teacherQuizzesGetHandler);
+
   // Teacher modules (service role) — same scoping as POST /api/teacher/modules so rows always
   // show after create even when RLS differs between environments.
   app.get("/api/teacher/modules", async (req, res) => {
@@ -1102,11 +1312,59 @@ async function startServer() {
 
   app.get('/api/admin/analytics', async (req, res) => {
     try {
-      const [profilesRes, coursesRes, quizzesRes, certsRes, assignmentsRes, lessonsRes, attendanceRes] = await Promise.all([
+      const certsPromise = (async () => {
+        const certRows = await fetchCertificatesSelectWithFallback([
+          "id, status, created_at",
+          "id, status",
+          "id, created_at",
+          "id",
+        ]);
+        return {
+          data: certRows.map((c: any) => ({
+            id: c.id,
+            status: c.status ?? "issued",
+            created_at: c.created_at ?? null,
+          })),
+          error: null,
+        } as any;
+      })();
+      const classesPromise = (async () => {
+        const selects = [
+          'id, status, created_at, student_ids, capacity',
+          'id, created_at, student_ids, capacity',
+          'id, created_at, student_ids',
+          'id, created_at',
+        ];
+        for (const sel of selects) {
+          const res = await supabaseAdmin.from('classes').select(sel as any);
+          if (!res.error) {
+            return {
+              data: (res.data || []).map((c: any) => ({
+                id: c.id,
+                status: c.status ?? 'active',
+                created_at: c.created_at ?? null,
+                student_ids: Array.isArray(c.student_ids) ? c.student_ids : [],
+                capacity: typeof c.capacity === 'number' ? c.capacity : 0,
+              })),
+              error: null,
+            } as any;
+          }
+          // Missing column in older schema; retry with a narrower select.
+          if (res.error.code !== '42703') return res as any;
+        }
+        return { data: [], error: null } as any;
+      })();
+      const quizzesPromise = (async () => ({
+        data: await loadQuizzesRowsForAnalytics(),
+        error: null,
+      }))();
+
+      const [profilesRes, coursesRes, classesRes, quizzesRes, certsRes, assignmentsRes, lessonsRes, attendanceRes] = await Promise.all([
         supabaseAdmin.from('profiles').select('id, role, created_at, status'),
         supabaseAdmin.from('courses').select('id, category, status, created_at, total_students, level'),
-        supabaseAdmin.from('quizzes').select('id, title, created_at, published'),
-        supabaseAdmin.from('certificates').select('id, status, created_at'),
+        classesPromise,
+        quizzesPromise,
+        certsPromise,
         supabaseAdmin.from('assignments').select('id, status, created_at'),
         supabaseAdmin.from('lessons').select('id, created_at, type'),
         supabaseAdmin.from('attendance').select('id, status, date'),
@@ -1114,6 +1372,7 @@ async function startServer() {
 
       if (profilesRes.error) throw profilesRes.error;
       if (coursesRes.error) throw coursesRes.error;
+      if (classesRes.error) throw classesRes.error;
       if (quizzesRes.error) throw quizzesRes.error;
       if (certsRes.error) throw certsRes.error;
       if (assignmentsRes.error) throw assignmentsRes.error;
@@ -1122,11 +1381,23 @@ async function startServer() {
 
       const profiles = profilesRes.data || [];
       const courses = coursesRes.data || [];
+      const classes = classesRes.data || [];
       const quizzes = quizzesRes.data || [];
       const certs = certsRes.data || [];
       const assignments = assignmentsRes.data || [];
       const lessons = lessonsRes.data || [];
       const attendance = attendanceRes.data || [];
+      const activeClasses = classes.filter((c: any) => c.status === 'active').length;
+      const upcomingClasses = classes.filter((c: any) => c.status === 'upcoming').length;
+      const totalClassEnrollments = classes.reduce((sum: number, c: any) => sum + ((c.student_ids || []).length || 0), 0);
+      const avgClassFillRate = classes.length > 0
+        ? Math.round(classes.reduce((sum: number, c: any) => {
+            const enrolled = (c.student_ids || []).length || 0;
+            const capacity = Number(c.capacity) > 0 ? Number(c.capacity) : 0;
+            if (!capacity) return sum;
+            return sum + Math.min((enrolled / capacity) * 100, 100);
+          }, 0) / classes.length)
+        : 0;
 
       const attempts = normalizeAttempts(await fetchAllAttemptRows());
 
@@ -1195,10 +1466,16 @@ async function startServer() {
           totalStudents: profiles.filter(p => p.role === 'student').length,
           activeStudents: profiles.filter(p => p.role === 'student' && p.status === 'active').length,
           totalTeachers: profiles.filter(p => p.role === 'teacher').length,
+          totalClasses: classes.length,
+          activeClasses,
+          upcomingClasses,
+          totalClassEnrollments,
+          avgClassFillRate,
           totalCourses: courses.length,
           publishedCourses: courses.filter(c => c.status === 'published').length,
           totalQuizzes: quizzes.length,
-          publishedQuizzes: quizzes.filter(q => q.published).length,
+          // Legacy DBs may not have quizzes.published; avoid column dependency.
+          publishedQuizzes: quizzes.length,
           totalAttempts: attempts.length,
           completedAttempts: completedAttempts.length,
           totalCertificates: certs.filter(c => c.status === 'issued').length,
@@ -1220,20 +1497,25 @@ async function startServer() {
   // ── REPORTS ─────────────────────────────────────────────────
   app.get('/api/admin/reports/students', async (req, res) => {
     try {
-      const [studentsRes, certsRes, enrollmentsRes] = await Promise.all([
+      const [studentsRes, enrollmentsResWithIds, certs] = await Promise.all([
         supabaseAdmin.from('profiles').select('id, display_name, email, status, created_at').eq('role', 'student'),
-        supabaseAdmin.from('certificates').select('student_id, status'),
         supabaseAdmin.from('courses').select('id, student_ids'),
+        loadCertificateRowsForReports(),
       ]);
 
       if (studentsRes.error) throw studentsRes.error;
-      if (certsRes.error) throw certsRes.error;
-      if (enrollmentsRes.error) throw enrollmentsRes.error;
+      let courses: any[] = [];
+      if (enrollmentsResWithIds.error) {
+        const isMissingStudentIdsColumn =
+          enrollmentsResWithIds.error?.code === '42703' ||
+          String(enrollmentsResWithIds.error?.message || '').includes('courses.student_ids');
+        if (!isMissingStudentIdsColumn) throw enrollmentsResWithIds.error;
+      } else {
+        courses = enrollmentsResWithIds.data || [];
+      }
 
       const students = studentsRes.data || [];
       const attempts = normalizeAttempts(await fetchAllAttemptRows());
-      const certs = certsRes.data || [];
-      const courses = enrollmentsRes.data || [];
 
       const enrollmentMap: Record<string, number> = {};
       courses.forEach((c: any) => {
@@ -1257,7 +1539,7 @@ async function startServer() {
           totalAttempts: attempts.filter(a => a.student_id === s.id).length,
           completedQuizzes: myAttempts.length,
           avgScore,
-          certificates: certs.filter(c => c.student_id === s.id && c.status === 'issued').length,
+          certificates: certs.filter((c) => c.student_id === s.id && c.status === 'issued').length,
         };
       });
 
@@ -1267,18 +1549,30 @@ async function startServer() {
 
   app.get('/api/admin/reports/courses', async (req, res) => {
     try {
-      const [coursesRes, certsRes, lessonsRes] = await Promise.all([
+      const [coursesResWithIds, lessonsRes, certs] = await Promise.all([
         supabaseAdmin.from('courses').select('id, title, category, level, status, created_at, total_students, teacher_id, student_ids'),
-        supabaseAdmin.from('certificates').select('course_id, status'),
         supabaseAdmin.from('lessons').select('course_id'),
+        loadCertificateRowsForReports(),
       ]);
 
-      if (coursesRes.error) throw coursesRes.error;
-      if (certsRes.error) throw certsRes.error;
       if (lessonsRes.error) throw lessonsRes.error;
+      let courses: any[] = [];
+      let usesStudentIds = true;
+      if (coursesResWithIds.error) {
+        const isMissingStudentIdsColumn =
+          coursesResWithIds.error?.code === '42703' ||
+          String(coursesResWithIds.error?.message || '').includes('courses.student_ids');
+        if (!isMissingStudentIdsColumn) throw coursesResWithIds.error;
+        const coursesResFallback = await supabaseAdmin
+          .from('courses')
+          .select('id, title, category, level, status, created_at, total_students, teacher_id');
+        if (coursesResFallback.error) throw coursesResFallback.error;
+        courses = coursesResFallback.data || [];
+        usesStudentIds = false;
+      } else {
+        courses = coursesResWithIds.data || [];
+      }
 
-      const courses = coursesRes.data || [];
-      const certs = certsRes.data || [];
       const lessonsList = lessonsRes.data || [];
 
       const report = courses.map(c => ({
@@ -1288,9 +1582,11 @@ async function startServer() {
         level: c.level || 'beginner',
         status: c.status,
         createdAt: c.created_at,
-        enrolledStudents: (c.student_ids || []).length,
+        enrolledStudents: usesStudentIds
+          ? (c.student_ids || []).length
+          : Number(c.total_students || 0),
         totalLessons: lessonsList.filter((l: any) => l.course_id === c.id).length,
-        certificatesIssued: certs.filter((cert: any) => cert.course_id === c.id && cert.status === 'issued').length,
+        certificatesIssued: certs.filter((cert) => cert.course_id === c.id && cert.status === 'issued').length,
       }));
 
       res.json({ success: true, report });
@@ -1339,6 +1635,370 @@ async function startServer() {
     } catch (e: any) { res.status(500).json({ error: e.message }); }
   });
 
+  app.get('/api/admin/reports/roles', async (req, res) => {
+    try {
+      const [profilesRes, coursesRes, quizzesRes, certs] = await Promise.all([
+        supabaseAdmin.from('profiles').select('id, role, status, created_at'),
+        supabaseAdmin.from('courses').select('teacher_id'),
+        supabaseAdmin.from('quizzes').select('teacher_id'),
+        loadCertificateRowsForReports(),
+      ]);
+
+      if (profilesRes.error) throw profilesRes.error;
+      if (coursesRes.error) throw coursesRes.error;
+      if (quizzesRes.error) throw quizzesRes.error;
+
+      const profiles = profilesRes.data || [];
+      const courses = coursesRes.data || [];
+      const quizzes = quizzesRes.data || [];
+      const attempts = normalizeAttempts(await fetchAllAttemptRows());
+
+      const roleByUserId: Record<string, 'admin' | 'teacher' | 'student'> = {};
+      profiles.forEach((p: any) => {
+        const role = p?.role === 'admin' || p?.role === 'teacher' ? p.role : 'student';
+        roleByUserId[p.id] = role;
+      });
+
+      const roleStats: Record<'admin' | 'teacher' | 'student', {
+        role: 'admin' | 'teacher' | 'student';
+        users: number;
+        activeUsers: number;
+        newUsers30d: number;
+        coursesCreated: number;
+        quizzesCreated: number;
+        attempts: number;
+        certificates: number;
+      }> = {
+        admin: { role: 'admin', users: 0, activeUsers: 0, newUsers30d: 0, coursesCreated: 0, quizzesCreated: 0, attempts: 0, certificates: 0 },
+        teacher: { role: 'teacher', users: 0, activeUsers: 0, newUsers30d: 0, coursesCreated: 0, quizzesCreated: 0, attempts: 0, certificates: 0 },
+        student: { role: 'student', users: 0, activeUsers: 0, newUsers30d: 0, coursesCreated: 0, quizzesCreated: 0, attempts: 0, certificates: 0 },
+      };
+
+      const now = Date.now();
+      const thirtyDaysMs = 30 * 24 * 60 * 60 * 1000;
+
+      profiles.forEach((p: any) => {
+        const role = p?.role === 'admin' || p?.role === 'teacher' ? p.role : 'student';
+        roleStats[role].users += 1;
+        if (p?.status === 'active') roleStats[role].activeUsers += 1;
+        const created = p?.created_at ? new Date(p.created_at).getTime() : 0;
+        if (created > 0 && now - created <= thirtyDaysMs) roleStats[role].newUsers30d += 1;
+      });
+
+      courses.forEach((c: any) => {
+        const ownerRole = roleByUserId[c?.teacher_id] || 'teacher';
+        roleStats[ownerRole].coursesCreated += 1;
+      });
+
+      quizzes.forEach((q: any) => {
+        const ownerRole = roleByUserId[q?.teacher_id] || 'teacher';
+        roleStats[ownerRole].quizzesCreated += 1;
+      });
+
+      attempts.forEach((a: any) => {
+        const role = roleByUserId[a?.student_id] || 'student';
+        roleStats[role].attempts += 1;
+      });
+
+      certs.forEach((c: any) => {
+        if (c?.status !== 'issued') return;
+        const role = roleByUserId[c?.student_id] || 'student';
+        roleStats[role].certificates += 1;
+      });
+
+      const report = [roleStats.admin, roleStats.teacher, roleStats.student];
+      res.json({ success: true, report });
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  // ── PAYMENTS ────────────────────────────────────────────────
+  app.get('/api/admin/payments', async (req, res) => {
+    try {
+      const [teachersRes, studentsRes] = await Promise.all([
+        supabaseAdmin.from('profiles').select('id, display_name, email').eq('role', 'teacher'),
+        supabaseAdmin.from('profiles').select('id, display_name, email, teacher_id').eq('role', 'student'),
+      ]);
+
+      if (teachersRes.error) throw teachersRes.error;
+      if (studentsRes.error) throw studentsRes.error;
+
+      const paymentsRes = await supabaseAdmin
+        .from('payments')
+        .select('id, teacher_id, student_id, amount, currency, status, method, payment_date, description, reference, created_at')
+        .order('payment_date', { ascending: false });
+
+      let paymentsRows: any[] = [];
+      if (paymentsRes.error) {
+        const message = String(paymentsRes.error?.message || '');
+        const isMissingPaymentsTable =
+          paymentsRes.error?.code === '42P01' ||
+          message.includes("Could not find the table 'public.payments'") ||
+          message.includes("Could not find the table 'payments'");
+        if (!isMissingPaymentsTable) throw paymentsRes.error;
+      } else {
+        paymentsRows = paymentsRes.data || [];
+      }
+
+      const teacherMap: Record<string, { name: string; email: string }> = {};
+      (teachersRes.data || []).forEach((t: any) => {
+        teacherMap[t.id] = {
+          name: t.display_name || t.email || 'Unknown teacher',
+          email: t.email || '',
+        };
+      });
+
+      const studentMap: Record<string, { name: string; email: string; teacher_id: string | null }> = {};
+      (studentsRes.data || []).forEach((s: any) => {
+        studentMap[s.id] = {
+          name: s.display_name || s.email || 'Unknown student',
+          email: s.email || '',
+          teacher_id: s.teacher_id || null,
+        };
+      });
+
+      const payments = paymentsRows.map((p: any) => ({
+        ...p,
+        teacher_name: p.teacher_id ? (teacherMap[p.teacher_id]?.name || '—') : '—',
+        student_name: p.student_id ? (studentMap[p.student_id]?.name || '—') : '—',
+        student_email: p.student_id ? (studentMap[p.student_id]?.email || '') : '',
+      }));
+
+      const teacherOptions = (teachersRes.data || []).map((t: any) => ({
+        id: t.id,
+        name: t.display_name || t.email || 'Unnamed teacher',
+      }));
+      const studentOptions = (studentsRes.data || []).map((s: any) => ({
+        id: s.id,
+        name: s.display_name || s.email || 'Unnamed student',
+        email: s.email || '',
+        teacherId: s.teacher_id || null,
+      }));
+
+      res.json({ success: true, payments, teacherOptions, studentOptions });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message || 'Failed to load payments' });
+    }
+  });
+
+  app.post('/api/admin/payments', async (req, res) => {
+    try {
+      const {
+        teacher_id,
+        student_id,
+        amount,
+        currency = 'USD',
+        status = 'completed',
+        method = 'bank',
+        payment_date,
+        description = '',
+        reference = '',
+      } = req.body || {};
+
+      if (!teacher_id) return res.status(400).json({ error: 'Teacher is required' });
+      if (!student_id) return res.status(400).json({ error: 'Student is required' });
+      const numericAmount = Number(amount);
+      if (!Number.isFinite(numericAmount) || numericAmount <= 0) {
+        return res.status(400).json({ error: 'Amount must be greater than zero' });
+      }
+      if (!payment_date) return res.status(400).json({ error: 'Payment date is required' });
+
+      const { data: studentProfile, error: studentErr } = await supabaseAdmin
+        .from('profiles')
+        .select('id, teacher_id')
+        .eq('id', student_id)
+        .eq('role', 'student')
+        .single();
+      if (studentErr || !studentProfile) return res.status(400).json({ error: 'Invalid student selected' });
+      if (studentProfile.teacher_id !== teacher_id) {
+        return res.status(400).json({ error: 'Selected student does not belong to this teacher' });
+      }
+
+      const { data, error } = await supabaseAdmin
+        .from('payments')
+        .insert({
+          teacher_id,
+          student_id,
+          amount: numericAmount,
+          currency,
+          status,
+          method,
+          payment_date,
+          description,
+          reference,
+        })
+        .select('id')
+        .single();
+      if (error) throw error;
+
+      const paymentId = data?.id as string | undefined;
+      if (paymentId) {
+        const invStatus = paymentStatusToInvoiceRowStatus(String(status));
+        const issued = String(payment_date).slice(0, 10);
+        let due = issued;
+        if (invStatus === 'paid') due = issued;
+        else if (invStatus === 'pending') due = addDaysToYmd(issued, 14);
+        else due = addDaysToYmd(issued, 30);
+
+        const paidDate = invStatus === 'paid' ? issued : null;
+        const lineDesc =
+          String(description || '').trim() ||
+          `Payment — ${String(method).replace(/_/g, ' ')}`;
+        const courseTitle =
+          String(description || '').trim().slice(0, 160) || 'Program / services';
+        const items = [{ description: lineDesc, qty: 1, unit_price: numericAmount }];
+        const noteLines = ['Auto-generated from payment registration.'];
+        if (String(reference || '').trim()) noteLines.push(`Reference: ${String(reference).trim()}`);
+        if (String(status) !== 'completed') noteLines.push(`Payment record status: ${String(status)}.`);
+
+        let invoiceNumber: string;
+        try {
+          invoiceNumber = await nextInvoiceNumberForPaymentDate(issued);
+        } catch (invNumErr: any) {
+          await supabaseAdmin.from('payments').delete().eq('id', paymentId);
+          throw invNumErr;
+        }
+
+        const invInsert = await supabaseAdmin
+          .from('invoices')
+          .insert({
+            payment_id: paymentId,
+            invoice_number: invoiceNumber,
+            teacher_id,
+            student_id,
+            currency,
+            status: invStatus,
+            issued_date: issued,
+            due_date: due,
+            paid_date: paidDate,
+            course_title: courseTitle,
+            items,
+            notes: noteLines.join('\n'),
+            student_address: '',
+            student_phone: '',
+          })
+          .select('id, invoice_number')
+          .single();
+
+        if (invInsert.error) {
+          await supabaseAdmin.from('payments').delete().eq('id', paymentId);
+          const im = String(invInsert.error?.message || '');
+          if (
+            invInsert.error?.code === '42P01' ||
+            im.includes("Could not find the table 'public.invoices'")
+          ) {
+            return res.status(400).json({
+              error:
+                "Could not create invoice: table 'invoices' is missing. Run sql/add_invoices_table.sql in Supabase, then try again.",
+            });
+          }
+          throw invInsert.error;
+        }
+
+        return res.json({
+          success: true,
+          id: paymentId,
+          invoice_id: invInsert.data?.id,
+          invoice_number: invInsert.data?.invoice_number,
+        });
+      }
+
+      res.json({ success: true, id: data?.id });
+    } catch (e: any) {
+      const message = String(e?.message || '');
+      if (
+        e?.code === '42P01' ||
+        message.includes("Could not find the table 'public.payments'") ||
+        message.includes("Could not find the table 'payments'")
+      ) {
+        return res.status(400).json({
+          error:
+            "Payments are not available yet because table 'payments' is missing. Run sql/add_payments_table.sql in Supabase, then try again.",
+        });
+      }
+      res.status(500).json({ error: e.message || 'Failed to create payment' });
+    }
+  });
+
+  app.get('/api/admin/invoices', async (req, res) => {
+    try {
+      const invRes = await supabaseAdmin
+        .from('invoices')
+        .select(
+          'id, payment_id, invoice_number, teacher_id, student_id, currency, status, issued_date, due_date, paid_date, course_title, items, notes, student_address, student_phone, created_at',
+        )
+        .order('issued_date', { ascending: false });
+
+      if (invRes.error) {
+        const msg = String(invRes.error?.message || '');
+        if (
+          invRes.error?.code === '42P01' ||
+          msg.includes("Could not find the table 'public.invoices'")
+        ) {
+          return res.json({ success: true, invoices: [] });
+        }
+        throw invRes.error;
+      }
+
+      const rows = invRes.data || [];
+      const ids = new Set<string>();
+      rows.forEach((r: any) => {
+        if (r.student_id) ids.add(r.student_id);
+        if (r.teacher_id) ids.add(r.teacher_id);
+      });
+      const idList = [...ids];
+      let profMap: Record<string, { name: string; email: string }> = {};
+      if (idList.length) {
+        const { data: profs, error: pErr } = await supabaseAdmin
+          .from('profiles')
+          .select('id, display_name, email')
+          .in('id', idList);
+        if (pErr) throw pErr;
+        (profs || []).forEach((p: any) => {
+          profMap[p.id] = {
+            name: p.display_name || p.email || 'Unknown',
+            email: p.email || '',
+          };
+        });
+      }
+
+      const invoices = rows.map((r: any) => {
+        const dueYmd = String(r.due_date || '').slice(0, 10);
+        const displayStatus = resolveInvoiceDisplayStatus(String(r.status || 'draft'), dueYmd);
+        const rawItems = Array.isArray(r.items) ? r.items : [];
+        const items = rawItems.map((it: any) => ({
+          description: String(it?.description ?? ''),
+          qty: Math.max(1, Number(it?.qty) || 1),
+          unit_price: Number(it?.unit_price) || 0,
+        }));
+        const stu = profMap[r.student_id] || { name: '—', email: '' };
+        const tea = profMap[r.teacher_id] || { name: '—', email: '' };
+        return {
+          id: r.id,
+          payment_id: r.payment_id,
+          invoice_number: r.invoice_number,
+          student_name: stu.name,
+          student_email: stu.email,
+          student_address: r.student_address || '',
+          student_phone: r.student_phone || '',
+          teacher_name: tea.name,
+          teacher_email: tea.email,
+          course_title: r.course_title || '',
+          status: displayStatus,
+          currency: r.currency || 'USD',
+          issued_date: String(r.issued_date || '').slice(0, 10),
+          due_date: dueYmd,
+          paid_date: r.paid_date ? String(r.paid_date).slice(0, 10) : null,
+          items,
+          notes: r.notes || '',
+        };
+      });
+
+      res.json({ success: true, invoices });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message || 'Failed to load invoices' });
+    }
+  });
+
   // ── TEACHER LIVE SESSIONS ───────────────────────────────────
 
   // Auth helper: validates Bearer token and returns { userId, role } or null
@@ -1370,6 +2030,25 @@ async function startServer() {
     if (!caller) { res.status(401).json({ error: 'Unauthorized' }); return null; }
     return caller;
   };
+
+  // Admin users list for dashboard user management
+  app.get('/api/admin/users', async (req, res) => {
+    try {
+      const caller = await assertAuthenticated(req, res);
+      if (!caller) return;
+      if (caller.role !== 'admin') return res.status(403).json({ error: 'Forbidden: admin role required' });
+
+      const { data, error } = await supabaseAdmin
+        .from('profiles')
+        .select('id, email, display_name, role, teacher_id, status, created_at')
+        .order('created_at', { ascending: false });
+
+      if (error) throw error;
+      res.json({ success: true, users: data || [] });
+    } catch (e: unknown) {
+      res.status(500).json({ error: (e as Error).message || 'Failed to load users' });
+    }
+  });
 
   // List sessions for logged-in teacher (teacher or admin only)
   app.get('/api/teacher/live-sessions', async (req, res) => {
@@ -1477,7 +2156,7 @@ async function startServer() {
       if (!hostId) return;
 
       // Whitelist the fields a host is permitted to change
-      const ALLOWED_FIELDS = ['status', 'title', 'description', 'scheduled_at', 'duration_minutes', 'recording_url', 'jitsi_room_name'];
+      const ALLOWED_FIELDS = ['status', 'title', 'description', 'scheduled_at', 'duration_minutes', 'recording_url', 'jitsi_room_name', 'started_at'];
       const update: Record<string, unknown> = { updated_at: new Date().toISOString() };
       for (const key of ALLOWED_FIELDS) {
         if (key in req.body) update[key] = req.body[key];
@@ -1493,6 +2172,7 @@ async function startServer() {
       if (error) throw error;
 
       if (req.body.status === 'live') {
+        update.started_at = new Date().toISOString();
         const { data: parts } = await supabaseAdmin
           .from('session_participants').select('user_id').eq('session_id', req.params.id);
         if (parts && parts.length > 0) {
@@ -2076,6 +2756,151 @@ async function startServer() {
   app.delete('/api/admin/community/:id', async (req, res) => {
     try {
       const { error } = await supabaseAdmin.from('community_posts').delete().eq('id', req.params.id);
+      if (error) throw error;
+      res.json({ success: true });
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  // ── MODULES (ADMIN) ───────────────────────────────────────────
+  app.get('/api/admin/modules', async (req, res) => {
+    try {
+      const [modulesSnap, coursesSnap, teachersSnap] = await Promise.all([
+        supabaseAdmin.from('modules').select('*').order('order', { ascending: true }),
+        supabaseAdmin.from('courses').select('id, title, teacher_id'),
+        supabaseAdmin.from('teachers').select('user_id, first_name, last_name'),
+      ]);
+
+      if (modulesSnap.error) throw modulesSnap.error;
+      if (coursesSnap.error) throw coursesSnap.error;
+      if (teachersSnap.error) throw teachersSnap.error;
+
+      let lessonsSnap = await supabaseAdmin
+        .from('lessons')
+        .select('*')
+        .order('order', { ascending: true });
+      if (lessonsSnap.error) {
+        lessonsSnap = await supabaseAdmin
+          .from('lessons')
+          .select('*')
+          .order('created_at', { ascending: true });
+      }
+      if (lessonsSnap.error) throw lessonsSnap.error;
+
+      res.json({
+        success: true,
+        modules: modulesSnap.data || [],
+        courses: coursesSnap.data || [],
+        teachers: teachersSnap.data || [],
+        lessons: lessonsSnap.data || [],
+      });
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  app.post('/api/admin/modules', async (req, res) => {
+    try {
+      const payload = {
+        ...req.body,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      };
+      const { data, error } = await supabaseAdmin.from('modules').insert(payload).select().single();
+      if (error) throw error;
+      res.json({ success: true, module: data });
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  app.patch('/api/admin/modules/:id', async (req, res) => {
+    try {
+      const payload = {
+        ...req.body,
+        updated_at: new Date().toISOString(),
+      };
+      const { data, error } = await supabaseAdmin.from('modules').update(payload).eq('id', req.params.id).select().single();
+      if (error) throw error;
+      res.json({ success: true, module: data });
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  app.delete('/api/admin/modules/:id', async (req, res) => {
+    try {
+      const { error } = await supabaseAdmin.from('modules').delete().eq('id', req.params.id);
+      if (error) throw error;
+      res.json({ success: true });
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  // ── LESSONS (ADMIN, service role — bypasses RLS) ─────────────
+  // List/load: use GET /api/admin/modules (includes lessons + courses + modules + teachers).
+
+  app.post('/api/admin/lessons', async (req, res) => {
+    try {
+      const { title, short_description, course_id, module_id, type, duration_minutes, status, is_free_preview, slug, order } = req.body || {};
+      if (!course_id || !module_id || typeof title !== 'string' || !title.trim()) {
+        return res.status(400).json({ error: 'course_id, module_id and title are required' });
+      }
+      const slugFinal =
+        typeof slug === 'string' && slug.trim()
+          ? slug.trim()
+          : title
+              .trim()
+              .toLowerCase()
+              .replace(/[^a-z0-9]+/g, '-')
+              .replace(/(^-|-$)+/g, '');
+      const now = new Date().toISOString();
+      const payload = {
+        title: title.trim(),
+        short_description: short_description ?? null,
+        course_id: String(course_id),
+        module_id: String(module_id),
+        type: type || 'video',
+        duration_minutes: Number(duration_minutes) || 0,
+        status: status || 'published',
+        is_free_preview: Boolean(is_free_preview),
+        slug: slugFinal,
+        order: Number(order) || 1,
+        created_at: now,
+        updated_at: now,
+      };
+      const { data, error } = await supabaseAdmin.from('lessons').insert(payload).select().single();
+      if (error) {
+        const msg = [error.message, error.details, error.hint].filter(Boolean).join(' — ') || error.code || 'Database error';
+        return res.status(400).json({ error: msg, code: error.code });
+      }
+      res.json({ success: true, lesson: data });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  app.patch('/api/admin/lessons/:id', async (req, res) => {
+    try {
+      const id = typeof req.params.id === 'string' ? req.params.id.trim() : '';
+      if (!id) return res.status(400).json({ error: 'Lesson id is required' });
+      const { title, short_description, course_id, module_id, type, duration_minutes, status, is_free_preview, order } = req.body || {};
+      const updates: Record<string, unknown> = { updated_at: new Date().toISOString() };
+      if (typeof title === 'string') updates.title = title.trim();
+      if (short_description !== undefined) updates.short_description = short_description;
+      if (course_id !== undefined) updates.course_id = String(course_id);
+      if (module_id !== undefined) updates.module_id = String(module_id);
+      if (type !== undefined) updates.type = type;
+      if (duration_minutes !== undefined) updates.duration_minutes = Number(duration_minutes) || 0;
+      if (status !== undefined) updates.status = status;
+      if (is_free_preview !== undefined) updates.is_free_preview = Boolean(is_free_preview);
+      if (order !== undefined) updates.order = Number(order) || 1;
+      const { data, error } = await supabaseAdmin.from('lessons').update(updates).eq('id', id).select().single();
+      if (error) {
+        const msg = [error.message, error.details, error.hint].filter(Boolean).join(' — ') || error.code || 'Database error';
+        return res.status(400).json({ error: msg, code: error.code });
+      }
+      res.json({ success: true, lesson: data });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  app.delete('/api/admin/lessons/:id', async (req, res) => {
+    try {
+      const { error } = await supabaseAdmin.from('lessons').delete().eq('id', req.params.id);
       if (error) throw error;
       res.json({ success: true });
     } catch (e: any) { res.status(500).json({ error: e.message }); }

@@ -21,6 +21,7 @@ interface LiveSession {
   duration_minutes: number;
   max_participants: number;
   recording_url: string | null;
+  started_at: string | null;
   host?: { id: string; display_name: string; email: string } | null;
   course?: { id: string; title: string } | null;
 }

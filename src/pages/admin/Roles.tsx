@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import AdminLayout from '../../components/layout/AdminLayout';
 import { cn } from '../../lib/utils';
 import { toast } from 'sonner';
@@ -111,11 +111,39 @@ export default function AdminRoles() {
   };
 
   const handleSave = async () => {
-    setSaving(true);
-    await new Promise(r => setTimeout(r, 900));
-    setSaving(false);
-    toast.success('Role permissions saved.');
+    try {
+      setSaving(true);
+      const res = await fetch('/api/admin/config/roles', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ value: { perms } }),
+      });
+      const json = await res.json();
+      if (!res.ok || !json?.success) throw new Error(json?.error || 'Failed to save roles');
+      toast.success('Role permissions saved.');
+    } catch (e: any) {
+      toast.error(e?.message || 'Failed to save role permissions');
+    } finally {
+      setSaving(false);
+    }
   };
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const res = await fetch('/api/admin/config/roles');
+        const json = await res.json();
+        if (!res.ok || !json?.success || !json?.value?.perms) return;
+        setPerms((prev) => ({
+          admin: { ...prev.admin, ...(json.value.perms.admin || {}) },
+          teacher: { ...prev.teacher, ...(json.value.perms.teacher || {}) },
+          student: { ...prev.student, ...(json.value.perms.student || {}) },
+        }));
+      } catch {
+        // keep defaults
+      }
+    })();
+  }, []);
 
   const roleMeta = ROLE_META[activeRole];
   const RoleIcon = roleMeta.icon;

@@ -11,6 +11,9 @@ import {
 import { toast } from 'sonner';
 import { cn } from '../../lib/utils';
 import { useNavigate } from 'react-router-dom';
+import { apiUrl, authFetch } from '../../lib/apiUrl';
+import { resolveTeacherIdCandidates } from '../../lib/teacherScope';
+import { fetchAttemptRowsByQuizIds, normalizeAttempts } from '../../lib/quizAttempts';
 
 interface Exam {
   id: string;
@@ -58,31 +61,95 @@ export default function Exams() {
   const fetchData = async () => {
     setLoading(true);
     const { data: { session } } = await supabase.auth.getSession();
-    if (!session) return;
+    if (!session) {
+      setLoading(false);
+      return;
+    }
 
-    const [examsSnap, coursesSnap, questionsSnap, attemptsSnap] = await Promise.all([
-      supabase.from('quizzes').select('*').eq('teacher_id', session.user.id).eq('type', 'exam').order('created_at', { ascending: false }),
-      supabase.from('courses').select('id, title').eq('teacher_id', session.user.id),
-      supabase.from('questions').select('quiz_id'),
-      supabase.from('quiz_attempts').select('quiz_id, score, passed'),
-    ]);
+    try {
+      let courseRows: { id: string; title: string | null }[] | null = null;
+      const coursesRes = await fetch(
+        apiUrl(`/api/teacher/courses?userId=${encodeURIComponent(session.user.id)}`)
+      );
+      if (coursesRes.ok) {
+        const j = await coursesRes.json();
+        if (j?.success && Array.isArray(j.courses)) {
+          courseRows = j.courses.map((c: { id: string; title?: string | null }) => ({ id: c.id, title: c.title ?? null }));
+        }
+      }
+      if (courseRows === null) {
+        const scopedIds = await resolveTeacherIdCandidates(session.user.id);
+        const { data: cd } = await supabase.from('courses').select('id, title').in('teacher_id', scopedIds);
+        courseRows = cd ?? [];
+      }
 
-    const courseMap: Record<string, string> = {};
-    (coursesSnap.data || []).forEach(c => { courseMap[c.id] = c.title; });
-    setCourses(coursesSnap.data || []);
+      let quizRows: any[] | null = null;
+      const qzRes = await authFetch(
+        `/api/teacher/quizzes?userId=${encodeURIComponent(session.user.id)}`
+      );
+      if (qzRes.ok) {
+        const j = await qzRes.json();
+        if (j?.success && Array.isArray(j.quizzes)) quizRows = j.quizzes;
+      }
+      if (quizRows === null) {
+        const scopedIds = await resolveTeacherIdCandidates(session.user.id);
+        let res = await supabase
+          .from('quizzes')
+          .select('*')
+          .in('teacher_id', scopedIds)
+          .order('created_at', { ascending: false });
+        if (res.error) {
+          res = await supabase.from('quizzes').select('*').in('teacher_id', scopedIds);
+        }
+        if (res.error) {
+          res = await supabase.from('quizzes').select('*').eq('teacher_id', session.user.id);
+        }
+        if (res.error) throw res.error;
+        const rows = res.data ?? [];
+        rows.sort((a: { created_at?: string }, b: { created_at?: string }) => {
+          const ta = a.created_at ? new Date(a.created_at).getTime() : 0;
+          const tb = b.created_at ? new Date(b.created_at).getTime() : 0;
+          return tb - ta;
+        });
+        quizRows = rows;
+      }
 
-    const qCount: Record<string, number> = {};
-    (questionsSnap.data || []).forEach(q => { qCount[q.quiz_id] = (qCount[q.quiz_id] || 0) + 1; });
+      const examsOnly = (quizRows || []).filter((d: any) => (d.type || 'standard') === 'exam');
 
-    const attempts: Record<string, { total: number; passed: number; scores: number[] }> = {};
-    (attemptsSnap.data || []).forEach(a => {
-      if (!attempts[a.quiz_id]) attempts[a.quiz_id] = { total: 0, passed: 0, scores: [] };
-      attempts[a.quiz_id].total++;
-      if (a.passed) attempts[a.quiz_id].passed++;
-      if (a.score != null) attempts[a.quiz_id].scores.push(a.score);
-    });
+      const { data: questionsSnap } = await supabase.from('questions').select('quiz_id');
+      const courseMap: Record<string, string> = {};
+      (courseRows || []).forEach(c => { courseMap[c.id] = c.title || ''; });
+      setCourses((courseRows || []).map(c => ({ id: c.id, title: c.title || '' })));
 
-    setExams((examsSnap.data || []).map(d => {
+      const qCount: Record<string, number> = {};
+      (questionsSnap || []).forEach((q: { quiz_id: string }) => {
+        qCount[q.quiz_id] = (qCount[q.quiz_id] || 0) + 1;
+      });
+
+      const examIds = examsOnly.map((e: any) => e.id).filter(Boolean);
+      let attemptRows: any[] = [];
+      try {
+        attemptRows = await fetchAttemptRowsByQuizIds(supabase, examIds);
+      } catch {
+        attemptRows = [];
+      }
+
+      const passingByQuiz: Record<string, number> = {};
+      examsOnly.forEach((ex: any) => {
+        passingByQuiz[ex.id] = Number(ex.settings?.passingScore ?? ex.pass_mark ?? 70);
+      });
+      const normalizedAttempts = normalizeAttempts(attemptRows, passingByQuiz);
+
+      const attempts: Record<string, { total: number; passed: number; scores: number[] }> = {};
+      normalizedAttempts.forEach((a) => {
+        const qid = a.quiz_id;
+        if (!attempts[qid]) attempts[qid] = { total: 0, passed: 0, scores: [] };
+        attempts[qid].total++;
+        if (a.passed) attempts[qid].passed++;
+        attempts[qid].scores.push(a.score);
+      });
+
+      setExams(examsOnly.map((d: any) => {
       const att = attempts[d.id] || { total: 0, passed: 0, scores: [] };
       const avgScore = att.scores.length ? Math.round(att.scores.reduce((a, b) => a + b, 0) / att.scores.length) : 0;
       const passRate = att.total ? Math.round((att.passed / att.total) * 100) : 0;
@@ -104,8 +171,11 @@ export default function Exams() {
         settings: d.settings || {},
       };
     }));
-
-    setLoading(false);
+    } catch (e: any) {
+      toast.error(e?.message || 'Failed to load exams');
+    } finally {
+      setLoading(false);
+    }
   };
 
   useEffect(() => { fetchData(); }, []);
@@ -166,7 +236,7 @@ export default function Exams() {
     if (!confirm('Delete this exam? All attempts will also be deleted.')) return;
     setDeleting(id);
     try {
-      await supabase.from('quiz_attempts').delete().eq('quiz_id', id);
+      await supabase.from('attempts').delete().eq('quiz_id', id);
       await supabase.from('questions').delete().eq('quiz_id', id);
       const { error } = await supabase.from('quizzes').delete().eq('id', id);
       if (error) throw error;

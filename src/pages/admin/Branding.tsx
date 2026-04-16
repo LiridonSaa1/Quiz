@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import AdminLayout from '../../components/layout/AdminLayout';
 import { cn } from '../../lib/utils';
 import { toast } from 'sonner';
@@ -57,18 +57,71 @@ export default function AdminBranding() {
   const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>, type: 'logo' | 'favicon') => {
     const file = e.target.files?.[0];
     if (!file) return;
-    const url = URL.createObjectURL(file);
-    if (type === 'logo') setLogoUrl(url);
-    else setFaviconUrl(url);
-    toast.success(`${type === 'logo' ? 'Logo' : 'Favicon'} uploaded.`);
+    const reader = new FileReader();
+    reader.onload = () => {
+      const dataUrl = typeof reader.result === 'string' ? reader.result : null;
+      if (!dataUrl) {
+        toast.error('Failed to read uploaded image.');
+        return;
+      }
+      if (type === 'logo') {
+        setLogoUrl(dataUrl);
+        window.dispatchEvent(
+          new CustomEvent('branding-updated', { detail: { logoUrl: dataUrl } }),
+        );
+      } else {
+        setFaviconUrl(dataUrl);
+      }
+      toast.success(`${type === 'logo' ? 'Logo' : 'Favicon'} uploaded.`);
+    };
+    reader.onerror = () => {
+      toast.error('Failed to read uploaded image.');
+    };
+    reader.readAsDataURL(file);
   };
 
   const handleSave = async () => {
-    setSaving(true);
-    await new Promise(r => setTimeout(r, 900));
-    setSaving(false);
-    toast.success('Branding saved successfully.');
+    try {
+      setSaving(true);
+      const res = await fetch('/api/admin/config/branding', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          value: { colors, typography, copy, darkMode, preview, logoUrl, faviconUrl },
+        }),
+      });
+      const json = await res.json();
+      if (!res.ok || !json?.success) throw new Error(json?.error || 'Failed to save branding');
+      window.dispatchEvent(
+        new CustomEvent('branding-updated', { detail: { logoUrl } }),
+      );
+      toast.success('Branding saved successfully.');
+    } catch (e: any) {
+      toast.error(e?.message || 'Failed to save branding');
+    } finally {
+      setSaving(false);
+    }
   };
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const res = await fetch('/api/admin/config/branding');
+        const json = await res.json();
+        if (!res.ok || !json?.success || !json?.value) return;
+        const v = json.value as any;
+        if (v.colors) setColors((prev) => ({ ...prev, ...v.colors }));
+        if (v.typography) setTypography((prev) => ({ ...prev, ...v.typography }));
+        if (v.copy) setCopy((prev) => ({ ...prev, ...v.copy }));
+        if (typeof v.darkMode === 'boolean') setDarkMode(v.darkMode);
+        if (v.preview === 'desktop' || v.preview === 'mobile') setPreview(v.preview);
+        if (typeof v.logoUrl === 'string' || v.logoUrl === null) setLogoUrl(v.logoUrl ?? null);
+        if (typeof v.faviconUrl === 'string' || v.faviconUrl === null) setFaviconUrl(v.faviconUrl ?? null);
+      } catch {
+        // fallback to defaults
+      }
+    })();
+  }, []);
 
   return (
     <AdminLayout>

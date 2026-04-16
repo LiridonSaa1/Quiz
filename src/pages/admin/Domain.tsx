@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import AdminLayout from '../../components/layout/AdminLayout';
 import { cn } from '../../lib/utils';
 import { toast } from 'sonner';
@@ -46,11 +46,23 @@ export default function AdminDomain() {
     ? 'failed' : 'pending';
 
   const handleSave = async () => {
-    setSaving(true);
-    await new Promise(r => setTimeout(r, 900));
-    setCustomDomain(inputDomain);
-    setSaving(false);
-    toast.success('Domain settings saved.');
+    try {
+      setSaving(true);
+      const payload = { customDomain: inputDomain, sslEnabled, wwwRedirect, httpsForce, records };
+      const res = await fetch('/api/admin/config/domain', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ value: payload }),
+      });
+      const json = await res.json();
+      if (!res.ok || !json?.success) throw new Error(json?.error || 'Failed to save domain');
+      setCustomDomain(inputDomain);
+      toast.success('Domain settings saved.');
+    } catch (e: any) {
+      toast.error(e?.message || 'Failed to save domain settings');
+    } finally {
+      setSaving(false);
+    }
   };
 
   const handleCheck = async () => {
@@ -68,6 +80,27 @@ export default function AdminDomain() {
     navigator.clipboard.writeText(text);
     toast.success('Copied to clipboard');
   };
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const res = await fetch('/api/admin/config/domain');
+        const json = await res.json();
+        if (!res.ok || !json?.success || !json?.value) return;
+        const v = json.value as any;
+        if (typeof v.customDomain === 'string') {
+          setCustomDomain(v.customDomain);
+          setInputDomain(v.customDomain);
+        }
+        if (typeof v.sslEnabled === 'boolean') setSslEnabled(v.sslEnabled);
+        if (typeof v.wwwRedirect === 'boolean') setWwwRedirect(v.wwwRedirect);
+        if (typeof v.httpsForce === 'boolean') setHttpsForce(v.httpsForce);
+        if (Array.isArray(v.records)) setRecords(v.records as DnsRecord[]);
+      } catch {
+        // keep defaults
+      }
+    })();
+  }, []);
 
   return (
     <AdminLayout>

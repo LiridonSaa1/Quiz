@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { supabase } from '../../supabase';
 import { cn } from '../../lib/utils';
@@ -20,7 +20,7 @@ import {
   Megaphone, 
   BarChart3, 
   FileBarChart, 
-  DollarSign, 
+  DollarSign,
   Receipt, 
   Settings, 
   Palette, 
@@ -103,8 +103,37 @@ const adminNavSections = [
 
 export default function AdminLayout({ children }: { children: React.ReactNode }) {
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+  const [brandLogoUrl, setBrandLogoUrl] = useState<string | null>(null);
   const location = useLocation();
   const navigate = useNavigate();
+
+  useEffect(() => {
+    let mounted = true;
+    (async () => {
+      try {
+        const res = await fetch('/api/admin/config/branding');
+        const json = await res.json();
+        if (!mounted || !res.ok || !json?.success || !json?.value) return;
+        const url = typeof json.value?.logoUrl === 'string' ? json.value.logoUrl : null;
+        setBrandLogoUrl(url);
+      } catch {
+        // keep default logo
+      }
+    })();
+
+    const onBrandUpdated = (event: Event) => {
+      const custom = event as CustomEvent<{ logoUrl?: string | null }>;
+      if (custom.detail && 'logoUrl' in custom.detail) {
+        setBrandLogoUrl(custom.detail.logoUrl || null);
+      }
+    };
+
+    window.addEventListener('branding-updated', onBrandUpdated);
+    return () => {
+      mounted = false;
+      window.removeEventListener('branding-updated', onBrandUpdated);
+    };
+  }, []);
 
   const handleLogout = async () => {
     await supabase.auth.signOut();
@@ -128,11 +157,15 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
   );
 
   const SidebarContent = ({ onLinkClick }: { onLinkClick?: () => void }) => (
-    <>
-      <div className="p-5 border-b border-slate-700/50">
+    <div className="flex flex-col h-full min-h-0">
+      <div className="p-5 border-b border-slate-700/50 shrink-0">
         <div className="flex items-center gap-3">
           <div className="w-9 h-9 bg-indigo-600 rounded-xl flex items-center justify-center shadow-lg shadow-indigo-900/40">
-            <GraduationCap className="w-5 h-5 text-white" />
+            {brandLogoUrl ? (
+              <img src={brandLogoUrl} alt="Brand logo" className="w-full h-full object-contain rounded-xl" />
+            ) : (
+              <GraduationCap className="w-5 h-5 text-white" />
+            )}
           </div>
           <div>
             <h1 className="text-base font-bold text-white leading-tight">QuizMaster</h1>
@@ -140,7 +173,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
           </div>
         </div>
       </div>
-      <nav className="flex-1 px-3 py-4 space-y-5 overflow-y-auto">
+      <nav className="flex-1 min-h-0 px-3 py-4 space-y-5 overflow-y-auto scrollbar-none">
         {adminNavSections.map((section) => (
           <div key={section.title} className="space-y-0.5">
             <h3 className="px-3 text-[9px] font-bold text-slate-500 uppercase tracking-widest mb-1.5">
@@ -151,17 +184,17 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
             ))}
           </div>
         ))}
-        <div className="pt-3 border-t border-slate-700/50">
-          <button
-            onClick={handleLogout}
-            className="flex items-center gap-3 px-3 py-2 w-full text-slate-400 hover:bg-red-500/10 hover:text-red-400 rounded-lg transition-all text-sm font-medium"
-          >
-            <LogOut className="w-4 h-4" />
-            <span>Sign out</span>
-          </button>
-        </div>
       </nav>
-    </>
+      <div className="px-3 py-3 border-t border-slate-700/50 shrink-0">
+        <button
+          onClick={handleLogout}
+          className="flex items-center gap-3 px-3 py-2 w-full text-slate-400 hover:bg-red-500/10 hover:text-red-400 rounded-lg transition-all text-sm font-medium"
+        >
+          <LogOut className="w-4 h-4" />
+          <span>Sign out</span>
+        </button>
+      </div>
+    </div>
   );
 
   return (
@@ -185,7 +218,11 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
       <div className="lg:hidden fixed top-0 left-0 right-0 h-14 bg-slate-800 flex items-center justify-between px-4 z-50">
         <div className="flex items-center gap-2.5">
           <div className="w-8 h-8 bg-indigo-600 rounded-lg flex items-center justify-center">
-            <GraduationCap className="w-4 h-4 text-white" />
+            {brandLogoUrl ? (
+              <img src={brandLogoUrl} alt="Brand logo" className="w-full h-full object-contain rounded-lg" />
+            ) : (
+              <GraduationCap className="w-4 h-4 text-white" />
+            )}
           </div>
           <h1 className="text-base font-bold text-white">QuizMaster</h1>
         </div>

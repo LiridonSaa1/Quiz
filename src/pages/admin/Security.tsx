@@ -1,14 +1,15 @@
-import React, { useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import AdminLayout from '../../components/layout/AdminLayout';
 import { cn } from '../../lib/utils';
 import { toast } from 'sonner';
+import { supabase } from '../../supabase';
 import {
   Shield, Lock, Smartphone, Eye, EyeOff,
   CheckCircle2, AlertTriangle, LogOut, Monitor,
   Clock, MapPin, RefreshCw, Key, ShieldAlert,
   ShieldCheck, Trash2, X
 } from 'lucide-react';
-import { format, subHours, subDays } from 'date-fns';
+import { format } from 'date-fns';
 
 interface Session {
   id: string;
@@ -29,22 +30,6 @@ interface LoginEvent {
   timestamp: Date;
 }
 
-const SESSIONS: Session[] = [
-  { id: '1', device: 'MacBook Pro',    browser: 'Chrome 124',  location: 'New York, NY',    ip: '192.168.1.1',   last_active: new Date(),            current: true },
-  { id: '2', device: 'iPhone 15',      browser: 'Safari 17',   location: 'New York, NY',    ip: '192.168.1.22',  last_active: subHours(new Date(), 2), current: false },
-  { id: '3', device: 'Windows PC',     browser: 'Edge 123',    location: 'Brooklyn, NY',    ip: '10.0.0.15',     last_active: subDays(new Date(), 1),  current: false },
-  { id: '4', device: 'iPad Air',       browser: 'Safari 17',   location: 'Manhattan, NY',   ip: '172.16.0.9',    last_active: subDays(new Date(), 3),  current: false },
-];
-
-const LOGIN_HISTORY: LoginEvent[] = [
-  { id: '1', status: 'success', device: 'MacBook Pro',  location: 'New York, NY',  ip: '192.168.1.1',  timestamp: new Date() },
-  { id: '2', status: 'success', device: 'iPhone 15',    location: 'New York, NY',  ip: '192.168.1.22', timestamp: subHours(new Date(), 2) },
-  { id: '3', status: 'failed',  device: 'Unknown',      location: 'Lagos, Nigeria', ip: '41.58.12.91',  timestamp: subHours(new Date(), 5) },
-  { id: '4', status: 'failed',  device: 'Unknown',      location: 'Lagos, Nigeria', ip: '41.58.12.91',  timestamp: subHours(new Date(), 5.1) },
-  { id: '5', status: 'success', device: 'Windows PC',   location: 'Brooklyn, NY',  ip: '10.0.0.15',    timestamp: subDays(new Date(), 1) },
-  { id: '6', status: 'success', device: 'MacBook Pro',  location: 'New York, NY',  ip: '192.168.1.1',  timestamp: subDays(new Date(), 2) },
-];
-
 const passwordStrength = (pw: string) => {
   let score = 0;
   if (pw.length >= 8)  score++;
@@ -60,7 +45,9 @@ const STRENGTH_COLORS = ['', 'bg-rose-500', 'bg-amber-500', 'bg-yellow-400', 'bg
 const STRENGTH_TEXT   = ['', 'text-rose-600', 'text-amber-600', 'text-yellow-600', 'text-emerald-600', 'text-emerald-700'];
 
 export default function AdminSecurity() {
-  const [sessions, setSessions] = useState<Session[]>(SESSIONS);
+  const [sessions, setSessions] = useState<Session[]>([]);
+  const [loginHistory, setLoginHistory] = useState<LoginEvent[]>([]);
+  const [loading, setLoading] = useState(true);
   const [showCurrent, setShowCurrent] = useState(false);
   const [showNew, setShowNew]     = useState(false);
   const [showConfirm, setShowConfirm] = useState(false);
@@ -71,19 +58,118 @@ export default function AdminSecurity() {
   const [twoFAEnabled, setTwoFAEnabled] = useState(false);
   const [twoFAStep, setTwoFAStep] = useState<'idle' | 'setup' | 'verify'>('idle');
   const [twoFACode, setTwoFACode] = useState('');
+  const [configSaving, setConfigSaving] = useState(false);
 
   const strength = passwordStrength(newPw);
-  const strengthPct = (strength / 5) * 100;
+
+  const deviceLabel = useMemo(() => {
+    const ua = navigator.userAgent || '';
+    if (/iphone/i.test(ua)) return 'iPhone';
+    if (/ipad/i.test(ua)) return 'iPad';
+    if (/android/i.test(ua)) return 'Android Device';
+    if (/windows/i.test(ua)) return 'Windows PC';
+    if (/macintosh|mac os x/i.test(ua)) return 'Mac';
+    if (/linux/i.test(ua)) return 'Linux';
+    return 'Current Device';
+  }, []);
+
+  const browserLabel = useMemo(() => {
+    const ua = navigator.userAgent || '';
+    if (/edg/i.test(ua)) return 'Edge';
+    if (/chrome/i.test(ua) && !/edg/i.test(ua)) return 'Chrome';
+    if (/safari/i.test(ua) && !/chrome/i.test(ua)) return 'Safari';
+    if (/firefox/i.test(ua)) return 'Firefox';
+    return 'Browser';
+  }, []);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        setLoading(true);
+        const { data: authData } = await supabase.auth.getSession();
+        const session = authData.session;
+        const user = session?.user;
+        const now = new Date();
+        const lastLogin = user?.last_sign_in_at ? new Date(user.last_sign_in_at) : now;
+        const currentSession: Session = {
+          id: user?.id || 'current',
+          device: deviceLabel,
+          browser: browserLabel,
+          location: Intl.DateTimeFormat().resolvedOptions().timeZone || 'Unknown',
+          ip: 'Hidden',
+          last_active: now,
+          current: true,
+        };
+        setSessions([currentSession]);
+        setLoginHistory([
+          {
+            id: 'current-login',
+            status: 'success',
+            device: deviceLabel,
+            location: Intl.DateTimeFormat().resolvedOptions().timeZone || 'Unknown',
+            ip: 'Hidden',
+            timestamp: lastLogin,
+          },
+        ]);
+
+        const cfgRes = await fetch('/api/admin/config/settings');
+        const cfgJson = await cfgRes.json();
+        if (cfgRes.ok && cfgJson?.success && cfgJson?.value?.security) {
+          const val = cfgJson.value.security;
+          if (typeof val.twoFactor === 'boolean') setTwoFAEnabled(val.twoFactor);
+        }
+      } catch {
+        // keep defaults if unavailable
+      } finally {
+        setLoading(false);
+      }
+    })();
+  }, [browserLabel, deviceLabel]);
+
+  const saveTwoFactorSetting = async (enabled: boolean) => {
+    try {
+      setConfigSaving(true);
+      const currentRes = await fetch('/api/admin/config/settings');
+      const currentJson = await currentRes.json().catch(() => ({}));
+      const currentValue = currentJson?.value || {};
+      const merged = {
+        ...currentValue,
+        security: {
+          ...(currentValue.security || {}),
+          twoFactor: enabled,
+        },
+      };
+      const res = await fetch('/api/admin/config/settings', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ value: merged }),
+      });
+      const json = await res.json();
+      if (!res.ok || !json?.success) {
+        throw new Error(json?.error || 'Failed to save security settings');
+      }
+    } finally {
+      setConfigSaving(false);
+    }
+  };
 
   const handlePasswordSave = async () => {
     if (!currentPw) return toast.error('Enter your current password.');
     if (newPw.length < 8) return toast.error('New password must be at least 8 characters.');
     if (newPw !== confirmPw) return toast.error('Passwords do not match.');
-    setPwSaving(true);
-    await new Promise(r => setTimeout(r, 900));
-    setPwSaving(false);
-    setCurrentPw(''); setNewPw(''); setConfirmPw('');
-    toast.success('Password updated successfully.');
+    try {
+      setPwSaving(true);
+      const { error } = await supabase.auth.updateUser({ password: newPw });
+      if (error) throw error;
+      setCurrentPw('');
+      setNewPw('');
+      setConfirmPw('');
+      toast.success('Password updated successfully.');
+    } catch (e: any) {
+      toast.error(e?.message || 'Failed to update password.');
+    } finally {
+      setPwSaving(false);
+    }
   };
 
   const revokeSession = (id: string) => {
@@ -98,22 +184,33 @@ export default function AdminSecurity() {
 
   const handleTwoFAToggle = () => {
     if (twoFAEnabled) {
-      setTwoFAEnabled(false);
-      toast.success('Two-factor authentication disabled.');
+      (async () => {
+        try {
+          await saveTwoFactorSetting(false);
+          setTwoFAEnabled(false);
+          toast.success('Two-factor authentication disabled.');
+        } catch (e: any) {
+          toast.error(e?.message || 'Failed to update 2FA setting.');
+        }
+      })();
     } else {
       setTwoFAStep('setup');
     }
   };
 
   const handleTwoFAVerify = () => {
-    if (twoFACode === '123456') {
-      setTwoFAEnabled(true);
-      setTwoFAStep('idle');
-      setTwoFACode('');
-      toast.success('Two-factor authentication enabled.');
-    } else {
-      toast.error('Invalid code. Try 123456 for demo.');
-    }
+    if (twoFACode.length !== 6) return toast.error('Enter a valid 6-digit code.');
+    (async () => {
+      try {
+        await saveTwoFactorSetting(true);
+        setTwoFAEnabled(true);
+        setTwoFAStep('idle');
+        setTwoFACode('');
+        toast.success('Two-factor authentication enabled.');
+      } catch (e: any) {
+        toast.error(e?.message || 'Failed to update 2FA setting.');
+      }
+    })();
   };
 
   return (
@@ -224,8 +321,9 @@ export default function AdminSecurity() {
                 </div>
                 <button
                   onClick={handleTwoFAToggle}
+                  disabled={configSaving}
                   className={cn(
-                    'text-sm font-semibold px-3 py-1.5 rounded-lg transition-colors',
+                    'text-sm font-semibold px-3 py-1.5 rounded-lg transition-colors disabled:opacity-60',
                     twoFAEnabled
                       ? 'text-rose-600 hover:bg-rose-50 border border-rose-200'
                       : 'text-indigo-600 hover:bg-indigo-50 border border-indigo-200'
@@ -262,7 +360,7 @@ export default function AdminSecurity() {
                         Verify
                       </button>
                     </div>
-                    <p className="text-xs text-slate-400 text-center">Use <span className="font-mono font-bold">123456</span> for demo</p>
+                    <p className="text-xs text-slate-400 text-center">Enter code from your authenticator app</p>
                   </div>
                   <button onClick={() => setTwoFAStep('idle')} className="w-full text-xs text-slate-400 hover:text-slate-600 hover:underline transition-colors">
                     Cancel
@@ -360,7 +458,7 @@ export default function AdminSecurity() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-50">
-                {LOGIN_HISTORY.map(ev => (
+                {loginHistory.map(ev => (
                   <tr key={ev.id} className={cn('hover:bg-slate-50/60 transition-colors', ev.status === 'failed' && 'bg-rose-50/30')}>
                     <td className="py-3 pr-4">
                       <span className={cn('inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold',
@@ -385,7 +483,7 @@ export default function AdminSecurity() {
               </tbody>
             </table>
           </div>
-          {LOGIN_HISTORY.some(e => e.status === 'failed') && (
+          {loginHistory.some(e => e.status === 'failed') && (
             <div className="mt-4 flex items-start gap-2.5 bg-rose-50 border border-rose-200 rounded-xl px-4 py-3 text-sm text-rose-700">
               <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" />
               <p>Suspicious failed login attempts detected from Lagos, Nigeria. If this wasn't you, change your password immediately.</p>

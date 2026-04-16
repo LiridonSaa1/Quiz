@@ -1,16 +1,23 @@
 import React, { useEffect, useState } from 'react';
 import AdminLayout from '../../components/layout/AdminLayout';
 import { Link } from 'react-router-dom';
+import { motion } from 'motion/react';
+import {
+  AdminListFilterBar,
+  AdminListPageShell,
+  ADMIN_LIST_SEARCH_INPUT,
+  ADMIN_LIST_SELECT,
+  ADMIN_LIST_CARD_GRID,
+  ADMIN_LIST_ITEM_CARD,
+} from '../../components/admin/AdminListPageShell';
 import { toast } from 'sonner';
 import { format, formatDistanceToNow, isPast } from 'date-fns';
 import {
-  Video, Plus, Search, Trash2, Pencil, X, ExternalLink,
-  Clock, Users, BookOpen, CalendarDays, Radio, CheckCircle2,
+  Video, Plus, Search, Trash2, Pencil, X,
+  BookOpen, CalendarDays, Radio, CheckCircle2,
   XCircle, Play
 } from 'lucide-react';
 import { cn } from '../../lib/utils';
-import { TableRowsSkeleton } from '../../components/ui/Skeleton';
-
 type SessionStatus = 'scheduled' | 'live' | 'ended' | 'cancelled';
 
 interface LiveSession {
@@ -150,67 +157,61 @@ export default function AdminLiveSessions() {
     return matchQ && matchS;
   });
 
-  const stats = {
-    total: sessions.length,
-    live: sessions.filter(s => s.status === 'live').length,
-    upcoming: sessions.filter(s => s.status === 'scheduled' && !isPast(new Date(s.scheduled_at))).length,
-    ended: sessions.filter(s => s.status === 'ended').length,
-  };
+  const statItems = [
+    { label: 'Total Sessions', value: sessions.length, gradient: 'from-indigo-500 to-violet-600', shadow: 'shadow-indigo-500/25', icon: Video },
+    { label: 'Live Now', value: sessions.filter(s => s.status === 'live').length, gradient: 'from-rose-500 to-pink-600', shadow: 'shadow-rose-500/25', icon: Radio },
+    { label: 'Upcoming', value: sessions.filter(s => s.status === 'scheduled' && !isPast(new Date(s.scheduled_at))).length, gradient: 'from-blue-500 to-cyan-600', shadow: 'shadow-blue-500/25', icon: CalendarDays },
+    { label: 'Completed', value: sessions.filter(s => s.status === 'ended').length, gradient: 'from-emerald-500 to-teal-600', shadow: 'shadow-emerald-500/25', icon: CheckCircle2 },
+  ];
 
   return (
     <AdminLayout>
-      <div className="space-y-6">
-        {/* Header */}
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-          <div>
-            <h1 className="text-2xl font-bold text-slate-900">Live Sessions</h1>
-            <p className="text-slate-500 text-sm mt-0.5">Schedule and manage live video sessions for your students</p>
-          </div>
-          <button onClick={openCreate}
-            className="flex items-center gap-2 px-4 py-2.5 bg-indigo-600 text-white rounded-xl font-semibold text-sm hover:bg-indigo-700 transition-all shadow-lg shadow-indigo-200 active:scale-[0.98]">
+      <AdminListPageShell
+        breadcrumbLabel="Live Sessions"
+        title="Live Sessions"
+        description="Schedule and manage live video sessions for your students."
+        statsGridClassName="grid grid-cols-2 sm:grid-cols-4 gap-4"
+        stats={statItems}
+        action={
+          <motion.button
+            type="button"
+            onClick={openCreate}
+            whileHover={{ scale: 1.04, y: -2 }}
+            whileTap={{ scale: 0.97 }}
+            className="inline-flex items-center gap-2 px-6 py-3 rounded-2xl font-bold text-sm text-white shrink-0 transition-all"
+            style={{
+              background: 'linear-gradient(135deg, #818cf8 0%, #a78bfa 100%)',
+              boxShadow: '0 8px 32px rgba(139,92,246,0.45), 0 2px 8px rgba(0,0,0,0.15)',
+            }}
+          >
             <Plus className="w-4 h-4" /> Schedule Session
-          </button>
-        </div>
-
-        {/* Stats */}
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-          {[
-            { label: 'Total Sessions', value: stats.total, iconBg: 'bg-indigo-100 text-indigo-600', ring: 'ring-indigo-100', grad: 'from-indigo-500 to-violet-500', icon: Video },
-            { label: 'Live Now', value: stats.live, iconBg: 'bg-rose-100 text-rose-600', ring: 'ring-rose-100', grad: 'from-rose-500 to-pink-500', icon: Radio },
-            { label: 'Upcoming', value: stats.upcoming, iconBg: 'bg-blue-100 text-blue-600', ring: 'ring-blue-100', grad: 'from-blue-500 to-cyan-500', icon: CalendarDays },
-            { label: 'Completed', value: stats.ended, iconBg: 'bg-emerald-100 text-emerald-600', ring: 'ring-emerald-100', grad: 'from-emerald-500 to-teal-500', icon: CheckCircle2 },
-          ].map(({ label, value, iconBg, ring, grad, icon: Icon }) => (
-            <div key={label} className="bg-white rounded-2xl border border-slate-100 shadow-sm hover:shadow-md transition-all overflow-hidden">
-              <div className={cn("h-0.5 bg-gradient-to-r", grad)} />
-              <div className="p-5">
-                <div className={cn("p-2.5 rounded-xl ring-4 inline-flex mb-4", iconBg, ring)}>
-                  <Icon className="w-5 h-5" />
-                </div>
-                <p className="text-2xl font-bold text-slate-900 tracking-tight">{value}</p>
-                <p className="text-sm font-medium text-slate-700 mt-0.5">{label}</p>
-              </div>
+          </motion.button>
+        }
+        filterBar={
+          <AdminListFilterBar>
+            <div className="relative flex-1 min-w-[200px]">
+              <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-indigo-400" />
+              <input
+                value={search}
+                onChange={e => setSearch(e.target.value)}
+                placeholder="Search sessions or hosts..."
+                className={ADMIN_LIST_SEARCH_INPUT}
+              />
             </div>
-          ))}
-        </div>
-
-        {/* Filters */}
-        <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-4 flex flex-col sm:flex-row gap-3">
-          <div className="relative flex-1">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
-            <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search sessions or hosts..."
-              className="w-full pl-9 pr-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500" />
-          </div>
-          <select value={statusFilter} onChange={e => setStatusFilter(e.target.value)}
-            className="px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500">
-            <option value="all">All Status</option>
-            {Object.entries(STATUS_CFG).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
-          </select>
-        </div>
-
-        {/* Table */}
+            <select value={statusFilter} onChange={e => setStatusFilter(e.target.value)} className={ADMIN_LIST_SELECT}>
+              <option value="all">All Status</option>
+              {Object.entries(STATUS_CFG).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
+            </select>
+          </AdminListFilterBar>
+        }
+      >
         <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
           {loading ? (
-            <TableRowsSkeleton rows={5} className="p-6" />
+            <div className={ADMIN_LIST_CARD_GRID}>
+              {Array(5).fill(0).map((_, i) => (
+                <div key={i} className="h-52 rounded-2xl bg-slate-100 animate-pulse" />
+              ))}
+            </div>
           ) : filtered.length === 0 ? (
             <div className="flex flex-col items-center justify-center h-48 text-slate-400">
               <Video className="w-10 h-10 mb-3 opacity-40" />
@@ -218,80 +219,78 @@ export default function AdminLiveSessions() {
               <p className="text-sm mt-1">Schedule your first live session to get started</p>
             </div>
           ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="border-b border-slate-100 bg-slate-50/60">
-                    <th className="text-left px-5 py-3 text-xs font-bold text-slate-500 uppercase tracking-wider">Session</th>
-                    <th className="text-left px-5 py-3 text-xs font-bold text-slate-500 uppercase tracking-wider hidden md:table-cell">Host</th>
-                    <th className="text-left px-5 py-3 text-xs font-bold text-slate-500 uppercase tracking-wider hidden lg:table-cell">Scheduled</th>
-                    <th className="text-left px-5 py-3 text-xs font-bold text-slate-500 uppercase tracking-wider hidden sm:table-cell">Duration</th>
-                    <th className="text-left px-5 py-3 text-xs font-bold text-slate-500 uppercase tracking-wider">Status</th>
-                    <th className="text-right px-5 py-3 text-xs font-bold text-slate-500 uppercase tracking-wider">Actions</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-50">
-                  {filtered.map(s => {
-                    const cfg = STATUS_CFG[s.status];
-                    const Icon = cfg.icon;
-                    return (
-                      <tr key={s.id} className="hover:bg-slate-50/50 transition-colors">
-                        <td className="px-5 py-4">
-                          <div className="flex items-center gap-3">
-                            <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-indigo-500 to-violet-600 flex items-center justify-center shrink-0">
-                              <Video className="w-4 h-4 text-white" />
-                            </div>
-                            <div>
-                              <p className="font-semibold text-slate-900 leading-tight">{s.title}</p>
-                              {s.course && <p className="text-xs text-slate-400 mt-0.5 flex items-center gap-1"><BookOpen className="w-3 h-3" />{s.course.title}</p>}
-                            </div>
-                          </div>
-                        </td>
-                        <td className="px-5 py-4 hidden md:table-cell">
-                          {s.host ? (
-                            <div>
-                              <p className="font-medium text-slate-700">{s.host.display_name}</p>
-                              <p className="text-xs text-slate-400">{s.host.email}</p>
-                            </div>
-                          ) : <span className="text-slate-400 text-xs">—</span>}
-                        </td>
-                        <td className="px-5 py-4 hidden lg:table-cell">
-                          <p className="font-medium text-slate-700">{format(new Date(s.scheduled_at), 'MMM d, yyyy')}</p>
-                          <p className="text-xs text-slate-400">{format(new Date(s.scheduled_at), 'h:mm a')} · {!isPast(new Date(s.scheduled_at)) && s.status === 'scheduled' ? formatDistanceToNow(new Date(s.scheduled_at), { addSuffix: true }) : ''}</p>
-                        </td>
-                        <td className="px-5 py-4 hidden sm:table-cell">
-                          <span className="text-slate-600 font-medium">{s.duration_minutes} min</span>
-                        </td>
-                        <td className="px-5 py-4">
+            <div className={ADMIN_LIST_CARD_GRID}>
+              {filtered.map(s => {
+                const cfg = STATUS_CFG[s.status];
+                return (
+                  <div key={s.id} className={ADMIN_LIST_ITEM_CARD}>
+                    <div className="flex items-start gap-3">
+                      <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-indigo-500 to-violet-600 flex items-center justify-center shrink-0">
+                        <Video className="w-4 h-4 text-white" />
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <p className="font-semibold text-slate-900 text-sm leading-snug">{s.title}</p>
+                        {s.course && (
+                          <p className="text-xs text-slate-400 mt-1 flex items-center gap-1">
+                            <BookOpen className="w-3 h-3 shrink-0" />
+                            <span className="truncate">{s.course.title}</span>
+                          </p>
+                        )}
+                        <div className="mt-2">
                           <span className={cn('inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold', cfg.bg, cfg.text)}>
                             <span className={cn('w-1.5 h-1.5 rounded-full', cfg.dot, s.status === 'live' ? 'animate-pulse' : '')} />
                             {cfg.label}
                           </span>
-                        </td>
-                        <td className="px-5 py-4">
-                          <div className="flex items-center justify-end gap-2">
-                            <Link to={`/admin/live-sessions/${s.id}/room`}
-                              className="flex items-center gap-1.5 px-3 py-1.5 bg-indigo-600 text-white rounded-lg text-xs font-semibold hover:bg-indigo-700 transition-all shadow-sm shadow-indigo-200">
-                              <Play className="w-3 h-3" /> Enter Room
-                            </Link>
-                            <button onClick={() => openEdit(s)} className="p-1.5 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-all">
-                              <Pencil className="w-4 h-4" />
-                            </button>
-                            <button onClick={() => handleDelete(s.id)} disabled={deleting === s.id}
-                              className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-all disabled:opacity-40">
-                              <Trash2 className="w-4 h-4" />
-                            </button>
-                          </div>
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
+                        </div>
+                      </div>
+                    </div>
+                    <div className="mt-4 space-y-2 text-xs text-slate-600 border-t border-slate-100 pt-3">
+                      <div className="flex justify-between gap-2">
+                        <span className="text-slate-400 font-semibold uppercase tracking-wider">Host</span>
+                        <span className="text-right truncate">
+                          {s.host ? s.host.display_name : '—'}
+                        </span>
+                      </div>
+                      {s.host?.email && (
+                        <div className="text-[11px] text-slate-400 truncate text-right">{s.host.email}</div>
+                      )}
+                      <div className="flex justify-between gap-2">
+                        <span className="text-slate-400 font-semibold uppercase tracking-wider shrink-0">Scheduled</span>
+                        <span className="text-right">
+                          <span className="block font-medium text-slate-800">{format(new Date(s.scheduled_at), 'MMM d, yyyy')}</span>
+                          <span className="block text-slate-400 font-normal text-[11px]">{format(new Date(s.scheduled_at), 'h:mm a')}</span>
+                          {!isPast(new Date(s.scheduled_at)) && s.status === 'scheduled' && (
+                            <span className="block text-indigo-600 text-[11px] mt-0.5">{formatDistanceToNow(new Date(s.scheduled_at), { addSuffix: true })}</span>
+                          )}
+                        </span>
+                      </div>
+                      <div className="flex justify-between gap-2">
+                        <span className="text-slate-400 font-semibold uppercase tracking-wider">Duration</span>
+                        <span>{s.duration_minutes} min</span>
+                      </div>
+                    </div>
+                    <div className="mt-4 flex flex-wrap gap-2">
+                      <Link
+                        to={`/admin/live-sessions/${s.id}/room`}
+                        className="inline-flex flex-1 min-w-[120px] items-center justify-center gap-1.5 px-3 py-2 bg-indigo-600 text-white rounded-xl text-xs font-semibold hover:bg-indigo-700 transition-all shadow-sm"
+                      >
+                        <Play className="w-3.5 h-3.5" /> Enter Room
+                      </Link>
+                      <button type="button" onClick={() => openEdit(s)} className="p-2 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-xl transition-all border border-slate-100">
+                        <Pencil className="w-4 h-4" />
+                      </button>
+                      <button type="button" onClick={() => handleDelete(s.id)} disabled={deleting === s.id}
+                        className="p-2 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-xl transition-all border border-slate-100 disabled:opacity-40">
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
             </div>
           )}
         </div>
-      </div>
+      </AdminListPageShell>
 
       {/* Modal */}
       {showModal && (

@@ -2,16 +2,22 @@ import React, { useEffect, useState } from 'react';
 import { supabase } from '../../supabase';
 import AdminLayout from '../../components/layout/AdminLayout';
 import { toast } from 'sonner';
+import { motion } from 'motion/react';
+import {
+  AdminListFilterBar,
+  AdminListPageShell,
+  ADMIN_LIST_SEARCH_INPUT,
+  ADMIN_LIST_CARD_GRID,
+  ADMIN_LIST_ITEM_CARD,
+} from '../../components/admin/AdminListPageShell';
 import {
   School, Plus, Search, Filter, Users, BookOpen, CalendarDays,
-  MoreHorizontal, ChevronRight, X, Pencil, Trash2, Eye,
+  MoreHorizontal, X, Pencil, Trash2, Eye,
   Clock, CheckCircle2, AlertCircle, Archive, GraduationCap,
-  TrendingUp, Layers
+  TrendingUp
 } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import StyledSelect from '../../components/ui/StyledSelect';
-import { TableRowsSkeleton } from '../../components/ui/Skeleton';
-
 type ClassStatus = 'active' | 'upcoming' | 'completed' | 'archived';
 
 interface ClassRecord {
@@ -214,327 +220,233 @@ export default function AdminClasses() {
   const formatDate = (d: string | null) =>
     d ? new Date(d).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '—';
 
+  const statItems = [
+    { label: 'Total Classes', value: stats.total, gradient: 'from-indigo-500 to-indigo-600', shadow: 'shadow-indigo-500/25', icon: School },
+    { label: 'Active Now', value: stats.active, gradient: 'from-emerald-500 to-emerald-600', shadow: 'shadow-emerald-500/25', icon: CheckCircle2 },
+    { label: 'Total Students', value: stats.students, gradient: 'from-violet-500 to-violet-600', shadow: 'shadow-violet-500/25', icon: Users },
+    { label: 'Completed', value: stats.completed, gradient: 'from-amber-500 to-amber-600', shadow: 'shadow-amber-500/25', icon: TrendingUp },
+  ];
+
   return (
     <AdminLayout>
-      <div className="space-y-7">
-        {/* Header */}
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-          <div>
-            <h1 className="text-2xl font-bold text-slate-900 tracking-tight">Classes</h1>
-            <p className="text-slate-400 text-sm mt-1">Manage all classes, assign teachers and track enrollment.</p>
-          </div>
-          <button
+      <AdminListPageShell
+        breadcrumbLabel="Classes"
+        title="Classes"
+        description="Manage all classes, assign teachers and track enrollment."
+        action={
+          <motion.button
+            type="button"
             onClick={openCreate}
-            className="inline-flex items-center gap-2 px-5 py-2.5 bg-indigo-600 text-white rounded-xl font-semibold text-sm hover:bg-indigo-700 transition-all shadow-lg shadow-indigo-500/20 active:scale-[0.98]"
+            whileHover={{ scale: 1.04, y: -2 }}
+            whileTap={{ scale: 0.97 }}
+            className="inline-flex items-center gap-2 px-6 py-3 rounded-2xl font-bold text-sm text-white shrink-0 transition-all"
+            style={{
+              background: 'linear-gradient(135deg, #818cf8 0%, #a78bfa 100%)',
+              boxShadow: '0 8px 32px rgba(139,92,246,0.45), 0 2px 8px rgba(0,0,0,0.15)',
+            }}
           >
             <Plus className="w-4 h-4" />
             New Class
-          </button>
-        </div>
-
-        {/* Stats */}
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-          {[
-            { label: 'Total Classes', value: stats.total, icon: School, gradFrom: '#6366f1', gradTo: '#8b5cf6', light: 'bg-indigo-50', text: 'text-indigo-600', ring: 'ring-indigo-100' },
-            { label: 'Active Now', value: stats.active, icon: CheckCircle2, gradFrom: '#10b981', gradTo: '#14b8a6', light: 'bg-emerald-50', text: 'text-emerald-600', ring: 'ring-emerald-100' },
-            { label: 'Total Students', value: stats.students, icon: Users, gradFrom: '#8b5cf6', gradTo: '#a855f7', light: 'bg-violet-50', text: 'text-violet-600', ring: 'ring-violet-100' },
-            { label: 'Completed', value: stats.completed, icon: TrendingUp, gradFrom: '#f59e0b', gradTo: '#f97316', light: 'bg-amber-50', text: 'text-amber-600', ring: 'ring-amber-100' },
-          ].map(stat => (
-            <div key={stat.label} className="bg-white rounded-2xl border border-slate-100 shadow-sm hover:shadow-md transition-all overflow-hidden">
-              <div className="h-0.5" style={{ background: `linear-gradient(to right, ${stat.gradFrom}, ${stat.gradTo})` }} />
-              <div className="p-5">
-                <div className={`p-2.5 ${stat.light} rounded-xl ring-4 ${stat.ring} inline-flex mb-4`}>
-                  <stat.icon className={`w-5 h-5 ${stat.text}`} />
-                </div>
-                {loading ? (
-                  <div className="h-8 w-10 bg-slate-100 rounded-lg animate-pulse" />
-                ) : (
-                  <div className="text-3xl font-bold text-slate-900 tracking-tight">{stat.value}</div>
-                )}
-                <div className="text-xs text-slate-400 mt-1 font-medium">{stat.label}</div>
-              </div>
+          </motion.button>
+        }
+        stats={statItems}
+        filterBar={
+          <AdminListFilterBar>
+            <div className="relative flex-1 min-w-[200px]">
+              <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-indigo-400" />
+              <input
+                type="text"
+                placeholder="Search classes..."
+                value={searchQuery}
+                onChange={e => setSearchQuery(e.target.value)}
+                className={ADMIN_LIST_SEARCH_INPUT}
+              />
             </div>
-          ))}
-        </div>
-
-        {/* Table Card */}
+            <StyledSelect
+              value={statusFilter}
+              onChange={e => setStatusFilter(e.target.value as any)}
+              icon={<Filter className="w-3.5 h-3.5 text-indigo-400" />}
+              className="rounded-full border-indigo-100 bg-white/80 py-2.5 shadow-sm focus:ring-2 focus:ring-violet-400 focus:border-transparent min-w-[160px]"
+              wrapperClassName="min-w-[160px]"
+            >
+              <option value="all">All Statuses</option>
+              <option value="active">Active</option>
+              <option value="upcoming">Upcoming</option>
+              <option value="completed">Completed</option>
+              <option value="archived">Archived</option>
+            </StyledSelect>
+          </AdminListFilterBar>
+        }
+      >
         <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
-          {/* Toolbar */}
-          <div className="p-5 border-b border-slate-100 flex flex-col sm:flex-row gap-3 items-start sm:items-center">
-            <div>
-              <h2 className="text-base font-bold text-slate-900">All Classes</h2>
-              <p className="text-xs text-slate-400 mt-0.5">{filtered.length} class{filtered.length !== 1 ? 'es' : ''}</p>
+          <div className="px-5 py-4 border-b border-slate-100">
+            <h2 className="text-base font-bold text-slate-900">All Classes</h2>
+            <p className="text-xs text-slate-400 mt-0.5">{filtered.length} class{filtered.length !== 1 ? 'es' : ''}</p>
+          </div>
+
+          {loading ? (
+            <div className={ADMIN_LIST_CARD_GRID}>
+              {Array.from({ length: 4 }).map((_, i) => (
+                <div key={i} className="h-64 rounded-2xl bg-slate-100 animate-pulse" />
+              ))}
             </div>
-            <div className="sm:ml-auto flex flex-wrap gap-2">
-              <div className="relative">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
-                <input
-                  type="text"
-                  placeholder="Search classes..."
-                  value={searchQuery}
-                  onChange={e => setSearchQuery(e.target.value)}
-                  className="w-full sm:w-56 pl-9 pr-4 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/30 focus:border-indigo-400 transition-all"
-                />
+          ) : filtered.length === 0 ? (
+            <div className="px-6 py-16 text-center">
+              <div className="w-14 h-14 bg-slate-50 rounded-2xl flex items-center justify-center mx-auto mb-3 border border-slate-100">
+                <School className="w-7 h-7 text-slate-300" />
               </div>
-              <StyledSelect
-                value={statusFilter}
-                onChange={e => setStatusFilter(e.target.value as any)}
-                icon={<Filter className="w-3.5 h-3.5" />}
-              >
-                <option value="all">All Statuses</option>
-                <option value="active">Active</option>
-                <option value="upcoming">Upcoming</option>
-                <option value="completed">Completed</option>
-                <option value="archived">Archived</option>
-              </StyledSelect>
+              <p className="text-slate-500 text-sm font-semibold">No classes found</p>
+              <p className="text-slate-400 text-xs mt-1">
+                {searchQuery || statusFilter !== 'all' ? 'Try adjusting your search or filter' : 'Create your first class to get started'}
+              </p>
+              {!searchQuery && statusFilter === 'all' && (
+                <button
+                  type="button"
+                  onClick={openCreate}
+                  className="mt-4 inline-flex items-center gap-1.5 px-4 py-2 bg-indigo-600 text-white rounded-xl text-sm font-semibold hover:bg-indigo-700 transition-all shadow-sm"
+                >
+                  <Plus className="w-3.5 h-3.5" /> New Class
+                </button>
+              )}
             </div>
-          </div>
-
-          {/* Desktop Table */}
-          <div className="hidden md:block overflow-x-auto">
-            <table className="w-full text-left">
-              <thead>
-                <tr className="border-b border-slate-100">
-                  {['Class', 'Course', 'Teacher', 'Students', 'Schedule', 'Status', ''].map(h => (
-                    <th key={h} className="px-5 py-3.5 text-[11px] font-bold text-slate-400 uppercase tracking-wider">{h}</th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-50">
-                {loading ? (
-                  Array.from({ length: 4 }).map((_, i) => (
-                    <tr key={i}>
-                      <td className="px-5 py-4">
-                        <div className="flex items-center gap-3">
-                          <div className="w-9 h-9 rounded-xl bg-slate-100 animate-pulse shrink-0" />
-                          <div className="space-y-1.5">
-                            <div className="h-3 w-28 bg-slate-100 rounded animate-pulse" />
-                            <div className="h-2 w-20 bg-slate-100 rounded animate-pulse" />
-                          </div>
-                        </div>
-                      </td>
-                      {[...Array(5)].map((_, j) => (
-                        <td key={j} className="px-5 py-4"><div className="h-3 w-20 bg-slate-100 rounded animate-pulse" /></td>
-                      ))}
-                    </tr>
-                  ))
-                ) : filtered.length > 0 ? (
-                  filtered.map(cls => {
-                    const sc = STATUS_CONFIG[cls.status];
-                    const enrolledCount = cls.student_ids?.length || 0;
-                    const capacityPct = cls.capacity > 0 ? Math.round((enrolledCount / cls.capacity) * 100) : 0;
-                    return (
-                      <tr key={cls.id} className="hover:bg-slate-50/80 transition-colors group">
-                        {/* Class Name */}
-                        <td className="px-5 py-4">
-                          <div className="flex items-center gap-3">
-                            <div className={`w-9 h-9 rounded-xl bg-gradient-to-br ${getAvatar(cls.name)} flex items-center justify-center text-white font-bold text-sm shrink-0 shadow-sm`}>
-                              {cls.name.charAt(0).toUpperCase()}
-                            </div>
-                            <div>
-                              <div className="text-sm font-semibold text-slate-800">{cls.name}</div>
-                              {cls.description && (
-                                <div className="text-xs text-slate-400 truncate max-w-[160px]">{cls.description}</div>
-                              )}
-                            </div>
-                          </div>
-                        </td>
-                        {/* Course */}
-                        <td className="px-5 py-4">
-                          {cls.course ? (
-                            <div className="flex items-center gap-2">
-                              <div className="p-1.5 bg-indigo-50 rounded-lg">
-                                <BookOpen className="w-3.5 h-3.5 text-indigo-500" />
-                              </div>
-                              <span className="text-sm text-slate-700 font-medium truncate max-w-[140px]">{cls.course.title}</span>
-                            </div>
-                          ) : (
-                            <span className="text-slate-300 text-sm">—</span>
-                          )}
-                        </td>
-                        {/* Teacher */}
-                        <td className="px-5 py-4">
-                          {cls.teacher ? (
-                            <div className="flex items-center gap-2">
-                              <div className={`w-7 h-7 rounded-lg bg-gradient-to-br ${getAvatar(cls.teacher.display_name)} flex items-center justify-center text-white text-xs font-bold shrink-0`}>
-                                {cls.teacher.display_name.charAt(0).toUpperCase()}
-                              </div>
-                              <span className="text-sm text-slate-700 font-medium truncate max-w-[120px]">{cls.teacher.display_name}</span>
-                            </div>
-                          ) : (
-                            <span className="text-slate-300 text-sm">Unassigned</span>
-                          )}
-                        </td>
-                        {/* Students */}
-                        <td className="px-5 py-4">
-                          <div className="flex flex-col gap-1">
-                            <div className="flex items-center gap-1.5">
-                              <Users className="w-3.5 h-3.5 text-slate-400" />
-                              <span className="text-sm font-semibold text-slate-700">{enrolledCount}</span>
-                              <span className="text-xs text-slate-400">/ {cls.capacity}</span>
-                            </div>
-                            <div className="w-24 h-1.5 bg-slate-100 rounded-full overflow-hidden">
-                              <div
-                                className={cn("h-full rounded-full transition-all", capacityPct >= 90 ? 'bg-red-400' : capacityPct >= 60 ? 'bg-amber-400' : 'bg-emerald-400')}
-                                style={{ width: `${Math.min(capacityPct, 100)}%` }}
-                              />
-                            </div>
-                          </div>
-                        </td>
-                        {/* Schedule */}
-                        <td className="px-5 py-4">
-                          {cls.start_date ? (
-                            <div className="text-xs text-slate-500 space-y-0.5">
-                              <div className="flex items-center gap-1 font-medium text-slate-700">
-                                <CalendarDays className="w-3.5 h-3.5 text-slate-400" />
-                                {formatDate(cls.start_date)}
-                              </div>
-                              {cls.end_date && <div className="text-slate-400 pl-5">→ {formatDate(cls.end_date)}</div>}
-                            </div>
-                          ) : (
-                            <span className="text-slate-300 text-sm">No schedule</span>
-                          )}
-                        </td>
-                        {/* Status */}
-                        <td className="px-5 py-4">
-                          <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[11px] font-semibold ${sc.bg} ${sc.text}`}>
-                            <span className={`w-1.5 h-1.5 rounded-full ${sc.dot}`} />
-                            {sc.label}
-                          </span>
-                        </td>
-                        {/* Actions */}
-                        <td className="px-5 py-4">
-                          <div className="relative flex items-center justify-end">
-                            <div className="opacity-0 group-hover:opacity-100 transition-all flex items-center gap-1">
-                              <button
-                                onClick={() => setViewClass(cls)}
-                                className="p-2 rounded-lg text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 transition-all"
-                                title="View details"
-                              >
-                                <Eye className="w-4 h-4" />
-                              </button>
-                              <button
-                                onClick={() => openEdit(cls)}
-                                className="p-2 rounded-lg text-slate-400 hover:text-violet-600 hover:bg-violet-50 transition-all"
-                                title="Edit"
-                              >
-                                <Pencil className="w-4 h-4" />
-                              </button>
-                              <div className="relative">
-                                <button
-                                  onClick={() => setActiveMenu(activeMenu === cls.id ? null : cls.id)}
-                                  className="p-2 rounded-lg text-slate-300 hover:text-slate-600 hover:bg-slate-100 transition-all"
-                                >
-                                  <MoreHorizontal className="w-4 h-4" />
-                                </button>
-                                {activeMenu === cls.id && (
-                                  <div className="absolute right-0 top-9 z-20 w-48 bg-white rounded-xl border border-slate-100 shadow-xl py-1">
-                                    {(['active', 'upcoming', 'completed', 'archived'] as ClassStatus[])
-                                      .filter(s => s !== cls.status)
-                                      .map(s => (
-                                        <button
-                                          key={s}
-                                          onClick={() => handleStatusChange(cls, s)}
-                                          className="w-full text-left px-4 py-2 text-sm text-slate-600 hover:bg-slate-50 flex items-center gap-2 capitalize"
-                                        >
-                                          <span className={`w-2 h-2 rounded-full ${STATUS_CONFIG[s].dot}`} />
-                                          Mark as {s}
-                                        </button>
-                                      ))}
-                                    <div className="border-t border-slate-100 mt-1 pt-1">
-                                      <button
-                                        onClick={() => handleDelete(cls)}
-                                        className="w-full text-left px-4 py-2 text-sm text-red-500 hover:bg-red-50 flex items-center gap-2"
-                                      >
-                                        <Trash2 className="w-4 h-4" />
-                                        Delete Class
-                                      </button>
-                                    </div>
-                                  </div>
-                                )}
-                              </div>
-                            </div>
-                          </div>
-                        </td>
-                      </tr>
-                    );
-                  })
-                ) : (
-                  <tr>
-                    <td colSpan={7} className="px-6 py-16 text-center">
-                      <div className="w-14 h-14 bg-slate-50 rounded-2xl flex items-center justify-center mx-auto mb-3 border border-slate-100">
-                        <School className="w-7 h-7 text-slate-300" />
-                      </div>
-                      <p className="text-slate-500 text-sm font-semibold">No classes found</p>
-                      <p className="text-slate-400 text-xs mt-1">
-                        {searchQuery || statusFilter !== 'all' ? 'Try adjusting your search or filter' : 'Create your first class to get started'}
-                      </p>
-                      {!searchQuery && statusFilter === 'all' && (
-                        <button
-                          onClick={openCreate}
-                          className="mt-4 inline-flex items-center gap-1.5 px-4 py-2 bg-indigo-600 text-white rounded-xl text-sm font-semibold hover:bg-indigo-700 transition-all shadow-sm"
-                        >
-                          <Plus className="w-3.5 h-3.5" /> New Class
-                        </button>
-                      )}
-                    </td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
-          </div>
-
-          {/* Mobile Cards */}
-          <div className="md:hidden divide-y divide-slate-50">
-            {loading ? (
-              <TableRowsSkeleton rows={4} />
-            ) : filtered.length > 0 ? (
-              filtered.map(cls => {
+          ) : (
+            <div className={ADMIN_LIST_CARD_GRID}>
+              {filtered.map(cls => {
                 const sc = STATUS_CONFIG[cls.status];
                 const enrolledCount = cls.student_ids?.length || 0;
+                const capacityPct = cls.capacity > 0 ? Math.round((enrolledCount / cls.capacity) * 100) : 0;
                 return (
-                  <div key={cls.id} className="p-4 space-y-3">
-                    <div className="flex items-start justify-between gap-2">
+                  <div key={cls.id} className={ADMIN_LIST_ITEM_CARD}>
+                    <div className="flex items-start justify-between gap-3">
                       <div className="flex items-center gap-3 min-w-0">
-                        <div className={`w-10 h-10 rounded-xl bg-gradient-to-br ${getAvatar(cls.name)} flex items-center justify-center text-white font-bold shrink-0`}>
+                        <div className={`w-11 h-11 rounded-xl bg-gradient-to-br ${getAvatar(cls.name)} flex items-center justify-center text-white font-bold text-sm shrink-0 shadow-sm`}>
                           {cls.name.charAt(0).toUpperCase()}
                         </div>
                         <div className="min-w-0">
-                          <div className="text-sm font-semibold text-slate-800 truncate">{cls.name}</div>
-                          <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-semibold mt-1 ${sc.bg} ${sc.text}`}>
-                            <span className={`w-1.5 h-1.5 rounded-full ${sc.dot}`} />{sc.label}
+                          <h3 className="text-sm font-semibold text-slate-900 leading-snug">{cls.name}</h3>
+                          {cls.description && (
+                            <p className="text-xs text-slate-400 mt-0.5 line-clamp-2">{cls.description}</p>
+                          )}
+                          <span className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-lg text-[10px] font-semibold mt-2 ${sc.bg} ${sc.text}`}>
+                            <span className={`w-1.5 h-1.5 rounded-full ${sc.dot}`} />
+                            {sc.label}
                           </span>
                         </div>
                       </div>
-                      <div className="flex gap-1 shrink-0">
-                        <button onClick={() => openEdit(cls)} className="p-2 rounded-lg text-slate-400 hover:text-violet-600 hover:bg-violet-50">
+                      <div className="flex items-center gap-0.5 shrink-0">
+                        <button
+                          type="button"
+                          onClick={() => setViewClass(cls)}
+                          className="p-2 rounded-lg text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 transition-all"
+                          title="View details"
+                        >
+                          <Eye className="w-4 h-4" />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => openEdit(cls)}
+                          className="p-2 rounded-lg text-slate-400 hover:text-violet-600 hover:bg-violet-50 transition-all"
+                          title="Edit"
+                        >
                           <Pencil className="w-4 h-4" />
                         </button>
-                        <button onClick={() => handleDelete(cls)} className="p-2 rounded-lg text-slate-400 hover:text-red-500 hover:bg-red-50">
-                          <Trash2 className="w-4 h-4" />
-                        </button>
+                        <div className="relative">
+                          <button
+                            type="button"
+                            onClick={() => setActiveMenu(activeMenu === cls.id ? null : cls.id)}
+                            className="p-2 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition-all"
+                          >
+                            <MoreHorizontal className="w-4 h-4" />
+                          </button>
+                          {activeMenu === cls.id && (
+                            <div className="absolute right-0 top-9 z-20 w-48 bg-white rounded-xl border border-slate-100 shadow-xl py-1">
+                              {(['active', 'upcoming', 'completed', 'archived'] as ClassStatus[])
+                                .filter(s => s !== cls.status)
+                                .map(s => (
+                                  <button
+                                    key={s}
+                                    type="button"
+                                    onClick={() => handleStatusChange(cls, s)}
+                                    className="w-full text-left px-4 py-2 text-sm text-slate-600 hover:bg-slate-50 flex items-center gap-2 capitalize"
+                                  >
+                                    <span className={`w-2 h-2 rounded-full ${STATUS_CONFIG[s].dot}`} />
+                                    Mark as {s}
+                                  </button>
+                                ))}
+                              <div className="border-t border-slate-100 mt-1 pt-1">
+                                <button
+                                  type="button"
+                                  onClick={() => handleDelete(cls)}
+                                  className="w-full text-left px-4 py-2 text-sm text-red-500 hover:bg-red-50 flex items-center gap-2"
+                                >
+                                  <Trash2 className="w-4 h-4" />
+                                  Delete Class
+                                </button>
+                              </div>
+                            </div>
+                          )}
+                        </div>
                       </div>
                     </div>
-                    <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-slate-500">
-                      {cls.course && <span className="flex items-center gap-1"><BookOpen className="w-3 h-3 text-indigo-400" />{cls.course.title}</span>}
-                      {cls.teacher && <span className="flex items-center gap-1"><GraduationCap className="w-3 h-3 text-violet-400" />{cls.teacher.display_name}</span>}
-                      <span className="flex items-center gap-1"><Users className="w-3 h-3 text-slate-400" />{enrolledCount} / {cls.capacity}</span>
-                    </div>
-                    {cls.start_date && (
-                      <div className="text-xs text-slate-400 flex items-center gap-1">
-                        <CalendarDays className="w-3 h-3" />
-                        {formatDate(cls.start_date)}{cls.end_date ? ` → ${formatDate(cls.end_date)}` : ''}
+                    <div className="mt-4 space-y-3 text-xs border-t border-slate-100 pt-4">
+                      <div className="flex items-start justify-between gap-2">
+                        <span className="text-slate-400 font-semibold uppercase tracking-wider shrink-0">Course</span>
+                        {cls.course ? (
+                          <span className="flex items-center gap-1.5 text-slate-700 font-medium text-right">
+                            <BookOpen className="w-3.5 h-3.5 text-indigo-500 shrink-0" />
+                            <span className="truncate">{cls.course.title}</span>
+                          </span>
+                        ) : (
+                          <span className="text-slate-300">—</span>
+                        )}
                       </div>
-                    )}
+                      <div className="flex items-start justify-between gap-2">
+                        <span className="text-slate-400 font-semibold uppercase tracking-wider shrink-0">Teacher</span>
+                        {cls.teacher ? (
+                          <span className="flex items-center gap-1.5 text-slate-700 font-medium text-right">
+                            <GraduationCap className="w-3.5 h-3.5 text-violet-500 shrink-0" />
+                            <span className="truncate">{cls.teacher.display_name}</span>
+                          </span>
+                        ) : (
+                          <span className="text-slate-400">Unassigned</span>
+                        )}
+                      </div>
+                      <div>
+                        <div className="flex items-center justify-between text-slate-600 mb-1">
+                          <span className="flex items-center gap-1 font-semibold text-slate-400 uppercase tracking-wider">
+                            <Users className="w-3.5 h-3.5" /> Enrollment
+                          </span>
+                          <span className="font-semibold text-slate-800">{enrolledCount} / {cls.capacity}</span>
+                        </div>
+                        <div className="h-1.5 bg-slate-100 rounded-full overflow-hidden">
+                          <div
+                            className={cn('h-full rounded-full transition-all', capacityPct >= 90 ? 'bg-red-400' : capacityPct >= 60 ? 'bg-amber-400' : 'bg-emerald-400')}
+                            style={{ width: `${Math.min(capacityPct, 100)}%` }}
+                          />
+                        </div>
+                      </div>
+                      <div className="flex items-start justify-between gap-2">
+                        <span className="text-slate-400 font-semibold uppercase tracking-wider shrink-0">Schedule</span>
+                        {cls.start_date ? (
+                          <span className="text-right text-slate-600">
+                            <span className="flex items-center justify-end gap-1 font-medium">
+                              <CalendarDays className="w-3.5 h-3.5 text-slate-400" />
+                              {formatDate(cls.start_date)}
+                            </span>
+                            {cls.end_date && <span className="text-slate-400 block">→ {formatDate(cls.end_date)}</span>}
+                          </span>
+                        ) : (
+                          <span className="text-slate-300">No schedule</span>
+                        )}
+                      </div>
+                    </div>
                   </div>
                 );
-              })
-            ) : (
-              <div className="p-8 text-center text-slate-400 text-sm">No classes found</div>
-            )}
-          </div>
+              })}
+            </div>
+          )}
         </div>
-      </div>
+      </AdminListPageShell>
 
       {/* Create / Edit Modal */}
       {showModal && (

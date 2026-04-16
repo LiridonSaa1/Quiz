@@ -1,7 +1,9 @@
-import React, { useState, useMemo } from "react";
+import React, { useState, useMemo, useEffect, useCallback } from "react";
 import AdminLayout from "../../components/layout/AdminLayout";
 import { cn } from "../../lib/utils";
-import { format, subDays, subMonths, addDays } from "date-fns";
+import { format } from "date-fns";
+import { toast } from "sonner";
+import { apiUrl, readApiError } from "../../lib/apiUrl";
 import {
   Receipt,
   CheckCircle2,
@@ -30,6 +32,7 @@ interface InvoiceItem {
 
 interface Invoice {
   id: string;
+  payment_id?: string;
   invoice_number: string;
   student_name: string;
   student_email: string;
@@ -37,6 +40,7 @@ interface Invoice {
   student_phone: string;
   course_title: string;
   status: InvoiceStatus;
+  currency: string;
   issued_date: Date;
   due_date: Date;
   paid_date?: Date;
@@ -44,183 +48,85 @@ interface Invoice {
   notes: string;
 }
 
-const SCHOOL = {
+interface InvoiceBrandProfile {
+  name: string;
+  email: string;
+  phone: string;
+  address: string;
+  website: string;
+  logoUrl: string | null;
+  primaryColor: string;
+  accentColor: string;
+}
+
+const DEFAULT_BRAND: InvoiceBrandProfile = {
   name: "QuizMaster Academy",
   email: "billing@quizmaster.edu",
   phone: "+1 (555) 010-2030",
   address: "123 Education Blvd, Suite 400, New York, NY 10001",
   website: "www.quizmaster.edu",
+  logoUrl: null,
+  primaryColor: "#6366f1",
+  accentColor: "#8b5cf6",
 };
 
-const MOCK_INVOICES: Invoice[] = [
-  {
-    id: "1",
-    invoice_number: "INV-2026-0001",
-    student_name: "Arta Krasniqi",
-    student_email: "arta@example.com",
-    student_address: "45 Maple St, Brooklyn, NY 11201",
-    student_phone: "+1 (555) 111-2222",
-    course_title: "Advanced Mathematics",
-    status: "paid",
-    issued_date: subDays(new Date(), 30),
-    due_date: subDays(new Date(), 15),
-    paid_date: subDays(new Date(), 14),
-    items: [
-      {
-        description: "Advanced Mathematics — Full Course Enrollment",
-        qty: 1,
-        unit_price: 199,
-      },
-    ],
-    notes: "Thank you for choosing QuizMaster Academy.",
-  },
-  {
-    id: "2",
-    invoice_number: "INV-2026-0002",
-    student_name: "Besmir Hoxha",
-    student_email: "besmir@example.com",
-    student_address: "88 Oak Ave, Manhattan, NY 10002",
-    student_phone: "+1 (555) 333-4444",
-    course_title: "Web Development Bootcamp",
-    status: "paid",
-    issued_date: subDays(new Date(), 25),
-    due_date: subDays(new Date(), 10),
-    paid_date: subDays(new Date(), 9),
-    items: [
-      {
-        description: "Web Development Bootcamp — Full Course Enrollment",
-        qty: 1,
-        unit_price: 299,
-      },
-      { description: "Supplementary Study Materials", qty: 1, unit_price: 50 },
-    ],
-    notes: "Payment received. Access granted.",
-  },
-  {
-    id: "3",
-    invoice_number: "INV-2026-0003",
-    student_name: "Drita Berisha",
-    student_email: "drita@example.com",
-    student_address: "12 Pine Rd, Queens, NY 11101",
-    student_phone: "+1 (555) 555-6666",
-    course_title: "UI/UX Design Fundamentals",
-    status: "pending",
-    issued_date: subDays(new Date(), 5),
-    due_date: addDays(new Date(), 10),
-    items: [
-      {
-        description: "UI/UX Design Fundamentals — Full Course Enrollment",
-        qty: 1,
-        unit_price: 149,
-      },
-    ],
-    notes: "Payment due within 15 days of invoice date.",
-  },
-  {
-    id: "4",
-    invoice_number: "INV-2026-0004",
-    student_name: "Flamur Gashi",
-    student_email: "flamur@example.com",
-    student_address: "7 Cedar Ln, Bronx, NY 10451",
-    student_phone: "+1 (555) 777-8888",
-    course_title: "Data Science Essentials",
-    status: "overdue",
-    issued_date: subDays(new Date(), 40),
-    due_date: subDays(new Date(), 10),
-    items: [
-      {
-        description: "Data Science Essentials — Full Course Enrollment",
-        qty: 1,
-        unit_price: 249,
-      },
-      { description: "Python Toolkit License", qty: 1, unit_price: 30 },
-    ],
-    notes:
-      "Please settle this invoice immediately to avoid service interruption.",
-  },
-  {
-    id: "5",
-    invoice_number: "INV-2026-0005",
-    student_name: "Genta Osmani",
-    student_email: "genta@example.com",
-    student_address: "99 Birch Blvd, Staten Island, NY 10301",
-    student_phone: "+1 (555) 999-0000",
-    course_title: "English for Beginners",
-    status: "draft",
-    issued_date: new Date(),
-    due_date: addDays(new Date(), 30),
-    items: [
-      {
-        description: "English for Beginners — Full Course Enrollment",
-        qty: 1,
-        unit_price: 89,
-      },
-    ],
-    notes: "Draft invoice — not yet sent to student.",
-  },
-  {
-    id: "6",
-    invoice_number: "INV-2026-0006",
-    student_name: "Ilir Morina",
-    student_email: "ilir@example.com",
-    student_address: "3 Walnut Way, Jersey City, NJ 07302",
-    student_phone: "+1 (555) 211-3322",
-    course_title: "Photography Masterclass",
-    status: "paid",
-    issued_date: subMonths(new Date(), 1),
-    due_date: subDays(new Date(), 20),
-    paid_date: subDays(new Date(), 21),
-    items: [
-      {
-        description: "Photography Masterclass — Full Course Enrollment",
-        qty: 1,
-        unit_price: 129,
-      },
-    ],
-    notes: "Thank you for your prompt payment.",
-  },
-  {
-    id: "7",
-    invoice_number: "INV-2026-0007",
-    student_name: "Jehona Pllana",
-    student_email: "jehona@example.com",
-    student_address: "55 Elm St, Hoboken, NJ 07030",
-    student_phone: "+1 (555) 444-5566",
-    course_title: "Web Development Bootcamp",
-    status: "overdue",
-    issued_date: subDays(new Date(), 50),
-    due_date: subDays(new Date(), 20),
-    items: [
-      {
-        description: "Web Development Bootcamp — Full Course Enrollment",
-        qty: 1,
-        unit_price: 299,
-      },
-      { description: "Course Extension (1 month)", qty: 1, unit_price: 50 },
-    ],
-    notes: "Overdue — please contact billing@quizmaster.edu.",
-  },
-  {
-    id: "8",
-    invoice_number: "INV-2026-0008",
-    student_name: "Kushtrim Aliu",
-    student_email: "kushtrim@example.com",
-    student_address: "21 Spruce Ave, Newark, NJ 07102",
-    student_phone: "+1 (555) 667-7889",
-    course_title: "Advanced Mathematics",
-    status: "pending",
-    issued_date: subDays(new Date(), 3),
-    due_date: addDays(new Date(), 12),
-    items: [
-      {
-        description: "Advanced Mathematics — Full Course Enrollment",
-        qty: 1,
-        unit_price: 199,
-      },
-    ],
-    notes: "Payment due within 15 days of invoice date.",
-  },
-];
+const normalizeWeb = (value: string) =>
+  String(value || "")
+    .replace(/^https?:\/\//i, "")
+    .replace(/\/+$/, "");
+
+const safeColor = (value: unknown, fallback: string) =>
+  typeof value === "string" && /^#[0-9a-fA-F]{6}$/.test(value) ? value : fallback;
+
+const toBrandProfile = (settings: any, branding: any): InvoiceBrandProfile => {
+  const g = settings?.general || {};
+  const colors = branding?.colors || {};
+  return {
+    name: String(g.school_name || DEFAULT_BRAND.name),
+    email: String(g.contact_email || DEFAULT_BRAND.email),
+    phone: String(g.support_phone || DEFAULT_BRAND.phone),
+    address: String(g.address || DEFAULT_BRAND.address),
+    website: normalizeWeb(String(g.website || DEFAULT_BRAND.website)),
+    logoUrl: typeof branding?.logoUrl === "string" && branding.logoUrl.trim() ? branding.logoUrl : null,
+    primaryColor: safeColor(colors.primary, DEFAULT_BRAND.primaryColor),
+    accentColor: safeColor(colors.accent, DEFAULT_BRAND.accentColor),
+  };
+};
+
+function parseYmdToLocalDate(ymd: string): Date {
+  const [y, m, d] = ymd.split("-").map((x) => parseInt(x, 10));
+  if (!y || !m || !d) return new Date(ymd);
+  return new Date(y, m - 1, d);
+}
+
+function mapApiRowToInvoice(row: any): Invoice {
+  const issued = String(row.issued_date || "").slice(0, 10);
+  const due = String(row.due_date || "").slice(0, 10);
+  const paid = row.paid_date ? String(row.paid_date).slice(0, 10) : null;
+  return {
+    id: String(row.id),
+    payment_id: row.payment_id ? String(row.payment_id) : undefined,
+    invoice_number: String(row.invoice_number || ""),
+    student_name: String(row.student_name || "—"),
+    student_email: String(row.student_email || ""),
+    student_address: String(row.student_address || ""),
+    student_phone: String(row.student_phone || ""),
+    course_title: String(row.course_title || ""),
+    status: row.status as InvoiceStatus,
+    currency: String(row.currency || "USD"),
+    issued_date: parseYmdToLocalDate(issued),
+    due_date: parseYmdToLocalDate(due),
+    paid_date: paid ? parseYmdToLocalDate(paid) : undefined,
+    items: Array.isArray(row.items)
+      ? row.items.map((it: any) => ({
+          description: String(it?.description ?? ""),
+          qty: Math.max(1, Number(it?.qty) || 1),
+          unit_price: Number(it?.unit_price) || 0,
+        }))
+      : [],
+    notes: String(row.notes || ""),
+  };
+}
 
 const STATUS_CFG: Record<
   InvoiceStatus,
@@ -276,109 +182,157 @@ const getAvatarColor = (str: string) => {
   return AVATAR_COLORS[Math.abs(h) % AVATAR_COLORS.length];
 };
 
-const fmtCurrency = (n: number) =>
-  new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(
-    n,
-  );
+const fmtCurrency = (n: number, currency = "USD") =>
+  new Intl.NumberFormat("en-US", { style: "currency", currency }).format(n);
 const invoiceTotal = (inv: Invoice) =>
   inv.items.reduce((s, i) => s + i.qty * i.unit_price, 0);
 const invoiceTax = (inv: Invoice) =>
-  Math.round(invoiceTotal(inv) * 0.08 * 100) / 100;
+  Math.round(invoiceTotal(inv) * 0 * 100) / 100;
 const invoiceGrand = (inv: Invoice) => invoiceTotal(inv) + invoiceTax(inv);
 
-function printInvoice(inv: Invoice) {
+function printInvoice(inv: Invoice, brand: InvoiceBrandProfile) {
   const subtotal = invoiceTotal(inv);
   const tax = invoiceTax(inv);
   const grand = invoiceGrand(inv);
   const sc = STATUS_CFG[inv.status];
+  const cur = inv.currency || "USD";
+  const money = (n: number) => fmtCurrency(n, cur);
+  const esc = (value: unknown) =>
+    String(value ?? "")
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;")
+      .replace(/'/g, "&#39;");
+  const lines = (value: unknown) => esc(value).replace(/\n/g, "<br/>");
+  const logoMarkup = brand.logoUrl
+    ? `<img src="${esc(brand.logoUrl)}" alt="Logo" style="max-width:100%;max-height:100%;object-fit:contain;" />`
+    : `<svg viewBox="0 0 24 24"><path d="M12 14l9-5-9-5-9 5 9 5z"/><path d="M12 14l6.16-3.422a12.083 12.083 0 01.665 6.479A11.952 11.952 0 0012 20.055a11.952 11.952 0 00-6.824-2.998 12.078 12.078 0 01.665-6.479L12 14z"/></svg>`;
 
   const html = `<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8"/>
-  <title>Invoice ${inv.invoice_number}</title>
+  <title>Invoice ${esc(inv.invoice_number)}</title>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body { font-family: 'Helvetica Neue', Arial, sans-serif; background: #fff; color: #1e293b; font-size: 13px; }
-    .page { max-width: 720px; margin: 0 auto; padding: 48px 48px 60px; }
-    .header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 40px; }
+    .page { position: relative; max-width: 760px; margin: 0 auto; padding: 36px 34px 48px; }
+    .watermark {
+      position: absolute;
+      top: 44%;
+      left: 50%;
+      transform: translate(-50%, -50%) rotate(-24deg);
+      font-size: 82px;
+      font-weight: 900;
+      letter-spacing: 8px;
+      color: rgba(100, 116, 139, 0.06);
+      user-select: none;
+      pointer-events: none;
+      z-index: 0;
+    }
+    .sheet {
+      position: relative;
+      z-index: 1;
+      border: 1px solid #e2e8f0;
+      border-radius: 18px;
+      overflow: hidden;
+      box-shadow: 0 12px 32px rgba(15, 23, 42, 0.08);
+      background: #fff;
+    }
+    .section-pad { padding: 0 26px; }
+    .header { display: flex; justify-content: space-between; align-items: flex-start; padding: 24px 26px; background: linear-gradient(180deg, #ffffff, #f8fafc); border-bottom: 1px solid #e2e8f0; }
     .brand { display: flex; align-items: center; gap: 12px; }
-    .logo { width: 44px; height: 44px; background: linear-gradient(135deg,#6366f1,#8b5cf6); border-radius: 12px; display: flex; align-items: center; justify-content: center; }
+    .logo { width: 44px; height: 44px; background: linear-gradient(135deg,${brand.primaryColor},${brand.accentColor}); border-radius: 12px; display: flex; align-items: center; justify-content: center; overflow: hidden; }
     .logo svg { width: 24px; height: 24px; fill: none; stroke: white; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
     .brand-name { font-size: 20px; font-weight: 800; color: #1e293b; letter-spacing: -0.3px; }
     .brand-url  { font-size: 11px; color: #94a3b8; margin-top: 1px; }
     .inv-meta { text-align: right; }
-    .inv-title { font-size: 28px; font-weight: 800; color: #6366f1; letter-spacing: -0.5px; }
+    .inv-title { font-size: 28px; font-weight: 800; color: ${brand.primaryColor}; letter-spacing: -0.5px; }
     .inv-num   { font-size: 13px; color: #64748b; margin-top: 4px; font-family: monospace; }
     .status-badge { display: inline-block; padding: 3px 10px; border-radius: 20px; font-size: 11px; font-weight: 700; margin-top: 6px; background: ${inv.status === "paid" ? "#d1fae5" : inv.status === "overdue" ? "#fee2e2" : inv.status === "pending" ? "#fef3c7" : "#f1f5f9"}; color: ${inv.status === "paid" ? "#065f46" : inv.status === "overdue" ? "#991b1b" : inv.status === "pending" ? "#92400e" : "#475569"}; }
-    .divider { border: none; border-top: 1.5px solid #e2e8f0; margin: 32px 0; }
-    .parties { display: grid; grid-template-columns: 1fr 1fr; gap: 40px; margin-bottom: 32px; }
+    .divider { border: none; border-top: 1.5px solid #e2e8f0; margin: 16px 26px 20px; }
+    .parties { display: grid; grid-template-columns: 1fr 1fr; gap: 28px; margin-bottom: 16px; }
     .party-label { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 1px; color: #94a3b8; margin-bottom: 10px; }
     .party-name  { font-size: 15px; font-weight: 700; color: #0f172a; margin-bottom: 6px; }
     .party-detail { font-size: 12px; color: #64748b; margin-bottom: 3px; line-height: 1.6; }
-    .dates { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; background: #f8fafc; border-radius: 12px; padding: 20px; margin-bottom: 32px; }
+    .dates { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; background: #f8fafc; border-radius: 12px; padding: 16px; margin-bottom: 16px; border: 1px solid #e2e8f0; }
     .date-block { text-align: center; }
     .date-label { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 1px; color: #94a3b8; margin-bottom: 6px; }
     .date-val   { font-size: 14px; font-weight: 700; color: #1e293b; }
-    table { width: 100%; border-collapse: collapse; margin-bottom: 24px; }
-    th { background: #6366f1; color: white; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.8px; padding: 10px 14px; text-align: left; }
+    table { width: 100%; border-collapse: collapse; margin-bottom: 16px; border: 1px solid #e2e8f0; border-radius: 12px; overflow: hidden; }
+    th { background: ${brand.primaryColor}; color: white; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.8px; padding: 10px 14px; text-align: left; }
     th:last-child, td:last-child { text-align: right; }
     td { padding: 12px 14px; font-size: 13px; border-bottom: 1px solid #f1f5f9; color: #334155; }
     tr:last-child td { border-bottom: none; }
     tr:nth-child(even) td { background: #f8fafc; }
-    .totals { display: flex; justify-content: flex-end; margin-bottom: 32px; }
-    .totals-box { width: 260px; }
+    .totals { display: flex; justify-content: flex-end; margin-bottom: 0; }
+    .totals-box { width: 100%; }
+    .summary-grid { display: grid; grid-template-columns: 1.15fr 1fr; gap: 14px; margin-bottom: 16px; }
+    .summary-card { border: 1px solid #e2e8f0; border-radius: 12px; background: #fff; padding: 12px 14px; }
+    .summary-title { font-size: 10px; text-transform: uppercase; letter-spacing: 1px; color: #94a3b8; font-weight: 700; margin-bottom: 8px; }
+    .summary-row { display: flex; justify-content: space-between; font-size: 12px; color: #475569; padding: 5px 0; border-bottom: 1px dashed #e2e8f0; }
+    .summary-row:last-child { border-bottom: none; }
+    .summary-row b { color: #0f172a; }
     .total-row { display: flex; justify-content: space-between; padding: 6px 0; font-size: 13px; color: #64748b; border-bottom: 1px dashed #e2e8f0; }
     .total-row:last-child { border-bottom: none; font-size: 16px; font-weight: 800; color: #1e293b; padding-top: 12px; }
     .total-row span:last-child { font-weight: 700; color: #334155; }
-    .total-row:last-child span:last-child { color: #6366f1; font-size: 18px; }
-    .notes-section { background: #f8fafc; border-left: 3px solid #6366f1; border-radius: 0 8px 8px 0; padding: 14px 18px; margin-bottom: 32px; }
-    .notes-label { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 1px; color: #6366f1; margin-bottom: 6px; }
+    .total-row:last-child span:last-child { color: ${brand.primaryColor}; font-size: 18px; }
+    .notes-section { background: #f8fafc; border-left: 3px solid ${brand.primaryColor}; border-radius: 0 8px 8px 0; padding: 14px 18px; margin-bottom: 16px; }
+    .notes-label { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 1px; color: ${brand.primaryColor}; margin-bottom: 6px; }
+    .course-chip { display: inline-flex; align-items: center; padding: 6px 12px; border-radius: 999px; background: #eef2ff; color: ${brand.primaryColor}; font-size: 11px; font-weight: 700; margin-bottom: 14px; }
     .notes-text  { font-size: 12px; color: #64748b; line-height: 1.6; }
-    .footer { display: flex; justify-content: space-between; align-items: center; padding-top: 20px; border-top: 1px solid #e2e8f0; }
+    .signature-wrap { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-bottom: 16px; }
+    .signature-box { border: 1px dashed #cbd5e1; border-radius: 12px; min-height: 106px; padding: 10px 12px; }
+    .signature-label { font-size: 10px; text-transform: uppercase; letter-spacing: 1px; color: #94a3b8; font-weight: 700; }
+    .signature-line { margin-top: 52px; border-top: 1px solid #94a3b8; padding-top: 6px; text-align: center; font-size: 11px; color: #64748b; }
+    .footer { display: flex; justify-content: space-between; align-items: center; padding: 14px 26px 20px; border-top: 1px solid #e2e8f0; }
     .footer-left  { font-size: 11px; color: #94a3b8; line-height: 1.8; }
     .footer-right { text-align: right; font-size: 11px; color: #94a3b8; }
-    .thank-you { font-size: 15px; font-weight: 700; color: #6366f1; }
-    @media print { body { -webkit-print-color-adjust: exact; print-color-adjust: exact; } .page { padding: 32px; } }
+    .thank-you { font-size: 15px; font-weight: 700; color: ${brand.primaryColor}; }
+    @media print { body { -webkit-print-color-adjust: exact; print-color-adjust: exact; } .page { padding: 20px; } }
   </style>
 </head>
 <body>
 <div class="page">
+  <div class="watermark">INVOICE</div>
+  <div class="sheet">
   <div class="header">
     <div class="brand">
       <div class="logo">
-        <svg viewBox="0 0 24 24"><path d="M12 14l9-5-9-5-9 5 9 5z"/><path d="M12 14l6.16-3.422a12.083 12.083 0 01.665 6.479A11.952 11.952 0 0012 20.055a11.952 11.952 0 00-6.824-2.998 12.078 12.078 0 01.665-6.479L12 14z"/></svg>
+        ${logoMarkup}
       </div>
       <div>
-        <div class="brand-name">${SCHOOL.name}</div>
-        <div class="brand-url">${SCHOOL.website}</div>
+        <div class="brand-name">${esc(brand.name)}</div>
+        <div class="brand-url">${esc(brand.website)}</div>
       </div>
     </div>
     <div class="inv-meta">
       <div class="inv-title">INVOICE</div>
-      <div class="inv-num">${inv.invoice_number}</div>
+      <div class="inv-num">${esc(inv.invoice_number)}</div>
       <div class="status-badge">${sc.label.toUpperCase()}</div>
     </div>
   </div>
 
   <hr class="divider"/>
-
+  <div class="section-pad">
   <div class="parties">
     <div>
       <div class="party-label">From</div>
-      <div class="party-name">${SCHOOL.name}</div>
-      <div class="party-detail">${SCHOOL.email}</div>
-      <div class="party-detail">${SCHOOL.phone}</div>
-      <div class="party-detail">${SCHOOL.address}</div>
+      <div class="party-name">${esc(brand.name)}</div>
+      <div class="party-detail">${esc(brand.email)}</div>
+      <div class="party-detail">${esc(brand.phone)}</div>
+      <div class="party-detail">${lines(brand.address)}</div>
     </div>
     <div>
       <div class="party-label">Bill To</div>
-      <div class="party-name">${inv.student_name}</div>
-      <div class="party-detail">${inv.student_email}</div>
-      <div class="party-detail">${inv.student_phone}</div>
-      <div class="party-detail">${inv.student_address}</div>
+      <div class="party-name">${esc(inv.student_name)}</div>
+      <div class="party-detail">${esc(inv.student_email)}</div>
+      <div class="party-detail">${esc(inv.student_phone)}</div>
+      <div class="party-detail">${lines(inv.student_address)}</div>
     </div>
   </div>
+  <div class="course-chip">Course: ${esc(inv.course_title || "General services")}</div>
 
   <div class="dates">
     <div class="date-block">
@@ -409,36 +363,60 @@ function printInvoice(inv: Invoice) {
         .map(
           (item) => `
       <tr>
-        <td>${item.description}</td>
+        <td>${esc(item.description)}</td>
         <td style="text-align:center">${item.qty}</td>
-        <td style="text-align:right">${fmtCurrency(item.unit_price)}</td>
-        <td style="text-align:right">${fmtCurrency(item.qty * item.unit_price)}</td>
+        <td style="text-align:right">${money(item.unit_price)}</td>
+        <td style="text-align:right">${money(item.qty * item.unit_price)}</td>
       </tr>`,
         )
         .join("")}
     </tbody>
   </table>
 
-  <div class="totals">
-    <div class="totals-box">
-      <div class="total-row"><span>Subtotal</span><span>${fmtCurrency(subtotal)}</span></div>
-      <div class="total-row"><span>Tax (8%)</span><span>${fmtCurrency(tax)}</span></div>
-      <div class="total-row"><span>Total Due</span><span>${fmtCurrency(grand)}</span></div>
+  <div class="summary-grid">
+    <div class="summary-card">
+      <div class="summary-title">Payment Summary</div>
+      <div class="summary-row"><span>Invoice Number</span><b>${esc(inv.invoice_number)}</b></div>
+      <div class="summary-row"><span>Status</span><b>${esc(sc.label)}</b></div>
+      <div class="summary-row"><span>Due Date</span><b>${format(inv.due_date, "MMM d, yyyy")}</b></div>
+      <div class="summary-row"><span>Currency</span><b>${esc(cur)}</b></div>
+    </div>
+    <div class="summary-card">
+      <div class="summary-title">Amount Due</div>
+      <div class="totals">
+        <div class="totals-box">
+          <div class="total-row"><span>Subtotal</span><span>${money(subtotal)}</span></div>
+          <div class="total-row"><span>Tax (0%)</span><span>${money(tax)}</span></div>
+          <div class="total-row"><span>Total Due</span><span>${money(grand)}</span></div>
+        </div>
+      </div>
     </div>
   </div>
 
-  ${inv.notes ? `<div class="notes-section"><div class="notes-label">Notes</div><div class="notes-text">${inv.notes}</div></div>` : ""}
+  ${inv.notes ? `<div class="notes-section"><div class="notes-label">Notes</div><div class="notes-text">${lines(inv.notes)}</div></div>` : ""}
+  <div class="signature-wrap">
+    <div class="signature-box">
+      <div class="signature-label">Authorized Signature</div>
+      <div class="signature-line">Name, Signature & Date</div>
+    </div>
+    <div class="signature-box">
+      <div class="signature-label">Client Signature</div>
+      <div class="signature-line">Name, Signature & Date</div>
+    </div>
+  </div>
+  </div>
 
   <div class="footer">
     <div class="footer-left">
-      <div>${SCHOOL.name}</div>
-      <div>${SCHOOL.address}</div>
-      <div>${SCHOOL.email} · ${SCHOOL.phone}</div>
+      <div>${esc(brand.name)}</div>
+      <div>${lines(brand.address)}</div>
+      <div>${esc(brand.email)} · ${esc(brand.phone)}</div>
     </div>
     <div class="footer-right">
       <div class="thank-you">Thank You!</div>
-      <div>Questions? ${SCHOOL.email}</div>
+      <div>Questions? ${esc(brand.email)}</div>
     </div>
+  </div>
   </div>
 </div>
 <script>window.onload = () => { window.print(); };</script>
@@ -453,31 +431,83 @@ function printInvoice(inv: Invoice) {
 }
 
 export default function AdminInvoices() {
+  const [invoices, setInvoices] = useState<Invoice[]>([]);
+  const [brand, setBrand] = useState<InvoiceBrandProfile>(DEFAULT_BRAND);
+  const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<"all" | InvoiceStatus>(
     "all",
   );
   const [selected, setSelected] = useState<Invoice | null>(null);
 
+  const fetchInvoices = useCallback(async () => {
+    setLoading(true);
+    try {
+      const res = await fetch(apiUrl("/api/admin/invoices"));
+      if (!res.ok) throw new Error(await readApiError(res));
+      const json = await res.json();
+      if (!json.success) throw new Error(json.error || "Failed to load invoices");
+      setInvoices((json.invoices || []).map(mapApiRowToInvoice));
+    } catch (e: any) {
+      toast.error(e.message || "Failed to load invoices");
+      setInvoices([]);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchInvoices();
+  }, [fetchInvoices]);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const [settingsRes, brandingRes] = await Promise.all([
+          fetch(apiUrl("/api/admin/config/settings")),
+          fetch(apiUrl("/api/admin/config/branding")),
+        ]);
+        const [settingsJson, brandingJson] = await Promise.all([
+          settingsRes.json(),
+          brandingRes.json(),
+        ]);
+        setBrand(
+          toBrandProfile(
+            settingsJson?.success ? settingsJson.value : null,
+            brandingJson?.success ? brandingJson.value : null,
+          ),
+        );
+      } catch {
+        setBrand(DEFAULT_BRAND);
+      }
+    })();
+  }, []);
+
   const stats = useMemo(() => {
-    const paid = MOCK_INVOICES.filter((i) => i.status === "paid");
-    const pending = MOCK_INVOICES.filter((i) => i.status === "pending");
-    const overdue = MOCK_INVOICES.filter((i) => i.status === "overdue");
+    const paid = invoices.filter((i) => i.status === "paid");
+    const pending = invoices.filter((i) => i.status === "pending");
+    const overdue = invoices.filter((i) => i.status === "overdue");
+    const sumCurrency =
+      invoices.length &&
+      invoices.every((i) => i.currency === invoices[0].currency)
+        ? invoices[0].currency
+        : "USD";
     return {
-      total: MOCK_INVOICES.length,
-      totalAmt: MOCK_INVOICES.reduce((s, i) => s + invoiceGrand(i), 0),
+      total: invoices.length,
+      totalAmt: invoices.reduce((s, i) => s + invoiceGrand(i), 0),
       paidAmt: paid.reduce((s, i) => s + invoiceGrand(i), 0),
       paidCount: paid.length,
       pendingAmt: pending.reduce((s, i) => s + invoiceGrand(i), 0),
       pendingCount: pending.length,
       overdueAmt: overdue.reduce((s, i) => s + invoiceGrand(i), 0),
       overdueCount: overdue.length,
+      sumCurrency,
     };
-  }, []);
+  }, [invoices]);
 
   const filtered = useMemo(
     () =>
-      MOCK_INVOICES.filter((i) => {
+      invoices.filter((i) => {
         const q = search.toLowerCase();
         const matchSearch =
           !q ||
@@ -487,7 +517,7 @@ export default function AdminInvoices() {
         const matchStatus = statusFilter === "all" || i.status === statusFilter;
         return matchSearch && matchStatus;
       }),
-    [search, statusFilter],
+    [invoices, search, statusFilter],
   );
 
   return (
@@ -513,7 +543,9 @@ export default function AdminInvoices() {
               </div>
               <p className="text-2xl font-bold text-slate-900 tracking-tight">{stats.total}</p>
               <p className="text-sm font-medium text-slate-700 mt-0.5">Total Invoices</p>
-              <p className="text-xs text-slate-400 mt-0.5">{fmtCurrency(stats.totalAmt)} total value</p>
+              <p className="text-xs text-slate-400 mt-0.5">
+                {fmtCurrency(stats.totalAmt, stats.sumCurrency)} total value
+              </p>
             </div>
           </div>
           <div className="bg-white rounded-2xl border border-slate-100 shadow-sm hover:shadow-md transition-all overflow-hidden">
@@ -524,7 +556,9 @@ export default function AdminInvoices() {
               </div>
               <p className="text-2xl font-bold text-slate-900 tracking-tight">{stats.paidCount}</p>
               <p className="text-sm font-medium text-slate-700 mt-0.5">Paid</p>
-              <p className="text-xs text-slate-400 mt-0.5">{fmtCurrency(stats.paidAmt)} collected</p>
+              <p className="text-xs text-slate-400 mt-0.5">
+                {fmtCurrency(stats.paidAmt, stats.sumCurrency)} collected
+              </p>
             </div>
           </div>
           <div className="bg-white rounded-2xl border border-slate-100 shadow-sm hover:shadow-md transition-all overflow-hidden">
@@ -535,7 +569,9 @@ export default function AdminInvoices() {
               </div>
               <p className="text-2xl font-bold text-slate-900 tracking-tight">{stats.pendingCount}</p>
               <p className="text-sm font-medium text-slate-700 mt-0.5">Pending</p>
-              <p className="text-xs text-slate-400 mt-0.5">{fmtCurrency(stats.pendingAmt)} outstanding</p>
+              <p className="text-xs text-slate-400 mt-0.5">
+                {fmtCurrency(stats.pendingAmt, stats.sumCurrency)} outstanding
+              </p>
             </div>
           </div>
           <div className="bg-white rounded-2xl border border-slate-100 shadow-sm hover:shadow-md transition-all overflow-hidden">
@@ -546,7 +582,9 @@ export default function AdminInvoices() {
               </div>
               <p className="text-2xl font-bold text-slate-900 tracking-tight">{stats.overdueCount}</p>
               <p className="text-sm font-medium text-slate-700 mt-0.5">Overdue</p>
-              <p className="text-xs text-slate-400 mt-0.5">{fmtCurrency(stats.overdueAmt)} overdue</p>
+              <p className="text-xs text-slate-400 mt-0.5">
+                {fmtCurrency(stats.overdueAmt, stats.sumCurrency)} overdue
+              </p>
             </div>
           </div>
         </div>
@@ -610,13 +648,22 @@ export default function AdminInvoices() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-50">
-                {filtered.length === 0 ? (
+                {loading ? (
                   <tr>
                     <td
                       colSpan={7}
                       className="text-center py-12 text-slate-400 text-sm"
                     >
-                      No invoices found.
+                      Loading invoices…
+                    </td>
+                  </tr>
+                ) : filtered.length === 0 ? (
+                  <tr>
+                    <td
+                      colSpan={7}
+                      className="text-center py-12 text-slate-400 text-sm"
+                    >
+                      No invoices found. Register a payment to generate an invoice.
                     </td>
                   </tr>
                 ) : (
@@ -663,7 +710,7 @@ export default function AdminInvoices() {
                         </td>
                         <td className="px-5 py-4 text-right">
                           <span className="font-bold text-slate-900">
-                            {fmtCurrency(invoiceGrand(inv))}
+                            {fmtCurrency(invoiceGrand(inv), inv.currency)}
                           </span>
                         </td>
                         <td className="px-5 py-4">
@@ -702,7 +749,7 @@ export default function AdminInvoices() {
                               <Eye className="w-4 h-4" />
                             </button>
                             <button
-                              onClick={() => printInvoice(inv)}
+                              onClick={() => printInvoice(inv, brand)}
                               className="p-1.5 rounded-lg hover:bg-emerald-50 text-slate-400 hover:text-emerald-600 transition-colors"
                               title="Download PDF"
                             >
@@ -720,11 +767,17 @@ export default function AdminInvoices() {
           {filtered.length > 0 && (
             <div className="px-5 py-3.5 border-t border-slate-100 bg-slate-50 flex items-center justify-between">
               <span className="text-xs text-slate-500">
-                {filtered.length} of {MOCK_INVOICES.length} invoices
+                {filtered.length} of {invoices.length} invoices
               </span>
               <span className="text-xs font-semibold text-slate-700">
                 Showing:{" "}
-                {fmtCurrency(filtered.reduce((s, i) => s + invoiceGrand(i), 0))}{" "}
+                {fmtCurrency(
+                  filtered.reduce((s, i) => s + invoiceGrand(i), 0),
+                  filtered.length &&
+                    filtered.every((i) => i.currency === filtered[0].currency)
+                    ? filtered[0].currency
+                    : "USD",
+                )}{" "}
                 total
               </span>
             </div>
@@ -754,7 +807,7 @@ export default function AdminInvoices() {
               </div>
               <div className="flex items-center gap-2">
                 <button
-                  onClick={() => printInvoice(selected)}
+                  onClick={() => printInvoice(selected, brand)}
                   className="inline-flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-semibold px-4 py-2 rounded-xl transition-colors"
                 >
                   <Download className="w-4 h-4" />
@@ -795,8 +848,8 @@ export default function AdminInvoices() {
                     </svg>
                   </div>
                   <div>
-                    <p className="font-bold text-slate-900">{SCHOOL.name}</p>
-                    <p className="text-xs text-slate-400">{SCHOOL.website}</p>
+                    <p className="font-bold text-slate-900">{brand.name}</p>
+                    <p className="text-xs text-slate-400">{brand.website}</p>
                   </div>
                 </div>
                 <div className="text-right">
@@ -832,12 +885,12 @@ export default function AdminInvoices() {
                   <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-2">
                     From
                   </p>
-                  <p className="font-bold text-slate-900">{SCHOOL.name}</p>
+                  <p className="font-bold text-slate-900">{brand.name}</p>
                   <div className="mt-1.5 space-y-1">
                     {[
-                      { icon: Mail, text: SCHOOL.email },
-                      { icon: Phone, text: SCHOOL.phone },
-                      { icon: MapPin, text: SCHOOL.address },
+                      { icon: Mail, text: brand.email },
+                      { icon: Phone, text: brand.phone },
+                      { icon: MapPin, text: brand.address },
                     ].map(({ icon: Icon, text }) => (
                       <div
                         key={text}
@@ -927,10 +980,10 @@ export default function AdminInvoices() {
                           {item.qty}
                         </td>
                         <td className="px-4 py-3 text-right text-slate-600">
-                          {fmtCurrency(item.unit_price)}
+                          {fmtCurrency(item.unit_price, selected.currency)}
                         </td>
                         <td className="px-4 py-3 text-right font-semibold text-slate-800">
-                          {fmtCurrency(item.qty * item.unit_price)}
+                          {fmtCurrency(item.qty * item.unit_price, selected.currency)}
                         </td>
                       </tr>
                     ))}
@@ -944,19 +997,19 @@ export default function AdminInvoices() {
                   <div className="flex justify-between text-sm text-slate-500">
                     <span>Subtotal</span>
                     <span className="font-semibold text-slate-700">
-                      {fmtCurrency(invoiceTotal(selected))}
+                      {fmtCurrency(invoiceTotal(selected), selected.currency)}
                     </span>
                   </div>
                   <div className="flex justify-between text-sm text-slate-500 pb-2 border-b border-dashed border-slate-200">
-                    <span>Tax (8%)</span>
+                    <span>Tax (0%)</span>
                     <span className="font-semibold text-slate-700">
-                      {fmtCurrency(invoiceTax(selected))}
+                      {fmtCurrency(invoiceTax(selected), selected.currency)}
                     </span>
                   </div>
                   <div className="flex justify-between text-base font-bold text-slate-900 pt-1">
                     <span>Total Due</span>
                     <span className="text-indigo-600 text-lg">
-                      {fmtCurrency(invoiceGrand(selected))}
+                      {fmtCurrency(invoiceGrand(selected), selected.currency)}
                     </span>
                   </div>
                 </div>

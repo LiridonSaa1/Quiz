@@ -1,7 +1,7 @@
-import React, { useState, useMemo } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import AdminLayout from "../../components/layout/AdminLayout";
 import { cn } from "../../lib/utils";
-import { format, subDays, subMonths } from "date-fns";
+import { format, subMonths } from "date-fns";
 import {
   DollarSign,
   TrendingUp,
@@ -9,232 +9,49 @@ import {
   CheckCircle2,
   XCircle,
   Search,
-  Filter,
   ChevronDown,
   Eye,
   RefreshCw,
-  Download,
+  Plus,
   ArrowUpRight,
-  ArrowDownRight,
   CreditCard,
   Banknote,
   ReceiptText,
 } from "lucide-react";
+import { toast } from "sonner";
+import { apiUrl, readApiError } from "../../lib/apiUrl";
 
 type PaymentStatus = "completed" | "pending" | "failed" | "refunded";
-type PaymentMethod = "card" | "bank" | "paypal";
+type PaymentMethod = "card" | "bank" | "paypal" | "cash";
 
 interface Payment {
   id: string;
-  invoice_number: string;
+  reference: string;
+  teacher_id: string | null;
+  teacher_name: string;
+  student_id: string | null;
   student_name: string;
   student_email: string;
-  course_title: string;
   amount: number;
   currency: string;
   status: PaymentStatus;
   method: PaymentMethod;
-  date: Date;
+  payment_date: string;
   description: string;
+  created_at?: string;
 }
 
-const MOCK_PAYMENTS: Payment[] = [
-  {
-    id: "1",
-    invoice_number: "INV-2026-0001",
-    student_name: "Arta Krasniqi",
-    student_email: "arta@example.com",
-    course_title: "Advanced Mathematics",
-    amount: 199,
-    currency: "USD",
-    status: "completed",
-    method: "card",
-    date: subDays(new Date(), 1),
-    description: "Course enrollment fee",
-  },
-  {
-    id: "2",
-    invoice_number: "INV-2026-0002",
-    student_name: "Besmir Hoxha",
-    student_email: "besmir@example.com",
-    course_title: "Web Development Bootcamp",
-    amount: 349,
-    currency: "USD",
-    status: "completed",
-    method: "paypal",
-    date: subDays(new Date(), 2),
-    description: "Course enrollment fee",
-  },
-  {
-    id: "3",
-    invoice_number: "INV-2026-0003",
-    student_name: "Drita Berisha",
-    student_email: "drita@example.com",
-    course_title: "UI/UX Design Fundamentals",
-    amount: 149,
-    currency: "USD",
-    status: "pending",
-    method: "bank",
-    date: subDays(new Date(), 3),
-    description: "Course enrollment fee",
-  },
-  {
-    id: "4",
-    invoice_number: "INV-2026-0004",
-    student_name: "Flamur Gashi",
-    student_email: "flamur@example.com",
-    course_title: "Data Science Essentials",
-    amount: 279,
-    currency: "USD",
-    status: "completed",
-    method: "card",
-    date: subDays(new Date(), 5),
-    description: "Course enrollment fee",
-  },
-  {
-    id: "5",
-    invoice_number: "INV-2026-0005",
-    student_name: "Genta Osmani",
-    student_email: "genta@example.com",
-    course_title: "English for Beginners",
-    amount: 89,
-    currency: "USD",
-    status: "failed",
-    method: "card",
-    date: subDays(new Date(), 6),
-    description: "Course enrollment fee",
-  },
-  {
-    id: "6",
-    invoice_number: "INV-2026-0006",
-    student_name: "Ilir Morina",
-    student_email: "ilir@example.com",
-    course_title: "Advanced Mathematics",
-    amount: 199,
-    currency: "USD",
-    status: "refunded",
-    method: "paypal",
-    date: subDays(new Date(), 8),
-    description: "Course enrollment fee",
-  },
-  {
-    id: "7",
-    invoice_number: "INV-2026-0007",
-    student_name: "Jehona Pllana",
-    student_email: "jehona@example.com",
-    course_title: "Photography Masterclass",
-    amount: 129,
-    currency: "USD",
-    status: "completed",
-    method: "card",
-    date: subDays(new Date(), 10),
-    description: "Course enrollment fee",
-  },
-  {
-    id: "8",
-    invoice_number: "INV-2026-0008",
-    student_name: "Kushtrim Aliu",
-    student_email: "kushtrim@example.com",
-    course_title: "Web Development Bootcamp",
-    amount: 349,
-    currency: "USD",
-    status: "completed",
-    method: "bank",
-    date: subDays(new Date(), 12),
-    description: "Course enrollment fee",
-  },
-  {
-    id: "9",
-    invoice_number: "INV-2026-0009",
-    student_name: "Lirije Sadiku",
-    student_email: "lirije@example.com",
-    course_title: "Data Science Essentials",
-    amount: 279,
-    currency: "USD",
-    status: "pending",
-    method: "card",
-    date: subDays(new Date(), 14),
-    description: "Course enrollment fee",
-  },
-  {
-    id: "10",
-    invoice_number: "INV-2026-0010",
-    student_name: "Mentor Bajrami",
-    student_email: "mentor@example.com",
-    course_title: "UI/UX Design Fundamentals",
-    amount: 149,
-    currency: "USD",
-    status: "completed",
-    method: "card",
-    date: subDays(new Date(), 16),
-    description: "Course enrollment fee",
-  },
-  {
-    id: "11",
-    invoice_number: "INV-2026-0011",
-    student_name: "Njomza Rama",
-    student_email: "njomza@example.com",
-    course_title: "Photography Masterclass",
-    amount: 129,
-    currency: "USD",
-    status: "completed",
-    method: "paypal",
-    date: subDays(new Date(), 18),
-    description: "Course enrollment fee",
-  },
-  {
-    id: "12",
-    invoice_number: "INV-2026-0012",
-    student_name: "Oren Lushta",
-    student_email: "oren@example.com",
-    course_title: "English for Beginners",
-    amount: 89,
-    currency: "USD",
-    status: "failed",
-    method: "bank",
-    date: subDays(new Date(), 20),
-    description: "Course enrollment fee",
-  },
-  {
-    id: "13",
-    invoice_number: "INV-2026-0013",
-    student_name: "Pranvera Kelmendi",
-    student_email: "pranvera@example.com",
-    course_title: "Advanced Mathematics",
-    amount: 199,
-    currency: "USD",
-    status: "completed",
-    method: "card",
-    date: subMonths(new Date(), 1),
-    description: "Course enrollment fee",
-  },
-  {
-    id: "14",
-    invoice_number: "INV-2026-0014",
-    student_name: "Qendresa Hyseni",
-    student_email: "qendresa@example.com",
-    course_title: "Web Development Bootcamp",
-    amount: 349,
-    currency: "USD",
-    status: "completed",
-    method: "card",
-    date: subMonths(new Date(), 1),
-    description: "Course enrollment fee",
-  },
-  {
-    id: "15",
-    invoice_number: "INV-2026-0015",
-    student_name: "Rinor Vllasaliu",
-    student_email: "rinor@example.com",
-    course_title: "Data Science Essentials",
-    amount: 279,
-    currency: "USD",
-    status: "pending",
-    method: "paypal",
-    date: subMonths(new Date(), 1),
-    description: "Course enrollment fee",
-  },
-];
+interface TeacherOption {
+  id: string;
+  name: string;
+}
+
+interface StudentOption {
+  id: string;
+  name: string;
+  email: string;
+  teacherId: string | null;
+}
 
 const STATUS_CFG: Record<
   PaymentStatus,
@@ -283,6 +100,7 @@ const METHOD_CFG: Record<
   card: { label: "Credit Card", icon: CreditCard, color: "text-indigo-600" },
   bank: { label: "Bank Transfer", icon: Banknote, color: "text-teal-600" },
   paypal: { label: "PayPal", icon: ReceiptText, color: "text-blue-600" },
+  cash: { label: "Cash", icon: DollarSign, color: "text-emerald-600" },
 };
 
 const AVATAR_COLORS = [
@@ -305,6 +123,11 @@ const fmtCurrency = (n: number) =>
   );
 
 export default function AdminPayments() {
+  const [payments, setPayments] = useState<Payment[]>([]);
+  const [teacherOptions, setTeacherOptions] = useState<TeacherOption[]>([]);
+  const [studentOptions, setStudentOptions] = useState<StudentOption[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<"all" | PaymentStatus>(
     "all",
@@ -313,15 +136,54 @@ export default function AdminPayments() {
     "all",
   );
   const [selected, setSelected] = useState<Payment | null>(null);
+  const [showRegister, setShowRegister] = useState(false);
+  const [form, setForm] = useState({
+    teacher_id: "",
+    student_id: "",
+    amount: "",
+    currency: "EUR",
+    status: "completed" as PaymentStatus,
+    method: "bank" as PaymentMethod,
+    payment_date: format(new Date(), "yyyy-MM-dd"),
+    description: "",
+    reference: "",
+  });
+
+  const fetchData = async () => {
+    setLoading(true);
+    try {
+      const res = await fetch(apiUrl("/api/admin/payments"));
+      if (!res.ok) throw new Error(await readApiError(res));
+      const json = await res.json();
+      if (!json.success) throw new Error(json.error || "Failed to load payments");
+      setPayments(
+        (json.payments || []).map((p: any) => ({
+          ...p,
+          amount: Number(p.amount || 0),
+          reference: p.reference || `PAY-${String(p.id || "").slice(0, 8)}`,
+        })),
+      );
+      setTeacherOptions(json.teacherOptions || []);
+      setStudentOptions(json.studentOptions || []);
+    } catch (e: any) {
+      toast.error(e.message || "Failed to load payments");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchData();
+  }, []);
 
   const stats = useMemo(() => {
-    const completed = MOCK_PAYMENTS.filter((p) => p.status === "completed");
-    const pending = MOCK_PAYMENTS.filter((p) => p.status === "pending");
-    const failed = MOCK_PAYMENTS.filter((p) => p.status === "failed");
-    const refunded = MOCK_PAYMENTS.filter((p) => p.status === "refunded");
+    const completed = payments.filter((p) => p.status === "completed");
+    const pending = payments.filter((p) => p.status === "pending");
+    const failed = payments.filter((p) => p.status === "failed");
+    const refunded = payments.filter((p) => p.status === "refunded");
     const totalRevenue = completed.reduce((s, p) => s + p.amount, 0);
     const thisMonth = completed
-      .filter((p) => p.date >= subMonths(new Date(), 1))
+      .filter((p) => new Date(p.payment_date) >= subMonths(new Date(), 1))
       .reduce((s, p) => s + p.amount, 0);
     return {
       totalRevenue,
@@ -330,25 +192,86 @@ export default function AdminPayments() {
       pendingAmt: pending.reduce((s, p) => s + p.amount, 0),
       failedCount: failed.length,
       refundedAmt: refunded.reduce((s, p) => s + p.amount, 0),
-      total: MOCK_PAYMENTS.length,
+      total: payments.length,
     };
-  }, []);
+  }, [payments]);
+
+  const studentsForTeacher = useMemo(
+    () => studentOptions.filter((s) => s.teacherId === form.teacher_id),
+    [studentOptions, form.teacher_id],
+  );
 
   const filtered = useMemo(
     () =>
-      MOCK_PAYMENTS.filter((p) => {
+      payments.filter((p) => {
         const q = search.toLowerCase();
         const matchSearch =
           !q ||
           p.student_name.toLowerCase().includes(q) ||
-          p.invoice_number.toLowerCase().includes(q) ||
-          p.course_title.toLowerCase().includes(q);
+          p.reference.toLowerCase().includes(q) ||
+          p.teacher_name.toLowerCase().includes(q);
         const matchStatus = statusFilter === "all" || p.status === statusFilter;
         const matchMethod = methodFilter === "all" || p.method === methodFilter;
         return matchSearch && matchStatus && matchMethod;
       }),
-    [search, statusFilter, methodFilter],
+    [payments, search, statusFilter, methodFilter],
   );
+
+  const resetForm = () =>
+    setForm({
+      teacher_id: "",
+      student_id: "",
+      amount: "",
+      currency: "EUR",
+      status: "completed",
+      method: "bank",
+      payment_date: format(new Date(), "yyyy-MM-dd"),
+      description: "",
+      reference: "",
+    });
+
+  const openRegisterModal = () => {
+    resetForm();
+    setShowRegister(true);
+  };
+
+  const handleCreatePayment = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!form.teacher_id) return toast.error("Please select a teacher");
+    if (!form.student_id) return toast.error("Please select a student");
+    if (!form.amount || Number(form.amount) <= 0) {
+      return toast.error("Amount must be greater than 0");
+    }
+    if (!form.payment_date) return toast.error("Please select a payment date");
+
+    setSaving(true);
+    try {
+      const res = await fetch(apiUrl("/api/admin/payments"), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          ...form,
+          amount: Number(form.amount),
+          reference: form.reference.trim(),
+          description: form.description.trim(),
+        }),
+      });
+      if (!res.ok) throw new Error(await readApiError(res));
+      const json = await res.json();
+      if (!json.success) throw new Error(json.error || "Failed to create payment");
+      if (json.invoice_number) {
+        toast.success(`Payment registered · Invoice ${json.invoice_number}`);
+      } else {
+        toast.success("Payment registered");
+      }
+      setShowRegister(false);
+      await fetchData();
+    } catch (e: any) {
+      toast.error(e.message || "Failed to register payment");
+    } finally {
+      setSaving(false);
+    }
+  };
 
   return (
     <AdminLayout>
@@ -358,12 +281,15 @@ export default function AdminPayments() {
           <div>
             <h1 className="text-2xl font-bold text-slate-900">Payments</h1>
             <p className="text-sm text-slate-500 mt-0.5">
-              Track all student payment transactions
+              Track and register teacher-student payments
             </p>
           </div>
-          <button className="inline-flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-semibold px-4 py-2.5 rounded-xl transition-colors">
-            <Download className="w-4 h-4" />
-            Export CSV
+          <button
+            onClick={openRegisterModal}
+            className="inline-flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-semibold px-4 py-2.5 rounded-xl transition-colors"
+          >
+            <Plus className="w-4 h-4" />
+            Register Payment
           </button>
         </div>
 
@@ -417,7 +343,7 @@ export default function AdminPayments() {
               <input
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
-                placeholder="Search by student, invoice, or course..."
+                placeholder="Search by student, teacher, reference, or description..."
                 className="w-full pl-10 pr-4 py-2.5 text-sm border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-400"
               />
             </div>
@@ -440,6 +366,7 @@ export default function AdminPayments() {
                 { value: "card", label: "Credit Card" },
                 { value: "bank", label: "Bank Transfer" },
                 { value: "paypal", label: "PayPal" },
+                { value: "cash", label: "Cash" },
               ]}
             />
           </div>
@@ -452,13 +379,13 @@ export default function AdminPayments() {
               <thead>
                 <tr className="border-b border-slate-100 bg-slate-50">
                   <th className="text-left px-5 py-3.5 text-xs font-semibold text-slate-500 uppercase tracking-wide">
-                    Invoice
+                    Reference
                   </th>
                   <th className="text-left px-5 py-3.5 text-xs font-semibold text-slate-500 uppercase tracking-wide">
                     Student
                   </th>
                   <th className="text-left px-5 py-3.5 text-xs font-semibold text-slate-500 uppercase tracking-wide hidden md:table-cell">
-                    Course
+                    Teacher
                   </th>
                   <th className="text-left px-5 py-3.5 text-xs font-semibold text-slate-500 uppercase tracking-wide hidden lg:table-cell">
                     Method
@@ -476,7 +403,16 @@ export default function AdminPayments() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-50">
-                {filtered.length === 0 ? (
+                {loading ? (
+                  <tr>
+                    <td
+                      colSpan={8}
+                      className="text-center py-12 text-slate-400 text-sm"
+                    >
+                      Loading payments...
+                    </td>
+                  </tr>
+                ) : filtered.length === 0 ? (
                   <tr>
                     <td
                       colSpan={8}
@@ -497,7 +433,7 @@ export default function AdminPayments() {
                       >
                         <td className="px-5 py-4">
                           <span className="font-mono text-xs font-semibold text-slate-700">
-                            {p.invoice_number}
+                            {p.reference || `PAY-${p.id.slice(0, 8)}`}
                           </span>
                         </td>
                         <td className="px-5 py-4">
@@ -526,7 +462,7 @@ export default function AdminPayments() {
                         </td>
                         <td className="px-5 py-4 hidden md:table-cell">
                           <span className="text-slate-600 text-sm">
-                            {p.course_title}
+                            {p.teacher_name}
                           </span>
                         </td>
                         <td className="px-5 py-4 hidden lg:table-cell">
@@ -558,7 +494,7 @@ export default function AdminPayments() {
                         </td>
                         <td className="px-5 py-4 hidden lg:table-cell">
                           <span className="text-slate-400 text-sm">
-                            {format(p.date, "MMM d, yyyy")}
+                            {format(new Date(p.payment_date), "MMM d, yyyy")}
                           </span>
                         </td>
                         <td className="px-5 py-4 text-right">
@@ -579,7 +515,7 @@ export default function AdminPayments() {
           {filtered.length > 0 && (
             <div className="px-5 py-3.5 border-t border-slate-100 bg-slate-50 flex items-center justify-between">
               <span className="text-xs text-slate-500">
-                {filtered.length} of {MOCK_PAYMENTS.length} payments
+                {filtered.length} of {payments.length} payments
               </span>
               <span className="text-xs font-semibold text-slate-700">
                 Total:{" "}
@@ -612,7 +548,7 @@ export default function AdminPayments() {
                   Payment Details
                 </h2>
                 <p className="text-xs text-slate-400 font-mono mt-0.5">
-                  {selected.invoice_number}
+                  {selected.reference || `PAY-${selected.id.slice(0, 8)}`}
                 </p>
               </div>
               <button
@@ -626,10 +562,10 @@ export default function AdminPayments() {
               {[
                 ["Student", selected.student_name],
                 ["Email", selected.student_email],
-                ["Course", selected.course_title],
+                ["Teacher", selected.teacher_name],
                 ["Amount", fmtCurrency(selected.amount)],
                 ["Method", METHOD_CFG[selected.method].label],
-                ["Date", format(selected.date, "MMMM d, yyyy")],
+                ["Date", format(new Date(selected.payment_date), "MMMM d, yyyy")],
                 ["Description", selected.description],
               ].map(([k, v]) => (
                 <div key={k} className="flex justify-between items-start">
@@ -658,6 +594,224 @@ export default function AdminPayments() {
                 </span>
               </div>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Register Payment Modal */}
+      {showRegister && (
+        <div
+          className="fixed inset-0 bg-black/40 backdrop-blur-sm z-50 flex items-center justify-center p-4"
+          onClick={() => setShowRegister(false)}
+        >
+          <div
+            className="bg-white rounded-2xl shadow-2xl w-full max-w-xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="p-6 border-b border-slate-100 flex items-center justify-between">
+              <div>
+                <h2 className="text-lg font-bold text-slate-900">Register Payment</h2>
+                <p className="text-xs text-slate-500 mt-0.5">
+                  Select teacher, then student, and save payment details
+                </p>
+              </div>
+              <button
+                onClick={() => setShowRegister(false)}
+                className="p-2 rounded-xl hover:bg-slate-100 text-slate-400 hover:text-slate-600 transition-colors"
+              >
+                <XCircle className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleCreatePayment} className="p-6 space-y-4">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-xs font-semibold text-slate-500 mb-1.5">
+                    Teacher
+                  </label>
+                  <select
+                    value={form.teacher_id}
+                    onChange={(e) =>
+                      setForm((prev) => ({
+                        ...prev,
+                        teacher_id: e.target.value,
+                        student_id: "",
+                      }))
+                    }
+                    className="w-full px-3 py-2.5 text-sm border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-400 bg-white"
+                    required
+                  >
+                    <option value="">Select teacher</option>
+                    {teacherOptions.map((teacher) => (
+                      <option key={teacher.id} value={teacher.id}>
+                        {teacher.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-slate-500 mb-1.5">
+                    Student
+                  </label>
+                  <select
+                    value={form.student_id}
+                    onChange={(e) =>
+                      setForm((prev) => ({ ...prev, student_id: e.target.value }))
+                    }
+                    className="w-full px-3 py-2.5 text-sm border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-400 bg-white disabled:bg-slate-50 disabled:text-slate-400"
+                    required
+                    disabled={!form.teacher_id}
+                  >
+                    <option value="">
+                      {form.teacher_id ? "Select student" : "Select teacher first"}
+                    </option>
+                    {studentsForTeacher.map((student) => (
+                      <option key={student.id} value={student.id}>
+                        {student.name} ({student.email})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-xs font-semibold text-slate-500 mb-1.5">
+                    Amount
+                  </label>
+                  <input
+                    type="number"
+                    min="0.01"
+                    step="0.01"
+                    value={form.amount}
+                    onChange={(e) => setForm((prev) => ({ ...prev, amount: e.target.value }))}
+                    className="w-full px-3 py-2.5 text-sm border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-400"
+                    placeholder="0.00"
+                    required
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-slate-500 mb-1.5">
+                    Date
+                  </label>
+                  <input
+                    type="date"
+                    value={form.payment_date}
+                    onChange={(e) =>
+                      setForm((prev) => ({ ...prev, payment_date: e.target.value }))
+                    }
+                    className="w-full px-3 py-2.5 text-sm border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-400"
+                    required
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div>
+                  <label className="block text-xs font-semibold text-slate-500 mb-1.5">
+                    Method
+                  </label>
+                  <select
+                    value={form.method}
+                    onChange={(e) =>
+                      setForm((prev) => ({
+                        ...prev,
+                        method: e.target.value as PaymentMethod,
+                      }))
+                    }
+                    className="w-full px-3 py-2.5 text-sm border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-400 bg-white"
+                  >
+                    <option value="bank">Bank Transfer</option>
+                    <option value="card">Credit Card</option>
+                    <option value="paypal">PayPal</option>
+                    <option value="cash">Cash</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-slate-500 mb-1.5">
+                    Status
+                  </label>
+                  <select
+                    value={form.status}
+                    onChange={(e) =>
+                      setForm((prev) => ({
+                        ...prev,
+                        status: e.target.value as PaymentStatus,
+                      }))
+                    }
+                    className="w-full px-3 py-2.5 text-sm border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-400 bg-white"
+                  >
+                    <option value="completed">Completed</option>
+                    <option value="pending">Pending</option>
+                    <option value="failed">Failed</option>
+                    <option value="refunded">Refunded</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-slate-500 mb-1.5">
+                    Currency
+                  </label>
+                  <input
+                    value={form.currency}
+                    onChange={(e) =>
+                      setForm((prev) => ({
+                        ...prev,
+                        currency: e.target.value.toUpperCase(),
+                      }))
+                    }
+                    className="w-full px-3 py-2.5 text-sm border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-400"
+                    placeholder="USD"
+                    maxLength={5}
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-xs font-semibold text-slate-500 mb-1.5">
+                    Reference
+                  </label>
+                  <input
+                    value={form.reference}
+                    onChange={(e) =>
+                      setForm((prev) => ({ ...prev, reference: e.target.value }))
+                    }
+                    className="w-full px-3 py-2.5 text-sm border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-400"
+                    placeholder="Optional payment reference"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-slate-500 mb-1.5">
+                    Description
+                  </label>
+                  <input
+                    value={form.description}
+                    onChange={(e) =>
+                      setForm((prev) => ({ ...prev, description: e.target.value }))
+                    }
+                    className="w-full px-3 py-2.5 text-sm border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-400"
+                    placeholder="What is this payment for?"
+                  />
+                </div>
+              </div>
+
+              <div className="pt-2 flex items-center justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => setShowRegister(false)}
+                  className="px-4 py-2.5 text-sm font-semibold text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-xl transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={saving}
+                  className="px-4 py-2.5 text-sm font-semibold text-white bg-indigo-600 hover:bg-indigo-700 rounded-xl transition-colors disabled:opacity-60"
+                >
+                  {saving ? "Saving..." : "Save Payment"}
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}

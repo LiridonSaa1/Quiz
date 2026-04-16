@@ -1,6 +1,15 @@
 import React, { useEffect, useState } from 'react';
 import AdminLayout from '../../components/layout/AdminLayout';
 import { toast } from 'sonner';
+import { motion } from 'motion/react';
+import {
+  AdminListFilterBar,
+  AdminListPageShell,
+  ADMIN_LIST_SEARCH_INPUT,
+  ADMIN_LIST_SELECT,
+  ADMIN_LIST_CARD_GRID,
+  ADMIN_LIST_ITEM_CARD,
+} from '../../components/admin/AdminListPageShell';
 import { supabase } from '../../supabase';
 import {
   Award, Plus, Search, CheckCircle2, XCircle,
@@ -9,8 +18,6 @@ import {
 } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { format } from 'date-fns';
-import { TableRowsSkeleton } from '../../components/ui/Skeleton';
-
 type CertStatus = 'issued' | 'revoked';
 
 interface Certificate {
@@ -30,6 +37,7 @@ interface Certificate {
 
 interface Course { id: string; title: string }
 interface StudentRec { id: string; display_name: string; email: string }
+interface StudentApiRow { uid?: string; id?: string; displayName?: string; display_name?: string; email?: string }
 
 const STATUS_CFG: Record<CertStatus, { label: string; bg: string; text: string; dot: string; icon: React.ElementType }> = {
   issued:  { label: 'Issued',  bg: 'bg-emerald-50', text: 'text-emerald-700', dot: 'bg-emerald-500', icon: CheckCircle2 },
@@ -92,12 +100,33 @@ export default function AdminCertificates() {
   const fetchData = async () => {
     setLoading(true);
     try {
-      const [{ data: rawCerts, error }, { data: c }, { data: s }] = await Promise.all([
+      const [{ data: rawCerts, error }, { data: c }, studentsApiRes] = await Promise.all([
         supabase.from('certificates').select('*').order('issued_at', { ascending: false }),
         supabase.from('courses').select('id,title'),
-        supabase.from('profiles').select('id,display_name,email').eq('role', 'student'),
+        fetch('/api/admin/students').then(async (r) => {
+          const json = await r.json().catch(() => null);
+          return r.ok && json?.success ? json.students : null;
+        }).catch(() => null),
       ]);
       if (error) throw error;
+
+      let s: StudentRec[] = [];
+      if (Array.isArray(studentsApiRes) && studentsApiRes.length > 0) {
+        s = (studentsApiRes as StudentApiRow[])
+          .map((row) => ({
+            id: String(row.uid || row.id || ''),
+            display_name: String(row.displayName || row.display_name || ''),
+            email: String(row.email || ''),
+          }))
+          .filter((row) => row.id && row.display_name);
+      } else {
+        // Fallback for environments without API routing.
+        const { data: directStudents } = await supabase
+          .from('profiles')
+          .select('id,display_name,email')
+          .eq('role', 'student');
+        s = (directStudents || []) as StudentRec[];
+      }
 
       const courseMap: Record<string, string> = {};
       (c || []).forEach((course: any) => { courseMap[course.id] = course.title; });
@@ -135,10 +164,10 @@ export default function AdminCertificates() {
   });
 
   const stats = [
-    { label: 'Total Issued', value: certs.length, icon: Award, iconBg: 'bg-amber-100 text-amber-600', grad: 'from-amber-500 to-orange-500', ring: 'ring-amber-100' },
-    { label: 'Active', value: certs.filter(c => c.status === 'issued').length, icon: CheckCircle2, iconBg: 'bg-emerald-100 text-emerald-600', grad: 'from-emerald-500 to-teal-500', ring: 'ring-emerald-100' },
-    { label: 'Revoked', value: certs.filter(c => c.status === 'revoked').length, icon: XCircle, iconBg: 'bg-rose-100 text-rose-600', grad: 'from-rose-500 to-pink-500', ring: 'ring-rose-100' },
-    { label: 'This Month', value: certs.filter(c => { const d = new Date(c.issued_at); const n = new Date(); return d.getMonth() === n.getMonth() && d.getFullYear() === n.getFullYear(); }).length, icon: Calendar, iconBg: 'bg-violet-100 text-violet-600', grad: 'from-violet-500 to-purple-500', ring: 'ring-violet-100' },
+    { label: 'Total Issued', value: certs.length, gradient: 'from-amber-500 to-orange-600', shadow: 'shadow-amber-500/25', icon: Award },
+    { label: 'Active', value: certs.filter(c => c.status === 'issued').length, gradient: 'from-emerald-500 to-teal-600', shadow: 'shadow-emerald-500/25', icon: CheckCircle2 },
+    { label: 'Revoked', value: certs.filter(c => c.status === 'revoked').length, gradient: 'from-rose-500 to-pink-600', shadow: 'shadow-rose-500/25', icon: XCircle },
+    { label: 'This Month', value: certs.filter(c => { const d = new Date(c.issued_at); const n = new Date(); return d.getMonth() === n.getMonth() && d.getFullYear() === n.getFullYear(); }).length, gradient: 'from-violet-500 to-violet-600', shadow: 'shadow-violet-500/25', icon: Calendar },
   ];
 
   const openAdd = () => {
@@ -219,201 +248,142 @@ export default function AdminCertificates() {
 
   return (
     <AdminLayout>
-      <div className="space-y-6">
-        {/* Header */}
-        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-          <div>
-            <h1 className="text-2xl font-bold text-slate-800">Certificates</h1>
-            <p className="text-sm text-slate-500 mt-0.5">Issue and manage student achievement certificates</p>
-          </div>
-          <button
+      <AdminListPageShell
+        breadcrumbLabel="Certificates"
+        title="Certificates"
+        description="Issue and manage student achievement certificates."
+        action={
+          <motion.button
+            type="button"
             onClick={openAdd}
-            className="flex items-center gap-2 bg-amber-500 hover:bg-amber-600 text-white text-sm font-semibold px-4 py-2.5 rounded-xl shadow-lg shadow-amber-200 transition-all"
+            whileHover={{ scale: 1.04, y: -2 }}
+            whileTap={{ scale: 0.97 }}
+            className="inline-flex items-center gap-2 px-6 py-3 rounded-2xl font-bold text-sm text-white shrink-0 transition-all"
+            style={{
+              background: 'linear-gradient(135deg, #818cf8 0%, #a78bfa 100%)',
+              boxShadow: '0 8px 32px rgba(139,92,246,0.45), 0 2px 8px rgba(0,0,0,0.15)',
+            }}
           >
             <Plus className="w-4 h-4" />
             Issue Certificate
-          </button>
-        </div>
-
-        {/* Stats */}
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-          {stats.map(s => (
-            <div key={s.label} className="bg-white rounded-2xl border border-slate-100 shadow-sm hover:shadow-md transition-all overflow-hidden">
-              <div className={cn("h-0.5 bg-gradient-to-r", s.grad)} />
-              <div className="p-5">
-                <div className={cn("p-2.5 rounded-xl ring-4 inline-flex mb-4", s.iconBg, s.ring)}>
-                  <s.icon className="w-5 h-5" />
-                </div>
-                <p className="text-2xl font-bold text-slate-900 tracking-tight">{s.value}</p>
-                <p className="text-sm font-medium text-slate-700 mt-0.5">{s.label}</p>
-              </div>
+          </motion.button>
+        }
+        stats={stats}
+        filterBar={
+          <AdminListFilterBar>
+            <div className="relative flex-1 min-w-[200px]">
+              <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-indigo-400" />
+              <input
+                value={search}
+                onChange={e => setSearch(e.target.value)}
+                placeholder="Search student, course, certificate #..."
+                className={ADMIN_LIST_SEARCH_INPUT}
+              />
             </div>
-          ))}
-        </div>
-
-        {/* Filters */}
-        <div className="bg-white rounded-xl border border-slate-200 p-4 flex flex-wrap gap-3">
-          <div className="relative flex-1 min-w-[200px]">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
-            <input
-              value={search} onChange={e => setSearch(e.target.value)}
-              placeholder="Search student, course, certificate #..."
-              className="w-full pl-9 pr-3 py-2 text-sm bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-500/30"
-            />
-          </div>
-          <select value={statusFilter} onChange={e => setStatusFilter(e.target.value)} className="px-3 py-2 text-sm bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-500/30">
-            <option value="all">All Status</option>
-            <option value="issued">Issued</option>
-            <option value="revoked">Revoked</option>
-          </select>
-          <select value={courseFilter} onChange={e => setCourseFilter(e.target.value)} className="px-3 py-2 text-sm bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-500/30">
-            <option value="all">All Courses</option>
-            {courses.map(c => <option key={c.id} value={c.id}>{c.title}</option>)}
-          </select>
-        </div>
-
-        {/* Cards grid on desktop, list on mobile */}
+            <select value={statusFilter} onChange={e => setStatusFilter(e.target.value)} className={ADMIN_LIST_SELECT}>
+              <option value="all">All Status</option>
+              <option value="issued">Issued</option>
+              <option value="revoked">Revoked</option>
+            </select>
+            <select value={courseFilter} onChange={e => setCourseFilter(e.target.value)} className={ADMIN_LIST_SELECT}>
+              <option value="all">All Courses</option>
+              {courses.map(c => <option key={c.id} value={c.id}>{c.title}</option>)}
+            </select>
+          </AdminListFilterBar>
+        }
+      >
         {loading ? (
-          <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
-            <TableRowsSkeleton rows={6} className="p-6" />
+          <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
+            <div className={ADMIN_LIST_CARD_GRID}>
+              {Array(6).fill(0).map((_, i) => (
+                <div key={i} className="h-56 rounded-2xl bg-slate-100 animate-pulse" />
+              ))}
+            </div>
           </div>
         ) : filtered.length === 0 ? (
-          <div className="flex flex-col items-center justify-center py-20 gap-3 text-slate-400 bg-white rounded-xl border border-slate-200">
+          <div className="flex flex-col items-center justify-center py-20 gap-3 text-slate-400 bg-white rounded-2xl border border-slate-100 shadow-sm">
             <Award className="w-10 h-10 opacity-30" />
             <p className="text-sm">No certificates found</p>
-            <button onClick={openAdd} className="text-xs text-amber-600 hover:underline">Issue the first one</button>
+            <button type="button" onClick={openAdd} className="text-xs text-indigo-600 font-semibold hover:underline">Issue the first one</button>
           </div>
         ) : (
-          <>
-            {/* Desktop table */}
-            <div className="hidden md:block bg-white rounded-xl border border-slate-200 overflow-hidden">
-              <div className="overflow-x-auto">
-                <table className="w-full text-sm">
-                  <thead>
-                    <tr className="border-b border-slate-100 bg-slate-50">
-                      <th className="text-left px-5 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">Student</th>
-                      <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">Certificate</th>
-                      <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">Course</th>
-                      <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">Grade</th>
-                      <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">Issued</th>
-                      <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">Status</th>
-                      <th className="px-4 py-3" />
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-50">
-                    {filtered.map(cert => {
-                      const sc = STATUS_CFG[cert.status];
-                      const name = cert.student?.display_name || 'Unknown';
-                      const initials = name.split(' ').map(n => n[0]).join('').substring(0, 2).toUpperCase();
-                      const gradeColor = cert.grade ? (GRADE_COLORS[cert.grade] || 'text-slate-600 bg-slate-100') : null;
-                      return (
-                        <tr key={cert.id} className="hover:bg-slate-50/70 group transition-colors">
-                          <td className="px-5 py-3.5">
-                            <div className="flex items-center gap-3">
-                              <div className={cn('w-9 h-9 rounded-full bg-gradient-to-br flex items-center justify-center text-white text-xs font-bold shrink-0', getAvatarColor(name))}>
-                                {initials}
-                              </div>
-                              <div>
-                                <div className="font-semibold text-slate-800 leading-tight">{name}</div>
-                                <div className="text-xs text-slate-400">{cert.student?.email}</div>
-                              </div>
-                            </div>
-                          </td>
-                          <td className="px-4 py-3.5">
-                            <div className="font-medium text-slate-700">{cert.title}</div>
-                            <div className="flex items-center gap-1 text-xs text-slate-400 mt-0.5">
-                              <Hash className="w-3 h-3" />{cert.certificate_number}
-                            </div>
-                          </td>
-                          <td className="px-4 py-3.5 text-slate-600">{cert.course?.title || <span className="text-slate-300">—</span>}</td>
-                          <td className="px-4 py-3.5">
-                            <div className="flex items-center gap-2">
-                              {cert.grade && gradeColor && (
-                                <span className={cn('px-2 py-0.5 rounded-full text-xs font-bold', gradeColor)}>{cert.grade}</span>
-                              )}
-                              {cert.score !== null && <span className="text-xs text-slate-500">{cert.score}%</span>}
-                              {!cert.grade && cert.score === null && <span className="text-slate-300">—</span>}
-                            </div>
-                          </td>
-                          <td className="px-4 py-3.5">
-                            <div className="flex items-center gap-1.5 text-slate-600">
-                              <Calendar className="w-3.5 h-3.5 text-slate-400" />
-                              {format(new Date(cert.issued_at), 'MMM d, yyyy')}
-                            </div>
-                          </td>
-                          <td className="px-4 py-3.5">
-                            <button onClick={() => toggleStatus(cert)} className={cn('inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium transition-opacity hover:opacity-80', sc.bg, sc.text)}>
-                              <span className={cn('w-1.5 h-1.5 rounded-full', sc.dot)} />
-                              {sc.label}
-                            </button>
-                          </td>
-                          <td className="px-4 py-3.5">
-                            <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                              <button onClick={() => setPreviewCert(cert)} className="p-1.5 hover:bg-amber-50 hover:text-amber-600 rounded-lg transition-colors" title="Preview">
-                                <Eye className="w-3.5 h-3.5" />
-                              </button>
-                              <button onClick={() => openEdit(cert)} className="p-1.5 hover:bg-blue-50 hover:text-blue-600 rounded-lg transition-colors">
-                                <Pencil className="w-3.5 h-3.5" />
-                              </button>
-                              <button onClick={() => setDeleteId(cert.id)} className="p-1.5 hover:bg-rose-50 hover:text-rose-500 rounded-lg transition-colors">
-                                <Trash2 className="w-3.5 h-3.5" />
-                              </button>
-                            </div>
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
-              <div className="px-5 py-3 border-t border-slate-100 text-xs text-slate-400">
-                Showing {filtered.length} of {certs.length} certificates
-              </div>
-            </div>
-
-            {/* Mobile cards */}
-            <div className="md:hidden space-y-3">
+          <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
+            <div className={ADMIN_LIST_CARD_GRID}>
               {filtered.map(cert => {
                 const sc = STATUS_CFG[cert.status];
                 const name = cert.student?.display_name || 'Unknown';
                 const initials = name.split(' ').map(n => n[0]).join('').substring(0, 2).toUpperCase();
+                const gradeColor = cert.grade ? (GRADE_COLORS[cert.grade] || 'text-slate-600 bg-slate-100') : null;
                 return (
-                  <div key={cert.id} className="bg-white rounded-xl border border-slate-200 p-4">
+                  <div key={cert.id} className={ADMIN_LIST_ITEM_CARD}>
                     <div className="flex items-start gap-3">
                       <div className={cn('w-12 h-12 rounded-xl bg-gradient-to-br flex items-center justify-center text-white text-sm font-bold shrink-0', getAvatarColor(name))}>
                         {initials}
                       </div>
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-start justify-between gap-2">
-                          <div>
-                            <p className="font-semibold text-slate-800 text-sm">{name}</p>
-                            <p className="text-xs text-slate-500">{cert.title}</p>
-                          </div>
-                          <span className={cn('inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium shrink-0', sc.bg, sc.text)}>
+                      <div className="min-w-0 flex-1">
+                        <p className="font-semibold text-slate-900 text-sm">{name}</p>
+                        <p className="text-xs text-slate-400 truncate">{cert.student?.email}</p>
+                        <p className="text-sm font-medium text-slate-800 mt-2">{cert.title}</p>
+                        <div className="flex flex-wrap items-center gap-2 mt-2">
+                          <button
+                            type="button"
+                            onClick={() => toggleStatus(cert)}
+                            className={cn('inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium transition-opacity hover:opacity-80', sc.bg, sc.text)}
+                          >
                             <span className={cn('w-1.5 h-1.5 rounded-full', sc.dot)} />
                             {sc.label}
-                          </span>
-                        </div>
-                        <div className="flex flex-wrap gap-2 mt-2 text-xs text-slate-500">
-                          {cert.course?.title && <span className="flex items-center gap-0.5"><BookOpen className="w-3 h-3" />{cert.course.title}</span>}
-                          <span className="flex items-center gap-0.5"><Hash className="w-3 h-3" />{cert.certificate_number}</span>
-                          <span>{format(new Date(cert.issued_at), 'MMM d, yyyy')}</span>
-                          {cert.grade && <span className="font-semibold text-emerald-600">{cert.grade}</span>}
+                          </button>
                         </div>
                       </div>
                     </div>
-                    <div className="flex justify-end gap-1 mt-2">
-                      <button onClick={() => setPreviewCert(cert)} className="p-1.5 hover:bg-amber-50 rounded-lg"><Eye className="w-3.5 h-3.5 text-slate-400" /></button>
-                      <button onClick={() => openEdit(cert)} className="p-1.5 hover:bg-blue-50 rounded-lg"><Pencil className="w-3.5 h-3.5 text-slate-400" /></button>
-                      <button onClick={() => setDeleteId(cert.id)} className="p-1.5 hover:bg-rose-50 rounded-lg"><Trash2 className="w-3.5 h-3.5 text-slate-400" /></button>
+                    <div className="mt-4 space-y-2 text-xs text-slate-600 border-t border-slate-100 pt-3">
+                      <div className="flex items-start justify-between gap-2">
+                        <span className="text-slate-400 font-semibold uppercase tracking-wider shrink-0">Number</span>
+                        <span className="flex items-center gap-1 text-right font-mono text-[11px]"><Hash className="w-3 h-3 shrink-0" />{cert.certificate_number}</span>
+                      </div>
+                      <div className="flex justify-between gap-2">
+                        <span className="text-slate-400 font-semibold uppercase tracking-wider">Course</span>
+                        <span className="text-right truncate">{cert.course?.title || '—'}</span>
+                      </div>
+                      <div className="flex justify-between gap-2 items-center">
+                        <span className="text-slate-400 font-semibold uppercase tracking-wider">Grade</span>
+                        <span className="flex items-center gap-2">
+                          {cert.grade && gradeColor && (
+                            <span className={cn('px-2 py-0.5 rounded-full text-xs font-bold', gradeColor)}>{cert.grade}</span>
+                          )}
+                          {cert.score !== null && <span>{cert.score}%</span>}
+                          {!cert.grade && cert.score === null ? '—' : null}
+                        </span>
+                      </div>
+                      <div className="flex justify-between gap-2 items-center">
+                        <span className="text-slate-400 font-semibold uppercase tracking-wider">Issued</span>
+                        <span className="inline-flex items-center gap-1">
+                          <Calendar className="w-3.5 h-3.5 text-slate-400" />
+                          {format(new Date(cert.issued_at), 'MMM d, yyyy')}
+                        </span>
+                      </div>
+                    </div>
+                    <div className="flex justify-end gap-1 mt-4 pt-3 border-t border-slate-50">
+                      <button type="button" onClick={() => setPreviewCert(cert)} className="p-2 rounded-lg text-slate-400 hover:bg-amber-50 hover:text-amber-600 transition-colors" title="Preview">
+                        <Eye className="w-4 h-4" />
+                      </button>
+                      <button type="button" onClick={() => openEdit(cert)} className="p-2 rounded-lg text-slate-400 hover:bg-indigo-50 hover:text-indigo-600 transition-colors">
+                        <Pencil className="w-4 h-4" />
+                      </button>
+                      <button type="button" onClick={() => setDeleteId(cert.id)} className="p-2 rounded-lg text-slate-400 hover:bg-rose-50 hover:text-rose-500 transition-colors">
+                        <Trash2 className="w-4 h-4" />
+                      </button>
                     </div>
                   </div>
                 );
               })}
             </div>
-          </>
+            <div className="px-5 py-3 border-t border-slate-100 text-xs text-slate-400">
+              Showing {filtered.length} of {certs.length} certificates
+            </div>
+          </div>
         )}
-      </div>
+      </AdminListPageShell>
 
       {/* Add/Edit Modal */}
       {showModal && (

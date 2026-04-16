@@ -1,14 +1,22 @@
 import React, { useEffect, useState } from 'react';
 import AdminLayout from '../../components/layout/AdminLayout';
 import { toast } from 'sonner';
+import { motion } from 'motion/react';
+import {
+  AdminListFilterBar,
+  AdminListPageShell,
+  ADMIN_LIST_SEARCH_INPUT,
+  ADMIN_LIST_SELECT,
+  ADMIN_LIST_CARD_GRID,
+  ADMIN_LIST_ITEM_CARD,
+} from '../../components/admin/AdminListPageShell';
 import { formatDistanceToNow } from 'date-fns';
 import {
   MessageSquare, Plus, Search, Trash2, Pencil, X,
-  ThumbsUp, MessageCircle, Pin, Archive, Flame,
+  ThumbsUp, MessageCircle, Pin, Archive,
   HelpCircle, BookMarked, Sparkles, Globe
 } from 'lucide-react';
 import { cn } from '../../lib/utils';
-import { TableRowsSkeleton } from '../../components/ui/Skeleton';
 
 type PostStatus   = 'active' | 'pinned' | 'archived';
 type PostCategory = 'general' | 'q_and_a' | 'resources' | 'showcase';
@@ -37,6 +45,13 @@ const STATUS_CFG: Record<PostStatus, { label: string; icon: React.ElementType; c
   active:   { label: 'Active',   icon: Globe,   color: 'text-emerald-600' },
   pinned:   { label: 'Pinned',   icon: Pin,     color: 'text-indigo-600'  },
   archived: { label: 'Archived', icon: Archive, color: 'text-slate-400'   },
+};
+
+const CATEGORY_STAT_STYLE: Record<PostCategory, { gradient: string; shadow: string }> = {
+  general:   { gradient: 'from-slate-500 to-slate-600', shadow: 'shadow-slate-500/25' },
+  q_and_a:   { gradient: 'from-amber-500 to-orange-600', shadow: 'shadow-amber-500/25' },
+  resources: { gradient: 'from-blue-500 to-cyan-600', shadow: 'shadow-blue-500/25' },
+  showcase:  { gradient: 'from-violet-500 to-purple-600', shadow: 'shadow-violet-500/25' },
 };
 
 const AVATAR_COLORS = [
@@ -138,126 +153,129 @@ export default function AdminCommunity() {
     return matchQ && matchC && matchS;
   });
 
+  const statItems = (Object.keys(CATEGORY_CFG) as PostCategory[]).map((k) => {
+    const v = CATEGORY_CFG[k];
+    const st = CATEGORY_STAT_STYLE[k];
+    return {
+      label: v.label,
+      value: posts.filter(p => p.category === k).length,
+      gradient: st.gradient,
+      shadow: st.shadow,
+      icon: v.icon,
+    };
+  });
+
   return (
     <AdminLayout>
-      <div className="space-y-6">
-        {/* Header */}
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-          <div>
-            <h1 className="text-2xl font-bold text-slate-900">Community</h1>
-            <p className="text-slate-500 text-sm mt-0.5">Manage discussions, Q&As, and community posts</p>
-          </div>
-          <button onClick={openCreate}
-            className="flex items-center gap-2 px-4 py-2.5 bg-indigo-600 text-white rounded-xl font-semibold text-sm hover:bg-indigo-700 transition-all shadow-lg shadow-indigo-200 active:scale-[0.98]">
+      <AdminListPageShell
+        breadcrumbLabel="Community"
+        title="Community"
+        description="Manage discussions, Q&As, and community posts."
+        statsGridClassName="grid grid-cols-2 sm:grid-cols-4 gap-4"
+        stats={statItems}
+        action={
+          <motion.button
+            type="button"
+            onClick={openCreate}
+            whileHover={{ scale: 1.04, y: -2 }}
+            whileTap={{ scale: 0.97 }}
+            className="inline-flex items-center gap-2 px-6 py-3 rounded-2xl font-bold text-sm text-white shrink-0 transition-all"
+            style={{
+              background: 'linear-gradient(135deg, #818cf8 0%, #a78bfa 100%)',
+              boxShadow: '0 8px 32px rgba(139,92,246,0.45), 0 2px 8px rgba(0,0,0,0.15)',
+            }}
+          >
             <Plus className="w-4 h-4" /> New Post
-          </button>
-        </div>
-
-        {/* Stats */}
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-          {Object.entries(CATEGORY_CFG).map(([k, v]) => {
-            const Icon = v.icon;
-            const count = posts.filter(p => p.category === k).length;
-            return (
-              <div key={k} className="bg-white rounded-2xl border border-slate-100 shadow-sm hover:shadow-md transition-all overflow-hidden">
-                <div className={cn("h-0.5 bg-gradient-to-r", v.grad)} />
-                <div className="p-5">
-                  <div className={cn("p-2.5 rounded-xl ring-4 inline-flex mb-4", v.iconBg, v.ring)}>
-                    <Icon className="w-5 h-5" />
-                  </div>
-                  <p className="text-2xl font-bold text-slate-900 tracking-tight">{count}</p>
-                  <p className="text-sm font-medium text-slate-700 mt-0.5">{v.label}</p>
-                </div>
-              </div>
-            );
-          })}
-        </div>
-
-        {/* Filters */}
-        <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-4 flex flex-col sm:flex-row gap-3">
-          <div className="relative flex-1">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
-            <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search posts or authors..."
-              className="w-full pl-9 pr-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500" />
-          </div>
-          <select value={categoryFilter} onChange={e => setCategoryFilter(e.target.value)}
-            className="px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500">
-            <option value="all">All Categories</option>
-            {Object.entries(CATEGORY_CFG).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
-          </select>
-          <select value={statusFilter} onChange={e => setStatusFilter(e.target.value)}
-            className="px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500">
-            <option value="all">All Status</option>
-            {Object.entries(STATUS_CFG).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
-          </select>
-        </div>
-
-        {/* Posts */}
-        <div className="space-y-3">
+          </motion.button>
+        }
+        filterBar={
+          <AdminListFilterBar>
+            <div className="relative flex-1 min-w-[200px]">
+              <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-indigo-400" />
+              <input
+                value={search}
+                onChange={e => setSearch(e.target.value)}
+                placeholder="Search posts or authors..."
+                className={ADMIN_LIST_SEARCH_INPUT}
+              />
+            </div>
+            <select value={categoryFilter} onChange={e => setCategoryFilter(e.target.value)} className={ADMIN_LIST_SELECT}>
+              <option value="all">All Categories</option>
+              {Object.entries(CATEGORY_CFG).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
+            </select>
+            <select value={statusFilter} onChange={e => setStatusFilter(e.target.value)} className={ADMIN_LIST_SELECT}>
+              <option value="all">All Status</option>
+              {Object.entries(STATUS_CFG).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
+            </select>
+          </AdminListFilterBar>
+        }
+      >
+        <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
           {loading ? (
-            <div className="bg-white rounded-2xl border border-slate-100 shadow-sm">
-              <TableRowsSkeleton rows={4} />
+            <div className={ADMIN_LIST_CARD_GRID}>
+              {Array(6).fill(0).map((_, i) => (
+                <div key={i} className="h-48 rounded-2xl bg-slate-100 animate-pulse" />
+              ))}
             </div>
           ) : filtered.length === 0 ? (
-            <div className="bg-white rounded-2xl border border-slate-100 shadow-sm flex flex-col items-center justify-center h-48 text-slate-400">
+            <div className="flex flex-col items-center justify-center h-48 text-slate-400">
               <MessageSquare className="w-10 h-10 mb-3 opacity-40" />
               <p className="font-medium">No posts found</p>
               <p className="text-sm mt-1">Start the conversation by creating the first post</p>
             </div>
-          ) : filtered.map(post => {
-            const catCfg = CATEGORY_CFG[post.category];
-            const statCfg = STATUS_CFG[post.status];
-            const CatIcon = catCfg.icon;
-            const StatIcon = statCfg.icon;
-            const initials = (post.author?.display_name || '?').split(' ').map(w => w[0]).join('').slice(0, 2).toUpperCase();
-            const aColor = avatarColor(post.author?.display_name || post.id);
-            return (
-              <div key={post.id} className={cn(
-                'bg-white rounded-2xl border shadow-sm p-5 hover:shadow-md transition-all',
-                post.status === 'pinned' ? 'border-indigo-200 bg-indigo-50/30' : 'border-slate-100'
-              )}>
-                <div className="flex items-start gap-4">
-                  {/* Avatar */}
-                  <div className={cn('w-10 h-10 rounded-full bg-gradient-to-br flex items-center justify-center shrink-0 text-white text-sm font-bold shadow-sm', aColor)}>
-                    {initials}
-                  </div>
-                  {/* Content */}
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-start justify-between gap-3">
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <span className={cn('inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold', catCfg.bg, catCfg.text)}>
-                          <CatIcon className="w-3 h-3" />{catCfg.label}
-                        </span>
-                        <span className={cn('inline-flex items-center gap-1 text-xs font-medium', statCfg.color)}>
-                          <StatIcon className="w-3 h-3" />{statCfg.label}
-                        </span>
+          ) : (
+            <div className={ADMIN_LIST_CARD_GRID}>
+              {filtered.map(post => {
+                const catCfg = CATEGORY_CFG[post.category];
+                const statCfg = STATUS_CFG[post.status];
+                const CatIcon = catCfg.icon;
+                const StatIcon = statCfg.icon;
+                const initials = (post.author?.display_name || '?').split(' ').map(w => w[0]).join('').slice(0, 2).toUpperCase();
+                const aColor = avatarColor(post.author?.display_name || post.id);
+                return (
+                  <div key={post.id} className={cn(ADMIN_LIST_ITEM_CARD, post.status === 'pinned' && 'border-indigo-200 bg-indigo-50/30')}>
+                    <div className="flex items-start gap-4">
+                      <div className={cn('w-10 h-10 rounded-full bg-gradient-to-br flex items-center justify-center shrink-0 text-white text-sm font-bold shadow-sm', aColor)}>
+                        {initials}
                       </div>
-                      <div className="flex items-center gap-1.5 shrink-0">
-                        <button onClick={() => openEdit(post)} className="p-1.5 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-all">
-                          <Pencil className="w-4 h-4" />
-                        </button>
-                        <button onClick={() => handleDelete(post.id)} disabled={deleting === post.id}
-                          className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-all disabled:opacity-40">
-                          <Trash2 className="w-4 h-4" />
-                        </button>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className={cn('inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold', catCfg.bg, catCfg.text)}>
+                              <CatIcon className="w-3 h-3" />{catCfg.label}
+                            </span>
+                            <span className={cn('inline-flex items-center gap-1 text-xs font-medium', statCfg.color)}>
+                              <StatIcon className="w-3 h-3" />{statCfg.label}
+                            </span>
+                          </div>
+                          <div className="flex items-center gap-1.5 shrink-0">
+                            <button onClick={() => openEdit(post)} className="p-1.5 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-all">
+                              <Pencil className="w-4 h-4" />
+                            </button>
+                            <button onClick={() => handleDelete(post.id)} disabled={deleting === post.id}
+                              className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-all disabled:opacity-40">
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          </div>
+                        </div>
+                        <h3 className="font-bold text-slate-900 mt-2 leading-snug">{post.title}</h3>
+                        {post.content && <p className="text-slate-500 text-sm mt-1.5 line-clamp-2 leading-relaxed">{post.content}</p>}
+                        <div className="flex items-center gap-4 mt-3 text-xs text-slate-400">
+                          <span className="font-medium">{post.author?.display_name || 'Unknown'}</span>
+                          <span>·</span>
+                          <span>{formatDistanceToNow(new Date(post.created_at), { addSuffix: true })}</span>
+                          <span className="flex items-center gap-1"><ThumbsUp className="w-3.5 h-3.5" />{post.likes_count}</span>
+                          <span className="flex items-center gap-1"><MessageCircle className="w-3.5 h-3.5" />{post.replies_count}</span>
+                        </div>
                       </div>
                     </div>
-                    <h3 className="font-bold text-slate-900 mt-2 leading-snug">{post.title}</h3>
-                    {post.content && <p className="text-slate-500 text-sm mt-1.5 line-clamp-2 leading-relaxed">{post.content}</p>}
-                    <div className="flex items-center gap-4 mt-3 text-xs text-slate-400">
-                      <span className="font-medium">{post.author?.display_name || 'Unknown'}</span>
-                      <span>·</span>
-                      <span>{formatDistanceToNow(new Date(post.created_at), { addSuffix: true })}</span>
-                      <span className="flex items-center gap-1"><ThumbsUp className="w-3.5 h-3.5" />{post.likes_count}</span>
-                      <span className="flex items-center gap-1"><MessageCircle className="w-3.5 h-3.5" />{post.replies_count}</span>
-                    </div>
                   </div>
-                </div>
-              </div>
-            );
-          })}
+                );
+              })}
+            </div>
+          )}
         </div>
-      </div>
+      </AdminListPageShell>
 
       {/* Modal */}
       {showModal && (

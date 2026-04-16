@@ -1,6 +1,15 @@
 import React, { useEffect, useState } from 'react';
 import AdminLayout from '../../components/layout/AdminLayout';
 import { toast } from 'sonner';
+import { motion } from 'motion/react';
+import {
+  AdminListFilterBar,
+  AdminListPageShell,
+  ADMIN_LIST_SEARCH_INPUT,
+  ADMIN_LIST_SELECT,
+  ADMIN_LIST_CARD_GRID,
+  ADMIN_LIST_ITEM_CARD,
+} from '../../components/admin/AdminListPageShell';
 import { supabase } from '../../supabase';
 import {
   ClipboardList, Plus, Search, Star,
@@ -8,8 +17,6 @@ import {
 } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { format, isPast, isToday } from 'date-fns';
-import { TableRowsSkeleton } from '../../components/ui/Skeleton';
-
 type AssignmentStatus = 'draft' | 'published' | 'closed';
 type AssignmentType = 'homework' | 'project' | 'essay' | 'quiz' | 'lab' | 'other';
 
@@ -133,10 +140,10 @@ export default function AdminAssignments() {
   });
 
   const stats = [
-    { label: 'Total', value: assignments.length, icon: ClipboardList, iconBg: 'bg-amber-100 text-amber-600', grad: 'from-amber-500 to-orange-500', ring: 'ring-amber-100' },
-    { label: 'Published', value: assignments.filter(a => a.status === 'published').length, icon: CheckCircle2, iconBg: 'bg-emerald-100 text-emerald-600', grad: 'from-emerald-500 to-teal-500', ring: 'ring-emerald-100' },
-    { label: 'Draft', value: assignments.filter(a => a.status === 'draft').length, icon: FileText, iconBg: 'bg-slate-100 text-slate-500', grad: 'from-slate-400 to-slate-500', ring: 'ring-slate-100' },
-    { label: 'Overdue', value: assignments.filter(a => a.due_date && isPast(new Date(a.due_date)) && !isToday(new Date(a.due_date)) && a.status === 'published').length, icon: AlertCircle, iconBg: 'bg-rose-100 text-rose-600', grad: 'from-rose-500 to-pink-500', ring: 'ring-rose-100' },
+    { label: 'Total', value: assignments.length, gradient: 'from-indigo-500 to-indigo-600', shadow: 'shadow-indigo-500/25', icon: ClipboardList },
+    { label: 'Published', value: assignments.filter(a => a.status === 'published').length, gradient: 'from-emerald-500 to-emerald-600', shadow: 'shadow-emerald-500/25', icon: CheckCircle2 },
+    { label: 'Draft', value: assignments.filter(a => a.status === 'draft').length, gradient: 'from-slate-500 to-slate-600', shadow: 'shadow-slate-500/25', icon: FileText },
+    { label: 'Overdue', value: assignments.filter(a => a.due_date && isPast(new Date(a.due_date)) && !isToday(new Date(a.due_date)) && a.status === 'published').length, gradient: 'from-rose-500 to-pink-600', shadow: 'shadow-rose-500/25', icon: AlertCircle },
   ];
 
   const openAdd = () => {
@@ -213,195 +220,143 @@ export default function AdminAssignments() {
 
   return (
     <AdminLayout>
-      <div className="space-y-6">
-        {/* Header */}
-        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-          <div>
-            <h1 className="text-2xl font-bold text-slate-800">Assignments</h1>
-            <p className="text-sm text-slate-500 mt-0.5">Create and manage all course assignments</p>
-          </div>
-          <button
+      <AdminListPageShell
+        breadcrumbLabel="Assignments"
+        title="Assignments"
+        description="Create and manage all course assignments."
+        action={
+          <motion.button
+            type="button"
             onClick={openAdd}
-            className="flex items-center gap-2 bg-amber-500 hover:bg-amber-600 text-white text-sm font-semibold px-4 py-2.5 rounded-xl shadow-lg shadow-amber-200 transition-all"
+            whileHover={{ scale: 1.04, y: -2 }}
+            whileTap={{ scale: 0.97 }}
+            className="inline-flex items-center gap-2 px-6 py-3 rounded-2xl font-bold text-sm text-white shrink-0 transition-all"
+            style={{
+              background: 'linear-gradient(135deg, #818cf8 0%, #a78bfa 100%)',
+              boxShadow: '0 8px 32px rgba(139,92,246,0.45), 0 2px 8px rgba(0,0,0,0.15)',
+            }}
           >
             <Plus className="w-4 h-4" />
             New Assignment
-          </button>
-        </div>
-
-        {/* Stats */}
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-          {stats.map(s => (
-            <div key={s.label} className="bg-white rounded-2xl border border-slate-100 shadow-sm hover:shadow-md transition-all overflow-hidden">
-              <div className={cn("h-0.5 bg-gradient-to-r", s.grad)} />
-              <div className="p-5">
-                <div className={cn("p-2.5 rounded-xl ring-4 inline-flex mb-4", s.iconBg, s.ring)}>
-                  <s.icon className="w-5 h-5" />
-                </div>
-                <p className="text-2xl font-bold text-slate-900 tracking-tight">{s.value}</p>
-                <p className="text-sm font-medium text-slate-700 mt-0.5">{s.label}</p>
-              </div>
+          </motion.button>
+        }
+        stats={stats}
+        filterBar={
+          <AdminListFilterBar>
+            <div className="relative flex-1 min-w-[200px]">
+              <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-indigo-400" />
+              <input
+                value={search}
+                onChange={e => setSearch(e.target.value)}
+                placeholder="Search assignments..."
+                className={ADMIN_LIST_SEARCH_INPUT}
+              />
             </div>
-          ))}
-        </div>
-
-        {/* Filters */}
-        <div className="bg-white rounded-xl border border-slate-200 p-4 flex flex-wrap gap-3">
-          <div className="relative flex-1 min-w-[200px]">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
-            <input
-              value={search} onChange={e => setSearch(e.target.value)}
-              placeholder="Search assignments..."
-              className="w-full pl-9 pr-3 py-2 text-sm bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-500/30"
-            />
-          </div>
-          <select value={statusFilter} onChange={e => setStatusFilter(e.target.value)} className="px-3 py-2 text-sm bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-500/30">
-            <option value="all">All Status</option>
-            <option value="draft">Draft</option>
-            <option value="published">Published</option>
-            <option value="closed">Closed</option>
-          </select>
-          <select value={typeFilter} onChange={e => setTypeFilter(e.target.value)} className="px-3 py-2 text-sm bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-500/30">
-            <option value="all">All Types</option>
-            {Object.entries(TYPE_CFG).map(([v, c]) => <option key={v} value={v}>{c.label}</option>)}
-          </select>
-          <select value={courseFilter} onChange={e => setCourseFilter(e.target.value)} className="px-3 py-2 text-sm bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-500/30">
-            <option value="all">All Courses</option>
-            {courses.map(c => <option key={c.id} value={c.id}>{c.title}</option>)}
-          </select>
-        </div>
-
-        {/* Table */}
-        <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
+            <select value={statusFilter} onChange={e => setStatusFilter(e.target.value)} className={ADMIN_LIST_SELECT}>
+              <option value="all">All Status</option>
+              <option value="draft">Draft</option>
+              <option value="published">Published</option>
+              <option value="closed">Closed</option>
+            </select>
+            <select value={typeFilter} onChange={e => setTypeFilter(e.target.value)} className={ADMIN_LIST_SELECT}>
+              <option value="all">All Types</option>
+              {Object.entries(TYPE_CFG).map(([v, c]) => <option key={v} value={v}>{c.label}</option>)}
+            </select>
+            <select value={courseFilter} onChange={e => setCourseFilter(e.target.value)} className={ADMIN_LIST_SELECT}>
+              <option value="all">All Courses</option>
+              {courses.map(c => <option key={c.id} value={c.id}>{c.title}</option>)}
+            </select>
+          </AdminListFilterBar>
+        }
+      >
+        <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
           {loading ? (
-            <TableRowsSkeleton rows={6} className="p-6" />
+            <div className={ADMIN_LIST_CARD_GRID}>
+              {Array(6).fill(0).map((_, i) => (
+                <div key={i} className="h-48 rounded-2xl bg-slate-100 animate-pulse" />
+              ))}
+            </div>
           ) : filtered.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-20 gap-3 text-slate-400">
               <ClipboardList className="w-10 h-10 opacity-30" />
               <p className="text-sm">No assignments found</p>
-              <button onClick={openAdd} className="text-xs text-amber-600 hover:underline">Create one now</button>
+              <button type="button" onClick={openAdd} className="text-xs text-indigo-600 font-semibold hover:underline">Create one now</button>
             </div>
           ) : (
             <>
-              {/* Desktop table */}
-              <div className="hidden md:block overflow-x-auto">
-                <table className="w-full text-sm">
-                  <thead>
-                    <tr className="border-b border-slate-100 bg-slate-50">
-                      <th className="text-left px-5 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">Assignment</th>
-                      <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">Type</th>
-                      <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">Course / Class</th>
-                      <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">Due Date</th>
-                      <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">Score</th>
-                      <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">Status</th>
-                      <th className="px-4 py-3" />
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-50">
-                    {filtered.map(a => {
-                      const sc = STATUS_CFG[a.status];
-                      const tc = TYPE_CFG[a.type];
-                      const initials = a.title.substring(0, 2).toUpperCase();
-                      return (
-                        <tr key={a.id} className="hover:bg-slate-50/70 group transition-colors">
-                          <td className="px-5 py-3.5">
-                            <div className="flex items-center gap-3">
-                              <div className={cn('w-9 h-9 rounded-lg bg-gradient-to-br flex items-center justify-center text-white text-xs font-bold shrink-0', getAvatarColor(a.title))}>
-                                {initials}
-                              </div>
-                              <div>
-                                <div className="font-semibold text-slate-800 leading-tight">{a.title}</div>
-                                {a.description && <div className="text-xs text-slate-400 truncate max-w-[200px]">{a.description}</div>}
-                              </div>
-                            </div>
-                          </td>
-                          <td className="px-4 py-3.5">
-                            <span className={cn('inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium', tc.bg, tc.color)}>
-                              {tc.label}
-                            </span>
-                          </td>
-                          <td className="px-4 py-3.5">
-                            <div className="text-slate-700">{a.course?.title || <span className="text-slate-300">—</span>}</div>
-                            {a.class_name && <div className="text-xs text-slate-400">{a.class_name}</div>}
-                          </td>
-                          <td className="px-4 py-3.5">
-                            {a.due_date ? (
-                              <div>
-                                <div className="text-slate-700">{format(new Date(a.due_date), 'MMM d, yyyy')}</div>
-                                {getDueBadge(a.due_date, a.status)}
-                              </div>
-                            ) : <span className="text-slate-300">—</span>}
-                          </td>
-                          <td className="px-4 py-3.5">
-                            <div className="flex items-center gap-1 text-slate-700">
-                              <Star className="w-3.5 h-3.5 text-amber-400" />
-                              {a.max_score} pts
-                            </div>
-                          </td>
-                          <td className="px-4 py-3.5">
-                            <span className={cn('inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium', sc.bg, sc.text)}>
-                              <span className={cn('w-1.5 h-1.5 rounded-full', sc.dot)} />
-                              {sc.label}
-                            </span>
-                          </td>
-                          <td className="px-4 py-3.5">
-                            <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                              <button onClick={() => openEdit(a)} className="p-1.5 hover:bg-amber-50 hover:text-amber-600 rounded-lg transition-colors">
-                                <Pencil className="w-3.5 h-3.5" />
-                              </button>
-                              <button onClick={() => setDeleteId(a.id)} className="p-1.5 hover:bg-rose-50 hover:text-rose-500 rounded-lg transition-colors">
-                                <Trash2 className="w-3.5 h-3.5" />
-                              </button>
-                            </div>
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
-
-              {/* Mobile cards */}
-              <div className="md:hidden divide-y divide-slate-100">
+              <div className={ADMIN_LIST_CARD_GRID}>
                 {filtered.map(a => {
                   const sc = STATUS_CFG[a.status];
                   const tc = TYPE_CFG[a.type];
+                  const initials = a.title.substring(0, 2).toUpperCase();
+                  const dueBadge = getDueBadge(a.due_date, a.status);
                   return (
-                    <div key={a.id} className="p-4 flex items-start gap-3">
-                      <div className={cn('w-10 h-10 rounded-lg bg-gradient-to-br flex items-center justify-center text-white text-xs font-bold shrink-0', getAvatarColor(a.title))}>
-                        {a.title.substring(0, 2).toUpperCase()}
+                    <div key={a.id} className={ADMIN_LIST_ITEM_CARD}>
+                      <div className="flex items-start gap-3">
+                        <div className={cn('w-10 h-10 rounded-xl bg-gradient-to-br flex items-center justify-center text-white text-xs font-bold shrink-0', getAvatarColor(a.title))}>
+                          {initials}
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          <p className="font-semibold text-slate-900 text-sm leading-snug">{a.title}</p>
+                          {a.description && <p className="text-xs text-slate-400 mt-1 line-clamp-2">{a.description}</p>}
+                          <div className="flex flex-wrap gap-2 mt-2">
+                            <span className={cn('inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium', tc.bg, tc.color)}>{tc.label}</span>
+                            <span className={cn('inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-medium', sc.bg, sc.text)}>
+                              <span className={cn('w-1.5 h-1.5 rounded-full', sc.dot)} />
+                              {sc.label}
+                            </span>
+                          </div>
+                        </div>
+                        <div className="flex gap-1 shrink-0">
+                          <button type="button" onClick={() => openEdit(a)} className="p-2 rounded-lg text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 transition-colors">
+                            <Pencil className="w-4 h-4" />
+                          </button>
+                          <button type="button" onClick={() => setDeleteId(a.id)} className="p-2 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 transition-colors">
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </div>
                       </div>
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-start justify-between gap-2">
-                          <p className="font-semibold text-slate-800 text-sm">{a.title}</p>
-                          <span className={cn('inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium shrink-0', sc.bg, sc.text)}>
-                            <span className={cn('w-1.5 h-1.5 rounded-full', sc.dot)} />
-                            {sc.label}
+                      <div className="mt-4 space-y-2 text-xs text-slate-600 border-t border-slate-100 pt-3">
+                        <div className="flex justify-between gap-2">
+                          <span className="text-slate-400 font-semibold uppercase tracking-wider">Course</span>
+                          <span className="text-right truncate">{a.course?.title || '—'}</span>
+                        </div>
+                        {a.class_name && (
+                          <div className="flex justify-between gap-2">
+                            <span className="text-slate-400 font-semibold uppercase tracking-wider">Class</span>
+                            <span className="text-right truncate">{a.class_name}</span>
+                          </div>
+                        )}
+                        <div className="flex justify-between gap-2 items-start">
+                          <span className="text-slate-400 font-semibold uppercase tracking-wider shrink-0">Due</span>
+                          <span className="text-right">
+                            {a.due_date ? (
+                              <>
+                                <span className="block">{format(new Date(a.due_date), 'MMM d, yyyy')}</span>
+                                {dueBadge}
+                              </>
+                            ) : '—'}
                           </span>
                         </div>
-                        <div className="flex flex-wrap gap-2 mt-1">
-                          <span className={cn('text-xs px-2 py-0.5 rounded-full', tc.bg, tc.color)}>{tc.label}</span>
-                          {a.course?.title && <span className="text-xs text-slate-500">{a.course.title}</span>}
-                          {a.due_date && <span className="text-xs text-slate-400">{format(new Date(a.due_date), 'MMM d')}</span>}
+                        <div className="flex justify-between gap-2 items-center">
+                          <span className="text-slate-400 font-semibold uppercase tracking-wider">Score</span>
+                          <span className="inline-flex items-center gap-1 font-medium text-slate-800">
+                            <Star className="w-3.5 h-3.5 text-amber-400" />
+                            {a.max_score} pts
+                          </span>
                         </div>
-                      </div>
-                      <div className="flex gap-1 shrink-0">
-                        <button onClick={() => openEdit(a)} className="p-1.5 hover:bg-amber-50 rounded-lg"><Pencil className="w-3.5 h-3.5 text-slate-400" /></button>
-                        <button onClick={() => setDeleteId(a.id)} className="p-1.5 hover:bg-rose-50 rounded-lg"><Trash2 className="w-3.5 h-3.5 text-slate-400" /></button>
                       </div>
                     </div>
                   );
                 })}
               </div>
+              <div className="px-5 py-3 border-t border-slate-100 text-xs text-slate-400">
+                Showing {filtered.length} of {assignments.length} assignments
+              </div>
             </>
           )}
-          {!loading && filtered.length > 0 && (
-            <div className="px-5 py-3 border-t border-slate-100 text-xs text-slate-400">
-              Showing {filtered.length} of {assignments.length} assignments
-            </div>
-          )}
         </div>
-      </div>
+      </AdminListPageShell>
 
       {/* Add/Edit Modal */}
       {showModal && (

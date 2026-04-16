@@ -17,6 +17,36 @@ import { cn } from '../../lib/utils';
 import { motion, AnimatePresence } from 'motion/react';
 import { QuizPageSkeleton } from '../../components/ui/Skeleton';
 import { insertAttemptWithFallback } from '../../lib/quizAttempts';
+import { isDirectVideoFileUrl, isLikelyVideoLink, toEmbedVideoUrl } from '../../lib/quizMedia';
+
+function QuizMediaDisplay({ url, mediaType }: { url: string; mediaType?: string }) {
+  const treatAsVideo = mediaType === 'video' || (mediaType !== 'image' && isLikelyVideoLink(url));
+  if (!url?.trim()) return null;
+  if (treatAsVideo && isDirectVideoFileUrl(url)) {
+    return (
+           <video src={url} controls className="w-full max-h-[min(360px,50vh)] rounded-xl bg-black" playsInline />
+    );
+  }
+  if (treatAsVideo) {
+    return (
+      <iframe
+        src={toEmbedVideoUrl(url)}
+        className="w-full aspect-video rounded-xl border-0 bg-black"
+        allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+        allowFullScreen
+        title="Question video"
+      />
+    );
+  }
+  return (
+    <img
+      src={url}
+      alt="Question illustration"
+      className="max-w-full max-h-[min(360px,50vh)] object-contain mx-auto rounded-xl"
+      referrerPolicy="no-referrer"
+    />
+  );
+}
 
 const DEFAULT_QUIZ_SETTINGS = {
   shuffleQuestions: false,
@@ -72,7 +102,7 @@ export default function QuizTaking() {
         .from('questions')
         .select('*')
         .eq('quiz_id', quizId)
-        .order('order_index', { ascending: true });
+        .order('order', { ascending: true });
 
       if (questionsError) throw questionsError;
 
@@ -87,7 +117,7 @@ export default function QuizTaking() {
         mediaUrl: q.media_url,
         mediaType: q.media_type,
         readingPassage: q.reading_passage,
-        orderIndex: q.order_index
+        orderIndex: (q as { order?: number; order_index?: number }).order_index ?? (q as { order?: number }).order,
       } as Question));
       
       if (formattedQuiz.settings.shuffleQuestions) {
@@ -184,6 +214,12 @@ export default function QuizTaking() {
   if (!quiz) return null;
 
   const currentQuestion = questions[currentQuestionIndex];
+  const quizSettingsRaw = quiz.settings as Record<string, unknown> | undefined;
+  const introMediaUrl =
+    typeof quizSettingsRaw?.introMediaUrl === 'string' ? quizSettingsRaw.introMediaUrl.trim() : '';
+  const introMediaType =
+    quizSettingsRaw?.introMediaType === 'image' ? 'image' : 'video';
+
   const formatTime = (seconds: number) => {
     const mins = Math.floor(seconds / 60);
     const secs = seconds % 60;
@@ -236,23 +272,20 @@ export default function QuizTaking() {
               className="bg-white rounded-3xl shadow-xl shadow-slate-200/50 border border-slate-100 p-8 md:p-12"
             >
               <div className="space-y-8">
+                {currentQuestionIndex === 0 && introMediaUrl && (
+                  <div className="rounded-2xl border border-indigo-100 bg-gradient-to-br from-indigo-50/80 to-violet-50/50 p-5 space-y-3">
+                    <p className="text-[11px] font-bold text-indigo-600 uppercase tracking-widest">Before you start</p>
+                    <QuizMediaDisplay url={introMediaUrl} mediaType={introMediaType} />
+                    {quiz.description && (
+                      <p className="text-sm text-slate-600 leading-relaxed">{quiz.description}</p>
+                    )}
+                  </div>
+                )}
+
                 {/* Media */}
                 {currentQuestion.mediaUrl && (
-                  <div className="rounded-2xl overflow-hidden border border-slate-100 bg-slate-50 aspect-video flex items-center justify-center">
-                    {currentQuestion.mediaType === 'video' ? (
-                      <iframe 
-                        src={currentQuestion.mediaUrl.replace('watch?v=', 'embed/')} 
-                        className="w-full h-full"
-                        allowFullScreen
-                      />
-                    ) : (
-                      <img 
-                        src={currentQuestion.mediaUrl} 
-                        alt="Question media" 
-                        className="max-w-full max-h-full object-contain"
-                        referrerPolicy="no-referrer"
-                      />
-                    )}
+                  <div className="rounded-2xl overflow-hidden border border-slate-100 bg-slate-50 p-3 flex items-center justify-center">
+                    <QuizMediaDisplay url={currentQuestion.mediaUrl} mediaType={currentQuestion.mediaType} />
                   </div>
                 )}
 

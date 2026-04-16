@@ -13,16 +13,34 @@ export function apiUrl(path: string): string {
 
 /** Read a useful message from a failed fetch (JSON `{ error }` or raw body). */
 export async function readApiError(res: Response): Promise<string> {
+  const normalizeErrorMessage = (input: string): string => {
+    const message = String(input || '');
+    const isMissingPaymentsTable =
+      message.includes("Could not find the table 'public.payments'") ||
+      message.includes("Could not find the table 'payments'");
+    if (isMissingPaymentsTable) {
+      return "Payments are not available yet because table 'payments' is missing.";
+    }
+    return message;
+  };
+
   const text = await res.text();
   try {
     const json = text ? JSON.parse(text) : {};
-    if (json && typeof json.error === 'string' && json.error) return json.error;
-    if (json && typeof json.message === 'string' && json.message) return json.message;
+    if (json && typeof json.error === 'string' && json.error) {
+      return normalizeErrorMessage(json.error);
+    }
+    if (json && typeof json.message === 'string' && json.message) {
+      return normalizeErrorMessage(json.message);
+    }
   } catch {
     /* ignore */
   }
   const trimmed = text?.trim();
-  if (trimmed) return trimmed.length > 500 ? `${trimmed.slice(0, 500)}…` : trimmed;
+  if (trimmed) {
+    const normalized = normalizeErrorMessage(trimmed);
+    return normalized.length > 500 ? `${normalized.slice(0, 500)}…` : normalized;
+  }
   return `Request failed (${res.status} ${res.statusText || ''})`.trim();
 }
 

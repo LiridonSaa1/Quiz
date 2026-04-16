@@ -21,6 +21,7 @@ interface LiveSession {
   scheduled_at: string;
   duration_minutes: number;
   recording_url: string | null;
+  started_at: string | null;
   host_id: string | null;
   host: { id: string; display_name: string } | null;
   course: { id: string; title: string } | null;
@@ -54,7 +55,31 @@ export default function StudentLiveSessionJoin() {
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
   const [chatInput, setChatInput] = useState('');
   const [sendingChat, setSendingChat] = useState(false);
+  const [timeRemaining, setTimeRemaining] = useState<number | null>(null);
   const chatEndRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (!session || session.status !== 'live' || !session.started_at) {
+      setTimeRemaining(null);
+      return;
+    }
+    
+    const interval = setInterval(() => {
+      const start = new Date(session.started_at!).getTime();
+      const end = start + session.duration_minutes * 60 * 1000;
+      const now = Date.now();
+      const remaining = Math.max(0, Math.floor((end - now) / 1000));
+      setTimeRemaining(remaining);
+    }, 1000);
+
+    return () => clearInterval(interval);
+  }, [session]);
+
+  const formatTime = (s: number) => {
+    const m = Math.floor(s / 60).toString().padStart(2, '0');
+    const sec = (s % 60).toString().padStart(2, '0');
+    return `${m}:${sec}`;
+  };
 
   const jitsiRoomName = `quizmaster-session-${id?.slice(0, 8)}`;
   const jitsiUrl = `https://meet.jit.si/${jitsiRoomName}#config.prejoinPageEnabled=false&config.startWithAudioMuted=false&config.startWithVideoMuted=false&interfaceConfig.SHOW_JITSI_WATERMARK=false`;
@@ -78,7 +103,7 @@ export default function StudentLiveSessionJoin() {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [chatMessages]);
 
-  // Realtime chat subscription
+  // Realtime chat & session subscription
   useEffect(() => {
     if (!id) return;
     const channel = supabase
@@ -92,6 +117,15 @@ export default function StudentLiveSessionJoin() {
         const msg = payload.new as { id: string; session_id: string; sender_id: string; message: string; created_at: string };
         const { data: sender } = await supabase.from('profiles').select('id, display_name, avatar_url').eq('id', msg.sender_id).single();
         setChatMessages(prev => [...prev, { ...msg, sender: sender || { id: msg.sender_id, display_name: 'User', avatar_url: null } }]);
+      })
+      .on('postgres_changes', {
+        event: 'UPDATE',
+        schema: 'public',
+        table: 'live_sessions',
+        filter: `id=eq.${id}`,
+      }, (payload) => {
+        const updated = payload.new as LiveSession;
+        setSession(prev => prev ? { ...prev, ...updated } : prev);
       })
       .subscribe();
 
@@ -224,6 +258,14 @@ export default function StudentLiveSessionJoin() {
                 )}>
                   {isLive ? '🔴 Live Now' : isEnded ? 'Ended' : 'Upcoming'}
                 </span>
+                {isLive && timeRemaining !== null && (
+                  <span className={cn(
+                    'px-2.5 py-0.5 rounded-full text-xs font-bold tracking-wide',
+                    timeRemaining < 300 ? 'bg-rose-100 text-rose-700 animate-pulse' : 'bg-slate-100 text-slate-600'
+                  )}>
+                    ⏱ {formatTime(timeRemaining)} remaining
+                  </span>
+                )}
               </div>
               <div className="flex items-center gap-4 mt-1.5 text-sm text-slate-500 flex-wrap">
                 {session.host && <span>{session.host.display_name}</span>}

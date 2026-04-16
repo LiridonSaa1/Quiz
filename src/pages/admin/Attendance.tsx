@@ -1,6 +1,15 @@
 import React, { useEffect, useState } from 'react';
 import AdminLayout from '../../components/layout/AdminLayout';
 import { toast } from 'sonner';
+import { motion } from 'motion/react';
+import {
+  AdminListFilterBar,
+  AdminListPageShell,
+  ADMIN_LIST_SEARCH_INPUT,
+  ADMIN_LIST_SELECT,
+  ADMIN_LIST_CARD_GRID,
+  ADMIN_LIST_ITEM_CARD,
+} from '../../components/admin/AdminListPageShell';
 import { supabase } from '../../supabase';
 import {
   CalendarCheck, Plus, Search, CheckCircle2,
@@ -8,8 +17,6 @@ import {
 } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { format } from 'date-fns';
-import { TableRowsSkeleton } from '../../components/ui/Skeleton';
-
 type AttendanceStatus = 'present' | 'absent' | 'late' | 'excused';
 
 interface AttendanceRecord {
@@ -73,11 +80,12 @@ export default function AdminAttendance() {
   const fetchData = async () => {
     setLoading(true);
     try {
-      const [{ data: rawData, error }, { data: cls }, { data: stu }, { data: tch }] = await Promise.all([
+      const [{ data: rawData, error }, { data: cls }, { data: stu }, { data: tch }, { data: studentRows }] = await Promise.all([
         supabase.from('attendance').select('*').order('date', { ascending: false }).order('created_at', { ascending: false }).limit(200),
         supabase.from('classes').select('id,name'),
         supabase.from('profiles').select('id,display_name,email').eq('role', 'student'),
         supabase.from('profiles').select('id,display_name,email').in('role', ['teacher', 'admin']),
+        supabase.from('students').select('id,user_id'),
       ]);
       if (error) throw error;
 
@@ -85,12 +93,20 @@ export default function AdminAttendance() {
       (cls || []).forEach((c: any) => { classMap[c.id] = c.name; });
       const studentMap: Record<string, { display_name: string; email: string }> = {};
       (stu || []).forEach((p: any) => { studentMap[p.id] = { display_name: p.display_name, email: p.email }; });
+      const studentProfileIdByStudentId: Record<string, string> = {};
+      (studentRows || []).forEach((s: any) => {
+        if (s.id && s.user_id) studentProfileIdByStudentId[s.id] = s.user_id;
+      });
       const teacherMap: Record<string, string> = {};
       (tch || []).forEach((p: any) => { teacherMap[p.id] = p.display_name; });
 
       setRecords((rawData || []).map((r: any) => ({
         ...r,
-        student: r.student_id ? (studentMap[r.student_id] || null) : null,
+        student: (() => {
+          if (!r.student_id) return null;
+          const profileId = studentMap[r.student_id] ? r.student_id : studentProfileIdByStudentId[r.student_id];
+          return profileId ? (studentMap[profileId] || null) : null;
+        })(),
         class: r.class_id ? { name: classMap[r.class_id] } : null,
         marker: r.marked_by ? { display_name: teacherMap[r.marked_by] } : null,
       })));
@@ -118,16 +134,41 @@ export default function AdminAttendance() {
     return matchSearch && matchStatus && matchClass;
   });
 
-  const stats = [
-    { label: 'Total Records', value: records.length, icon: CalendarCheck, iconBg: 'bg-sky-100 text-sky-600', grad: 'from-sky-500 to-cyan-500', ring: 'ring-sky-100' },
-    { label: 'Present', value: records.filter(r => r.status === 'present').length, icon: CheckCircle2, iconBg: 'bg-emerald-100 text-emerald-600', grad: 'from-emerald-500 to-teal-500', ring: 'ring-emerald-100' },
-    { label: 'Absent', value: records.filter(r => r.status === 'absent').length, icon: XCircle, iconBg: 'bg-rose-100 text-rose-600', grad: 'from-rose-500 to-pink-500', ring: 'ring-rose-100' },
-    { label: 'Late / Excused', value: records.filter(r => r.status === 'late' || r.status === 'excused').length, icon: Clock, iconBg: 'bg-amber-100 text-amber-600', grad: 'from-amber-500 to-orange-500', ring: 'ring-amber-100' },
-  ];
-
   const attendanceRate = records.length > 0
     ? Math.round((records.filter(r => r.status === 'present').length / records.length) * 100)
     : 0;
+
+  const stats = [
+    { label: 'Total Records', value: records.length, gradient: 'from-sky-500 to-cyan-600', shadow: 'shadow-sky-500/25', icon: CalendarCheck },
+    { label: 'Present', value: records.filter(r => r.status === 'present').length, gradient: 'from-emerald-500 to-emerald-600', shadow: 'shadow-emerald-500/25', icon: CheckCircle2 },
+    { label: 'Absent', value: records.filter(r => r.status === 'absent').length, gradient: 'from-rose-500 to-pink-600', shadow: 'shadow-rose-500/25', icon: XCircle },
+    { label: 'Late / Excused', value: records.filter(r => r.status === 'late' || r.status === 'excused').length, gradient: 'from-amber-500 to-orange-600', shadow: 'shadow-amber-500/25', icon: Clock },
+  ];
+
+  const rateAppend = (
+    <motion.div
+      variants={{
+        hidden: { opacity: 0, y: 20 },
+        visible: { opacity: 1, y: 0, transition: { duration: 0.4, ease: 'easeOut' } },
+      }}
+      className="relative overflow-hidden rounded-2xl p-5 text-white shadow-lg bg-gradient-to-br from-indigo-500 to-violet-600 shadow-indigo-500/25"
+      style={{ boxShadow: '0 8px 24px var(--tw-shadow-color, rgba(0,0,0,0.12))' }}
+    >
+      <div className="flex items-start justify-between">
+        <div>
+          <div className="text-3xl font-extrabold tracking-tight">{attendanceRate}%</div>
+          <div className="text-xs font-semibold text-white/75 mt-1">Attendance rate</div>
+        </div>
+        <div className="w-10 h-10 rounded-xl flex items-center justify-center bg-white/20">
+          <CalendarCheck className="w-5 h-5 text-white" />
+        </div>
+      </div>
+      <div className="w-full mt-3 bg-white/20 rounded-full h-1.5 overflow-hidden">
+        <div className="bg-white h-1.5 rounded-full transition-all" style={{ width: `${attendanceRate}%` }} />
+      </div>
+      <div className="pointer-events-none absolute -bottom-4 -right-4 w-20 h-20 rounded-full bg-white/10" />
+    </motion.div>
+  );
 
   const openAdd = () => {
     setEditId(null);
@@ -192,185 +233,135 @@ export default function AdminAttendance() {
 
   return (
     <AdminLayout>
-      <div className="space-y-6">
-        {/* Header */}
-        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-          <div>
-            <h1 className="text-2xl font-bold text-slate-800">Attendance</h1>
-            <p className="text-sm text-slate-500 mt-0.5">Track and manage student attendance records</p>
-          </div>
-          <button
+      <AdminListPageShell
+        breadcrumbLabel="Attendance"
+        title="Attendance"
+        description="Track and manage student attendance records."
+        statsGridClassName="grid grid-cols-2 lg:grid-cols-5 gap-4"
+        stats={stats}
+        statsAppend={rateAppend}
+        action={
+          <motion.button
+            type="button"
             onClick={openAdd}
-            className="flex items-center gap-2 bg-sky-500 hover:bg-sky-600 text-white text-sm font-semibold px-4 py-2.5 rounded-xl shadow-lg shadow-sky-200 transition-all"
+            whileHover={{ scale: 1.04, y: -2 }}
+            whileTap={{ scale: 0.97 }}
+            className="inline-flex items-center gap-2 px-6 py-3 rounded-2xl font-bold text-sm text-white shrink-0 transition-all"
+            style={{
+              background: 'linear-gradient(135deg, #818cf8 0%, #a78bfa 100%)',
+              boxShadow: '0 8px 32px rgba(139,92,246,0.45), 0 2px 8px rgba(0,0,0,0.15)',
+            }}
           >
             <Plus className="w-4 h-4" />
             Mark Attendance
-          </button>
-        </div>
-
-        {/* Stats + Rate */}
-        <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
-          {stats.map(s => (
-            <div key={s.label} className="bg-white rounded-2xl border border-slate-100 shadow-sm hover:shadow-md transition-all overflow-hidden">
-              <div className={cn("h-0.5 bg-gradient-to-r", s.grad)} />
-              <div className="p-5">
-                <div className={cn("p-2.5 rounded-xl ring-4 inline-flex mb-4", s.iconBg, s.ring)}>
-                  <s.icon className="w-5 h-5" />
-                </div>
-                <p className="text-2xl font-bold text-slate-900 tracking-tight">{s.value}</p>
-                <p className="text-sm font-medium text-slate-700 mt-0.5">{s.label}</p>
-              </div>
+          </motion.button>
+        }
+        filterBar={
+          <AdminListFilterBar>
+            <div className="relative flex-1 min-w-[200px]">
+              <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-indigo-400" />
+              <input
+                value={search}
+                onChange={e => setSearch(e.target.value)}
+                placeholder="Search students or classes..."
+                className={ADMIN_LIST_SEARCH_INPUT}
+              />
             </div>
-          ))}
-          <div className="rounded-xl border border-indigo-100 bg-indigo-50 p-4 flex flex-col items-center justify-center">
-            <div className="text-2xl font-bold text-indigo-600">{attendanceRate}%</div>
-            <div className="text-xs text-slate-500 mt-0.5">Attendance Rate</div>
-            <div className="w-full mt-2 bg-indigo-100 rounded-full h-1.5">
-              <div className="bg-indigo-500 h-1.5 rounded-full transition-all" style={{ width: `${attendanceRate}%` }} />
-            </div>
-          </div>
-        </div>
-
-        {/* Filters */}
-        <div className="bg-white rounded-xl border border-slate-200 p-4 flex flex-wrap gap-3">
-          <div className="relative flex-1 min-w-[200px]">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
-            <input
-              value={search} onChange={e => setSearch(e.target.value)}
-              placeholder="Search students or classes..."
-              className="w-full pl-9 pr-3 py-2 text-sm bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-sky-500/30"
-            />
-          </div>
-          <select value={statusFilter} onChange={e => setStatusFilter(e.target.value)} className="px-3 py-2 text-sm bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-sky-500/30">
-            <option value="all">All Status</option>
-            <option value="present">Present</option>
-            <option value="absent">Absent</option>
-            <option value="late">Late</option>
-            <option value="excused">Excused</option>
-          </select>
-          <select value={classFilter} onChange={e => setClassFilter(e.target.value)} className="px-3 py-2 text-sm bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-sky-500/30">
-            <option value="all">All Classes</option>
-            {classes.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-          </select>
-        </div>
-
-        {/* Table */}
-        <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
+            <select value={statusFilter} onChange={e => setStatusFilter(e.target.value)} className={ADMIN_LIST_SELECT}>
+              <option value="all">All Status</option>
+              <option value="present">Present</option>
+              <option value="absent">Absent</option>
+              <option value="late">Late</option>
+              <option value="excused">Excused</option>
+            </select>
+            <select value={classFilter} onChange={e => setClassFilter(e.target.value)} className={ADMIN_LIST_SELECT}>
+              <option value="all">All Classes</option>
+              {classes.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+            </select>
+          </AdminListFilterBar>
+        }
+      >
+        <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
           {loading ? (
-            <TableRowsSkeleton rows={6} className="p-6" />
+            <div className={ADMIN_LIST_CARD_GRID}>
+              {Array(6).fill(0).map((_, i) => (
+                <div key={i} className="h-44 rounded-2xl bg-slate-100 animate-pulse" />
+              ))}
+            </div>
           ) : filtered.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-20 gap-3 text-slate-400">
               <CalendarCheck className="w-10 h-10 opacity-30" />
               <p className="text-sm">No attendance records found</p>
-              <button onClick={openAdd} className="text-xs text-sky-600 hover:underline">Mark attendance now</button>
+              <button type="button" onClick={openAdd} className="text-xs text-indigo-600 font-semibold hover:underline">Mark attendance now</button>
             </div>
           ) : (
             <>
-              {/* Desktop table */}
-              <div className="hidden md:block overflow-x-auto">
-                <table className="w-full text-sm">
-                  <thead>
-                    <tr className="border-b border-slate-100 bg-slate-50">
-                      <th className="text-left px-5 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">Student</th>
-                      <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">Class</th>
-                      <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">Date</th>
-                      <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">Status</th>
-                      <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">Notes</th>
-                      <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">Marked By</th>
-                      <th className="px-4 py-3" />
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-50">
-                    {filtered.map(r => {
-                      const sc = STATUS_CFG[r.status];
-                      const name = r.student?.display_name || 'Unknown';
-                      const initials = name.split(' ').map(n => n[0]).join('').substring(0, 2).toUpperCase();
-                      return (
-                        <tr key={r.id} className="hover:bg-slate-50/70 group transition-colors">
-                          <td className="px-5 py-3.5">
-                            <div className="flex items-center gap-3">
-                              <div className={cn('w-9 h-9 rounded-full bg-gradient-to-br flex items-center justify-center text-white text-xs font-bold shrink-0', getAvatarColor(name))}>
-                                {initials}
-                              </div>
-                              <div>
-                                <div className="font-semibold text-slate-800 leading-tight">{name}</div>
-                                <div className="text-xs text-slate-400">{r.student?.email}</div>
-                              </div>
-                            </div>
-                          </td>
-                          <td className="px-4 py-3.5 text-slate-600">{r.class?.name || <span className="text-slate-300">—</span>}</td>
-                          <td className="px-4 py-3.5">
-                            <div className="flex items-center gap-1.5 text-slate-600">
-                              <Calendar className="w-3.5 h-3.5 text-slate-400" />
-                              {format(new Date(r.date), 'MMM d, yyyy')}
-                            </div>
-                          </td>
-                          <td className="px-4 py-3.5">
-                            <span className={cn('inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium', sc.bg, sc.text)}>
-                              <span className={cn('w-1.5 h-1.5 rounded-full', sc.dot)} />
-                              {sc.label}
-                            </span>
-                          </td>
-                          <td className="px-4 py-3.5 text-slate-500 text-xs max-w-[160px] truncate">{r.notes || <span className="text-slate-300">—</span>}</td>
-                          <td className="px-4 py-3.5 text-slate-500 text-xs">{r.marker?.display_name || <span className="text-slate-300">—</span>}</td>
-                          <td className="px-4 py-3.5">
-                            <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                              <button onClick={() => openEdit(r)} className="p-1.5 hover:bg-sky-50 hover:text-sky-600 rounded-lg transition-colors">
-                                <Pencil className="w-3.5 h-3.5" />
-                              </button>
-                              <button onClick={() => setDeleteId(r.id)} className="p-1.5 hover:bg-rose-50 hover:text-rose-500 rounded-lg transition-colors">
-                                <Trash2 className="w-3.5 h-3.5" />
-                              </button>
-                            </div>
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
-
-              {/* Mobile cards */}
-              <div className="md:hidden divide-y divide-slate-100">
+              <div className={ADMIN_LIST_CARD_GRID}>
                 {filtered.map(r => {
                   const sc = STATUS_CFG[r.status];
                   const name = r.student?.display_name || 'Unknown';
                   const initials = name.split(' ').map(n => n[0]).join('').substring(0, 2).toUpperCase();
                   return (
-                    <div key={r.id} className="p-4 flex items-start gap-3">
-                      <div className={cn('w-10 h-10 rounded-full bg-gradient-to-br flex items-center justify-center text-white text-xs font-bold shrink-0', getAvatarColor(name))}>
-                        {initials}
+                    <div key={r.id} className={ADMIN_LIST_ITEM_CARD}>
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="flex items-center gap-3 min-w-0">
+                          <div className={cn('w-10 h-10 rounded-full bg-gradient-to-br flex items-center justify-center text-white text-xs font-bold shrink-0', getAvatarColor(name))}>
+                            {initials}
+                          </div>
+                          <div className="min-w-0">
+                            <p className="font-semibold text-slate-900 text-sm truncate">{name}</p>
+                            <p className="text-xs text-slate-400 truncate">{r.student?.email}</p>
+                          </div>
+                        </div>
+                        <div className="flex gap-1 shrink-0">
+                          <button type="button" onClick={() => openEdit(r)} className="p-2 rounded-lg text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 transition-colors">
+                            <Pencil className="w-4 h-4" />
+                          </button>
+                          <button type="button" onClick={() => setDeleteId(r.id)} className="p-2 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 transition-colors">
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </div>
                       </div>
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-start justify-between gap-2">
-                          <p className="font-semibold text-slate-800 text-sm">{name}</p>
-                          <span className={cn('inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium shrink-0', sc.bg, sc.text)}>
-                            <span className={cn('w-1.5 h-1.5 rounded-full', sc.dot)} />
-                            {sc.label}
+                      <div className="mt-3 flex flex-wrap items-center gap-2">
+                        <span className={cn('inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium', sc.bg, sc.text)}>
+                          <span className={cn('w-1.5 h-1.5 rounded-full', sc.dot)} />
+                          {sc.label}
+                        </span>
+                      </div>
+                      <div className="mt-4 space-y-2 text-xs border-t border-slate-100 pt-3 text-slate-600">
+                        <div className="flex justify-between gap-2">
+                          <span className="text-slate-400 font-semibold uppercase tracking-wider">Class</span>
+                          <span className="text-right truncate">{r.class?.name || '—'}</span>
+                        </div>
+                        <div className="flex justify-between gap-2 items-center">
+                          <span className="text-slate-400 font-semibold uppercase tracking-wider">Date</span>
+                          <span className="inline-flex items-center gap-1">
+                            <Calendar className="w-3.5 h-3.5 text-slate-400" />
+                            {format(new Date(r.date), 'MMM d, yyyy')}
                           </span>
                         </div>
-                        <div className="flex flex-wrap gap-2 mt-1 text-xs text-slate-500">
-                          {r.class?.name && <span>{r.class.name}</span>}
-                          <span>{format(new Date(r.date), 'MMM d, yyyy')}</span>
+                        <div className="flex justify-between gap-2">
+                          <span className="text-slate-400 font-semibold uppercase tracking-wider">Marked by</span>
+                          <span className="text-right truncate">{r.marker?.display_name || '—'}</span>
                         </div>
-                      </div>
-                      <div className="flex gap-1 shrink-0">
-                        <button onClick={() => openEdit(r)} className="p-1.5 hover:bg-sky-50 rounded-lg"><Pencil className="w-3.5 h-3.5 text-slate-400" /></button>
-                        <button onClick={() => setDeleteId(r.id)} className="p-1.5 hover:bg-rose-50 rounded-lg"><Trash2 className="w-3.5 h-3.5 text-slate-400" /></button>
+                        {r.notes && (
+                          <div className="text-slate-500 pt-1 border-t border-slate-50">
+                            <span className="text-slate-400 font-semibold uppercase tracking-wider block mb-1">Notes</span>
+                            {r.notes}
+                          </div>
+                        )}
                       </div>
                     </div>
                   );
                 })}
               </div>
+              <div className="px-5 py-3 border-t border-slate-100 text-xs text-slate-400">
+                Showing {filtered.length} of {records.length} records
+              </div>
             </>
           )}
-          {!loading && filtered.length > 0 && (
-            <div className="px-5 py-3 border-t border-slate-100 text-xs text-slate-400">
-              Showing {filtered.length} of {records.length} records
-            </div>
-          )}
         </div>
-      </div>
+      </AdminListPageShell>
 
       {/* Add/Edit Modal */}
       {showModal && (

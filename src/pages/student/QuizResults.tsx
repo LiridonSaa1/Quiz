@@ -85,7 +85,7 @@ export default function QuizResults() {
           .from('questions')
           .select('*')
           .eq('quiz_id', normalizedAttempt.quiz_id)
-          .order('order_index', { ascending: true });
+          .order('order', { ascending: true });
 
         if (questionsError) throw questionsError;
 
@@ -100,7 +100,7 @@ export default function QuizResults() {
           mediaUrl: q.media_url,
           mediaType: q.media_type,
           readingPassage: q.reading_passage,
-          orderIndex: q.order_index
+          orderIndex: (q as { order?: number; order_index?: number }).order_index ?? (q as { order?: number }).order,
         } as Question)));
       } catch (error) {
         console.error('Error fetching results:', error);

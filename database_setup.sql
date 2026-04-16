@@ -410,6 +410,87 @@ CREATE TABLE IF NOT EXISTS certificates (
   created_at         TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+-- ============================================================
+-- 15. PAYMENTS
+-- ============================================================
+CREATE TABLE IF NOT EXISTS payments (
+  id           UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  teacher_id   UUID NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
+  student_id   UUID NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
+  amount       NUMERIC(10, 2) NOT NULL CHECK (amount > 0),
+  currency     TEXT NOT NULL DEFAULT 'USD',
+  status       TEXT NOT NULL DEFAULT 'completed' CHECK (status IN ('completed', 'pending', 'failed', 'refunded')),
+  method       TEXT NOT NULL DEFAULT 'bank' CHECK (method IN ('card', 'bank', 'paypal', 'cash')),
+  payment_date DATE NOT NULL DEFAULT CURRENT_DATE,
+  description  TEXT,
+  reference    TEXT,
+  created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- ============================================================
+-- 16. PLATFORM CONFIG
+-- ============================================================
+CREATE TABLE IF NOT EXISTS platform_config (
+  section    TEXT PRIMARY KEY,
+  value      JSONB NOT NULL DEFAULT '{}'::jsonb,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_payments_teacher_id   ON payments(teacher_id);
+CREATE INDEX IF NOT EXISTS idx_payments_student_id   ON payments(student_id);
+CREATE INDEX IF NOT EXISTS idx_payments_payment_date ON payments(payment_date);
+CREATE INDEX IF NOT EXISTS idx_payments_status       ON payments(status);
+
+ALTER TABLE payments ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "payments_read_auth" ON payments FOR SELECT USING (
+  auth.role() = 'authenticated'
+);
+CREATE POLICY "payments_write_admin_teacher" ON payments FOR ALL USING (
+  EXISTS (SELECT 1 FROM profiles WHERE profiles.id = auth.uid() AND profiles.role IN ('admin', 'teacher'))
+);
+
+CREATE TRIGGER trg_payments_updated_at BEFORE UPDATE ON payments FOR EACH ROW EXECUTE FUNCTION update_updated_at();
+
+-- ============================================================
+-- 16. INVOICES (linked to payments; one invoice per payment)
+-- ============================================================
+CREATE TABLE IF NOT EXISTS invoices (
+  id               UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  payment_id       UUID NOT NULL UNIQUE REFERENCES payments(id) ON DELETE CASCADE,
+  invoice_number   TEXT NOT NULL UNIQUE,
+  teacher_id       UUID NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
+  student_id       UUID NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
+  currency         TEXT NOT NULL DEFAULT 'USD',
+  status           TEXT NOT NULL DEFAULT 'paid' CHECK (status IN ('paid', 'pending', 'draft')),
+  issued_date      DATE NOT NULL DEFAULT CURRENT_DATE,
+  due_date         DATE NOT NULL DEFAULT CURRENT_DATE,
+  paid_date        DATE,
+  course_title     TEXT NOT NULL DEFAULT '',
+  items            JSONB NOT NULL DEFAULT '[]'::jsonb,
+  notes            TEXT NOT NULL DEFAULT '',
+  student_address  TEXT NOT NULL DEFAULT '',
+  student_phone    TEXT NOT NULL DEFAULT '',
+  created_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at       TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_invoices_payment_id   ON invoices(payment_id);
+CREATE INDEX IF NOT EXISTS idx_invoices_student_id   ON invoices(student_id);
+CREATE INDEX IF NOT EXISTS idx_invoices_teacher_id   ON invoices(teacher_id);
+CREATE INDEX IF NOT EXISTS idx_invoices_status       ON invoices(status);
+CREATE INDEX IF NOT EXISTS idx_invoices_issued_date  ON invoices(issued_date);
+
+ALTER TABLE invoices ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "invoices_read_auth" ON invoices FOR SELECT USING (
+  auth.role() = 'authenticated'
+);
+CREATE POLICY "invoices_write_admin_teacher" ON invoices FOR ALL USING (
+  EXISTS (SELECT 1 FROM profiles WHERE profiles.id = auth.uid() AND profiles.role IN ('admin', 'teacher'))
+);
+
+CREATE TRIGGER trg_invoices_updated_at BEFORE UPDATE ON invoices FOR EACH ROW EXECUTE FUNCTION update_updated_at();
+
 CREATE INDEX IF NOT EXISTS idx_certificates_student_id ON certificates(student_id);
 CREATE INDEX IF NOT EXISTS idx_certificates_course_id  ON certificates(course_id);
 CREATE INDEX IF NOT EXISTS idx_certificates_status     ON certificates(status);
@@ -437,6 +518,7 @@ CREATE TABLE IF NOT EXISTS live_sessions (
   meeting_url       TEXT,
   status            TEXT NOT NULL DEFAULT 'scheduled' CHECK (status IN ('scheduled','live','ended','cancelled')),
   max_participants  INTEGER DEFAULT 100,
+  started_at        TIMESTAMPTZ,
   created_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at        TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
@@ -485,6 +567,9 @@ CREATE POLICY "announcements_write" ON announcements FOR ALL USING (
 
 -- Add recording_url to live_sessions (run if table already exists)
 ALTER TABLE live_sessions ADD COLUMN IF NOT EXISTS recording_url TEXT;
+
+-- Add started_at to live_sessions
+ALTER TABLE live_sessions ADD COLUMN IF NOT EXISTS started_at TIMESTAMPTZ;
 
 -- Add class_id to live_sessions
 ALTER TABLE live_sessions ADD COLUMN IF NOT EXISTS class_id UUID REFERENCES classes(id) ON DELETE SET NULL;
@@ -585,3 +670,30 @@ CREATE POLICY "session_reactions_insert" ON session_reactions FOR INSERT WITH CH
     OR auth.uid() IN (SELECT user_id FROM session_participants WHERE session_id = session_reactions.session_id)
   )
 );
+
+-- ============================================================
+-- Compatibility (run on existing DBs): certificates status
+-- ============================================================
+-- Older installs may omit status; admin reports and analytics filter on issued/revoked.
+ALTER TABLE certificates ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'issued';
+
+-- ============================================================
+-- Compatibility (run on existing DBs): quizzes extras + question types
+-- ============================================================
+-- Older installs may have `quizzes` without teacher_id; API and RLS expect it.
+ALTER TABLE quizzes ADD COLUMN IF NOT EXISTS teacher_id UUID REFERENCES profiles(id) ON DELETE CASCADE;
+-- Older installs may omit `published`; admin analytics filters on it.
+ALTER TABLE quizzes ADD COLUMN IF NOT EXISTS published BOOLEAN DEFAULT FALSE;
+UPDATE quizzes q SET teacher_id = c.teacher_id FROM courses c
+  WHERE q.teacher_id IS NULL AND q.course_id IS NOT NULL AND q.course_id = c.id;
+CREATE INDEX IF NOT EXISTS idx_quizzes_teacher_id ON quizzes(teacher_id);
+
+ALTER TABLE quizzes ADD COLUMN IF NOT EXISTS type TEXT DEFAULT 'standard';
+ALTER TABLE quizzes ADD COLUMN IF NOT EXISTS pass_mark INTEGER;
+ALTER TABLE quizzes ADD COLUMN IF NOT EXISTS max_attempts INTEGER;
+
+ALTER TABLE questions DROP CONSTRAINT IF EXISTS questions_type_check;
+ALTER TABLE questions ADD CONSTRAINT questions_type_check CHECK (type IN (
+  'multiple-choice', 'true-false', 'open-text', 'fill-in-the-blank', 'matching', 'ordering',
+  'image', 'video', 'reading'
+));

@@ -1,6 +1,15 @@
 import React, { useEffect, useState } from 'react';
 import AdminLayout from '../../components/layout/AdminLayout';
 import { toast } from 'sonner';
+import { motion } from 'motion/react';
+import {
+  AdminListFilterBar,
+  AdminListPageShell,
+  ADMIN_LIST_SEARCH_INPUT,
+  ADMIN_LIST_SELECT,
+  ADMIN_LIST_CARD_GRID,
+  ADMIN_LIST_ITEM_CARD,
+} from '../../components/admin/AdminListPageShell';
 import { format, formatDistanceToNow, isPast } from 'date-fns';
 import {
   Megaphone, Plus, Search, Trash2, Pencil, X,
@@ -8,7 +17,6 @@ import {
   Info, Zap, Send, FileText, Archive, Clock
 } from 'lucide-react';
 import { cn } from '../../lib/utils';
-import { TableRowsSkeleton } from '../../components/ui/Skeleton';
 
 type Audience = 'all' | 'students' | 'teachers';
 type Priority  = 'normal' | 'important' | 'urgent';
@@ -150,148 +158,143 @@ export default function AdminAnnouncements() {
     return matchQ && matchP && matchS;
   });
 
-  const stats = {
-    total: announcements.length,
-    published: announcements.filter(a => a.status === 'published').length,
-    drafts: announcements.filter(a => a.status === 'draft').length,
-    urgent: announcements.filter(a => a.priority === 'urgent' && a.status === 'published').length,
-  };
+  const statItems = [
+    { label: 'Total', value: announcements.length, gradient: 'from-indigo-500 to-violet-600', shadow: 'shadow-indigo-500/25', icon: Megaphone },
+    { label: 'Published', value: announcements.filter(a => a.status === 'published').length, gradient: 'from-emerald-500 to-teal-600', shadow: 'shadow-emerald-500/25', icon: Send },
+    { label: 'Drafts', value: announcements.filter(a => a.status === 'draft').length, gradient: 'from-amber-500 to-orange-600', shadow: 'shadow-amber-500/25', icon: FileText },
+    { label: 'Urgent', value: announcements.filter(a => a.priority === 'urgent' && a.status === 'published').length, gradient: 'from-rose-500 to-pink-600', shadow: 'shadow-rose-500/25', icon: Zap },
+  ];
 
   return (
     <AdminLayout>
-      <div className="space-y-6">
-        {/* Header */}
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-          <div>
-            <h1 className="text-2xl font-bold text-slate-900">Announcements</h1>
-            <p className="text-slate-500 text-sm mt-0.5">Broadcast messages to students, teachers, or everyone</p>
-          </div>
-          <button onClick={openCreate}
-            className="flex items-center gap-2 px-4 py-2.5 bg-indigo-600 text-white rounded-xl font-semibold text-sm hover:bg-indigo-700 transition-all shadow-lg shadow-indigo-200 active:scale-[0.98]">
+      <AdminListPageShell
+        breadcrumbLabel="Announcements"
+        title="Announcements"
+        description="Broadcast messages to students, teachers, or everyone."
+        statsGridClassName="grid grid-cols-2 sm:grid-cols-4 gap-4"
+        stats={statItems}
+        action={
+          <motion.button
+            type="button"
+            onClick={openCreate}
+            whileHover={{ scale: 1.04, y: -2 }}
+            whileTap={{ scale: 0.97 }}
+            className="inline-flex items-center gap-2 px-6 py-3 rounded-2xl font-bold text-sm text-white shrink-0 transition-all"
+            style={{
+              background: 'linear-gradient(135deg, #818cf8 0%, #a78bfa 100%)',
+              boxShadow: '0 8px 32px rgba(139,92,246,0.45), 0 2px 8px rgba(0,0,0,0.15)',
+            }}
+          >
             <Plus className="w-4 h-4" /> New Announcement
-          </button>
-        </div>
-
-        {/* Stats */}
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-          {[
-            { label: 'Total', value: stats.total, iconBg: 'bg-indigo-100 text-indigo-600', ring: 'ring-indigo-100', grad: 'from-indigo-500 to-violet-500', icon: Megaphone },
-            { label: 'Published', value: stats.published, iconBg: 'bg-emerald-100 text-emerald-600', ring: 'ring-emerald-100', grad: 'from-emerald-500 to-teal-500', icon: Send },
-            { label: 'Drafts', value: stats.drafts, iconBg: 'bg-amber-100 text-amber-600', ring: 'ring-amber-100', grad: 'from-amber-500 to-orange-500', icon: FileText },
-            { label: 'Urgent', value: stats.urgent, iconBg: 'bg-rose-100 text-rose-600', ring: 'ring-rose-100', grad: 'from-rose-500 to-pink-500', icon: Zap },
-          ].map(({ label, value, iconBg, ring, grad, icon: Icon }) => (
-            <div key={label} className="bg-white rounded-2xl border border-slate-100 shadow-sm hover:shadow-md transition-all overflow-hidden">
-              <div className={cn("h-0.5 bg-gradient-to-r", grad)} />
-              <div className="p-5">
-                <div className={cn("p-2.5 rounded-xl ring-4 inline-flex mb-4", iconBg, ring)}>
-                  <Icon className="w-5 h-5" />
-                </div>
-                <p className="text-2xl font-bold text-slate-900 tracking-tight">{value}</p>
-                <p className="text-sm font-medium text-slate-700 mt-0.5">{label}</p>
-              </div>
+          </motion.button>
+        }
+        filterBar={
+          <AdminListFilterBar>
+            <div className="relative flex-1 min-w-[200px]">
+              <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-indigo-400" />
+              <input
+                value={search}
+                onChange={e => setSearch(e.target.value)}
+                placeholder="Search announcements..."
+                className={ADMIN_LIST_SEARCH_INPUT}
+              />
             </div>
-          ))}
-        </div>
-
-        {/* Filters */}
-        <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-4 flex flex-col sm:flex-row gap-3">
-          <div className="relative flex-1">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
-            <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search announcements..."
-              className="w-full pl-9 pr-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500" />
-          </div>
-          <select value={priorityFilter} onChange={e => setPriorityFilter(e.target.value)}
-            className="px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500">
-            <option value="all">All Priorities</option>
-            {Object.entries(PRIORITY_CFG).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
-          </select>
-          <select value={statusFilter} onChange={e => setStatusFilter(e.target.value)}
-            className="px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500">
-            <option value="all">All Status</option>
-            {Object.entries(STATUS_CFG).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
-          </select>
-        </div>
-
-        {/* Announcements List */}
-        <div className="space-y-3">
+            <select value={priorityFilter} onChange={e => setPriorityFilter(e.target.value)} className={ADMIN_LIST_SELECT}>
+              <option value="all">All Priorities</option>
+              {Object.entries(PRIORITY_CFG).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
+            </select>
+            <select value={statusFilter} onChange={e => setStatusFilter(e.target.value)} className={ADMIN_LIST_SELECT}>
+              <option value="all">All Status</option>
+              {Object.entries(STATUS_CFG).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
+            </select>
+          </AdminListFilterBar>
+        }
+      >
+        <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
           {loading ? (
-            <div className="bg-white rounded-2xl border border-slate-100 shadow-sm">
-              <TableRowsSkeleton rows={4} />
+            <div className={ADMIN_LIST_CARD_GRID}>
+              {Array(6).fill(0).map((_, i) => (
+                <div key={i} className="h-52 rounded-2xl bg-slate-100 animate-pulse" />
+              ))}
             </div>
           ) : filtered.length === 0 ? (
-            <div className="bg-white rounded-2xl border border-slate-100 shadow-sm flex flex-col items-center justify-center h-48 text-slate-400">
+            <div className="flex flex-col items-center justify-center h-48 text-slate-400">
               <Megaphone className="w-10 h-10 mb-3 opacity-40" />
               <p className="font-medium">No announcements yet</p>
               <p className="text-sm mt-1">Create your first announcement to reach your community</p>
             </div>
-          ) : filtered.map(ann => {
-            const priCfg = PRIORITY_CFG[ann.priority];
-            const statCfg = STATUS_CFG[ann.status];
-            const audCfg = AUDIENCE_CFG[ann.target_audience];
-            const PriIcon = priCfg.icon;
-            const AudIcon = audCfg.icon;
-            const isExpired = ann.expires_at && isPast(new Date(ann.expires_at));
-            return (
-              <div key={ann.id} className={cn(
-                'bg-white rounded-2xl border shadow-sm p-5 hover:shadow-md transition-all',
-                ann.priority === 'urgent' ? 'border-rose-200' : ann.priority === 'important' ? 'border-amber-200' : 'border-slate-100'
-              )}>
-                <div className="flex items-start gap-4">
-                  <div className={cn('w-11 h-11 rounded-xl flex items-center justify-center shrink-0', priCfg.bg)}>
-                    <PriIcon className={cn('w-5 h-5', priCfg.text)} />
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-start justify-between gap-3">
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <span className={cn('inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold', priCfg.bg, priCfg.text)}>
-                          <PriIcon className="w-3 h-3" />{priCfg.label}
-                        </span>
-                        <span className={cn('inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold', statCfg.bg, statCfg.text)}>
-                          <span className={cn('w-1.5 h-1.5 rounded-full', statCfg.dot)} />
-                          {statCfg.label}
-                        </span>
-                        <span className={cn('inline-flex items-center gap-1 text-xs font-medium text-slate-500')}>
-                          <AudIcon className="w-3.5 h-3.5" />{audCfg.label}
-                        </span>
+          ) : (
+            <div className={ADMIN_LIST_CARD_GRID}>
+              {filtered.map(ann => {
+                const priCfg = PRIORITY_CFG[ann.priority];
+                const statCfg = STATUS_CFG[ann.status];
+                const audCfg = AUDIENCE_CFG[ann.target_audience];
+                const PriIcon = priCfg.icon;
+                const AudIcon = audCfg.icon;
+                const isExpired = ann.expires_at && isPast(new Date(ann.expires_at));
+                return (
+                  <div key={ann.id} className={cn(
+                    ADMIN_LIST_ITEM_CARD,
+                    ann.priority === 'urgent' ? 'border-rose-200' : ann.priority === 'important' ? 'border-amber-200' : 'border-slate-100'
+                  )}>
+                    <div className="flex items-start gap-4">
+                      <div className={cn('w-11 h-11 rounded-xl flex items-center justify-center shrink-0', priCfg.bg)}>
+                        <PriIcon className={cn('w-5 h-5', priCfg.text)} />
                       </div>
-                      <div className="flex items-center gap-1.5 shrink-0">
-                        {ann.status === 'draft' && (
-                          <button onClick={() => quickPublish(ann)}
-                            className="flex items-center gap-1.5 px-2.5 py-1.5 bg-emerald-600 text-white rounded-lg text-xs font-semibold hover:bg-emerald-700 transition-all">
-                            <Send className="w-3 h-3" /> Publish
-                          </button>
-                        )}
-                        <button onClick={() => openEdit(ann)} className="p-1.5 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-all">
-                          <Pencil className="w-4 h-4" />
-                        </button>
-                        <button onClick={() => handleDelete(ann.id)} disabled={deleting === ann.id}
-                          className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-all disabled:opacity-40">
-                          <Trash2 className="w-4 h-4" />
-                        </button>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className={cn('inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold', priCfg.bg, priCfg.text)}>
+                              <PriIcon className="w-3 h-3" />{priCfg.label}
+                            </span>
+                            <span className={cn('inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold', statCfg.bg, statCfg.text)}>
+                              <span className={cn('w-1.5 h-1.5 rounded-full', statCfg.dot)} />
+                              {statCfg.label}
+                            </span>
+                            <span className={cn('inline-flex items-center gap-1 text-xs font-medium text-slate-500')}>
+                              <AudIcon className="w-3.5 h-3.5" />{audCfg.label}
+                            </span>
+                          </div>
+                          <div className="flex items-center gap-1.5 shrink-0">
+                            {ann.status === 'draft' && (
+                              <button onClick={() => quickPublish(ann)}
+                                className="flex items-center gap-1.5 px-2.5 py-1.5 bg-emerald-600 text-white rounded-lg text-xs font-semibold hover:bg-emerald-700 transition-all">
+                                <Send className="w-3 h-3" /> Publish
+                              </button>
+                            )}
+                            <button onClick={() => openEdit(ann)} className="p-1.5 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-all">
+                              <Pencil className="w-4 h-4" />
+                            </button>
+                            <button onClick={() => handleDelete(ann.id)} disabled={deleting === ann.id}
+                              className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-all disabled:opacity-40">
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          </div>
+                        </div>
+                        <h3 className="font-bold text-slate-900 mt-2 text-base">{ann.title}</h3>
+                        <p className="text-slate-500 text-sm mt-1.5 line-clamp-2 leading-relaxed">{ann.content}</p>
+                        <div className="flex items-center gap-4 mt-3 text-xs text-slate-400 flex-wrap">
+                          {ann.author && <span className="font-medium text-slate-500">{ann.author.display_name}</span>}
+                          <span className="flex items-center gap-1">
+                            <Clock className="w-3.5 h-3.5" />
+                            {ann.published_at ? `Published ${formatDistanceToNow(new Date(ann.published_at), { addSuffix: true })}` : `Created ${formatDistanceToNow(new Date(ann.created_at), { addSuffix: true })}`}
+                          </span>
+                          {ann.expires_at && (
+                            <span className={cn('flex items-center gap-1', isExpired ? 'text-rose-400' : 'text-amber-500')}>
+                              <AlertTriangle className="w-3.5 h-3.5" />
+                              {isExpired ? 'Expired' : `Expires ${format(new Date(ann.expires_at), 'MMM d, yyyy')}`}
+                            </span>
+                          )}
+                        </div>
                       </div>
                     </div>
-                    <h3 className="font-bold text-slate-900 mt-2 text-base">{ann.title}</h3>
-                    <p className="text-slate-500 text-sm mt-1.5 line-clamp-2 leading-relaxed">{ann.content}</p>
-                    <div className="flex items-center gap-4 mt-3 text-xs text-slate-400 flex-wrap">
-                      {ann.author && <span className="font-medium text-slate-500">{ann.author.display_name}</span>}
-                      <span className="flex items-center gap-1">
-                        <Clock className="w-3.5 h-3.5" />
-                        {ann.published_at ? `Published ${formatDistanceToNow(new Date(ann.published_at), { addSuffix: true })}` : `Created ${formatDistanceToNow(new Date(ann.created_at), { addSuffix: true })}`}
-                      </span>
-                      {ann.expires_at && (
-                        <span className={cn('flex items-center gap-1', isExpired ? 'text-rose-400' : 'text-amber-500')}>
-                          <AlertTriangle className="w-3.5 h-3.5" />
-                          {isExpired ? 'Expired' : `Expires ${format(new Date(ann.expires_at), 'MMM d, yyyy')}`}
-                        </span>
-                      )}
-                    </div>
                   </div>
-                </div>
-              </div>
-            );
-          })}
+                );
+              })}
+            </div>
+          )}
         </div>
-      </div>
+      </AdminListPageShell>
 
       {/* Modal */}
       {showModal && (

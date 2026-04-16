@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import AdminLayout from '../../components/layout/AdminLayout';
 import { cn } from '../../lib/utils';
 import { toast } from 'sonner';
@@ -81,11 +81,52 @@ export default function AdminSettings() {
   });
 
   const handleSave = async () => {
-    setSaving(true);
-    await new Promise(r => setTimeout(r, 900));
-    setSaving(false);
-    toast.success('Settings saved successfully.');
+    try {
+      setSaving(true);
+      const res = await fetch('/api/admin/config/settings', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          value: {
+            general,
+            notifications: notifs,
+            email: emailSettings,
+            security: { twoFactor, requireEmailVerify, registrationOpen },
+            advanced: { maintenance },
+          },
+        }),
+      });
+      const json = await res.json();
+      if (!res.ok || !json?.success) throw new Error(json?.error || 'Failed to save settings');
+      toast.success('Settings saved successfully.');
+    } catch (e: any) {
+      toast.error(e?.message || 'Failed to save settings');
+    } finally {
+      setSaving(false);
+    }
   };
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const res = await fetch('/api/admin/config/settings');
+        const json = await res.json();
+        if (!res.ok || !json?.success || !json?.value) return;
+        const v = json.value as any;
+        if (v.general) setGeneral((prev) => ({ ...prev, ...v.general }));
+        if (v.notifications) setNotifs((prev) => ({ ...prev, ...v.notifications }));
+        if (v.email) setEmailSettings((prev) => ({ ...prev, ...v.email }));
+        if (v.security) {
+          if (typeof v.security.twoFactor === 'boolean') setTwoFactor(v.security.twoFactor);
+          if (typeof v.security.requireEmailVerify === 'boolean') setRequireEmailVerify(v.security.requireEmailVerify);
+          if (typeof v.security.registrationOpen === 'boolean') setRegistrationOpen(v.security.registrationOpen);
+        }
+        if (v.advanced && typeof v.advanced.maintenance === 'boolean') setMaintenance(v.advanced.maintenance);
+      } catch {
+        // keep local defaults when config table is missing or unavailable
+      }
+    })();
+  }, []);
 
   return (
     <AdminLayout>

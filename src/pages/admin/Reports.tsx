@@ -6,12 +6,12 @@ import {
   GraduationCap, BookOpen, FileText, Download,
   Search, RefreshCw, ChevronUp, ChevronDown,
   CheckCircle2, XCircle, Clock, TrendingUp,
-  Award, Users, BarChart3, Minus
+  Award, Users, BarChart3, Minus, Crown
 } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { TableRowsSkeleton } from '../../components/ui/Skeleton';
 
-type ReportType = 'students' | 'courses' | 'quizzes';
+type ReportType = 'students' | 'courses' | 'quizzes' | 'roles';
 
 interface StudentRow {
   id: string; name: string; email: string; status: string; joinedAt: string;
@@ -27,6 +27,16 @@ interface QuizRow {
   totalAttempts: number; completedAttempts: number; passedAttempts: number;
   passRate: number | null; avgScore: number | null; uniqueStudents: number;
 }
+interface RoleRow {
+  role: 'admin' | 'teacher' | 'student';
+  users: number;
+  activeUsers: number;
+  newUsers30d: number;
+  coursesCreated: number;
+  quizzesCreated: number;
+  attempts: number;
+  certificates: number;
+}
 
 type SortDir = 'asc' | 'desc';
 
@@ -34,6 +44,7 @@ const REPORT_TABS: { id: ReportType; label: string; icon: React.ElementType }[] 
   { id: 'students', label: 'Student Performance', icon: GraduationCap },
   { id: 'courses', label: 'Course Overview', icon: BookOpen },
   { id: 'quizzes', label: 'Quiz Statistics', icon: FileText },
+  { id: 'roles', label: 'Role Breakdown', icon: Crown },
 ];
 
 const ScoreBadge = ({ value }: { value: number | null }) => {
@@ -47,6 +58,7 @@ export default function AdminReports() {
   const [studentData, setStudentData] = useState<StudentRow[]>([]);
   const [courseData, setCourseData] = useState<CourseRow[]>([]);
   const [quizData, setQuizData] = useState<QuizRow[]>([]);
+  const [roleData, setRoleData] = useState<RoleRow[]>([]);
   const [loading, setLoading] = useState(false);
   const [search, setSearch] = useState('');
   const [sortKey, setSortKey] = useState<string>('');
@@ -65,6 +77,7 @@ export default function AdminReports() {
       if (type === 'students') setStudentData(json.report);
       if (type === 'courses') setCourseData(json.report);
       if (type === 'quizzes') setQuizData(json.report);
+      if (type === 'roles') setRoleData(json.report);
     } catch (e: any) { toast.error(e.message || 'Failed to load report'); }
     finally { setLoading(false); }
   };
@@ -123,12 +136,18 @@ export default function AdminReports() {
         ...courseData.map(r => [r.title, r.category, r.level, r.status, r.createdAt?.slice(0,10), String(r.enrolledStudents), String(r.totalLessons), String(r.certificatesIssued)]),
       ];
       filename = 'course-report.csv';
-    } else {
+    } else if (reportType === 'quizzes') {
       rows = [
         ['Title', 'Published', 'Attempts', 'Completed', 'Passed', 'Pass Rate %', 'Avg Score %', 'Unique Students'],
         ...quizData.map(r => [r.title, r.published ? 'Yes' : 'No', String(r.totalAttempts), String(r.completedAttempts), String(r.passedAttempts), r.passRate !== null ? String(r.passRate) : '', r.avgScore !== null ? String(r.avgScore) : '', String(r.uniqueStudents)]),
       ];
       filename = 'quiz-report.csv';
+    } else {
+      rows = [
+        ['Role', 'Users', 'Active', 'New (30d)', 'Courses Created', 'Quizzes Created', 'Attempts', 'Certificates'],
+        ...roleData.map(r => [r.role, String(r.users), String(r.activeUsers), String(r.newUsers30d), String(r.coursesCreated), String(r.quizzesCreated), String(r.attempts), String(r.certificates)]),
+      ];
+      filename = 'role-report.csv';
     }
 
     const csv = rows.map(r => r.map(v => `"${v.replace(/"/g, '""')}"`).join(',')).join('\n');
@@ -142,6 +161,7 @@ export default function AdminReports() {
   const students = sortAndFilter<StudentRow>(studentData, ['name', 'email']);
   const courses  = sortAndFilter<CourseRow>(courseData,  ['title', 'category']);
   const quizzes  = sortAndFilter<QuizRow>(quizData,    ['title']);
+  const roles    = sortAndFilter<RoleRow>(roleData,    ['role']);
 
   return (
     <AdminLayout>
@@ -388,6 +408,58 @@ export default function AdminReports() {
                   )}
                 </>
               )}
+
+              {/* ── ROLES TABLE ── */}
+              {reportType === 'roles' && (
+                <>
+                  {roles.length === 0 ? (
+                    <div className="flex flex-col items-center justify-center h-48 text-slate-400">
+                      <Crown className="w-10 h-10 mb-2 opacity-40" />
+                      <p className="font-medium">No role data found</p>
+                    </div>
+                  ) : (
+                    <table className="w-full text-sm">
+                      <thead>
+                        <tr className="bg-slate-50/70 border-b border-slate-100">
+                          <TH label="Role" col="role" />
+                          <TH label="Users" col="users" />
+                          <TH label="Active" col="activeUsers" />
+                          <TH label="New (30d)" col="newUsers30d" />
+                          <TH label="Courses" col="coursesCreated" />
+                          <TH label="Quizzes" col="quizzesCreated" />
+                          <TH label="Attempts" col="attempts" />
+                          <TH label="Certificates" col="certificates" />
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-50">
+                        {roles.map((r) => (
+                          <tr key={r.role} className="hover:bg-slate-50/50 transition-colors">
+                            <td className="px-4 py-3.5">
+                              <span className={cn(
+                                'px-2 py-0.5 rounded-full text-xs font-bold capitalize',
+                                r.role === 'admin'
+                                  ? 'bg-violet-50 text-violet-700'
+                                  : r.role === 'teacher'
+                                    ? 'bg-indigo-50 text-indigo-700'
+                                    : 'bg-teal-50 text-teal-700'
+                              )}>
+                                {r.role}
+                              </span>
+                            </td>
+                            <td className="px-4 py-3.5 text-center font-semibold text-slate-700">{r.users}</td>
+                            <td className="px-4 py-3.5 text-center font-semibold text-slate-700">{r.activeUsers}</td>
+                            <td className="px-4 py-3.5 text-center font-semibold text-slate-700">{r.newUsers30d}</td>
+                            <td className="px-4 py-3.5 text-center font-semibold text-slate-700">{r.coursesCreated}</td>
+                            <td className="px-4 py-3.5 text-center font-semibold text-slate-700">{r.quizzesCreated}</td>
+                            <td className="px-4 py-3.5 text-center font-semibold text-slate-700">{r.attempts}</td>
+                            <td className="px-4 py-3.5 text-center font-semibold text-slate-700">{r.certificates}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  )}
+                </>
+              )}
             </div>
           )}
 
@@ -398,6 +470,7 @@ export default function AdminReports() {
                 {reportType === 'students' && `${students.length} student${students.length !== 1 ? 's' : ''}`}
                 {reportType === 'courses' && `${courses.length} course${courses.length !== 1 ? 's' : ''}`}
                 {reportType === 'quizzes' && `${quizzes.length} quiz${quizzes.length !== 1 ? 'zes' : ''}`}
+                {reportType === 'roles' && `${roles.length} role${roles.length !== 1 ? 's' : ''}`}
                 {search && ` matching "${search}"`}
               </p>
               <p className="text-xs text-slate-400">Click any column header to sort</p>

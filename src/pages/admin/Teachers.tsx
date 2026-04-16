@@ -6,6 +6,14 @@ import { toast } from 'sonner';
 import AdminLayout from '../../components/layout/AdminLayout';
 import { cn } from '../../lib/utils';
 import AddTeacherModal from '../../components/AddTeacherModal';
+import { motion } from 'motion/react';
+import {
+  AdminListFilterBar,
+  AdminListPageShell,
+  ADMIN_LIST_SEARCH_INPUT,
+  ADMIN_LIST_CARD_GRID,
+  ADMIN_LIST_ITEM_CARD,
+} from '../../components/admin/AdminListPageShell';
 
 const AVATAR_COLORS = [
   'from-violet-500 to-indigo-600',
@@ -60,65 +68,55 @@ export default function AdminTeachers() {
   );
 
   const stats = [
-    { label: 'Total Teachers', value: users.length, icon: ShieldCheck, iconBg: 'bg-violet-100 text-violet-600', grad: 'from-violet-500 to-purple-500', ring: 'ring-violet-100' },
-    { label: 'Active', value: users.filter(u => u.status === 'active').length, icon: UserCheck, iconBg: 'bg-indigo-100 text-indigo-600', grad: 'from-indigo-500 to-violet-500', ring: 'ring-indigo-100' },
-    { label: 'Inactive', value: users.filter(u => u.status !== 'active').length, icon: UserX, iconBg: 'bg-slate-100 text-slate-500', grad: 'from-slate-400 to-slate-500', ring: 'ring-slate-100' },
+    { label: 'Total Teachers', value: users.length, gradient: 'from-indigo-500 to-indigo-600', shadow: 'shadow-indigo-500/25', icon: ShieldCheck },
+    { label: 'Active', value: users.filter(u => u.status === 'active').length, gradient: 'from-emerald-500 to-emerald-600', shadow: 'shadow-emerald-500/25', icon: UserCheck },
+    { label: 'Inactive', value: users.filter(u => u.status !== 'active').length, gradient: 'from-amber-500 to-amber-600', shadow: 'shadow-amber-500/25', icon: UserX },
   ];
 
   return (
     <AdminLayout>
-      <div className="space-y-6">
-
-        {/* Header */}
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-          <div>
-            <h1 className="text-2xl font-bold text-slate-900">Teachers</h1>
-            <p className="text-slate-500 text-sm mt-1">Manage all teacher accounts in the system.</p>
-          </div>
-          <button
+      <AdminListPageShell
+        breadcrumbLabel="Teachers"
+        title="Teachers"
+        description="Manage all teacher accounts in the system."
+        statsGridClassName="grid grid-cols-2 sm:grid-cols-3 gap-4"
+        action={
+          <motion.button
+            type="button"
             onClick={() => setShowAddModal(true)}
-            className="flex items-center justify-center gap-2 px-5 py-2.5 bg-violet-600 text-white rounded-xl font-semibold text-sm hover:bg-violet-700 transition-all shadow-lg shadow-violet-200 active:scale-[0.98]"
+            whileHover={{ scale: 1.04, y: -2 }}
+            whileTap={{ scale: 0.97 }}
+            className="inline-flex items-center gap-2 px-6 py-3 rounded-2xl font-bold text-sm text-white shrink-0 transition-all"
+            style={{
+              background: 'linear-gradient(135deg, #818cf8 0%, #a78bfa 100%)',
+              boxShadow: '0 8px 32px rgba(139,92,246,0.45), 0 2px 8px rgba(0,0,0,0.15)',
+            }}
           >
             <UserPlus className="w-4 h-4" />
             Add Teacher
-          </button>
-        </div>
-
-        {/* Stats */}
-        <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
-          {stats.map(s => (
-            <div key={s.label} className="bg-white rounded-2xl border border-slate-100 shadow-sm hover:shadow-md transition-all overflow-hidden">
-              <div className={cn("h-0.5 bg-gradient-to-r", s.grad)} />
-              <div className="p-5">
-                <div className={cn("p-2.5 rounded-xl ring-4 inline-flex mb-4", s.iconBg, s.ring)}>
-                  <s.icon className="w-5 h-5" />
-                </div>
-                <p className="text-2xl font-bold text-slate-900 tracking-tight">{s.value}</p>
-                <p className="text-sm font-medium text-slate-700 mt-0.5">{s.label}</p>
-              </div>
-            </div>
-          ))}
-        </div>
-
-        {/* Table card */}
-        <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
-          <div className="p-5 border-b border-slate-100">
-            <div className="relative max-w-sm">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+          </motion.button>
+        }
+        stats={stats}
+        filterBar={
+          <AdminListFilterBar>
+            <div className="relative flex-1 min-w-[200px] max-w-md">
+              <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-indigo-400" />
               <input
                 type="text"
                 placeholder="Search teachers..."
                 value={searchQuery}
                 onChange={e => setSearchQuery(e.target.value)}
-                className="w-full pl-9 pr-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-violet-500 transition-all"
+                className={ADMIN_LIST_SEARCH_INPUT}
               />
             </div>
-          </div>
-
+          </AdminListFilterBar>
+        }
+      >
+        <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
           {loading ? (
-            <div className="p-8 space-y-3">
+            <div className={ADMIN_LIST_CARD_GRID}>
               {Array(4).fill(0).map((_, i) => (
-                <div key={i} className="h-14 bg-slate-50 rounded-xl animate-pulse" />
+                <div key={i} className="h-36 rounded-2xl bg-slate-100 animate-pulse" />
               ))}
             </div>
           ) : filteredUsers.length === 0 ? (
@@ -132,104 +130,49 @@ export default function AdminTeachers() {
               </p>
             </div>
           ) : (
-            <>
-              {/* Desktop table */}
-              <div className="hidden md:block overflow-x-auto">
-                <table className="w-full text-left">
-                  <thead>
-                    <tr className="bg-slate-50 text-slate-400 text-xs font-bold uppercase tracking-wider">
-                      <th className="px-6 py-3.5">Teacher</th>
-                      <th className="px-6 py-3.5">Status</th>
-                      <th className="px-6 py-3.5">Joined</th>
-                      <th className="px-6 py-3.5 text-right">Actions</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-50">
-                    {filteredUsers.map(user => (
-                      <tr key={user.uid} className="hover:bg-slate-50/70 transition-all group">
-                        <td className="px-6 py-4">
-                          <div className="flex items-center gap-3">
-                            <div className={`w-10 h-10 rounded-xl bg-gradient-to-br ${getAvatarColor(user.displayName)} flex items-center justify-center text-white font-bold text-sm shrink-0 shadow-sm`}>
-                              {user.displayName.charAt(0).toUpperCase()}
-                            </div>
-                            <div>
-                              <div className="text-sm font-semibold text-slate-900">{user.displayName}</div>
-                              <div className="text-xs text-slate-400">{user.email}</div>
-                            </div>
-                          </div>
-                        </td>
-                        <td className="px-6 py-4">
-                          <span className={cn(
-                            'inline-flex items-center gap-1.5 text-xs font-semibold px-2.5 py-1 rounded-lg',
-                            user.status === 'active' ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-100 text-slate-500'
-                          )}>
-                            <span className={cn('w-1.5 h-1.5 rounded-full', user.status === 'active' ? 'bg-emerald-500' : 'bg-slate-400')} />
-                            {user.status === 'active' ? 'Active' : 'Inactive'}
-                          </span>
-                        </td>
-                        <td className="px-6 py-4 text-xs text-slate-400">
-                          {new Date(user.createdAt).toLocaleDateString()}
-                        </td>
-                        <td className="px-6 py-4 text-right">
-                          <div className="flex items-center justify-end opacity-0 group-hover:opacity-100 transition-all">
-                            <button
-                              onClick={() => toggleUserStatus(user)}
-                              title={user.status === 'active' ? 'Deactivate' : 'Activate'}
-                              className={cn(
-                                'p-2 rounded-lg transition-all',
-                                user.status === 'active'
-                                  ? 'text-slate-400 hover:text-orange-600 hover:bg-orange-50'
-                                  : 'text-slate-400 hover:text-emerald-600 hover:bg-emerald-50'
-                              )}
-                            >
-                              {user.status === 'active' ? <UserX className="w-4 h-4" /> : <UserCheck className="w-4 h-4" />}
-                            </button>
-                          </div>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-
-              {/* Mobile cards */}
-              <div className="md:hidden divide-y divide-slate-50">
-                {filteredUsers.map(user => (
-                  <div key={user.uid} className="p-4 flex items-center justify-between gap-3">
+            <div className={ADMIN_LIST_CARD_GRID}>
+              {filteredUsers.map(user => (
+                <div key={user.uid} className={ADMIN_LIST_ITEM_CARD}>
+                  <div className="flex items-start justify-between gap-3">
                     <div className="flex items-center gap-3 min-w-0">
-                      <div className={`w-10 h-10 rounded-xl bg-gradient-to-br ${getAvatarColor(user.displayName)} flex items-center justify-center text-white font-bold text-sm shrink-0`}>
+                      <div className={`w-11 h-11 rounded-xl bg-gradient-to-br ${getAvatarColor(user.displayName)} flex items-center justify-center text-white font-bold text-sm shrink-0 shadow-sm`}>
                         {user.displayName.charAt(0).toUpperCase()}
                       </div>
                       <div className="min-w-0">
                         <div className="text-sm font-semibold text-slate-900 truncate">{user.displayName}</div>
                         <div className="text-xs text-slate-400 truncate">{user.email}</div>
-                        <span className={cn(
-                          'inline-flex items-center gap-1 text-[10px] font-medium mt-1',
-                          user.status === 'active' ? 'text-emerald-600' : 'text-slate-400'
-                        )}>
-                          <span className={cn('w-1.5 h-1.5 rounded-full', user.status === 'active' ? 'bg-emerald-500' : 'bg-slate-400')} />
-                          {user.status || 'active'}
-                        </span>
                       </div>
                     </div>
                     <button
+                      type="button"
                       onClick={() => toggleUserStatus(user)}
+                      title={user.status === 'active' ? 'Deactivate' : 'Activate'}
                       className={cn(
                         'p-2 rounded-lg shrink-0 transition-all',
                         user.status === 'active'
-                          ? 'text-slate-300 hover:text-orange-500 hover:bg-orange-50'
-                          : 'text-slate-300 hover:text-emerald-500 hover:bg-emerald-50'
+                          ? 'text-slate-400 hover:text-orange-600 hover:bg-orange-50'
+                          : 'text-slate-400 hover:text-emerald-600 hover:bg-emerald-50'
                       )}
                     >
-                      {user.status === 'active' ? <UserX className="w-5 h-5" /> : <UserCheck className="w-5 h-5" />}
+                      {user.status === 'active' ? <UserX className="w-4 h-4" /> : <UserCheck className="w-4 h-4" />}
                     </button>
                   </div>
-                ))}
-              </div>
-            </>
+                  <div className="mt-4 flex flex-wrap items-center gap-2 justify-between text-xs">
+                    <span className={cn(
+                      'inline-flex items-center gap-1.5 font-semibold px-2.5 py-1 rounded-lg',
+                      user.status === 'active' ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-100 text-slate-500'
+                    )}>
+                      <span className={cn('w-1.5 h-1.5 rounded-full', user.status === 'active' ? 'bg-emerald-500' : 'bg-slate-400')} />
+                      {user.status === 'active' ? 'Active' : 'Inactive'}
+                    </span>
+                    <span className="text-slate-400">Joined {new Date(user.createdAt).toLocaleDateString()}</span>
+                  </div>
+                </div>
+              ))}
+            </div>
           )}
         </div>
-      </div>
+      </AdminListPageShell>
 
       {showAddModal && (
         <AddTeacherModal
