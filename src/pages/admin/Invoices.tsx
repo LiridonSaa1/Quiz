@@ -290,7 +290,123 @@ function printInvoice(inv: Invoice, brand: InvoiceBrandProfile) {
     .footer-left  { font-size: 11px; color: #94a3b8; line-height: 1.8; }
     .footer-right { text-align: right; font-size: 11px; color: #94a3b8; }
     .thank-you { font-size: 15px; font-weight: 700; color: ${brand.primaryColor}; }
-    @media print { body { -webkit-print-color-adjust: exact; print-color-adjust: exact; } .page { padding: 20px; } }
+    /* Single-page print: compact layout + no extra page from margins */
+    @page {
+      size: A4 portrait;
+      margin: 8mm;
+    }
+    @media print {
+      html, body {
+        height: auto !important;
+        overflow: hidden !important;
+        -webkit-print-color-adjust: exact;
+        print-color-adjust: exact;
+      }
+      body {
+        font-size: 10.5px !important;
+        line-height: 1.35;
+      }
+      .page {
+        max-width: 100% !important;
+        padding: 0 !important;
+        margin: 0 auto !important;
+      }
+      .watermark {
+        font-size: 56px !important;
+        top: 42% !important;
+        letter-spacing: 4px !important;
+      }
+      .sheet {
+        box-shadow: none !important;
+        border-radius: 12px !important;
+        page-break-inside: avoid;
+        break-inside: avoid;
+      }
+      .header {
+        padding: 12px 16px !important;
+      }
+      .logo {
+        width: 36px !important;
+        height: 36px !important;
+        border-radius: 10px !important;
+      }
+      .logo svg { width: 20px !important; height: 20px !important; }
+      .brand-name { font-size: 15px !important; }
+      .inv-title { font-size: 20px !important; }
+      .inv-num { font-size: 11px !important; margin-top: 2px !important; }
+      .status-badge { margin-top: 4px !important; padding: 2px 8px !important; font-size: 10px !important; }
+      .divider { margin: 8px 16px 10px !important; }
+      .section-pad { padding: 0 16px !important; }
+      .parties {
+        gap: 14px !important;
+        margin-bottom: 8px !important;
+      }
+      .party-label { margin-bottom: 4px !important; font-size: 9px !important; }
+      .party-name { font-size: 12px !important; margin-bottom: 3px !important; }
+      .party-detail { font-size: 10px !important; line-height: 1.45 !important; margin-bottom: 2px !important; }
+      .course-chip {
+        padding: 4px 10px !important;
+        font-size: 10px !important;
+        margin-bottom: 8px !important;
+      }
+      .dates {
+        gap: 8px !important;
+        padding: 10px !important;
+        margin-bottom: 8px !important;
+      }
+      .date-label { font-size: 9px !important; margin-bottom: 3px !important; }
+      .date-val { font-size: 12px !important; }
+      table { margin-bottom: 8px !important; }
+      th {
+        padding: 5px 8px !important;
+        font-size: 9px !important;
+      }
+      td {
+        padding: 5px 8px !important;
+        font-size: 10px !important;
+      }
+      .summary-grid {
+        gap: 8px !important;
+        margin-bottom: 8px !important;
+      }
+      .summary-card { padding: 8px 10px !important; }
+      .summary-title { margin-bottom: 4px !important; font-size: 9px !important; }
+      .summary-row { padding: 3px 0 !important; font-size: 10px !important; }
+      .total-row {
+        padding: 3px 0 !important;
+        font-size: 11px !important;
+      }
+      .total-row:last-child {
+        padding-top: 6px !important;
+        font-size: 13px !important;
+      }
+      .total-row:last-child span:last-child { font-size: 14px !important; }
+      .notes-section {
+        padding: 8px 12px !important;
+        margin-bottom: 8px !important;
+        max-height: 56px;
+        overflow: hidden;
+      }
+      .notes-text { font-size: 10px !important; line-height: 1.4 !important; }
+      .signature-wrap {
+        gap: 8px !important;
+        margin-bottom: 8px !important;
+      }
+      .signature-box {
+        min-height: 64px !important;
+        padding: 6px 8px !important;
+      }
+      .signature-line {
+        margin-top: 28px !important;
+        padding-top: 4px !important;
+        font-size: 9px !important;
+      }
+      .footer {
+        padding: 8px 16px 10px !important;
+      }
+      .footer-left, .footer-right { font-size: 9px !important; line-height: 1.5 !important; }
+      .thank-you { font-size: 12px !important; }
+    }
   </style>
 </head>
 <body>

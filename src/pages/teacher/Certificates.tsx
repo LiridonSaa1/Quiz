@@ -1,258 +1,574 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import TeacherLayout from '../../components/layout/TeacherLayout';
-import { supabase } from '../../supabase';
 import { toast } from 'sonner';
-import { Award, Search, CheckCircle2, XCircle, BookOpen, Hash } from 'lucide-react';
+import { motion } from 'motion/react';
+import {
+  AdminListFilterBar,
+  AdminListPageShell,
+  ADMIN_LIST_SEARCH_INPUT,
+  ADMIN_LIST_SELECT,
+  ADMIN_LIST_CARD_GRID,
+  ADMIN_LIST_ITEM_CARD,
+} from '../../components/admin/AdminListPageShell';
+import { supabase } from '../../supabase';
+import {
+  Award, Plus, Search, CheckCircle2, XCircle,
+  X, Pencil, Trash2, Eye,
+  Hash, Calendar,
+} from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { format } from 'date-fns';
-import { LayoutPageSkeleton } from '../../components/ui/Skeleton';
 
 type CertStatus = 'issued' | 'revoked';
 
-interface CertificateRow {
+interface Certificate {
   id: string;
-  studentName: string;
-  studentEmail: string;
-  courseTitle: string;
+  student_id: string;
+  course_id: string | null;
   title: string;
-  certificateNumber: string;
-  score: number | null;
+  issued_at: string;
+  certificate_number: string;
   grade: string | null;
-  issuedAt: string;
+  score: number | null;
   status: CertStatus;
+  created_at: string;
+  student?: { display_name: string; email: string } | null;
+  course?: { title: string } | null;
 }
 
-const STATUS_META: Record<CertStatus, { label: string; bg: string; text: string; dot: string; icon: React.ElementType }> = {
-  issued: { label: 'Issued', bg: 'bg-emerald-50', text: 'text-emerald-700', dot: 'bg-emerald-500', icon: CheckCircle2 },
-  revoked: { label: 'Revoked', bg: 'bg-rose-50', text: 'text-rose-700', dot: 'bg-rose-500', icon: XCircle },
+interface Course { id: string; title: string }
+interface StudentRec { id: string; display_name: string; email: string }
+interface StudentApiRow { uid?: string; id?: string; displayName?: string; display_name?: string; email?: string; teacherId?: string }
+
+const STATUS_CFG: Record<CertStatus, { label: string; bg: string; text: string; dot: string; icon: React.ElementType }> = {
+  issued:  { label: 'Issued',  bg: 'bg-emerald-50', text: 'text-emerald-700', dot: 'bg-emerald-500', icon: CheckCircle2 },
+  revoked: { label: 'Revoked', bg: 'bg-rose-50',    text: 'text-rose-700',   dot: 'bg-rose-500',    icon: XCircle     },
+};
+
+const GRADE_COLORS: Record<string, string> = {
+  'A+': 'text-emerald-700 bg-emerald-50',
+  'A':  'text-emerald-700 bg-emerald-50',
+  'A-': 'text-emerald-600 bg-emerald-50',
+  'B+': 'text-blue-700 bg-blue-50',
+  'B':  'text-blue-700 bg-blue-50',
+  'B-': 'text-blue-600 bg-blue-50',
+  'C+': 'text-amber-700 bg-amber-50',
+  'C':  'text-amber-700 bg-amber-50',
+  'D':  'text-orange-700 bg-orange-50',
+  'F':  'text-rose-700 bg-rose-50',
+};
+
+const AVATAR_COLORS = [
+  'from-yellow-400 to-amber-500',
+  'from-violet-500 to-purple-600',
+  'from-blue-500 to-indigo-600',
+  'from-rose-500 to-pink-600',
+  'from-teal-500 to-cyan-600',
+  'from-emerald-500 to-green-600',
+];
+const getAvatarColor = (str: string) => {
+  let h = 0;
+  for (let i = 0; i < str.length; i++) h = str.charCodeAt(i) + ((h << 5) - h);
+  return AVATAR_COLORS[Math.abs(h) % AVATAR_COLORS.length];
+};
+
+const generateCertNumber = () => {
+  const year = new Date().getFullYear();
+  const rand = Math.random().toString(36).substring(2, 8).toUpperCase();
+  return `CERT-${year}-${rand}`;
+};
+
+const emptyForm = {
+  student_id: '', course_id: '', title: '', issued_at: new Date().toISOString().substring(0, 10),
+  certificate_number: generateCertNumber(), grade: '', score: '', status: 'issued' as CertStatus,
 };
 
 export default function TeacherCertificates() {
+  const [certs, setCerts] = useState<Certificate[]>([]);
   const [loading, setLoading] = useState(true);
-  const [rows, setRows] = useState<CertificateRow[]>([]);
   const [search, setSearch] = useState('');
-  const [statusFilter, setStatusFilter] = useState<'all' | CertStatus>('all');
+  const [statusFilter, setStatusFilter] = useState('all');
+  const [courseFilter, setCourseFilter] = useState('all');
+  const [showModal, setShowModal] = useState(false);
+  const [editId, setEditId] = useState<string | null>(null);
+  const [form, setForm] = useState(emptyForm);
+  const [saving, setSaving] = useState(false);
+  const [courses, setCourses] = useState<Course[]>([]);
+  const [students, setStudents] = useState<StudentRec[]>([]);
+  const [deleteId, setDeleteId] = useState<string | null>(null);
+  const [previewCert, setPreviewCert] = useState<Certificate | null>(null);
+
+  const fetchData = async () => {
+    setLoading(true);
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session?.user?.id) {
+        setCerts([]);
+        setCourses([]);
+        setStudents([]);
+        return;
+      }
+      const tid = session.user.id;
+
+      const [{ data: rawCerts, error }, { data: c }, studentsApiRes] = await Promise.all([
+        supabase.from('certificates').select('*').order('issued_at', { ascending: false }),
+        supabase.from('courses').select('id,title').eq('teacher_id', tid),
+        fetch('/api/admin/students').then(async (r) => {
+          const json = await r.json().catch(() => null);
+          return r.ok && json?.success ? json.students : null;
+        }).catch(() => null),
+      ]);
+      if (error) throw error;
+
+      let s: StudentRec[] = [];
+      if (Array.isArray(studentsApiRes) && studentsApiRes.length > 0) {
+        s = (studentsApiRes as StudentApiRow[])
+          .filter((row) => String(row.teacherId ?? '') === String(tid))
+          .map((row) => ({
+            id: String(row.uid || row.id || ''),
+            display_name: String(row.displayName || row.display_name || ''),
+            email: String(row.email || ''),
+          }))
+          .filter((row) => row.id && row.display_name);
+      } else {
+        const { data: directStudents } = await supabase
+          .from('profiles')
+          .select('id,display_name,email')
+          .eq('role', 'student')
+          .eq('teacher_id', tid);
+        s = (directStudents || []) as StudentRec[];
+      }
+
+      const courseList = c || [];
+      const courseIdSet = new Set(courseList.map((course: any) => course.id));
+      const studentIdSet = new Set(s.map((p) => p.id));
+
+      const scoped = (rawCerts || []).filter((cert: any) => {
+        if (cert.course_id) return courseIdSet.has(cert.course_id);
+        return !cert.course_id && studentIdSet.has(cert.student_id);
+      });
+
+      const courseMap: Record<string, string> = {};
+      courseList.forEach((course: any) => { courseMap[course.id] = course.title; });
+
+      const studentMap: Record<string, { display_name: string; email: string }> = {};
+      (s || []).forEach((p: any) => { studentMap[p.id] = { display_name: p.display_name, email: p.email }; });
+
+      const enriched = scoped.map((cert: any) => ({
+        ...cert,
+        student: cert.student_id ? (studentMap[cert.student_id] || null) : null,
+        course: cert.course_id ? (courseMap[cert.course_id] ? { title: courseMap[cert.course_id] } : null) : null,
+      }));
+
+      setCerts(enriched);
+      setCourses(courseList);
+      setStudents(s || []);
+    } catch {
+      toast.error('Failed to load certificates');
+    } finally {
+      setLoading(false);
+    }
+  };
 
   useEffect(() => {
-    const fetchData = async () => {
-      setLoading(true);
-      try {
-        const { data: { session } } = await supabase.auth.getSession();
-        if (!session) return;
-        const teacherId = session.user.id;
-
-        const [coursesRes, studentsRes] = await Promise.all([
-          supabase.from('courses').select('id,title').eq('teacher_id', teacherId),
-          supabase.from('profiles').select('id,display_name,email').eq('role', 'student').eq('teacher_id', teacherId),
-        ]);
-        if (coursesRes.error) throw coursesRes.error;
-        if (studentsRes.error) throw studentsRes.error;
-
-        const courseMap: Record<string, string> = {};
-        (coursesRes.data || []).forEach((c: any) => { courseMap[c.id] = c.title; });
-        const courseIds = Object.keys(courseMap);
-
-        const studentMap: Record<string, { name: string; email: string }> = {};
-        (studentsRes.data || []).forEach((s: any) => {
-          studentMap[s.id] = { name: s.display_name || 'Unknown Student', email: s.email || '' };
-        });
-
-        if (courseIds.length === 0) {
-          setRows([]);
-          return;
-        }
-
-        const certsRes = await supabase
-          .from('certificates')
-          .select('*')
-          .in('course_id', courseIds)
-          .order('issued_at', { ascending: false });
-        if (certsRes.error) throw certsRes.error;
-
-        const mapped = (certsRes.data || []).map((c: any) => ({
-          id: c.id,
-          studentName: studentMap[c.student_id]?.name || 'Unknown Student',
-          studentEmail: studentMap[c.student_id]?.email || '',
-          courseTitle: c.course_id ? (courseMap[c.course_id] || 'Unknown Course') : 'No Course',
-          title: c.title,
-          certificateNumber: c.certificate_number,
-          score: c.score ?? null,
-          grade: c.grade ?? null,
-          issuedAt: c.issued_at,
-          status: c.status as CertStatus,
-        }));
-
-        setRows(mapped);
-      } catch (error: any) {
-        toast.error(error?.message || 'Failed to load certificates');
-      } finally {
-        setLoading(false);
-      }
-    };
-
     fetchData();
   }, []);
 
-  const filtered = useMemo(() => {
-    const q = search.trim().toLowerCase();
-    return rows.filter((r) => {
-      const matchesSearch =
-        r.studentName.toLowerCase().includes(q) ||
-        r.courseTitle.toLowerCase().includes(q) ||
-        r.title.toLowerCase().includes(q) ||
-        r.certificateNumber.toLowerCase().includes(q);
-      const matchesStatus = statusFilter === 'all' || r.status === statusFilter;
-      return matchesSearch && matchesStatus;
-    });
-  }, [rows, search, statusFilter]);
+  const filtered = certs.filter(c => {
+    const q = search.toLowerCase();
+    const name = c.student?.display_name || '';
+    const course = c.course?.title || '';
+    const certNum = c.certificate_number || '';
+    const matchSearch = name.toLowerCase().includes(q) || course.toLowerCase().includes(q) || certNum.toLowerCase().includes(q) || c.title.toLowerCase().includes(q);
+    const matchStatus = statusFilter === 'all' || c.status === statusFilter;
+    const matchCourse = courseFilter === 'all' || c.course_id === courseFilter;
+    return matchSearch && matchStatus && matchCourse;
+  });
 
-  const stats = {
-    total: rows.length,
-    issued: rows.filter((r) => r.status === 'issued').length,
-    revoked: rows.filter((r) => r.status === 'revoked').length,
-    avgScore: rows.filter((r) => typeof r.score === 'number').length > 0
-      ? Math.round(
-          rows
-            .filter((r) => typeof r.score === 'number')
-            .reduce((acc, r) => acc + (r.score as number), 0) /
-            rows.filter((r) => typeof r.score === 'number').length,
-        )
-      : 0,
+  const stats = [
+    { label: 'Total Issued', value: certs.length, gradient: 'from-amber-500 to-orange-600', shadow: 'shadow-amber-500/25', icon: Award },
+    { label: 'Active', value: certs.filter(c => c.status === 'issued').length, gradient: 'from-emerald-500 to-teal-600', shadow: 'shadow-emerald-500/25', icon: CheckCircle2 },
+    { label: 'Revoked', value: certs.filter(c => c.status === 'revoked').length, gradient: 'from-rose-500 to-pink-600', shadow: 'shadow-rose-500/25', icon: XCircle },
+    { label: 'This Month', value: certs.filter(c => { const d = new Date(c.issued_at); const n = new Date(); return d.getMonth() === n.getMonth() && d.getFullYear() === n.getFullYear(); }).length, gradient: 'from-violet-500 to-violet-600', shadow: 'shadow-violet-500/25', icon: Calendar },
+  ];
+
+  const openAdd = () => {
+    setEditId(null);
+    setForm({ ...emptyForm, certificate_number: generateCertNumber() });
+    setShowModal(true);
   };
 
-  if (loading) {
-    return (
-      <TeacherLayout>
-        <LayoutPageSkeleton cards={4} rows={7} />
-      </TeacherLayout>
-    );
-  }
+  const openEdit = (c: Certificate) => {
+    setEditId(c.id);
+    setForm({
+      student_id: c.student_id,
+      course_id: c.course_id || '',
+      title: c.title,
+      issued_at: c.issued_at.substring(0, 10),
+      certificate_number: c.certificate_number,
+      grade: c.grade || '',
+      score: c.score !== null ? String(c.score) : '',
+      status: c.status,
+    });
+    setShowModal(true);
+  };
+
+  const handleSave = async () => {
+    if (!form.student_id) { toast.error('Student is required'); return; }
+    if (!form.title.trim()) { toast.error('Title is required'); return; }
+    if (!form.certificate_number.trim()) { toast.error('Certificate number is required'); return; }
+    setSaving(true);
+    try {
+      const payload: any = {
+        student_id: form.student_id,
+        course_id: form.course_id || null,
+        title: form.title.trim(),
+        issued_at: form.issued_at,
+        certificate_number: form.certificate_number.trim(),
+        grade: form.grade || null,
+        score: form.score !== '' ? Number(form.score) : null,
+        status: form.status,
+      };
+      if (editId) {
+        const { error } = await supabase.from('certificates').update(payload).eq('id', editId);
+        if (error) throw error;
+        toast.success('Certificate updated');
+      } else {
+        payload.created_at = new Date().toISOString();
+        const { error } = await supabase.from('certificates').insert(payload);
+        if (error) throw error;
+        toast.success('Certificate issued');
+      }
+      setShowModal(false);
+      fetchData();
+    } catch (e: any) {
+      toast.error(e.message || 'Failed to save');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleDelete = async (id: string) => {
+    try {
+      const { error } = await supabase.from('certificates').delete().eq('id', id);
+      if (error) throw error;
+      toast.success('Certificate deleted');
+      setDeleteId(null);
+      fetchData();
+    } catch { toast.error('Failed to delete'); }
+  };
+
+  const toggleStatus = async (cert: Certificate) => {
+    const newStatus: CertStatus = cert.status === 'issued' ? 'revoked' : 'issued';
+    try {
+      const { error } = await supabase.from('certificates').update({ status: newStatus }).eq('id', cert.id);
+      if (error) throw error;
+      toast.success(`Certificate ${newStatus}`);
+      fetchData();
+    } catch { toast.error('Failed to update status'); }
+  };
 
   return (
     <TeacherLayout>
-      <div className="space-y-6">
-        <div>
-          <h1 className="text-2xl font-bold text-slate-900">Certificates</h1>
-          <p className="text-slate-500 text-sm mt-1">Review certificates issued across your courses.</p>
-        </div>
-
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-          <StatCard label="Total" value={stats.total} icon={Award} color="text-violet-600" bg="bg-violet-50" />
-          <StatCard label="Issued" value={stats.issued} icon={CheckCircle2} color="text-emerald-600" bg="bg-emerald-50" />
-          <StatCard label="Revoked" value={stats.revoked} icon={XCircle} color="text-rose-600" bg="bg-rose-50" />
-          <StatCard label="Avg Score" value={stats.avgScore} suffix="%" icon={BookOpen} color="text-blue-600" bg="bg-blue-50" />
-        </div>
-
-        <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-4 flex flex-wrap items-center gap-3">
-          <div className="relative flex-1 min-w-[220px]">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
-            <input
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder="Search by student, course, title, number..."
-              className="w-full pl-9 pr-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-violet-500/30"
-            />
-          </div>
-          <select
-            value={statusFilter}
-            onChange={(e) => setStatusFilter(e.target.value as 'all' | CertStatus)}
-            className="px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-violet-500/30"
+      <AdminListPageShell
+        breadcrumbPortalLabel="Teacher Portal"
+        breadcrumbLabel="Certificates"
+        title="Certificates"
+        description="Issue and manage student achievement certificates."
+        action={
+          <motion.button
+            type="button"
+            onClick={openAdd}
+            whileHover={{ scale: 1.04, y: -2 }}
+            whileTap={{ scale: 0.97 }}
+            className="inline-flex items-center gap-2 px-6 py-3 rounded-2xl font-bold text-sm text-white shrink-0 transition-all"
+            style={{
+              background: 'linear-gradient(135deg, #818cf8 0%, #a78bfa 100%)',
+              boxShadow: '0 8px 32px rgba(139,92,246,0.45), 0 2px 8px rgba(0,0,0,0.15)',
+            }}
           >
-            <option value="all">All Status</option>
-            <option value="issued">Issued</option>
-            <option value="revoked">Revoked</option>
-          </select>
-        </div>
+            <Plus className="w-4 h-4" />
+            Issue Certificate
+          </motion.button>
+        }
+        stats={stats}
+        filterBar={
+          <AdminListFilterBar>
+            <div className="relative flex-1 min-w-[200px]">
+              <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-indigo-400" />
+              <input
+                value={search}
+                onChange={e => setSearch(e.target.value)}
+                placeholder="Search student, course, certificate #..."
+                className={ADMIN_LIST_SEARCH_INPUT}
+              />
+            </div>
+            <select value={statusFilter} onChange={e => setStatusFilter(e.target.value)} className={ADMIN_LIST_SELECT}>
+              <option value="all">All Status</option>
+              <option value="issued">Issued</option>
+              <option value="revoked">Revoked</option>
+            </select>
+            <select value={courseFilter} onChange={e => setCourseFilter(e.target.value)} className={ADMIN_LIST_SELECT}>
+              <option value="all">All Courses</option>
+              {courses.map(c => <option key={c.id} value={c.id}>{c.title}</option>)}
+            </select>
+          </AdminListFilterBar>
+        }
+      >
+        {loading ? (
+          <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
+            <div className={ADMIN_LIST_CARD_GRID}>
+              {Array(6).fill(0).map((_, i) => (
+                <div key={i} className="h-56 rounded-2xl bg-slate-100 animate-pulse" />
+              ))}
+            </div>
+          </div>
+        ) : filtered.length === 0 ? (
+          <div className="flex flex-col items-center justify-center py-20 gap-3 text-slate-400 bg-white rounded-2xl border border-slate-100 shadow-sm">
+            <Award className="w-10 h-10 opacity-30" />
+            <p className="text-sm">No certificates found</p>
+            <button type="button" onClick={openAdd} className="text-xs text-indigo-600 font-semibold hover:underline">Issue the first one</button>
+          </div>
+        ) : (
+          <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
+            <div className={ADMIN_LIST_CARD_GRID}>
+              {filtered.map(cert => {
+                const sc = STATUS_CFG[cert.status];
+                const name = cert.student?.display_name || 'Unknown';
+                const initials = name.split(' ').map(n => n[0]).join('').substring(0, 2).toUpperCase();
+                const gradeColor = cert.grade ? (GRADE_COLORS[cert.grade] || 'text-slate-600 bg-slate-100') : null;
+                return (
+                  <div key={cert.id} className={ADMIN_LIST_ITEM_CARD}>
+                    <div className="flex items-start gap-3">
+                      <div className={cn('w-12 h-12 rounded-xl bg-gradient-to-br flex items-center justify-center text-white text-sm font-bold shrink-0', getAvatarColor(name))}>
+                        {initials}
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <p className="font-semibold text-slate-900 text-sm">{name}</p>
+                        <p className="text-xs text-slate-400 truncate">{cert.student?.email}</p>
+                        <p className="text-sm font-medium text-slate-800 mt-2">{cert.title}</p>
+                        <div className="flex flex-wrap items-center gap-2 mt-2">
+                          <button
+                            type="button"
+                            onClick={() => toggleStatus(cert)}
+                            className={cn('inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium transition-opacity hover:opacity-80', sc.bg, sc.text)}
+                          >
+                            <span className={cn('w-1.5 h-1.5 rounded-full', sc.dot)} />
+                            {sc.label}
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                    <div className="mt-4 space-y-2 text-xs text-slate-600 border-t border-slate-100 pt-3">
+                      <div className="flex items-start justify-between gap-2">
+                        <span className="text-slate-400 font-semibold uppercase tracking-wider shrink-0">Number</span>
+                        <span className="flex items-center gap-1 text-right font-mono text-[11px]"><Hash className="w-3 h-3 shrink-0" />{cert.certificate_number}</span>
+                      </div>
+                      <div className="flex justify-between gap-2">
+                        <span className="text-slate-400 font-semibold uppercase tracking-wider">Course</span>
+                        <span className="text-right truncate">{cert.course?.title || '—'}</span>
+                      </div>
+                      <div className="flex justify-between gap-2 items-center">
+                        <span className="text-slate-400 font-semibold uppercase tracking-wider">Grade</span>
+                        <span className="flex items-center gap-2">
+                          {cert.grade && gradeColor && (
+                            <span className={cn('px-2 py-0.5 rounded-full text-xs font-bold', gradeColor)}>{cert.grade}</span>
+                          )}
+                          {cert.score !== null && <span>{cert.score}%</span>}
+                          {!cert.grade && cert.score === null ? '—' : null}
+                        </span>
+                      </div>
+                      <div className="flex justify-between gap-2 items-center">
+                        <span className="text-slate-400 font-semibold uppercase tracking-wider">Issued</span>
+                        <span className="inline-flex items-center gap-1">
+                          <Calendar className="w-3.5 h-3.5 text-slate-400" />
+                          {format(new Date(cert.issued_at), 'MMM d, yyyy')}
+                        </span>
+                      </div>
+                    </div>
+                    <div className="flex justify-end gap-1 mt-4 pt-3 border-t border-slate-50">
+                      <button type="button" onClick={() => setPreviewCert(cert)} className="p-2 rounded-lg text-slate-400 hover:bg-amber-50 hover:text-amber-600 transition-colors" title="Preview">
+                        <Eye className="w-4 h-4" />
+                      </button>
+                      <button type="button" onClick={() => openEdit(cert)} className="p-2 rounded-lg text-slate-400 hover:bg-indigo-50 hover:text-indigo-600 transition-colors">
+                        <Pencil className="w-4 h-4" />
+                      </button>
+                      <button type="button" onClick={() => setDeleteId(cert.id)} className="p-2 rounded-lg text-slate-400 hover:bg-rose-50 hover:text-rose-500 transition-colors">
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+            <div className="px-5 py-3 border-t border-slate-100 text-xs text-slate-400">
+              Showing {filtered.length} of {certs.length} certificates
+            </div>
+          </div>
+        )}
+      </AdminListPageShell>
 
-        <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
-          {filtered.length === 0 ? (
-            <div className="py-20 text-center text-slate-400">
-              <Award className="w-10 h-10 mx-auto mb-3 opacity-40" />
-              <p className="font-medium">No certificates found</p>
+      {showModal && (
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between p-5 border-b border-slate-100">
+              <div className="flex items-center gap-2">
+                <div className="w-8 h-8 bg-amber-100 rounded-lg flex items-center justify-center">
+                  <Award className="w-4 h-4 text-amber-600" />
+                </div>
+                <h2 className="text-lg font-bold text-slate-800">{editId ? 'Edit Certificate' : 'Issue Certificate'}</h2>
+              </div>
+              <button onClick={() => setShowModal(false)} className="p-2 hover:bg-slate-100 rounded-lg"><X className="w-4 h-4" /></button>
             </div>
-          ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full text-left text-sm">
-                <thead>
-                  <tr className="bg-slate-50 text-slate-500 text-xs font-bold uppercase tracking-wider">
-                    <th className="px-5 py-3.5">Student</th>
-                    <th className="px-5 py-3.5">Course</th>
-                    <th className="px-5 py-3.5">Certificate</th>
-                    <th className="px-5 py-3.5">Issued</th>
-                    <th className="px-5 py-3.5">Status</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-50">
-                  {filtered.map((row) => {
-                    const meta = STATUS_META[row.status];
-                    const Icon = meta.icon;
-                    return (
-                      <tr key={row.id} className="hover:bg-slate-50/60 transition-colors">
-                        <td className="px-5 py-4">
-                          <div className="font-semibold text-slate-800">{row.studentName}</div>
-                          <div className="text-xs text-slate-400 mt-0.5">{row.studentEmail}</div>
-                        </td>
-                        <td className="px-5 py-4 text-slate-600">{row.courseTitle}</td>
-                        <td className="px-5 py-4">
-                          <div className="font-semibold text-slate-800">{row.title}</div>
-                          <div className="text-xs text-slate-400 mt-0.5 flex items-center gap-1">
-                            <Hash className="w-3 h-3" />
-                            {row.certificateNumber}
-                          </div>
-                        </td>
-                        <td className="px-5 py-4 text-slate-600">
-                          <div>{format(new Date(row.issuedAt), 'MMM dd, yyyy')}</div>
-                          <div className="text-xs text-slate-400 mt-0.5">
-                            {typeof row.score === 'number' ? `Score ${row.score}${row.grade ? ` • ${row.grade}` : ''}` : (row.grade || 'No grade')}
-                          </div>
-                        </td>
-                        <td className="px-5 py-4">
-                          <span className={cn('inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-semibold', meta.bg, meta.text)}>
-                            <span className={cn('w-1.5 h-1.5 rounded-full', meta.dot)} />
-                            <Icon className="w-3 h-3" />
-                            {meta.label}
-                          </span>
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
+            <div className="p-5 space-y-4">
+              <div>
+                <label className="text-xs font-semibold text-slate-600 uppercase tracking-wide">Student *</label>
+                <select value={form.student_id} onChange={e => setForm(f => ({ ...f, student_id: e.target.value }))}
+                  className="mt-1 w-full px-3 py-2.5 text-sm border border-slate-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-amber-500/30">
+                  <option value="">Select student</option>
+                  {students.map(s => <option key={s.id} value={s.id}>{s.display_name} ({s.email})</option>)}
+                </select>
+              </div>
+              <div>
+                <label className="text-xs font-semibold text-slate-600 uppercase tracking-wide">Certificate Title *</label>
+                <input value={form.title} onChange={e => setForm(f => ({ ...f, title: e.target.value }))}
+                  className="mt-1 w-full px-3 py-2.5 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-500/30"
+                  placeholder="e.g. Certificate of Completion" />
+              </div>
+              <div>
+                <label className="text-xs font-semibold text-slate-600 uppercase tracking-wide">Course</label>
+                <select value={form.course_id} onChange={e => setForm(f => ({ ...f, course_id: e.target.value }))}
+                  className="mt-1 w-full px-3 py-2.5 text-sm border border-slate-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-amber-500/30">
+                  <option value="">No course</option>
+                  {courses.map(c => <option key={c.id} value={c.id}>{c.title}</option>)}
+                </select>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-xs font-semibold text-slate-600 uppercase tracking-wide">Grade</label>
+                  <select value={form.grade} onChange={e => setForm(f => ({ ...f, grade: e.target.value }))}
+                    className="mt-1 w-full px-3 py-2.5 text-sm border border-slate-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-amber-500/30">
+                    <option value="">No grade</option>
+                    {['A+','A','A-','B+','B','B-','C+','C','D','F'].map(g => <option key={g} value={g}>{g}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label className="text-xs font-semibold text-slate-600 uppercase tracking-wide">Score (%)</label>
+                  <input type="number" min={0} max={100} value={form.score} onChange={e => setForm(f => ({ ...f, score: e.target.value }))}
+                    className="mt-1 w-full px-3 py-2.5 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-500/30"
+                    placeholder="0–100" />
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-xs font-semibold text-slate-600 uppercase tracking-wide">Issue Date</label>
+                  <input type="date" value={form.issued_at} onChange={e => setForm(f => ({ ...f, issued_at: e.target.value }))}
+                    className="mt-1 w-full px-3 py-2.5 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-500/30" />
+                </div>
+                <div>
+                  <label className="text-xs font-semibold text-slate-600 uppercase tracking-wide">Status</label>
+                  <select value={form.status} onChange={e => setForm(f => ({ ...f, status: e.target.value as CertStatus }))}
+                    className="mt-1 w-full px-3 py-2.5 text-sm border border-slate-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-amber-500/30">
+                    <option value="issued">Issued</option>
+                    <option value="revoked">Revoked</option>
+                  </select>
+                </div>
+              </div>
+              <div>
+                <label className="text-xs font-semibold text-slate-600 uppercase tracking-wide">Certificate Number *</label>
+                <div className="flex gap-2 mt-1">
+                  <input value={form.certificate_number} onChange={e => setForm(f => ({ ...f, certificate_number: e.target.value }))}
+                    className="flex-1 px-3 py-2.5 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-500/30 font-mono"
+                    placeholder="CERT-2026-XXXXXX" />
+                  <button type="button" onClick={() => setForm(f => ({ ...f, certificate_number: generateCertNumber() }))}
+                    className="px-3 py-2.5 text-xs bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-lg transition-colors font-medium">
+                    Generate
+                  </button>
+                </div>
+              </div>
             </div>
-          )}
+            <div className="flex justify-end gap-3 p-5 border-t border-slate-100">
+              <button onClick={() => setShowModal(false)} className="px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-100 rounded-lg transition-colors">Cancel</button>
+              <button onClick={handleSave} disabled={saving}
+                className="px-4 py-2 text-sm font-semibold bg-amber-500 hover:bg-amber-600 text-white rounded-lg transition-colors disabled:opacity-50">
+                {saving ? 'Saving...' : editId ? 'Update' : 'Issue'}
+              </button>
+            </div>
+          </div>
         </div>
-      </div>
+      )}
+
+      {previewCert && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-xl overflow-hidden">
+            <div className="flex items-center justify-between p-4 border-b border-slate-100">
+              <span className="text-sm font-semibold text-slate-600">Certificate Preview</span>
+              <button onClick={() => setPreviewCert(null)} className="p-2 hover:bg-slate-100 rounded-lg"><X className="w-4 h-4" /></button>
+            </div>
+            <div className="p-8 bg-gradient-to-br from-amber-50 to-yellow-50 relative overflow-hidden">
+              <div className="absolute inset-3 border-2 border-amber-200 rounded-xl pointer-events-none" />
+              <div className="absolute inset-4 border border-amber-100 rounded-xl pointer-events-none" />
+              <div className="absolute top-6 left-6 w-8 h-8 border-t-2 border-l-2 border-amber-400 rounded-tl-lg" />
+              <div className="absolute top-6 right-6 w-8 h-8 border-t-2 border-r-2 border-amber-400 rounded-tr-lg" />
+              <div className="absolute bottom-6 left-6 w-8 h-8 border-b-2 border-l-2 border-amber-400 rounded-bl-lg" />
+              <div className="absolute bottom-6 right-6 w-8 h-8 border-b-2 border-r-2 border-amber-400 rounded-br-lg" />
+
+              <div className="relative text-center py-4 px-6">
+                <div className="w-16 h-16 bg-gradient-to-br from-amber-400 to-orange-500 rounded-full flex items-center justify-center mx-auto mb-4 shadow-lg shadow-amber-200">
+                  <Award className="w-8 h-8 text-white" />
+                </div>
+                <p className="text-xs font-bold text-amber-600 uppercase tracking-[0.3em] mb-1">Certificate of Achievement</p>
+                <p className="text-xs text-slate-400 mb-4">This is to certify that</p>
+                <h2 className="text-3xl font-bold text-slate-800 mb-1">{previewCert.student?.display_name || 'Student Name'}</h2>
+                <p className="text-xs text-slate-400 mb-4">has successfully completed</p>
+                <h3 className="text-xl font-semibold text-amber-700 mb-2">{previewCert.title}</h3>
+                {previewCert.course?.title && (
+                  <p className="text-sm text-slate-500 mb-4">{previewCert.course.title}</p>
+                )}
+                <div className="flex items-center justify-center gap-6 mb-4">
+                  {previewCert.grade && (
+                    <div className="text-center">
+                      <div className="text-2xl font-bold text-emerald-600">{previewCert.grade}</div>
+                      <div className="text-xs text-slate-400">Grade</div>
+                    </div>
+                  )}
+                  {previewCert.score !== null && (
+                    <div className="text-center">
+                      <div className="text-2xl font-bold text-blue-600">{previewCert.score}%</div>
+                      <div className="text-xs text-slate-400">Score</div>
+                    </div>
+                  )}
+                </div>
+                <div className="border-t border-amber-200 pt-4 mt-2">
+                  <p className="text-xs text-slate-400">
+                    Issued on {format(new Date(previewCert.issued_at), 'MMMM d, yyyy')}
+                  </p>
+                  <p className="text-xs font-mono text-slate-400 mt-1">{previewCert.certificate_number}</p>
+                </div>
+              </div>
+            </div>
+            <div className="flex justify-end p-4 border-t border-slate-100">
+              <button onClick={() => setPreviewCert(null)} className="px-4 py-2 text-sm font-medium bg-amber-500 hover:bg-amber-600 text-white rounded-lg">Close</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {deleteId && (
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm p-6 text-center">
+            <div className="w-12 h-12 bg-rose-50 rounded-full flex items-center justify-center mx-auto mb-3">
+              <Trash2 className="w-6 h-6 text-rose-500" />
+            </div>
+            <h3 className="text-lg font-bold text-slate-800 mb-1">Delete Certificate?</h3>
+            <p className="text-sm text-slate-500 mb-5">This action cannot be undone.</p>
+            <div className="flex gap-3 justify-center">
+              <button onClick={() => setDeleteId(null)} className="px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-100 rounded-lg">Cancel</button>
+              <button onClick={() => handleDelete(deleteId)} className="px-4 py-2 text-sm font-semibold bg-rose-500 hover:bg-rose-600 text-white rounded-lg">Delete</button>
+            </div>
+          </div>
+        </div>
+      )}
     </TeacherLayout>
-  );
-}
-
-function StatCard({
-  label,
-  value,
-  suffix,
-  icon: Icon,
-  color,
-  bg,
-}: {
-  label: string;
-  value: number;
-  suffix?: string;
-  icon: React.ElementType;
-  color: string;
-  bg: string;
-}) {
-  return (
-    <div className="bg-white border border-slate-100 rounded-2xl p-4 shadow-sm">
-      <div className="flex items-center justify-between mb-2">
-        <div className={cn('p-2 rounded-xl', bg)}>
-          <Icon className={cn('w-4 h-4', color)} />
-        </div>
-      </div>
-      <div className={cn('text-2xl font-bold', color)}>
-        {value}
-        {suffix || ''}
-      </div>
-      <div className="text-xs text-slate-500 font-medium mt-0.5">{label}</div>
-    </div>
   );
 }

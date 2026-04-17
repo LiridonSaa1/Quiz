@@ -56,6 +56,8 @@ export function AdminListFilterBar({ children }: { children: React.ReactNode }) 
 }
 
 export type AdminListPageShellProps = {
+  /** First segment of the hero breadcrumb (e.g. "Admin Portal" or "Teacher Portal"). */
+  breadcrumbPortalLabel?: string;
   breadcrumbLabel: string;
   title: string;
   description: string;
@@ -68,6 +70,7 @@ export type AdminListPageShellProps = {
 };
 
 export function AdminListPageShell({
+  breadcrumbPortalLabel = 'Admin Portal',
   breadcrumbLabel,
   title,
   description,
@@ -107,7 +110,7 @@ export function AdminListPageShell({
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-6">
               <div>
                 <nav className="flex items-center gap-1.5 text-xs font-semibold mb-3" aria-label="Breadcrumb">
-                  <span className="text-indigo-400 tracking-wider uppercase">Admin Portal</span>
+                  <span className="text-indigo-400 tracking-wider uppercase">{breadcrumbPortalLabel}</span>
                   <ChevronRight className="w-3.5 h-3.5 text-indigo-500/50" />
                   <span className="text-indigo-200 tracking-wider uppercase">{breadcrumbLabel}</span>
                 </nav>

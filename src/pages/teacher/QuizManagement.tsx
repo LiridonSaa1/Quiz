@@ -13,6 +13,7 @@ import { Quiz } from '../../types';
 import { cn } from '../../lib/utils';
 import { authFetch } from '../../lib/apiUrl';
 import { resolveTeacherIdCandidates } from '../../lib/teacherScope';
+import { fetchTeacherQuizzesFromSupabase, missingQuizzesPublishedColumn } from '../../lib/fetchTeacherQuizzes';
 import { Link, useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence, useMotionValue, useSpring, useTransform } from 'motion/react';
 
@@ -91,8 +92,11 @@ export default function QuizManagement() {
           .from('courses')
           .select('id, title')
           .in('teacher_id', scopedIds);
-        if (coursesErr && coursesErr.code !== 'PGRST116') throw coursesErr;
-        courseRows = coursesData ?? [];
+        if (coursesErr && coursesErr.code !== 'PGRST116') {
+          courseRows = [];
+        } else {
+          courseRows = coursesData ?? [];
+        }
       }
 
       let quizRows: Record<string, unknown>[] | null = null;
@@ -100,38 +104,27 @@ export default function QuizManagement() {
         `/api/teacher/quizzes?userId=${encodeURIComponent(session.user.id)}`
       );
       if (quizzesRes.ok) {
-        const quizzesJson = await quizzesRes.json();
-        if (quizzesJson?.success && Array.isArray(quizzesJson.quizzes)) {
-          quizRows = quizzesJson.quizzes as Record<string, unknown>[];
+        try {
+          const quizzesJson = await quizzesRes.json();
+          if (quizzesJson?.success && Array.isArray(quizzesJson.quizzes)) {
+            quizRows = quizzesJson.quizzes as Record<string, unknown>[];
+          }
+        } catch {
+          /* invalid JSON — fall through to Supabase */
         }
       }
       if (quizRows === null) {
         const scopedIds = await resolveTeacherIdCandidates(session.user.id);
-        let res = await supabase
-          .from('quizzes')
-          .select('*')
-          .in('teacher_id', scopedIds)
-          .order('created_at', { ascending: false });
-        if (res.error) {
-          res = await supabase.from('quizzes').select('*').in('teacher_id', scopedIds);
-        }
-        if (res.error) {
-          res = await supabase.from('quizzes').select('*').eq('teacher_id', session.user.id);
-        }
-        if (res.error) throw res.error;
-        const rows = (res.data ?? []) as Record<string, unknown>[];
-        rows.sort((a, b) => {
-          const ta = a.created_at ? new Date(String(a.created_at)).getTime() : 0;
-          const tb = b.created_at ? new Date(String(b.created_at)).getTime() : 0;
-          return tb - ta;
-        });
-        quizRows = rows;
+        quizRows = await fetchTeacherQuizzesFromSupabase(supabase, scopedIds, session.user.id);
       }
 
-      const { data: questionsSnapData, error: questionsErr } = await supabase
-        .from('questions')
-        .select('quiz_id');
-      if (questionsErr && questionsErr.code !== 'PGRST116') throw questionsErr;
+      let questionsSnapData: { quiz_id: string }[] | null = null;
+      const qCount = await supabase.from('questions').select('quiz_id');
+      if (qCount.error) {
+        questionsSnapData = [];
+      } else {
+        questionsSnapData = (qCount.data ?? []) as { quiz_id: string }[];
+      }
 
       const courseMap: Record<string, string> = {};
       const options: { id: string; name: string }[] = [];
@@ -143,6 +136,7 @@ export default function QuizManagement() {
 
       const questionCountMap: Record<string, number> = {};
       (questionsSnapData || []).forEach((q: { quiz_id: string }) => {
+        if (!q?.quiz_id) return;
         questionCountMap[q.quiz_id] = (questionCountMap[q.quiz_id] || 0) + 1;
       });
 
@@ -159,14 +153,18 @@ export default function QuizManagement() {
         maxAttempts: d.max_attempts,
         status: d.status,
         settings: d.settings,
-        published: d.published,
+        published:
+          typeof d.published === 'boolean'
+            ? d.published
+            : d.status === 'published' || String(d.status || '').toLowerCase() === 'active',
         createdAt: d.created_at,
         updatedAt: d.updated_at,
         questionCount: questionCountMap[d.id] || 0,
         courseName: courseMap[d.course_id] || 'Unknown Course',
       })));
-    } catch {
-      toast.error('Failed to load quizzes');
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : 'Failed to load quizzes';
+      toast.error(msg);
     } finally {
       setLoading(false);
     }
@@ -197,10 +195,17 @@ export default function QuizManagement() {
 
   const togglePublish = async (quiz: QuizWithCount) => {
     try {
-      const { error } = await supabase
+      const nextPub = !quiz.published;
+      let { error } = await supabase
         .from('quizzes')
-        .update({ published: !quiz.published })
+        .update({ published: nextPub })
         .eq('id', quiz.id);
+      if (error && missingQuizzesPublishedColumn(error)) {
+        ({ error } = await supabase
+          .from('quizzes')
+          .update({ status: nextPub ? 'published' : 'draft' })
+          .eq('id', quiz.id));
+      }
       if (error) throw error;
 
       if (!quiz.published) {

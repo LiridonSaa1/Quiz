@@ -2,10 +2,17 @@ import React, { useEffect, useMemo, useState } from 'react';
 import TeacherLayout from '../../components/layout/TeacherLayout';
 import { supabase } from '../../supabase';
 import { toast } from 'sonner';
+import {
+  AdminListFilterBar,
+  AdminListPageShell,
+  ADMIN_LIST_SEARCH_INPUT,
+  ADMIN_LIST_CARD_GRID,
+  ADMIN_LIST_ITEM_CARD,
+} from '../../components/admin/AdminListPageShell';
 import { BarChart3, Search, Users, BookOpen, FileText, TrendingUp, CheckCircle2 } from 'lucide-react';
 import { cn } from '../../lib/utils';
-import { LayoutPageSkeleton } from '../../components/ui/Skeleton';
 import { fetchAttemptRowsByQuizIds, normalizeAttempts } from '../../lib/quizAttempts';
+import { resolveTeacherIdCandidates } from '../../lib/teacherScope';
 
 interface StudentProgressRow {
   studentId: string;
@@ -17,6 +24,20 @@ interface StudentProgressRow {
   avgScore: number;
 }
 
+const AVATAR_COLORS = [
+  'from-sky-500 to-blue-600',
+  'from-violet-500 to-purple-600',
+  'from-emerald-500 to-teal-600',
+  'from-amber-500 to-orange-600',
+  'from-rose-500 to-pink-600',
+  'from-indigo-500 to-blue-600',
+];
+const getAvatarColor = (str: string) => {
+  let h = 0;
+  for (let i = 0; i < str.length; i++) h = str.charCodeAt(i) + ((h << 5) - h);
+  return AVATAR_COLORS[Math.abs(h) % AVATAR_COLORS.length];
+};
+
 export default function TeacherProgress() {
   const [loading, setLoading] = useState(true);
   const [rows, setRows] = useState<StudentProgressRow[]>([]);
@@ -24,13 +45,12 @@ export default function TeacherProgress() {
   const [coursesCount, setCoursesCount] = useState(0);
   const [quizzesCount, setQuizzesCount] = useState(0);
 
-  const isMissingTeacherIdColumn = (error: any) => {
-    const haystack = `${error?.message || ''} ${error?.details || ''}`.toLowerCase();
-    return error?.code === 'PGRST204' && haystack.includes('teacher_id');
-  };
-
-  const getPassingScore = (quizRow: any) => {
-    const raw = quizRow?.settings?.passingScore ?? quizRow?.passing_score ?? quizRow?.pass_mark ?? quizRow?.passMark;
+  const getPassingScore = (quizRow: Record<string, unknown>) => {
+    const raw =
+      (quizRow?.settings as { passingScore?: number } | undefined)?.passingScore ??
+      quizRow?.passing_score ??
+      quizRow?.pass_mark ??
+      quizRow?.passMark;
     const parsed = Number(raw);
     return Number.isFinite(parsed) ? parsed : 50;
   };
@@ -40,47 +60,39 @@ export default function TeacherProgress() {
       setLoading(true);
       try {
         const { data: { session } } = await supabase.auth.getSession();
-        if (!session) return;
+        if (!session?.user?.id) return;
         const teacherId = session.user.id;
+        const scopedIds = await resolveTeacherIdCandidates(teacherId);
 
         const [studentsRes, coursesRes] = await Promise.all([
           supabase.from('profiles').select('id,display_name,email').eq('role', 'student').eq('teacher_id', teacherId),
-          supabase.from('courses').select('id').eq('teacher_id', teacherId),
+          supabase.from('courses').select('id').in('teacher_id', scopedIds),
         ]);
 
         if (studentsRes.error) throw studentsRes.error;
         if (coursesRes.error) throw coursesRes.error;
 
         setCoursesCount((coursesRes.data || []).length);
-        const teacherCourseIds = (coursesRes.data || []).map((course: any) => course.id);
+        const teacherCourseIds = (coursesRes.data || []).map((course: { id: string }) => course.id);
 
-        const quizzesByTeacherRes = await supabase
-          .from('quizzes')
-          .select('*')
-          .eq('teacher_id', teacherId);
-
-        let quizRows: any[] = [];
-        if (!quizzesByTeacherRes.error) {
-          quizRows = quizzesByTeacherRes.data || [];
-        } else if (isMissingTeacherIdColumn(quizzesByTeacherRes.error)) {
-          if (teacherCourseIds.length > 0) {
-            const quizzesByCourseRes = await supabase
-              .from('quizzes')
-              .select('*')
-              .in('course_id', teacherCourseIds);
-            if (quizzesByCourseRes.error) throw quizzesByCourseRes.error;
-            quizRows = quizzesByCourseRes.data || [];
-          }
-        } else {
-          throw quizzesByTeacherRes.error;
+        /** Scope quizzes by teacher's courses only — avoids `quizzes.teacher_id` when that column is missing. */
+        let quizRows: Record<string, unknown>[] = [];
+        if (teacherCourseIds.length > 0) {
+          const quizzesRes = await supabase
+            .from('quizzes')
+            .select('*')
+            .in('course_id', teacherCourseIds);
+          if (quizzesRes.error) throw quizzesRes.error;
+          quizRows = quizzesRes.data || [];
         }
 
         setQuizzesCount(quizRows.length);
 
-        const quizIds = quizRows.map((q: any) => q.id);
-        const passingScoreByQuiz = quizRows.reduce((acc: Record<string, number>, q: any) => {
+        const quizIds = quizRows.map((q) => q.id as string);
+        const passingScoreByQuiz = quizRows.reduce((acc: Record<string, number>, q) => {
+          const id = q.id as string;
           const value = getPassingScore(q);
-          acc[q.id] = Number.isFinite(value) ? value : 50;
+          acc[id] = Number.isFinite(value) ? value : 50;
           return acc;
         }, {});
 
@@ -88,7 +100,7 @@ export default function TeacherProgress() {
         const attempts = normalizeAttempts(attemptsRows, passingScoreByQuiz);
 
         const studentMap: Record<string, { id: string; display_name: string; email: string }> = {};
-        (studentsRes.data || []).forEach((student: any) => {
+        (studentsRes.data || []).forEach((student: { id: string; display_name: string; email: string }) => {
           studentMap[student.id] = student;
         });
 
@@ -99,7 +111,7 @@ export default function TeacherProgress() {
             .select('id,display_name,email')
             .in('id', missingStudentIds);
           if (!extraStudentsRes.error) {
-            (extraStudentsRes.data || []).forEach((student: any) => {
+            (extraStudentsRes.data || []).forEach((student: { id: string; display_name: string; email: string }) => {
               studentMap[student.id] = student;
             });
           }
@@ -114,7 +126,7 @@ export default function TeacherProgress() {
           attemptsByStudent[sid].scoreSum += a.score_percent;
         });
 
-        const mapped = Object.values(studentMap).map((s: any) => {
+        const mapped = Object.values(studentMap).map((s) => {
           const aggr = attemptsByStudent[s.id] || { attempts: 0, passed: 0, scoreSum: 0 };
           const avgScore = aggr.attempts > 0 ? Math.round(aggr.scoreSum / aggr.attempts) : 0;
           const passRate = aggr.attempts > 0 ? Math.round((aggr.passed / aggr.attempts) * 100) : 0;
@@ -130,8 +142,8 @@ export default function TeacherProgress() {
         });
 
         setRows(mapped);
-      } catch (error: any) {
-        toast.error(error?.message || 'Failed to load student progress');
+      } catch (error: unknown) {
+        toast.error((error as Error)?.message || 'Failed to load student progress');
       } finally {
         setLoading(false);
       }
@@ -148,7 +160,7 @@ export default function TeacherProgress() {
     );
   }, [rows, search]);
 
-  const overall = {
+  const overall = useMemo(() => ({
     students: rows.length,
     attempts: rows.reduce((acc, r) => acc + r.attempts, 0),
     avgScore: rows.filter((r) => r.attempts > 0).length > 0
@@ -157,142 +169,131 @@ export default function TeacherProgress() {
     passRate: rows.filter((r) => r.attempts > 0).length > 0
       ? Math.round(rows.filter((r) => r.attempts > 0).reduce((acc, r) => acc + r.passRate, 0) / rows.filter((r) => r.attempts > 0).length)
       : 0,
-  };
+  }), [rows]);
 
-  if (loading) {
-    return (
-      <TeacherLayout>
-        <LayoutPageSkeleton cards={4} rows={7} />
-      </TeacherLayout>
-    );
-  }
+  const statItems = [
+    { label: 'Students', value: overall.students, gradient: 'from-indigo-500 to-violet-600', shadow: 'shadow-indigo-500/25', icon: Users },
+    { label: 'Attempts', value: overall.attempts, gradient: 'from-blue-500 to-cyan-600', shadow: 'shadow-blue-500/25', icon: FileText },
+    { label: 'Avg score %', value: overall.avgScore, gradient: 'from-emerald-500 to-teal-600', shadow: 'shadow-emerald-500/25', icon: TrendingUp },
+    { label: 'Pass rate %', value: overall.passRate, gradient: 'from-amber-500 to-orange-600', shadow: 'shadow-amber-500/25', icon: CheckCircle2 },
+    { label: 'Courses', value: coursesCount, gradient: 'from-violet-500 to-purple-600', shadow: 'shadow-violet-500/25', icon: BookOpen },
+    { label: 'Quizzes', value: quizzesCount, gradient: 'from-sky-500 to-indigo-600', shadow: 'shadow-sky-500/25', icon: BarChart3 },
+  ];
 
   return (
     <TeacherLayout>
-      <div className="space-y-6">
-        <div>
-          <h1 className="text-2xl font-bold text-slate-900">Student Progress</h1>
-          <p className="text-slate-500 text-sm mt-1">Performance overview across your students and quizzes.</p>
-        </div>
-
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-          <StatCard label="Students" value={overall.students} icon={Users} color="text-violet-600" bg="bg-violet-50" />
-          <StatCard label="Attempts" value={overall.attempts} icon={FileText} color="text-blue-600" bg="bg-blue-50" />
-          <StatCard label="Avg Score" value={overall.avgScore} suffix="%" icon={TrendingUp} color="text-emerald-600" bg="bg-emerald-50" />
-          <StatCard label="Pass Rate" value={overall.passRate} suffix="%" icon={CheckCircle2} color="text-amber-600" bg="bg-amber-50" />
-        </div>
-
-        <div className="grid grid-cols-2 gap-4">
-          <div className="bg-white border border-slate-100 rounded-2xl p-4 shadow-sm">
-            <div className="flex items-center gap-2 text-slate-500 text-sm font-medium">
-              <BookOpen className="w-4 h-4 text-violet-500" />
-              Courses
+      <AdminListPageShell
+        breadcrumbPortalLabel="Teacher Portal"
+        breadcrumbLabel="Progress"
+        title="Student Progress"
+        description="Performance overview across your students and quizzes linked to your courses."
+        statsGridClassName="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-4"
+        stats={statItems.map((s) => ({
+          label: s.label,
+          value: s.value,
+          gradient: s.gradient,
+          shadow: s.shadow,
+          icon: s.icon,
+        }))}
+        filterBar={
+          <AdminListFilterBar>
+            <div className="relative flex-1 min-w-[200px]">
+              <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-indigo-400" />
+              <input
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder="Search students by name or email..."
+                className={ADMIN_LIST_SEARCH_INPUT}
+              />
             </div>
-            <div className="text-2xl font-bold text-slate-900 mt-1">{coursesCount}</div>
-          </div>
-          <div className="bg-white border border-slate-100 rounded-2xl p-4 shadow-sm">
-            <div className="flex items-center gap-2 text-slate-500 text-sm font-medium">
-              <BarChart3 className="w-4 h-4 text-blue-500" />
-              Quizzes
-            </div>
-            <div className="text-2xl font-bold text-slate-900 mt-1">{quizzesCount}</div>
-          </div>
-        </div>
-
-        <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-4">
-          <div className="relative">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
-            <input
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder="Search students..."
-              className="w-full pl-9 pr-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-violet-500/30"
-            />
-          </div>
-        </div>
-
+          </AdminListFilterBar>
+        }
+      >
         <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
-          {filtered.length === 0 ? (
-            <div className="py-20 text-center text-slate-400">
-              <BarChart3 className="w-10 h-10 mx-auto mb-3 opacity-40" />
-              <p className="font-medium">No progress data found</p>
+          {loading ? (
+            <div className={ADMIN_LIST_CARD_GRID}>
+              {Array(6).fill(0).map((_, i) => (
+                <div key={i} className="h-48 rounded-2xl bg-slate-100 animate-pulse" />
+              ))}
+            </div>
+          ) : filtered.length === 0 ? (
+            <div className="flex flex-col items-center justify-center py-20 gap-2 text-slate-400">
+              <BarChart3 className="w-10 h-10 opacity-30" />
+              <p className="text-sm font-medium">No progress data found</p>
+              <p className="text-xs text-slate-400 max-w-sm text-center">
+                {coursesCount === 0
+                  ? 'Add courses and quizzes to see student attempts here.'
+                  : 'No quiz attempts yet for students assigned to you.'}
+              </p>
             </div>
           ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full text-left text-sm">
-                <thead>
-                  <tr className="bg-slate-50 text-slate-500 text-xs font-bold uppercase tracking-wider">
-                    <th className="px-5 py-3.5">Student</th>
-                    <th className="px-5 py-3.5">Attempts</th>
-                    <th className="px-5 py-3.5">Passed</th>
-                    <th className="px-5 py-3.5">Avg Score</th>
-                    <th className="px-5 py-3.5">Pass Rate</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-50">
-                  {filtered.map((row) => (
-                    <tr key={row.studentId} className="hover:bg-slate-50/60 transition-colors">
-                      <td className="px-5 py-4">
-                        <div className="font-semibold text-slate-800">{row.studentName}</div>
-                        <div className="text-xs text-slate-400 mt-0.5">{row.studentEmail}</div>
-                      </td>
-                      <td className="px-5 py-4 text-slate-700">{row.attempts}</td>
-                      <td className="px-5 py-4 text-slate-700">{row.passed}</td>
-                      <td className="px-5 py-4">
-                        <span className={cn('font-semibold', row.avgScore >= 70 ? 'text-emerald-600' : row.avgScore >= 50 ? 'text-amber-600' : 'text-rose-600')}>
-                          {row.avgScore}%
-                        </span>
-                      </td>
-                      <td className="px-5 py-4">
-                        <div className="flex items-center gap-2">
-                          <div className="w-24 h-2 rounded-full bg-slate-100 overflow-hidden">
-                            <div
-                              className={cn('h-full rounded-full', row.passRate >= 70 ? 'bg-emerald-500' : row.passRate >= 50 ? 'bg-amber-500' : 'bg-rose-500')}
-                              style={{ width: `${row.passRate}%` }}
-                            />
-                          </div>
-                          <span className="text-xs font-semibold text-slate-600">{row.passRate}%</span>
+            <>
+              <div className={ADMIN_LIST_CARD_GRID}>
+                {filtered.map((row) => {
+                  const initials = row.studentName.split(' ').map((n) => n[0]).join('').substring(0, 2).toUpperCase();
+                  return (
+                    <div key={row.studentId} className={ADMIN_LIST_ITEM_CARD}>
+                      <div className="flex items-start gap-3">
+                        <div
+                          className={cn(
+                            'w-12 h-12 rounded-xl bg-gradient-to-br flex items-center justify-center text-white text-sm font-bold shrink-0',
+                            getAvatarColor(row.studentName),
+                          )}
+                        >
+                          {initials}
                         </div>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+                        <div className="min-w-0 flex-1">
+                          <p className="font-semibold text-slate-900 text-sm">{row.studentName}</p>
+                          <p className="text-xs text-slate-400 truncate">{row.studentEmail}</p>
+                        </div>
+                      </div>
+                      <div className="mt-4 space-y-2 text-xs text-slate-600 border-t border-slate-100 pt-3">
+                        <div className="flex justify-between gap-2">
+                          <span className="text-slate-400 font-semibold uppercase tracking-wider">Attempts</span>
+                          <span className="font-medium text-slate-800">{row.attempts}</span>
+                        </div>
+                        <div className="flex justify-between gap-2">
+                          <span className="text-slate-400 font-semibold uppercase tracking-wider">Passed</span>
+                          <span className="font-medium text-slate-800">{row.passed}</span>
+                        </div>
+                        <div className="flex justify-between gap-2 items-center">
+                          <span className="text-slate-400 font-semibold uppercase tracking-wider">Avg score</span>
+                          <span
+                            className={cn(
+                              'font-bold',
+                              row.avgScore >= 70 ? 'text-emerald-600' : row.avgScore >= 50 ? 'text-amber-600' : 'text-rose-600',
+                            )}
+                          >
+                            {row.attempts > 0 ? `${row.avgScore}%` : '—'}
+                          </span>
+                        </div>
+                        <div className="flex flex-col gap-1.5 pt-1">
+                          <span className="text-slate-400 font-semibold uppercase tracking-wider">Pass rate</span>
+                          <div className="flex items-center gap-2">
+                            <div className="flex-1 h-2 rounded-full bg-slate-100 overflow-hidden">
+                              <div
+                                className={cn(
+                                  'h-full rounded-full transition-all',
+                                  row.passRate >= 70 ? 'bg-emerald-500' : row.passRate >= 50 ? 'bg-amber-500' : 'bg-rose-500',
+                                )}
+                                style={{ width: `${row.passRate}%` }}
+                              />
+                            </div>
+                            <span className="text-xs font-bold text-slate-700 w-10 text-right">{row.passRate}%</span>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+              <div className="px-5 py-3 border-t border-slate-100 text-xs text-slate-400">
+                Showing {filtered.length} of {rows.length} students
+              </div>
+            </>
           )}
         </div>
-      </div>
+      </AdminListPageShell>
     </TeacherLayout>
-  );
-}
-
-function StatCard({
-  label,
-  value,
-  suffix,
-  icon: Icon,
-  color,
-  bg,
-}: {
-  label: string;
-  value: number;
-  suffix?: string;
-  icon: React.ElementType;
-  color: string;
-  bg: string;
-}) {
-  return (
-    <div className="bg-white border border-slate-100 rounded-2xl p-4 shadow-sm">
-      <div className="flex items-center justify-between mb-2">
-        <div className={cn('p-2 rounded-xl', bg)}>
-          <Icon className={cn('w-4 h-4', color)} />
-        </div>
-      </div>
-      <div className={cn('text-2xl font-bold', color)}>
-        {value}
-        {suffix || ''}
-      </div>
-      <div className="text-xs text-slate-500 font-medium mt-0.5">{label}</div>
-    </div>
   );
 }

@@ -34,6 +34,7 @@ import TeacherCommunity from './pages/teacher/Community';
 import TeacherAnnouncements from './pages/teacher/Announcements';
 import TeacherProgress from './pages/teacher/Progress';
 import TeacherExams from './pages/teacher/Exams';
+import TeacherProfilePage from './pages/teacher/Profile';
 import AdminModules from './pages/admin/Modules';
 import AdminLessons from './pages/admin/Lessons';
 import AdminQuizzes from './pages/admin/Quizzes';
@@ -230,6 +231,7 @@ function TeacherRoutes() {
       <Route path="/community" element={<TeacherCommunity />} />
       <Route path="/announcements" element={<TeacherAnnouncements />} />
       <Route path="/progress" element={<TeacherProgress />} />
+      <Route path="/profile" element={<TeacherProfilePage />} />
       <Route path="*" element={<Navigate to="/not-found" replace />} />
     </Routes>
   );

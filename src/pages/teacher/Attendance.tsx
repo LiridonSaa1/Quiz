@@ -1,239 +1,473 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import TeacherLayout from '../../components/layout/TeacherLayout';
-import { supabase } from '../../supabase';
 import { toast } from 'sonner';
-import { CalendarCheck, Search, CheckCircle2, XCircle, Clock, AlertTriangle } from 'lucide-react';
+import { motion } from 'motion/react';
+import {
+  AdminListFilterBar,
+  AdminListPageShell,
+  ADMIN_LIST_SEARCH_INPUT,
+  ADMIN_LIST_SELECT,
+  ADMIN_LIST_CARD_GRID,
+  ADMIN_LIST_ITEM_CARD,
+} from '../../components/admin/AdminListPageShell';
+import { supabase } from '../../supabase';
+import {
+  CalendarCheck, Plus, Search, CheckCircle2,
+  XCircle, Clock, AlertTriangle, X, Pencil, Trash2, Calendar,
+} from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { format } from 'date-fns';
-import { LayoutPageSkeleton } from '../../components/ui/Skeleton';
 
 type AttendanceStatus = 'present' | 'absent' | 'late' | 'excused';
 
-interface AttendanceRow {
+interface AttendanceRecord {
   id: string;
-  student_id: string;
   class_id: string | null;
+  student_id: string;
   date: string;
   status: AttendanceStatus;
   notes: string | null;
-  className: string;
-  studentName: string;
-  studentEmail: string;
+  marked_by: string | null;
+  created_at: string;
+  student?: { display_name: string; email: string } | null;
+  class?: { name: string } | null;
+  marker?: { display_name: string } | null;
 }
 
-const STATUS_META: Record<AttendanceStatus, { label: string; bg: string; text: string; dot: string; icon: React.ElementType }> = {
+interface ClassRec { id: string; name: string }
+interface StudentRec { id: string; display_name: string; email: string }
+
+const STATUS_CFG: Record<AttendanceStatus, { label: string; bg: string; text: string; dot: string; icon: React.ElementType }> = {
   present: { label: 'Present', bg: 'bg-emerald-50', text: 'text-emerald-700', dot: 'bg-emerald-500', icon: CheckCircle2 },
-  absent: { label: 'Absent', bg: 'bg-rose-50', text: 'text-rose-700', dot: 'bg-rose-500', icon: XCircle },
-  late: { label: 'Late', bg: 'bg-amber-50', text: 'text-amber-700', dot: 'bg-amber-500', icon: Clock },
-  excused: { label: 'Excused', bg: 'bg-blue-50', text: 'text-blue-700', dot: 'bg-blue-500', icon: AlertTriangle },
+  absent:  { label: 'Absent',  bg: 'bg-rose-50',    text: 'text-rose-700',   dot: 'bg-rose-500',    icon: XCircle     },
+  late:    { label: 'Late',    bg: 'bg-amber-50',   text: 'text-amber-700',  dot: 'bg-amber-500',   icon: Clock       },
+  excused: { label: 'Excused', bg: 'bg-blue-50',    text: 'text-blue-700',   dot: 'bg-blue-500',    icon: AlertTriangle },
+};
+
+const AVATAR_COLORS = [
+  'from-sky-500 to-blue-600',
+  'from-violet-500 to-purple-600',
+  'from-emerald-500 to-teal-600',
+  'from-amber-500 to-orange-600',
+  'from-rose-500 to-pink-600',
+  'from-indigo-500 to-blue-600',
+];
+const getAvatarColor = (str: string) => {
+  let h = 0;
+  for (let i = 0; i < str.length; i++) h = str.charCodeAt(i) + ((h << 5) - h);
+  return AVATAR_COLORS[Math.abs(h) % AVATAR_COLORS.length];
+};
+
+const emptyForm = {
+  class_id: '', student_id: '', date: new Date().toISOString().substring(0, 10),
+  status: 'present' as AttendanceStatus, notes: '',
 };
 
 export default function TeacherAttendance() {
+  const [teacherId, setTeacherId] = useState<string | null>(null);
+  const [records, setRecords] = useState<AttendanceRecord[]>([]);
   const [loading, setLoading] = useState(true);
-  const [rows, setRows] = useState<AttendanceRow[]>([]);
   const [search, setSearch] = useState('');
-  const [statusFilter, setStatusFilter] = useState<'all' | AttendanceStatus>('all');
+  const [statusFilter, setStatusFilter] = useState('all');
+  const [classFilter, setClassFilter] = useState('all');
+  const [showModal, setShowModal] = useState(false);
+  const [editId, setEditId] = useState<string | null>(null);
+  const [form, setForm] = useState(emptyForm);
+  const [saving, setSaving] = useState(false);
+  const [classes, setClasses] = useState<ClassRec[]>([]);
+  const [students, setStudents] = useState<StudentRec[]>([]);
+  const [deleteId, setDeleteId] = useState<string | null>(null);
+
+  const fetchData = async () => {
+    setLoading(true);
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session?.user?.id) {
+        setLoading(false);
+        return;
+      }
+      const tid = session.user.id;
+      setTeacherId(tid);
+
+      const [{ data: classList, error: classesError }, { data: stuData, error: studentsError }] = await Promise.all([
+        supabase.from('classes').select('id,name').eq('teacher_id', tid),
+        supabase.from('profiles').select('id,display_name,email').eq('teacher_id', tid).eq('role', 'student'),
+      ]);
+      if (classesError) throw classesError;
+      if (studentsError) throw studentsError;
+
+      const classesRows = classList || [];
+      const classIds = classesRows.map((c: any) => c.id);
+      setClasses(classesRows);
+      setStudents(stuData || []);
+
+      const studentMap: Record<string, { display_name: string; email: string }> = {};
+      (stuData || []).forEach((p: any) => {
+        studentMap[p.id] = { display_name: p.display_name || 'Unknown', email: p.email || '' };
+      });
+
+      const classNameById: Record<string, string> = {};
+      classesRows.forEach((c: any) => { classNameById[c.id] = c.name; });
+
+      if (classIds.length === 0) {
+        setRecords([]);
+        return;
+      }
+
+      const { data: rawData, error } = await supabase
+        .from('attendance')
+        .select('*')
+        .in('class_id', classIds)
+        .order('date', { ascending: false })
+        .order('created_at', { ascending: false })
+        .limit(200);
+
+      if (error) throw error;
+
+      const markerIds = [...new Set((rawData || []).map((r: any) => r.marked_by).filter(Boolean))];
+      let markerNameById: Record<string, string> = {};
+      if (markerIds.length > 0) {
+        const { data: markers } = await supabase
+          .from('profiles')
+          .select('id,display_name')
+          .in('id', markerIds);
+        (markers || []).forEach((m: any) => { markerNameById[m.id] = m.display_name || '—'; });
+      }
+
+      setRecords((rawData || []).map((r: any) => ({
+        ...r,
+        student: studentMap[r.student_id]
+          ? { display_name: studentMap[r.student_id].display_name, email: studentMap[r.student_id].email }
+          : null,
+        class: r.class_id ? { name: classNameById[r.class_id] || '—' } : null,
+        marker: r.marked_by ? { display_name: markerNameById[r.marked_by] || '—' } : null,
+      })));
+    } catch (e: any) {
+      toast.error(e?.message || 'Failed to load attendance records');
+    } finally {
+      setLoading(false);
+    }
+  };
 
   useEffect(() => {
-    const fetchData = async () => {
-      setLoading(true);
-      try {
-        const { data: { session } } = await supabase.auth.getSession();
-        if (!session) return;
-
-        const teacherId = session.user.id;
-
-        const [classesRes, studentsRes] = await Promise.all([
-          supabase.from('classes').select('id,name').eq('teacher_id', teacherId),
-          supabase.from('profiles').select('id,display_name,email').eq('role', 'student').eq('teacher_id', teacherId),
-        ]);
-
-        if (classesRes.error) throw classesRes.error;
-        if (studentsRes.error) throw studentsRes.error;
-
-        const classMap: Record<string, string> = {};
-        (classesRes.data || []).forEach((c: any) => { classMap[c.id] = c.name; });
-        const classIds = Object.keys(classMap);
-
-        const studentMap: Record<string, { name: string; email: string }> = {};
-        (studentsRes.data || []).forEach((s: any) => {
-          studentMap[s.id] = { name: s.display_name || 'Unknown Student', email: s.email || '' };
-        });
-
-        if (classIds.length === 0) {
-          setRows([]);
-          return;
-        }
-
-        const attendanceRes = await supabase
-          .from('attendance')
-          .select('*')
-          .in('class_id', classIds)
-          .order('date', { ascending: false });
-
-        if (attendanceRes.error) throw attendanceRes.error;
-
-        const mapped = (attendanceRes.data || []).map((a: any) => ({
-          id: a.id,
-          student_id: a.student_id,
-          class_id: a.class_id,
-          date: a.date,
-          status: a.status as AttendanceStatus,
-          notes: a.notes || null,
-          className: a.class_id ? (classMap[a.class_id] || 'Unknown Class') : 'No Class',
-          studentName: studentMap[a.student_id]?.name || 'Unknown Student',
-          studentEmail: studentMap[a.student_id]?.email || '',
-        }));
-
-        setRows(mapped);
-      } catch (error: any) {
-        toast.error(error?.message || 'Failed to load attendance');
-      } finally {
-        setLoading(false);
-      }
-    };
-
     fetchData();
   }, []);
 
-  const filtered = useMemo(() => {
-    const q = search.trim().toLowerCase();
-    return rows.filter((r) => {
-      const matchesSearch =
-        r.studentName.toLowerCase().includes(q) ||
-        r.studentEmail.toLowerCase().includes(q) ||
-        r.className.toLowerCase().includes(q);
-      const matchesStatus = statusFilter === 'all' || r.status === statusFilter;
-      return matchesSearch && matchesStatus;
-    });
-  }, [rows, search, statusFilter]);
+  const filtered = records.filter(r => {
+    const q = search.toLowerCase();
+    const name = r.student?.display_name || '';
+    const email = r.student?.email || '';
+    const cls = r.class?.name || '';
+    const matchSearch = name.toLowerCase().includes(q) || email.toLowerCase().includes(q) || cls.toLowerCase().includes(q);
+    const matchStatus = statusFilter === 'all' || r.status === statusFilter;
+    const matchClass = classFilter === 'all' || r.class_id === classFilter;
+    return matchSearch && matchStatus && matchClass;
+  });
 
-  const stats = {
-    total: rows.length,
-    present: rows.filter((r) => r.status === 'present').length,
-    absent: rows.filter((r) => r.status === 'absent').length,
-    late: rows.filter((r) => r.status === 'late').length,
+  const attendanceRate = records.length > 0
+    ? Math.round((records.filter(r => r.status === 'present').length / records.length) * 100)
+    : 0;
+
+  const stats = [
+    { label: 'Total Records', value: records.length, gradient: 'from-sky-500 to-cyan-600', shadow: 'shadow-sky-500/25', icon: CalendarCheck },
+    { label: 'Present', value: records.filter(r => r.status === 'present').length, gradient: 'from-emerald-500 to-emerald-600', shadow: 'shadow-emerald-500/25', icon: CheckCircle2 },
+    { label: 'Absent', value: records.filter(r => r.status === 'absent').length, gradient: 'from-rose-500 to-pink-600', shadow: 'shadow-rose-500/25', icon: XCircle },
+    { label: 'Late / Excused', value: records.filter(r => r.status === 'late' || r.status === 'excused').length, gradient: 'from-amber-500 to-orange-600', shadow: 'shadow-amber-500/25', icon: Clock },
+  ];
+
+  const rateAppend = (
+    <motion.div
+      variants={{
+        hidden: { opacity: 0, y: 20 },
+        visible: { opacity: 1, y: 0, transition: { duration: 0.4, ease: 'easeOut' } },
+      }}
+      className="relative overflow-hidden rounded-2xl p-5 text-white shadow-lg bg-gradient-to-br from-indigo-500 to-violet-600 shadow-indigo-500/25"
+      style={{ boxShadow: '0 8px 24px var(--tw-shadow-color, rgba(0,0,0,0.12))' }}
+    >
+      <div className="flex items-start justify-between">
+        <div>
+          <div className="text-3xl font-extrabold tracking-tight">{attendanceRate}%</div>
+          <div className="text-xs font-semibold text-white/75 mt-1">Attendance rate</div>
+        </div>
+        <div className="w-10 h-10 rounded-xl flex items-center justify-center bg-white/20">
+          <CalendarCheck className="w-5 h-5 text-white" />
+        </div>
+      </div>
+      <div className="w-full mt-3 bg-white/20 rounded-full h-1.5 overflow-hidden">
+        <div className="bg-white h-1.5 rounded-full transition-all" style={{ width: `${attendanceRate}%` }} />
+      </div>
+      <div className="pointer-events-none absolute -bottom-4 -right-4 w-20 h-20 rounded-full bg-white/10" />
+    </motion.div>
+  );
+
+  const openAdd = () => {
+    setEditId(null);
+    setForm({ ...emptyForm, date: new Date().toISOString().substring(0, 10) });
+    setShowModal(true);
   };
 
-  if (loading) {
-    return (
-      <TeacherLayout>
-        <LayoutPageSkeleton cards={4} rows={7} />
-      </TeacherLayout>
-    );
-  }
+  const openEdit = (r: AttendanceRecord) => {
+    setEditId(r.id);
+    setForm({
+      class_id: r.class_id || '',
+      student_id: r.student_id,
+      date: r.date.substring(0, 10),
+      status: r.status,
+      notes: r.notes || '',
+    });
+    setShowModal(true);
+  };
+
+  const handleSave = async () => {
+    if (!form.student_id) { toast.error('Student is required'); return; }
+    if (!form.date) { toast.error('Date is required'); return; }
+    if (!teacherId) return;
+    setSaving(true);
+    try {
+      const payload: any = {
+        class_id: form.class_id || null,
+        student_id: form.student_id,
+        date: form.date,
+        status: form.status,
+        notes: form.notes || null,
+        marked_by: teacherId,
+      };
+      if (editId) {
+        const { error } = await supabase.from('attendance').update(payload).eq('id', editId);
+        if (error) throw error;
+        toast.success('Attendance updated');
+      } else {
+        payload.created_at = new Date().toISOString();
+        const { error } = await supabase.from('attendance').insert(payload);
+        if (error) throw error;
+        toast.success('Attendance marked');
+      }
+      setShowModal(false);
+      fetchData();
+    } catch (e: any) {
+      toast.error(e.message || 'Failed to save');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleDelete = async (id: string) => {
+    try {
+      const { error } = await supabase.from('attendance').delete().eq('id', id);
+      if (error) throw error;
+      toast.success('Record deleted');
+      setDeleteId(null);
+      fetchData();
+    } catch { toast.error('Failed to delete'); }
+  };
 
   return (
     <TeacherLayout>
-      <div className="space-y-6">
-        <div>
-          <h1 className="text-2xl font-bold text-slate-900">Attendance</h1>
-          <p className="text-slate-500 text-sm mt-1">Track attendance for your classes.</p>
-        </div>
-
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-          <StatCard label="Total Records" value={stats.total} icon={CalendarCheck} color="text-violet-600" bg="bg-violet-50" />
-          <StatCard label="Present" value={stats.present} icon={CheckCircle2} color="text-emerald-600" bg="bg-emerald-50" />
-          <StatCard label="Absent" value={stats.absent} icon={XCircle} color="text-rose-600" bg="bg-rose-50" />
-          <StatCard label="Late" value={stats.late} icon={Clock} color="text-amber-600" bg="bg-amber-50" />
-        </div>
-
-        <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-4 flex flex-wrap items-center gap-3">
-          <div className="relative flex-1 min-w-[220px]">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
-            <input
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder="Search by student or class..."
-              className="w-full pl-9 pr-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-violet-500/30"
-            />
-          </div>
-          <select
-            value={statusFilter}
-            onChange={(e) => setStatusFilter(e.target.value as 'all' | AttendanceStatus)}
-            className="px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-violet-500/30"
+      <AdminListPageShell
+        breadcrumbPortalLabel="Teacher Portal"
+        breadcrumbLabel="Attendance"
+        title="Attendance"
+        description="Track and manage attendance for your classes."
+        statsGridClassName="grid grid-cols-2 lg:grid-cols-5 gap-4"
+        stats={stats}
+        statsAppend={rateAppend}
+        action={
+          <motion.button
+            type="button"
+            onClick={openAdd}
+            whileHover={{ scale: 1.04, y: -2 }}
+            whileTap={{ scale: 0.97 }}
+            className="inline-flex items-center gap-2 px-6 py-3 rounded-2xl font-bold text-sm text-white shrink-0 transition-all"
+            style={{
+              background: 'linear-gradient(135deg, #818cf8 0%, #a78bfa 100%)',
+              boxShadow: '0 8px 32px rgba(139,92,246,0.45), 0 2px 8px rgba(0,0,0,0.15)',
+            }}
           >
-            <option value="all">All Status</option>
-            <option value="present">Present</option>
-            <option value="absent">Absent</option>
-            <option value="late">Late</option>
-            <option value="excused">Excused</option>
-          </select>
-        </div>
-
+            <Plus className="w-4 h-4" />
+            Mark Attendance
+          </motion.button>
+        }
+        filterBar={
+          <AdminListFilterBar>
+            <div className="relative flex-1 min-w-[200px]">
+              <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-indigo-400" />
+              <input
+                value={search}
+                onChange={e => setSearch(e.target.value)}
+                placeholder="Search students or classes..."
+                className={ADMIN_LIST_SEARCH_INPUT}
+              />
+            </div>
+            <select value={statusFilter} onChange={e => setStatusFilter(e.target.value)} className={ADMIN_LIST_SELECT}>
+              <option value="all">All Status</option>
+              <option value="present">Present</option>
+              <option value="absent">Absent</option>
+              <option value="late">Late</option>
+              <option value="excused">Excused</option>
+            </select>
+            <select value={classFilter} onChange={e => setClassFilter(e.target.value)} className={ADMIN_LIST_SELECT}>
+              <option value="all">All Classes</option>
+              {classes.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+            </select>
+          </AdminListFilterBar>
+        }
+      >
         <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
-          {filtered.length === 0 ? (
-            <div className="py-20 text-center text-slate-400">
-              <CalendarCheck className="w-10 h-10 mx-auto mb-3 opacity-40" />
-              <p className="font-medium">No attendance records found</p>
+          {loading ? (
+            <div className={ADMIN_LIST_CARD_GRID}>
+              {Array(6).fill(0).map((_, i) => (
+                <div key={i} className="h-44 rounded-2xl bg-slate-100 animate-pulse" />
+              ))}
+            </div>
+          ) : filtered.length === 0 ? (
+            <div className="flex flex-col items-center justify-center py-20 gap-3 text-slate-400">
+              <CalendarCheck className="w-10 h-10 opacity-30" />
+              <p className="text-sm">No attendance records found</p>
+              <button type="button" onClick={openAdd} className="text-xs text-indigo-600 font-semibold hover:underline">Mark attendance now</button>
             </div>
           ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full text-left text-sm">
-                <thead>
-                  <tr className="bg-slate-50 text-slate-500 text-xs font-bold uppercase tracking-wider">
-                    <th className="px-5 py-3.5">Student</th>
-                    <th className="px-5 py-3.5">Class</th>
-                    <th className="px-5 py-3.5">Date</th>
-                    <th className="px-5 py-3.5">Status</th>
-                    <th className="px-5 py-3.5">Notes</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-50">
-                  {filtered.map((row) => {
-                    const meta = STATUS_META[row.status];
-                    const Icon = meta.icon;
-                    return (
-                      <tr key={row.id} className="hover:bg-slate-50/60 transition-colors">
-                        <td className="px-5 py-4">
-                          <div className="font-semibold text-slate-800">{row.studentName}</div>
-                          <div className="text-xs text-slate-400 mt-0.5">{row.studentEmail}</div>
-                        </td>
-                        <td className="px-5 py-4 text-slate-600">{row.className}</td>
-                        <td className="px-5 py-4 text-slate-600">{format(new Date(row.date), 'MMM dd, yyyy')}</td>
-                        <td className="px-5 py-4">
-                          <span className={cn('inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-semibold', meta.bg, meta.text)}>
-                            <span className={cn('w-1.5 h-1.5 rounded-full', meta.dot)} />
-                            <Icon className="w-3 h-3" />
-                            {meta.label}
+            <>
+              <div className={ADMIN_LIST_CARD_GRID}>
+                {filtered.map(r => {
+                  const sc = STATUS_CFG[r.status];
+                  const name = r.student?.display_name || 'Unknown';
+                  const initials = name.split(' ').map(n => n[0]).join('').substring(0, 2).toUpperCase();
+                  return (
+                    <div key={r.id} className={ADMIN_LIST_ITEM_CARD}>
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="flex items-center gap-3 min-w-0">
+                          <div className={cn('w-10 h-10 rounded-full bg-gradient-to-br flex items-center justify-center text-white text-xs font-bold shrink-0', getAvatarColor(name))}>
+                            {initials}
+                          </div>
+                          <div className="min-w-0">
+                            <p className="font-semibold text-slate-900 text-sm truncate">{name}</p>
+                            <p className="text-xs text-slate-400 truncate">{r.student?.email}</p>
+                          </div>
+                        </div>
+                        <div className="flex gap-1 shrink-0">
+                          <button type="button" onClick={() => openEdit(r)} className="p-2 rounded-lg text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 transition-colors">
+                            <Pencil className="w-4 h-4" />
+                          </button>
+                          <button type="button" onClick={() => setDeleteId(r.id)} className="p-2 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 transition-colors">
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </div>
+                      </div>
+                      <div className="mt-3 flex flex-wrap items-center gap-2">
+                        <span className={cn('inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium', sc.bg, sc.text)}>
+                          <span className={cn('w-1.5 h-1.5 rounded-full', sc.dot)} />
+                          {sc.label}
+                        </span>
+                      </div>
+                      <div className="mt-4 space-y-2 text-xs border-t border-slate-100 pt-3 text-slate-600">
+                        <div className="flex justify-between gap-2">
+                          <span className="text-slate-400 font-semibold uppercase tracking-wider">Class</span>
+                          <span className="text-right truncate">{r.class?.name || '—'}</span>
+                        </div>
+                        <div className="flex justify-between gap-2 items-center">
+                          <span className="text-slate-400 font-semibold uppercase tracking-wider">Date</span>
+                          <span className="inline-flex items-center gap-1">
+                            <Calendar className="w-3.5 h-3.5 text-slate-400" />
+                            {format(new Date(r.date), 'MMM d, yyyy')}
                           </span>
-                        </td>
-                        <td className="px-5 py-4 text-slate-500">{row.notes || '—'}</td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
+                        </div>
+                        <div className="flex justify-between gap-2">
+                          <span className="text-slate-400 font-semibold uppercase tracking-wider">Marked by</span>
+                          <span className="text-right truncate">{r.marker?.display_name || '—'}</span>
+                        </div>
+                        {r.notes && (
+                          <div className="text-slate-500 pt-1 border-t border-slate-50">
+                            <span className="text-slate-400 font-semibold uppercase tracking-wider block mb-1">Notes</span>
+                            {r.notes}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+              <div className="px-5 py-3 border-t border-slate-100 text-xs text-slate-400">
+                Showing {filtered.length} of {records.length} records
+              </div>
+            </>
           )}
         </div>
-      </div>
-    </TeacherLayout>
-  );
-}
+      </AdminListPageShell>
 
-function StatCard({
-  label,
-  value,
-  icon: Icon,
-  color,
-  bg,
-}: {
-  label: string;
-  value: number;
-  icon: React.ElementType;
-  color: string;
-  bg: string;
-}) {
-  return (
-    <div className="bg-white border border-slate-100 rounded-2xl p-4 shadow-sm">
-      <div className="flex items-center justify-between mb-2">
-        <div className={cn('p-2 rounded-xl', bg)}>
-          <Icon className={cn('w-4 h-4', color)} />
+      {showModal && (
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between p-5 border-b border-slate-100">
+              <h2 className="text-lg font-bold text-slate-800">{editId ? 'Edit Record' : 'Mark Attendance'}</h2>
+              <button type="button" onClick={() => setShowModal(false)} className="p-2 hover:bg-slate-100 rounded-lg"><X className="w-4 h-4" /></button>
+            </div>
+            <div className="p-5 space-y-4">
+              <div>
+                <label className="text-xs font-semibold text-slate-600 uppercase tracking-wide">Student *</label>
+                <select value={form.student_id} onChange={e => setForm(f => ({ ...f, student_id: e.target.value }))}
+                  className="mt-1 w-full px-3 py-2.5 text-sm border border-slate-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-sky-500/30">
+                  <option value="">Select student</option>
+                  {students.map(s => <option key={s.id} value={s.id}>{s.display_name} ({s.email})</option>)}
+                </select>
+              </div>
+              <div>
+                <label className="text-xs font-semibold text-slate-600 uppercase tracking-wide">Class</label>
+                <select value={form.class_id} onChange={e => setForm(f => ({ ...f, class_id: e.target.value }))}
+                  className="mt-1 w-full px-3 py-2.5 text-sm border border-slate-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-sky-500/30">
+                  <option value="">No class</option>
+                  {classes.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                </select>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-xs font-semibold text-slate-600 uppercase tracking-wide">Date *</label>
+                  <input type="date" value={form.date} onChange={e => setForm(f => ({ ...f, date: e.target.value }))}
+                    className="mt-1 w-full px-3 py-2.5 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-sky-500/30" />
+                </div>
+                <div>
+                  <label className="text-xs font-semibold text-slate-600 uppercase tracking-wide">Status</label>
+                  <select value={form.status} onChange={e => setForm(f => ({ ...f, status: e.target.value as AttendanceStatus }))}
+                    className="mt-1 w-full px-3 py-2.5 text-sm border border-slate-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-sky-500/30">
+                    <option value="present">Present</option>
+                    <option value="absent">Absent</option>
+                    <option value="late">Late</option>
+                    <option value="excused">Excused</option>
+                  </select>
+                </div>
+              </div>
+              <div>
+                <label className="text-xs font-semibold text-slate-600 uppercase tracking-wide">Notes</label>
+                <textarea value={form.notes} onChange={e => setForm(f => ({ ...f, notes: e.target.value }))}
+                  rows={2} className="mt-1 w-full px-3 py-2.5 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-sky-500/30 resize-none"
+                  placeholder="Optional notes..." />
+              </div>
+            </div>
+            <div className="flex justify-end gap-3 p-5 border-t border-slate-100">
+              <button type="button" onClick={() => setShowModal(false)} className="px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-100 rounded-lg transition-colors">Cancel</button>
+              <button type="button" onClick={handleSave} disabled={saving}
+                className="px-4 py-2 text-sm font-semibold bg-sky-500 hover:bg-sky-600 text-white rounded-lg transition-colors disabled:opacity-50">
+                {saving ? 'Saving...' : editId ? 'Update' : 'Mark'}
+              </button>
+            </div>
+          </div>
         </div>
-      </div>
-      <div className={cn('text-2xl font-bold', color)}>{value}</div>
-      <div className="text-xs text-slate-500 font-medium mt-0.5">{label}</div>
-    </div>
+      )}
+
+      {deleteId && (
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm p-6 text-center">
+            <div className="w-12 h-12 bg-rose-50 rounded-full flex items-center justify-center mx-auto mb-3">
+              <Trash2 className="w-6 h-6 text-rose-500" />
+            </div>
+            <h3 className="text-lg font-bold text-slate-800 mb-1">Delete Record?</h3>
+            <p className="text-sm text-slate-500 mb-5">This attendance record will be permanently removed.</p>
+            <div className="flex gap-3 justify-center">
+              <button type="button" onClick={() => setDeleteId(null)} className="px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-100 rounded-lg">Cancel</button>
+              <button type="button" onClick={() => handleDelete(deleteId)} className="px-4 py-2 text-sm font-semibold bg-rose-500 hover:bg-rose-600 text-white rounded-lg">Delete</button>
+            </div>
+          </div>
+        </div>
+      )}
+    </TeacherLayout>
   );
 }

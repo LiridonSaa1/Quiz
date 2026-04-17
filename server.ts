@@ -277,6 +277,141 @@ async function startServer() {
     return [...candidates];
   };
 
+  const missingQuizzesTeacherIdColumn = (error: any) => {
+    const hay = `${error?.message || ""} ${error?.details || ""} ${error?.hint || ""}`;
+    const low = hay.toLowerCase();
+    if (error?.code === "PGRST204" && low.includes("teacher_id")) return true;
+    if (/quizzes\.?teacher_id/i.test(hay) && /does not exist|42703|undefined column/i.test(hay)) return true;
+    return false;
+  };
+
+  const missingQuizzesPublishedColumn = (error: any) => {
+    const hay = `${error?.message || ""} ${error?.details || ""} ${error?.hint || ""}`;
+    const low = hay.toLowerCase();
+    if (error?.code === "PGRST204" && low.includes("published")) return true;
+    if (/published/i.test(hay) && /schema cache|could not find|does not exist|42703|undefined column/i.test(low)) {
+      return true;
+    }
+    return false;
+  };
+
+  const missingQuizzesSettingsColumn = (error: any) => {
+    const hay = `${error?.message || ""} ${error?.details || ""} ${error?.hint || ""}`;
+    const low = hay.toLowerCase();
+    if (!low.includes("settings") || !/quiz/i.test(low)) return false;
+    if (error?.code === "PGRST204" || error?.code === "42703") return true;
+    if (/schema cache|could not find|does not exist|undefined column|column/i.test(low)) return true;
+    return false;
+  };
+
+  /** Service-role insert with the same column fallbacks as the client {@link insertCompatibleQuiz}. */
+  const insertCompatibleQuizAdmin = async (
+    basePayload: Record<string, unknown>,
+    sessionUserId: string,
+  ): Promise<{ data: { id: string } | null; error: unknown }> => {
+    let payload: Record<string, unknown> = { ...basePayload };
+    if (payload.teacher_id === undefined || payload.teacher_id === null) {
+      payload.teacher_id = sessionUserId;
+    }
+    for (let i = 0; i < 12; i++) {
+      const res = await supabaseAdmin.from("quizzes").insert(payload).select("id").single();
+      if (!res.error && res.data?.id) {
+        return { data: { id: String(res.data.id) }, error: null };
+      }
+      const err = res.error;
+      if (!err) {
+        return { data: null, error: new Error("Quiz insert returned no id") };
+      }
+      if (missingQuizzesSettingsColumn(err) && "settings" in payload) {
+        const { settings: _s, ...rest } = payload;
+        void _s;
+        payload = rest;
+        continue;
+      }
+      if (missingQuizzesPublishedColumn(err) && "published" in payload) {
+        const { published: _p, ...rest } = payload;
+        void _p;
+        payload = rest;
+        continue;
+      }
+      if (missingQuizzesTeacherIdColumn(err) && "teacher_id" in payload) {
+        const { teacher_id: _tid, ...rest } = payload;
+        void _tid;
+        payload = rest;
+        continue;
+      }
+      if ("settings" in payload && /settings/i.test(String((err as { message?: string })?.message || ""))) {
+        const { settings: _s, ...rest } = payload;
+        void _s;
+        payload = rest;
+        continue;
+      }
+      return { data: null, error: err };
+    }
+    return { data: null, error: new Error("Quiz insert: max compatibility retries") };
+  };
+
+  const loadTeacherQuizzesForScopedIds = async (scopedIds: string[], sessionUserId: string) => {
+    const sortRows = (rows: any[]) => {
+      rows.sort((a: any, b: any) => {
+        const ta = a?.created_at ? new Date(a.created_at).getTime() : 0;
+        const tb = b?.created_at ? new Date(b.created_at).getTime() : 0;
+        return tb - ta;
+      });
+      return rows;
+    };
+
+    const tryByCourseIds = async () => {
+      const { data: crs, error: ce } = await supabaseAdmin
+        .from("courses")
+        .select("id")
+        .in("teacher_id", scopedIds);
+      if (ce) throw ce;
+      const courseIds = (crs || []).map((c: any) => c?.id).filter(Boolean);
+      if (courseIds.length === 0) return [];
+      let q2 = await supabaseAdmin
+        .from("quizzes")
+        .select("*")
+        .in("course_id", courseIds)
+        .order("created_at", { ascending: false });
+      if (q2.error) {
+        q2 = await supabaseAdmin.from("quizzes").select("*").in("course_id", courseIds);
+      }
+      if (q2.error) throw q2.error;
+      return sortRows(q2.data || []);
+    };
+
+    let { data, error } = await supabaseAdmin
+      .from("quizzes")
+      .select("*")
+      .in("teacher_id", scopedIds)
+      .order("created_at", { ascending: false });
+
+    if (error && missingQuizzesTeacherIdColumn(error)) {
+      return tryByCourseIds();
+    }
+    if (error) {
+      const retry = await supabaseAdmin.from("quizzes").select("*").in("teacher_id", scopedIds);
+      if (retry.error && missingQuizzesTeacherIdColumn(retry.error)) {
+        return tryByCourseIds();
+      }
+      if (retry.error) throw error;
+      data = retry.data;
+      error = null;
+    }
+    if (error) {
+      const eqRes = await supabaseAdmin.from("quizzes").select("*").eq("teacher_id", sessionUserId);
+      if (eqRes.error && missingQuizzesTeacherIdColumn(eqRes.error)) {
+        return tryByCourseIds();
+      }
+      if (eqRes.error) throw error;
+      data = eqRes.data;
+      error = null;
+    }
+    if (error) throw error;
+    return sortRows(data || []);
+  };
+
   const CONFIG_SECTIONS = new Set(["settings", "branding", "domain", "roles"]);
 
   const getConfigSection = async (section: string) => {
@@ -923,24 +1058,7 @@ async function startServer() {
       const teacherIds = await getTeacherIdCandidates(userId);
       const scopedIds = teacherIds.length > 0 ? teacherIds : [userId];
 
-      let { data, error } = await supabaseAdmin
-        .from("quizzes")
-        .select("*")
-        .in("teacher_id", scopedIds)
-        .order("created_at", { ascending: false });
-      if (error) {
-        const retry = await supabaseAdmin.from("quizzes").select("*").in("teacher_id", scopedIds);
-        if (retry.error) throw error;
-        data = retry.data;
-        error = null;
-      }
-      if (error) throw error;
-      const rows = data || [];
-      rows.sort((a: any, b: any) => {
-        const ta = a?.created_at ? new Date(a.created_at).getTime() : 0;
-        const tb = b?.created_at ? new Date(b.created_at).getTime() : 0;
-        return tb - ta;
-      });
+      const rows = await loadTeacherQuizzesForScopedIds(scopedIds, userId);
       res.json({ success: true, quizzes: rows });
     } catch (e: any) {
       res.status(500).json({ error: e.message });
@@ -2030,6 +2148,73 @@ async function startServer() {
     if (!caller) { res.status(401).json({ error: 'Unauthorized' }); return null; }
     return caller;
   };
+
+  // Create quiz (service role) — bypasses RLS; caller must own the course.
+  const teacherQuizzesPostHandler = async (req: Request, res: Response) => {
+    try {
+      const caller = await assertAuthenticated(req, res);
+      if (!caller) return;
+      if (caller.role !== "teacher" && caller.role !== "admin") {
+        return res.status(403).json({ error: "Forbidden: teacher or admin role required" });
+      }
+      const body = req.body && typeof req.body === "object" ? (req.body as Record<string, unknown>) : {};
+      const courseId = typeof body.course_id === "string" ? body.course_id.trim() : "";
+      const title = typeof body.title === "string" ? body.title.trim() : String(body.title ?? "").trim();
+      if (!courseId) return res.status(400).json({ error: "course_id is required" });
+      if (!title) return res.status(400).json({ error: "title is required" });
+
+      const { data: course, error: cErr } = await supabaseAdmin
+        .from("courses")
+        .select("id, teacher_id")
+        .eq("id", courseId)
+        .maybeSingle();
+      if (cErr) throw cErr;
+      if (!course?.id) return res.status(404).json({ error: "Course not found" });
+
+      if (caller.role !== "admin") {
+        const scopedIds = await getTeacherIdCandidates(caller.userId);
+        const tid = course.teacher_id != null ? String(course.teacher_id) : "";
+        if (!tid || (!scopedIds.includes(tid) && tid !== caller.userId)) {
+          return res.status(403).json({ error: "Forbidden: you do not own this course" });
+        }
+      }
+
+      const description =
+        typeof body.description === "string"
+          ? body.description
+          : body.description != null
+            ? String(body.description)
+            : "";
+      const payload: Record<string, unknown> = {
+        title,
+        description,
+        course_id: courseId,
+        teacher_id: course.teacher_id != null ? String(course.teacher_id) : caller.userId,
+        time_limit:
+          typeof body.time_limit === "number" && !Number.isNaN(body.time_limit)
+            ? body.time_limit
+            : Number(body.time_limit) || 0,
+      };
+      if (body.type !== undefined && body.type !== null) payload.type = String(body.type);
+      if (body.pass_mark !== undefined && body.pass_mark !== null && !Number.isNaN(Number(body.pass_mark))) {
+        payload.pass_mark = Number(body.pass_mark);
+      }
+      if (body.max_attempts !== undefined && body.max_attempts !== null && !Number.isNaN(Number(body.max_attempts))) {
+        payload.max_attempts = Number(body.max_attempts);
+      }
+      if (body.published !== undefined) payload.published = Boolean(body.published);
+      if (body.settings !== undefined && body.settings !== null) payload.settings = body.settings;
+
+      const { data: inserted, error: insErr } = await insertCompatibleQuizAdmin(payload, caller.userId);
+      if (insErr) throw insErr;
+      if (!inserted?.id) return res.status(500).json({ error: "Quiz insert returned no id" });
+      res.json({ success: true, quiz: { id: inserted.id } });
+    } catch (e: any) {
+      res.status(500).json({ error: e?.message || "Failed to create quiz" });
+    }
+  };
+  app.post("/api/teacher/quizzes", teacherQuizzesPostHandler);
+  app.post("/api/teacher/quizzes/", teacherQuizzesPostHandler);
 
   // Admin users list for dashboard user management
   app.get('/api/admin/users', async (req, res) => {

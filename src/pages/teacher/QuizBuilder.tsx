@@ -27,8 +27,9 @@ import {
 import { toast } from 'sonner';
 import { Quiz, Question, Course, QuestionType } from '../../types';
 import { cn } from '../../lib/utils';
-import { apiUrl } from '../../lib/apiUrl';
+import { apiUrl, authFetch, readApiError } from '../../lib/apiUrl';
 import { resolveTeacherIdCandidates } from '../../lib/teacherScope';
+import { updateCompatibleQuiz } from '../../lib/fetchTeacherQuizzes';
 import { useNavigate, useParams } from 'react-router-dom';
 import { FormPageSkeleton } from '../../components/ui/Skeleton';
 import { AIPanel, AITriggerButton } from '../../components/AIPanel';
@@ -191,6 +192,12 @@ export default function QuizBuilder() {
 
           if (quizError) throw quizError;
 
+          const row = quiz as Record<string, unknown>;
+          const published =
+            typeof row.published === 'boolean'
+              ? row.published
+              : row.status === 'published' || row.status === 'active';
+
           setQuizData({
             id: quiz.id,
             courseId: quiz.course_id,
@@ -199,7 +206,7 @@ export default function QuizBuilder() {
             description: quiz.description,
             timeLimit: quiz.time_limit,
             settings: { ...defaultSettings(), ...(quiz.settings || {}) },
-            published: quiz.published,
+            published,
             createdAt: quiz.created_at
           } as Quiz);
 
@@ -349,7 +356,7 @@ export default function QuizBuilder() {
     try {
       let currentQuizId = quizId;
       const settings = { ...defaultSettings(), ...quizData.settings } as QuizSettingsExtended;
-      const basePayload = {
+      const basePayload: Record<string, unknown> = {
         title: quizData.title,
         description: quizData.description,
         course_id: quizData.courseId,
@@ -359,19 +366,25 @@ export default function QuizBuilder() {
       };
 
       if (quizId) {
-        const { error } = await supabase
-          .from('quizzes')
-          .update(basePayload)
-          .eq('id', quizId);
+        const { error } = await updateCompatibleQuiz(supabase, quizId, basePayload);
         if (error) throw error;
       } else {
-        const { data: newQuiz, error } = await supabase
-          .from('quizzes')
-          .insert({ ...basePayload, teacher_id: session.user.id })
-          .select()
-          .single();
-        if (error) throw error;
-        currentQuizId = newQuiz.id;
+        const createRes = await authFetch('/api/teacher/quizzes', {
+          method: 'POST',
+          body: JSON.stringify({
+            title: quizData.title,
+            description: quizData.description,
+            course_id: quizData.courseId,
+            time_limit: quizData.timeLimit,
+            published: quizData.published,
+            settings,
+          }),
+        });
+        if (!createRes.ok) throw new Error(await readApiError(createRes));
+        const created = await createRes.json();
+        const newId = created?.quiz?.id as string | undefined;
+        if (!newId) throw new Error('Quiz save returned no id');
+        currentQuizId = newId;
       }
 
       if (quizId) {

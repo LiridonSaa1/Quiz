@@ -684,6 +684,8 @@ ALTER TABLE certificates ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT '
 ALTER TABLE quizzes ADD COLUMN IF NOT EXISTS teacher_id UUID REFERENCES profiles(id) ON DELETE CASCADE;
 -- Older installs may omit `published`; admin analytics filters on it.
 ALTER TABLE quizzes ADD COLUMN IF NOT EXISTS published BOOLEAN DEFAULT FALSE;
+-- Older installs may omit `settings` JSONB; app stores passingScore etc. here when present.
+ALTER TABLE quizzes ADD COLUMN IF NOT EXISTS settings JSONB DEFAULT '{}'::jsonb;
 UPDATE quizzes q SET teacher_id = c.teacher_id FROM courses c
   WHERE q.teacher_id IS NULL AND q.course_id IS NOT NULL AND q.course_id = c.id;
 CREATE INDEX IF NOT EXISTS idx_quizzes_teacher_id ON quizzes(teacher_id);
