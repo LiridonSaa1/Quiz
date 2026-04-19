@@ -17,6 +17,8 @@ import {
   HelpCircle, BookMarked, Sparkles, Globe,
 } from 'lucide-react';
 import { cn } from '../../lib/utils';
+import { supabase } from '../../supabase';
+import { authFetch } from '../../lib/apiUrl';
 
 type PostStatus   = 'active' | 'pinned' | 'archived';
 type PostCategory = 'general' | 'q_and_a' | 'resources' | 'showcase';
@@ -98,14 +100,34 @@ export default function TeacherCommunity() {
 
   const fetchMembers = async () => {
     try {
-      const [tRes, sRes] = await Promise.all([fetch('/api/admin/teachers'), fetch('/api/admin/students')]);
-      const [t, s] = await Promise.all([tRes.json(), sRes.json()]);
-      const combined = [
-        ...(t.teachers || []).map((x: any) => ({ id: x.uid, displayName: x.displayName, email: x.email })),
-        ...(s.students || []).map((x: any) => ({ id: x.uid, displayName: x.displayName, email: x.email })),
-      ];
-      setMembers(combined);
-    } catch {}
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session?.user?.id) {
+        setMembers([]);
+        return;
+      }
+      const uid = session.user.id;
+      const [{ data: self }, studentsRes] = await Promise.all([
+        supabase.from('profiles').select('id, display_name, email').eq('id', uid).maybeSingle(),
+        authFetch(`/api/teacher/students?userId=${encodeURIComponent(uid)}`),
+      ]);
+      const teacherRow = self
+        ? [{ id: String(self.id), displayName: String(self.display_name || ''), email: String(self.email || '') }]
+        : [{ id: uid, displayName: '', email: '' }];
+      let studentRows: { id: string; displayName: string; email: string }[] = [];
+      if (studentsRes.ok) {
+        const j = await studentsRes.json().catch(() => null);
+        if (j?.success && Array.isArray(j.students)) {
+          studentRows = j.students.map((x: { uid?: string; displayName?: string; email?: string }) => ({
+            id: String(x.uid || ''),
+            displayName: String(x.displayName || ''),
+            email: String(x.email || ''),
+          })).filter((r) => r.id);
+        }
+      }
+      setMembers([...teacherRow, ...studentRows]);
+    } catch {
+      setMembers([]);
+    }
   };
 
   const openCreate = () => { setEditing(null); setForm(emptyForm); setShowModal(true); };

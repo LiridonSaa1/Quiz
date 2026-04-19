@@ -72,6 +72,8 @@ import StudentLiveSessionsList from './pages/student/LiveSessionsList';
 import StudentExams from './pages/student/Exams';
 import NotFound from './pages/NotFound';
 import { apiUrl } from './lib/apiUrl';
+import { isProfileAccessAllowed } from './lib/profileAccess';
+import { normalizeUserRole } from './lib/userRole';
 
 export default function App() {
   const [user, setUser] = useState<UserProfile | null>(null);
@@ -128,12 +130,18 @@ export default function App() {
     try {
       const { data: profile, error } = await supabase.from('profiles').select('*').eq('id', userId).single();
       if (error) throw error;
+      if (profile && !isProfileAccessAllowed(profile.status)) {
+        await supabase.auth.signOut();
+        setUser(null);
+        toast.error('Your account has been disabled. Contact an administrator.', { id: 'account-disabled' });
+        return;
+      }
       if (profile) {
         setUser({
           uid: profile.id,
           email: profile.email,
           displayName: profile.display_name,
-          role: profile.role,
+          role: normalizeUserRole(profile.role),
           teacherId: profile.teacher_id,
           status: profile.status,
           createdAt: profile.created_at
@@ -145,6 +153,32 @@ export default function App() {
       setLoading(false);
     }
   };
+
+  /** If an admin disables this account while they are logged in, revoke access immediately. */
+  useEffect(() => {
+    const uid = user?.uid;
+    if (!uid) return;
+
+    const channel = supabase
+      .channel(`profile-access-${uid}`)
+      .on(
+        'postgres_changes',
+        { event: 'UPDATE', schema: 'public', table: 'profiles', filter: `id=eq.${uid}` },
+        (payload) => {
+          const st = (payload.new as { status?: string } | null)?.status;
+          if (!isProfileAccessAllowed(st)) {
+            void supabase.auth.signOut();
+            setUser(null);
+            toast.error('Your account has been disabled. Contact an administrator.', { id: 'account-disabled' });
+          }
+        }
+      )
+      .subscribe();
+
+    return () => {
+      void supabase.removeChannel(channel);
+    };
+  }, [user?.uid]);
 
   if (loading) {
     return <AppBootSkeleton />;

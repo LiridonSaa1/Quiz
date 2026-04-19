@@ -18,7 +18,7 @@ import AdminLayout from '../components/layout/AdminLayout';
 import { TableRowsSkeleton } from '../components/ui/Skeleton';
 import { motion, AnimatePresence } from 'motion/react';
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, ResponsiveContainer, BarChart, Bar, Cell } from 'recharts';
-import { authFetch } from '../lib/apiUrl';
+import { apiUrl, authFetch } from '../lib/apiUrl';
 
 const CustomTooltip = ({ active, payload, label }: any) => {
   if (!active || !payload?.length) return null;
@@ -41,7 +41,6 @@ export default function AdminDashboard() {
   const [analytics, setAnalytics] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
-  const [roleFilter, setRoleFilter] = useState<'all' | UserRole>('all');
   const [showAddModal, setShowAddModal] = useState(false);
   const [newUserData, setNewUserData] = useState({ name: '', email: '', password: '', role: 'teacher' as UserRole });
   const [submitting, setSubmitting] = useState(false);
@@ -49,22 +48,40 @@ export default function AdminDashboard() {
   const fetchData = async () => {
     try {
       setLoading(true);
-      const [usersApiRes, analyticsRes] = await Promise.all([
-        authFetch('/api/admin/users').then(r => r.json()),
-        fetch('/api/admin/analytics').then(r => r.json())
+      const [usersHttpRes, analyticsHttpRes] = await Promise.all([
+        authFetch('/api/admin/users'),
+        fetch(apiUrl('/api/admin/analytics')),
       ]);
 
+      const usersJson = await usersHttpRes.json().catch(() => ({}));
+      const analyticsRes = await analyticsHttpRes.json().catch(() => ({}));
+
       let usersSource: any[] = [];
-      if (usersApiRes?.success) {
-        usersSource = usersApiRes.users || [];
+      if (usersHttpRes.ok && usersJson?.success && Array.isArray(usersJson.users)) {
+        usersSource = usersJson.users;
       } else {
-        // Fallback when API server isn't running on current frontend origin.
-        const usersRes = await supabase
+        const rawErr =
+          (typeof usersJson?.error === 'string' && usersJson.error) ||
+          (!usersHttpRes.ok ? `Users list failed (${usersHttpRes.status})` : '');
+        const apiErr =
+          /unauthorized/i.test(rawErr) || usersHttpRes.status === 401
+            ? 'The API could not verify your session. Use the same Supabase project in the server (.env: SUPABASE_SERVICE_ROLE_KEY, VITE_SUPABASE_URL) as in the app (VITE_SUPABASE_URL, VITE_SUPABASE_ANON_KEY).'
+            : rawErr;
+        const { data: fallbackRows, error: fbErr } = await supabase
           .from('profiles')
           .select('*')
+          .eq('role', 'teacher')
           .order('created_at', { ascending: false });
-        if (usersRes.error) throw usersRes.error;
-        usersSource = usersRes.data || [];
+        if (fbErr) {
+          console.error(fbErr);
+          toast.error(apiErr || fbErr.message || 'Failed to load teachers');
+          usersSource = [];
+        } else {
+          usersSource = fallbackRows || [];
+          if (usersSource.length === 0 && apiErr) {
+            toast.error(apiErr);
+          }
+        }
       }
 
       setUsers(usersSource.map((profile: any) => ({
@@ -87,7 +104,26 @@ export default function AdminDashboard() {
     }
   };
 
-  useEffect(() => { fetchData(); }, []);
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      let { data: { session } } = await supabase.auth.getSession();
+      if (!session?.access_token) {
+        const { data } = await supabase.auth.refreshSession();
+        session = data.session ?? null;
+      }
+      if (cancelled) return;
+      if (!session?.access_token) {
+        toast.error('You need to be signed in to load the admin dashboard.');
+        setLoading(false);
+        return;
+      }
+      fetchData();
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const handleAddUser = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -117,23 +153,32 @@ export default function AdminDashboard() {
   };
 
   const toggleUserStatus = async (user: UserProfile) => {
+    if (user.role !== 'teacher') return;
+    const newStatus = user.status === 'active' ? 'inactive' : 'active';
     try {
-      const newStatus = user.status === 'active' ? 'inactive' : 'active';
-      const { error } = await supabase.from('profiles').update({ status: newStatus }).eq('id', user.uid);
-      if (error) throw error;
-      toast.success(`User ${newStatus === 'active' ? 'enabled' : 'disabled'}`);
+      const res = await authFetch(`/api/admin/users/${encodeURIComponent(user.uid)}/status`, {
+        method: 'PATCH',
+        body: JSON.stringify({ status: newStatus }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(typeof json?.error === 'string' ? json.error : 'Failed to update user status');
+
+      const cascaded = typeof json.cascadedCount === 'number' ? json.cascadedCount : 0;
+      if (newStatus === 'inactive' && cascaded > 0) {
+        toast.success(`Teacher disabled; ${cascaded} linked student account(s) were also disabled.`);
+      } else {
+        toast.success(`Teacher ${newStatus === 'active' ? 'enabled' : 'disabled'}`);
+      }
       fetchData();
-    } catch (error) {
-      toast.error('Failed to update user status');
+    } catch (e: unknown) {
+      toast.error(e instanceof Error ? e.message : 'Failed to update user status');
     }
   };
 
-  const filteredUsers = users.filter(user => {
-    const matchesSearch = user.displayName.toLowerCase().includes(searchQuery.toLowerCase()) || 
-                         user.email.toLowerCase().includes(searchQuery.toLowerCase());
-    const matchesRole = roleFilter === 'all' || user.role === roleFilter;
-    return matchesSearch && matchesRole;
-  });
+  const filteredUsers = users.filter(user =>
+    user.displayName.toLowerCase().includes(searchQuery.toLowerCase()) ||
+    user.email.toLowerCase().includes(searchQuery.toLowerCase())
+  );
 
   const ov = analytics?.overview;
 
@@ -273,29 +318,17 @@ export default function AdminDashboard() {
           <div className="p-5 border-b border-slate-100 flex flex-col sm:flex-row gap-3 items-center justify-between bg-slate-50/50">
             <div>
               <h3 className="text-lg font-bold text-slate-900">User Management</h3>
-              <p className="text-sm text-slate-500">Manage all registered accounts</p>
+              <p className="text-sm text-slate-500">Teacher accounts only. Disabling a teacher also disables their linked students.</p>
             </div>
-            <div className="flex flex-col sm:flex-row gap-3 w-full sm:w-auto">
-              <div className="relative flex-1 sm:w-64">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
-                <input
-                  type="text"
-                  placeholder="Search users..."
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  className="w-full pl-9 pr-4 py-2 bg-white border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all shadow-sm"
-                />
-              </div>
-              <select
-                value={roleFilter}
-                onChange={(e) => setRoleFilter(e.target.value as any)}
-                className="px-4 py-2 bg-white border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 transition-all shadow-sm"
-              >
-                <option value="all">All Roles</option>
-                <option value="teacher">Teachers</option>
-                <option value="student">Students</option>
-                <option value="admin">Admins</option>
-              </select>
+            <div className="relative flex-1 sm:w-72 min-w-0">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+              <input
+                type="text"
+                placeholder="Search teachers..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="w-full pl-9 pr-4 py-2 bg-white border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all shadow-sm"
+              />
             </div>
           </div>
 
@@ -304,7 +337,7 @@ export default function AdminDashboard() {
             <table className="w-full text-left">
               <thead>
                 <tr className="bg-white text-slate-400 text-xs font-bold uppercase tracking-wider border-b border-slate-100">
-                  <th className="px-6 py-4">User</th>
+                  <th className="px-6 py-4">Teacher</th>
                   <th className="px-6 py-4">Role</th>
                   <th className="px-6 py-4">Status</th>
                   <th className="px-6 py-4">Joined</th>
@@ -340,12 +373,8 @@ export default function AdminDashboard() {
                           </div>
                         </td>
                         <td className="px-6 py-4">
-                          <span className={`px-2.5 py-1 rounded-lg text-[10px] font-bold uppercase tracking-wider ${
-                            user.role === 'admin' ? 'bg-violet-100 text-violet-700 ring-1 ring-violet-200' :
-                            user.role === 'teacher' ? 'bg-indigo-100 text-indigo-700 ring-1 ring-indigo-200' :
-                            'bg-emerald-100 text-emerald-700 ring-1 ring-emerald-200'
-                          }`}>
-                            {user.role}
+                          <span className="px-2.5 py-1 rounded-lg text-[10px] font-bold uppercase tracking-wider bg-indigo-100 text-indigo-700 ring-1 ring-indigo-200">
+                            teacher
                           </span>
                         </td>
                         <td className="px-6 py-4">
@@ -406,11 +435,7 @@ export default function AdminDashboard() {
                       <div className="text-sm font-bold text-slate-900 truncate">{user.displayName}</div>
                       <div className="text-xs text-slate-500 truncate">{user.email}</div>
                       <div className="flex items-center gap-2 mt-1.5">
-                        <span className={`px-2 py-0.5 rounded-md text-[10px] font-bold uppercase ${
-                          user.role === 'admin' ? 'bg-violet-100 text-violet-700' :
-                          user.role === 'teacher' ? 'bg-indigo-100 text-indigo-700' :
-                          'bg-emerald-100 text-emerald-700'
-                        }`}>{user.role}</span>
+                        <span className="px-2 py-0.5 rounded-md text-[10px] font-bold uppercase bg-indigo-100 text-indigo-700">teacher</span>
                         <span className={`flex items-center gap-1 text-[10px] font-bold ${
                           user.status === 'active' ? 'text-teal-600' : 'text-slate-400'
                         }`}>

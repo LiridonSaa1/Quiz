@@ -89,9 +89,10 @@ CREATE TABLE IF NOT EXISTS courses (
   updated_at          TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
--- Add gradient and category columns if they don't exist (for existing databases)
-ALTER TABLE courses ADD COLUMN IF NOT EXISTS gradient TEXT DEFAULT 'from-indigo-500 to-violet-600';
-ALTER TABLE courses ADD COLUMN IF NOT EXISTS category TEXT DEFAULT 'Other';
+-- Add gradient, category, and student_ids if missing (existing DBs / drifted schemas)
+ALTER TABLE public.courses ADD COLUMN IF NOT EXISTS gradient TEXT DEFAULT 'from-indigo-500 to-violet-600';
+ALTER TABLE public.courses ADD COLUMN IF NOT EXISTS category TEXT DEFAULT 'Other';
+ALTER TABLE public.courses ADD COLUMN IF NOT EXISTS student_ids UUID[] DEFAULT '{}';
 
 -- ============================================================
 -- 5. MODULES
@@ -148,6 +149,16 @@ CREATE TABLE IF NOT EXISTS classes (
   updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+-- Idempotent: align existing `public.classes` with the app (safe to re-run)
+ALTER TABLE public.classes ADD COLUMN IF NOT EXISTS description TEXT;
+ALTER TABLE public.classes ADD COLUMN IF NOT EXISTS student_ids UUID[] DEFAULT '{}';
+ALTER TABLE public.classes ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'upcoming';
+ALTER TABLE public.classes ADD COLUMN IF NOT EXISTS start_date DATE;
+ALTER TABLE public.classes ADD COLUMN IF NOT EXISTS end_date DATE;
+ALTER TABLE public.classes ADD COLUMN IF NOT EXISTS capacity INTEGER DEFAULT 30;
+ALTER TABLE public.classes ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ NOT NULL DEFAULT NOW();
+ALTER TABLE public.classes ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW();
+
 -- ============================================================
 -- 8. QUIZZES
 -- ============================================================
@@ -192,6 +203,19 @@ CREATE TABLE IF NOT EXISTS questions (
   "order"         INTEGER DEFAULT 0,
   created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+
+-- Idempotent: older `public.questions` may omit columns the app expects (PostgREST schema cache errors).
+ALTER TABLE public.questions ADD COLUMN IF NOT EXISTS text TEXT NOT NULL DEFAULT '';
+ALTER TABLE public.questions ADD COLUMN IF NOT EXISTS type TEXT NOT NULL DEFAULT 'multiple-choice';
+ALTER TABLE public.questions ADD COLUMN IF NOT EXISTS points INTEGER DEFAULT 1;
+ALTER TABLE public.questions ADD COLUMN IF NOT EXISTS "order" INTEGER DEFAULT 0;
+ALTER TABLE public.questions ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ NOT NULL DEFAULT NOW();
+ALTER TABLE public.questions ADD COLUMN IF NOT EXISTS reading_passage TEXT;
+ALTER TABLE public.questions ADD COLUMN IF NOT EXISTS media_url TEXT;
+ALTER TABLE public.questions ADD COLUMN IF NOT EXISTS media_type TEXT;
+ALTER TABLE public.questions ADD COLUMN IF NOT EXISTS options JSONB DEFAULT '[]'::jsonb;
+ALTER TABLE public.questions ADD COLUMN IF NOT EXISTS correct_answer JSONB;
+ALTER TABLE public.questions ADD COLUMN IF NOT EXISTS explanation TEXT;
 
 -- ============================================================
 -- 10. ATTEMPTS
@@ -697,5 +721,5 @@ ALTER TABLE quizzes ADD COLUMN IF NOT EXISTS max_attempts INTEGER;
 ALTER TABLE questions DROP CONSTRAINT IF EXISTS questions_type_check;
 ALTER TABLE questions ADD CONSTRAINT questions_type_check CHECK (type IN (
   'multiple-choice', 'true-false', 'open-text', 'fill-in-the-blank', 'matching', 'ordering',
-  'image', 'video', 'reading'
+  'image', 'video', 'reading', 'instruction'
 ));

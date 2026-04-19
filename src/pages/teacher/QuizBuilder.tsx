@@ -23,6 +23,8 @@ import {
   Upload,
   Loader2,
   Sparkles,
+  TextCursorInput,
+  AlignLeft,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { Quiz, Question, Course, QuestionType } from '../../types';
@@ -124,7 +126,7 @@ function toDbQuestionType(t: string | undefined): string {
   const x = (t || 'open-text').toLowerCase();
   const allowed = new Set([
     'multiple-choice', 'true-false', 'open-text', 'fill-in-the-blank', 'matching', 'ordering',
-    'image', 'video', 'reading',
+    'image', 'video', 'reading', 'instruction',
   ]);
   if (allowed.has(x)) return x;
   return 'open-text';
@@ -258,18 +260,27 @@ export default function QuizBuilder() {
   };
 
   const addQuestion = (type: QuestionType) => {
+    const needsChoiceOptions =
+      type === 'multiple-choice' ||
+      type === 'image' ||
+      type === 'video' ||
+      type === 'reading';
     const newQuestion: Partial<Question> = {
       type,
       text: '',
-      points: 1,
+      points: type === 'instruction' ? 0 : 1,
       mediaType: type === 'video' ? 'video' : type === 'image' ? 'image' : undefined,
-      options: type === 'multiple-choice' ? [
-        { id: '1', text: 'Option 1' },
-        { id: '2', text: 'Option 2' }
-      ] : type === 'true-false' ? [
-        { id: '1', text: 'True' },
-        { id: '2', text: 'False' }
-      ] : []
+      options: needsChoiceOptions
+        ? [
+            { id: '1', text: 'Option 1' },
+            { id: '2', text: 'Option 2' },
+          ]
+        : type === 'true-false'
+          ? [
+              { id: '1', text: 'True' },
+              { id: '2', text: 'False' },
+            ]
+          : undefined,
     };
     setQuestions([...questions, newQuestion]);
   };
@@ -387,12 +398,11 @@ export default function QuizBuilder() {
         currentQuizId = newId;
       }
 
-      if (quizId) {
-        await supabase.from('questions').delete().eq('quiz_id', quizId);
-      }
+      const quizIdForQuestions = currentQuizId || quizId;
+      if (!quizIdForQuestions) throw new Error('Missing quiz id');
 
       const questionsPayload = questions.map((q, idx) => ({
-        quiz_id: currentQuizId,
+        quiz_id: quizIdForQuestions,
         type: toDbQuestionType(q.type),
         text: (q.text || ' ').trim() || ' ',
         media_url: q.mediaUrl,
@@ -400,15 +410,19 @@ export default function QuizBuilder() {
         reading_passage: q.readingPassage,
         options: q.options,
         correct_answer: q.correctAnswer,
-        points: q.points ?? 1,
+        points: q.type === 'instruction' ? 0 : (q.points ?? 1),
         explanation: q.explanation,
         order: idx,
       }));
 
-      if (questionsPayload.length > 0) {
-        const { error: qError } = await supabase.from('questions').insert(questionsPayload);
-        if (qError) throw qError;
-      }
+      const saveQ = await authFetch(
+        `/api/teacher/quizzes/${encodeURIComponent(quizIdForQuestions)}/save-questions`,
+        {
+          method: 'POST',
+          body: JSON.stringify({ questions: questionsPayload }),
+        }
+      );
+      if (!saveQ.ok) throw new Error(await readApiError(saveQ));
 
       toast.success('Quiz saved successfully');
       navigate('/teacher/quizzes');
@@ -722,11 +736,13 @@ export default function QuizBuilder() {
                   <h3 className="font-bold text-sm flex items-center gap-2">
                     <Plus className="w-4 h-4" /> Add questions
                   </h3>
-                  <div className="grid grid-cols-2 gap-2">
+                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
                     {[
                       { type: 'multiple-choice' as const, label: 'MCQ', icon: CheckSquare },
                       { type: 'true-false' as const, label: 'T / F', icon: Circle },
                       { type: 'open-text' as const, label: 'Open', icon: Type },
+                      { type: 'fill-in-the-blank' as const, label: 'Blank', icon: TextCursorInput },
+                      { type: 'instruction' as const, label: 'Text only', icon: AlignLeft },
                       { type: 'image' as const, label: 'Image', icon: ImageIcon },
                       { type: 'video' as const, label: 'Video', icon: Video },
                       { type: 'reading' as const, label: 'Reading', icon: BookOpen },
@@ -776,14 +792,25 @@ export default function QuizBuilder() {
                         </div>
                         <div className="p-6 space-y-5">
                           <div>
-                            <label className="block text-xs font-semibold text-slate-600 mb-1.5">Question</label>
+                            <label className="block text-xs font-semibold text-slate-600 mb-1.5">
+                              {q.type === 'instruction' ? 'Text (directions, passage, or context)' : 'Question'}
+                            </label>
                             <textarea
                               value={q.text}
                               onChange={(e) => updateQuestion(index, { text: e.target.value })}
                               className="w-full px-3.5 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-violet-400 resize-none"
-                              rows={2}
-                              placeholder="Ask your question…"
+                              rows={q.type === 'instruction' ? 6 : 2}
+                              placeholder={
+                                q.type === 'instruction'
+                                  ? 'Paste or write the text students should read. Add scored questions after this block using the buttons on the left.'
+                                  : 'Ask your question…'
+                              }
                             />
+                            {q.type === 'instruction' && (
+                              <p className="text-[11px] text-slate-500 mt-1.5 leading-snug">
+                                Display-only: no answer box on the quiz. Use it before MCQ / open-text questions to give reading material or instructions.
+                              </p>
+                            )}
                           </div>
 
                           {(q.type === 'image' || q.type === 'video') && (
@@ -932,39 +959,65 @@ export default function QuizBuilder() {
                             </div>
                           )}
 
-                          {q.type === 'open-text' && (
+                          {(q.type === 'open-text' || q.type === 'fill-in-the-blank') && (
                             <div>
-                              <label className="block text-xs font-semibold text-slate-600 mb-1.5">Correct keywords (comma-separated)</label>
+                              <label className="block text-xs font-semibold text-slate-600 mb-1.5">
+                                {q.type === 'fill-in-the-blank'
+                                  ? 'Acceptable answers (comma-separated)'
+                                  : 'Correct keywords (comma-separated)'}
+                              </label>
                               <input
                                 type="text"
                                 value={typeof q.correctAnswer === 'string' ? q.correctAnswer : ''}
                                 onChange={(e) => updateQuestion(index, { correctAnswer: e.target.value })}
                                 className="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-violet-400"
-                                placeholder="e.g. photosynthesis, chlorophyll"
+                                placeholder={
+                                  q.type === 'fill-in-the-blank'
+                                    ? 'e.g. mitochondria, Mitochondria'
+                                    : 'e.g. photosynthesis, chlorophyll'
+                                }
                               />
                             </div>
                           )}
 
-                          <div className="grid grid-cols-2 gap-4 pt-4 border-t border-slate-100">
-                            <div>
+                          <div
+                            className={cn(
+                              'grid gap-4 pt-4 border-t border-slate-100',
+                              q.type === 'instruction' ? 'grid-cols-1' : 'grid-cols-2'
+                            )}
+                          >
+                            <div className={q.type === 'instruction' ? 'max-w-xs' : ''}>
                               <label className="block text-xs font-semibold text-slate-600 mb-1.5">Points</label>
-                              <input
-                                type="number"
-                                value={q.points}
-                                onChange={(e) => updateQuestion(index, { points: parseInt(e.target.value, 10) || 0 })}
-                                className="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-violet-400"
-                              />
+                              {q.type === 'instruction' ? (
+                                <input
+                                  type="number"
+                                  value={0}
+                                  readOnly
+                                  disabled
+                                  className="w-full px-3 py-2.5 bg-slate-100 border border-slate-200 rounded-xl text-sm text-slate-500 cursor-not-allowed"
+                                  title="Text-only blocks are not scored"
+                                />
+                              ) : (
+                                <input
+                                  type="number"
+                                  value={q.points}
+                                  onChange={(e) => updateQuestion(index, { points: parseInt(e.target.value, 10) || 0 })}
+                                  className="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-violet-400"
+                                />
+                              )}
                             </div>
-                            <div>
-                              <label className="block text-xs font-semibold text-slate-600 mb-1.5">Explanation (optional)</label>
-                              <input
-                                type="text"
-                                value={typeof q.explanation === 'string' ? q.explanation : ''}
-                                onChange={(e) => updateQuestion(index, { explanation: e.target.value })}
-                                className="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-violet-400"
-                                placeholder="Shown after submit (if enabled)"
-                              />
-                            </div>
+                            {q.type !== 'instruction' && (
+                              <div>
+                                <label className="block text-xs font-semibold text-slate-600 mb-1.5">Explanation (optional)</label>
+                                <input
+                                  type="text"
+                                  value={typeof q.explanation === 'string' ? q.explanation : ''}
+                                  onChange={(e) => updateQuestion(index, { explanation: e.target.value })}
+                                  className="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-violet-400"
+                                  placeholder="Shown after submit (if enabled)"
+                                />
+                              </div>
+                            )}
                           </div>
                         </div>
                       </motion.div>
@@ -975,7 +1028,7 @@ export default function QuizBuilder() {
                     <FileText className="w-14 h-14 text-indigo-200 mx-auto mb-4" />
                     <h3 className="text-lg font-bold text-slate-800 mb-1">No questions yet</h3>
                     <p className="text-slate-500 text-sm max-w-sm mx-auto mb-6">
-                      Use the panel on the left to add multiple-choice, video, image, and more. Video and image questions support both links and file uploads.
+                      Use <span className="font-semibold text-slate-700">Add questions</span> on the left: MCQ, true/false, open-ended, fill-in-the-blank, <span className="font-semibold text-slate-700">Text only</span> (passages / directions), reading, image, or video. Image and video questions support links and uploads to Storage.
                     </p>
                   </div>
                 )}

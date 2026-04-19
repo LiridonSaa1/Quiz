@@ -163,14 +163,16 @@ export default function QuizTaking() {
       let totalPoints = 0;
 
       questions.forEach(q => {
+        if (q.type === 'instruction') return;
         totalPoints += q.points;
         const studentAnswer = answers[q.id];
         if (q.type === 'multiple-choice' || q.type === 'true-false' || q.type === 'image' || q.type === 'video' || q.type === 'reading') {
           if (studentAnswer === q.correctAnswer) {
             score += q.points;
           }
-        } else if (q.type === 'open-text') {
-          const keywords = q.correctAnswer.toLowerCase().split(',').map(k => k.trim());
+        } else if (q.type === 'open-text' || q.type === 'fill-in-the-blank') {
+          const raw = typeof q.correctAnswer === 'string' ? q.correctAnswer : String(q.correctAnswer ?? '');
+          const keywords = raw.toLowerCase().split(',').map(k => k.trim()).filter(Boolean);
           const studentText = studentAnswer?.toLowerCase() || '';
           if (keywords.some(k => studentText.includes(k))) {
             score += q.points;
@@ -296,43 +298,51 @@ export default function QuizTaking() {
                   </div>
                 )}
 
-                {/* Question Text */}
-                <h2 className="text-2xl font-bold text-slate-900 leading-tight">
-                  {currentQuestion.text}
-                </h2>
+                {/* Question text (or display-only passage for `instruction`) */}
+                {currentQuestion.type === 'instruction' ? (
+                  <div className="rounded-2xl border border-slate-100 bg-slate-50/80 p-6 md:p-8 text-slate-800 text-base leading-relaxed whitespace-pre-wrap">
+                    {currentQuestion.text}
+                  </div>
+                ) : (
+                  <h2 className="text-2xl font-bold text-slate-900 leading-tight">{currentQuestion.text}</h2>
+                )}
 
-                {/* Options */}
-                <div className="grid grid-cols-1 gap-4">
-                  {currentQuestion.options ? (
-                    currentQuestion.options.map((option) => (
-                      <button
-                        key={option.id}
-                        onClick={() => handleAnswerChange(currentQuestion.id, option.id)}
-                        className={cn(
-                          "flex items-center gap-4 p-5 rounded-2xl border-2 text-left transition-all",
-                          answers[currentQuestion.id] === option.id
-                            ? "border-slate-900 bg-slate-900 text-white shadow-lg shadow-slate-200"
-                            : "border-slate-100 bg-white hover:border-slate-200 text-slate-600"
-                        )}
-                      >
-                        <div className={cn(
-                          "w-6 h-6 rounded-full border-2 flex items-center justify-center shrink-0",
-                          answers[currentQuestion.id] === option.id ? "border-white" : "border-slate-200"
-                        )}>
-                          {answers[currentQuestion.id] === option.id && <div className="w-2.5 h-2.5 bg-white rounded-full" />}
-                        </div>
-                        <span className="font-semibold">{option.text}</span>
-                      </button>
-                    ))
-                  ) : (
-                    <textarea
-                      value={answers[currentQuestion.id] || ''}
-                      onChange={(e) => handleAnswerChange(currentQuestion.id, e.target.value)}
-                      className="w-full p-6 bg-slate-50 border-2 border-slate-100 rounded-2xl focus:outline-none focus:border-slate-900 focus:bg-white transition-all min-h-[150px] text-lg"
-                      placeholder="Type your answer here..."
-                    />
-                  )}
-                </div>
+                {/* Options or answer — skipped for display-only instruction blocks */}
+                {currentQuestion.type === 'instruction' ? (
+                  <p className="text-sm text-slate-500 italic">Read the text above, then continue. No answer is required for this step.</p>
+                ) : (
+                  <div className="grid grid-cols-1 gap-4">
+                    {Array.isArray(currentQuestion.options) && currentQuestion.options.length > 0 ? (
+                      currentQuestion.options.map((option) => (
+                        <button
+                          key={option.id}
+                          onClick={() => handleAnswerChange(currentQuestion.id, option.id)}
+                          className={cn(
+                            "flex items-center gap-4 p-5 rounded-2xl border-2 text-left transition-all",
+                            answers[currentQuestion.id] === option.id
+                              ? "border-slate-900 bg-slate-900 text-white shadow-lg shadow-slate-200"
+                              : "border-slate-100 bg-white hover:border-slate-200 text-slate-600"
+                          )}
+                        >
+                          <div className={cn(
+                            "w-6 h-6 rounded-full border-2 flex items-center justify-center shrink-0",
+                            answers[currentQuestion.id] === option.id ? "border-white" : "border-slate-200"
+                          )}>
+                            {answers[currentQuestion.id] === option.id && <div className="w-2.5 h-2.5 bg-white rounded-full" />}
+                          </div>
+                          <span className="font-semibold">{option.text}</span>
+                        </button>
+                      ))
+                    ) : (
+                      <textarea
+                        value={answers[currentQuestion.id] || ''}
+                        onChange={(e) => handleAnswerChange(currentQuestion.id, e.target.value)}
+                        className="w-full p-6 bg-slate-50 border-2 border-slate-100 rounded-2xl focus:outline-none focus:border-slate-900 focus:bg-white transition-all min-h-[150px] text-lg"
+                        placeholder="Type your answer here..."
+                      />
+                    )}
+                  </div>
+                )}
               </div>
             </motion.div>
           </AnimatePresence>

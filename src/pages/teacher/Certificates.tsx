@@ -17,6 +17,7 @@ import {
   Hash, Calendar,
 } from 'lucide-react';
 import { cn } from '../../lib/utils';
+import { authFetch } from '../../lib/apiUrl';
 import { format } from 'date-fns';
 
 type CertStatus = 'issued' | 'revoked';
@@ -110,26 +111,23 @@ export default function TeacherCertificates() {
       }
       const tid = session.user.id;
 
-      const [{ data: rawCerts, error }, { data: c }, studentsApiRes] = await Promise.all([
+      const [{ data: rawCerts, error }, { data: c }, teacherStudentsPayload] = await Promise.all([
         supabase.from('certificates').select('*').order('issued_at', { ascending: false }),
         supabase.from('courses').select('id,title').eq('teacher_id', tid),
-        fetch('/api/admin/students').then(async (r) => {
+        authFetch(`/api/teacher/students?userId=${encodeURIComponent(tid)}`).then(async (r) => {
           const json = await r.json().catch(() => null);
-          return r.ok && json?.success ? json.students : null;
+          return r.ok && json?.success && Array.isArray(json.students) ? json.students : null;
         }).catch(() => null),
       ]);
       if (error) throw error;
 
       let s: StudentRec[] = [];
-      if (Array.isArray(studentsApiRes) && studentsApiRes.length > 0) {
-        s = (studentsApiRes as StudentApiRow[])
-          .filter((row) => String(row.teacherId ?? '') === String(tid))
-          .map((row) => ({
-            id: String(row.uid || row.id || ''),
-            display_name: String(row.displayName || row.display_name || ''),
-            email: String(row.email || ''),
-          }))
-          .filter((row) => row.id && row.display_name);
+      if (Array.isArray(teacherStudentsPayload) && teacherStudentsPayload.length > 0) {
+        s = teacherStudentsPayload.map((row: StudentApiRow) => ({
+          id: String(row.uid || row.id || ''),
+          display_name: String(row.displayName || row.display_name || ''),
+          email: String(row.email || ''),
+        })).filter((row) => row.id && row.display_name);
       } else {
         const { data: directStudents } = await supabase
           .from('profiles')

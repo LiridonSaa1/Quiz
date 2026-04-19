@@ -17,6 +17,9 @@ import {
 } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import StyledSelect from '../../components/ui/StyledSelect';
+import { resolveTeacherIdCandidates } from '../../lib/teacherScope';
+import { apiUrl } from '../../lib/apiUrl';
+import { normalizeClassRow, saveClassRow, selectClassesForTeacher } from '../../lib/classesTable';
 
 type ClassStatus = 'active' | 'upcoming' | 'completed' | 'archived';
 
@@ -35,7 +38,7 @@ interface ClassRecord {
   course?: { title: string } | null;
 }
 
-interface Course { id: string; title: string }
+interface Course { id: string; title: string; status?: string }
 
 const STATUS_CONFIG: Record<ClassStatus, { label: string; bg: string; text: string; dot: string; icon: React.ElementType }> = {
   active:    { label: 'Active',    bg: 'bg-emerald-50', text: 'text-emerald-700', dot: 'bg-emerald-500', icon: CheckCircle2 },
@@ -99,22 +102,53 @@ export default function TeacherClasses() {
   const fetchData = async (tid: string) => {
     setLoading(true);
     try {
-      const [classesRes, coursesRes] = await Promise.all([
-        supabase.from('classes').select('*').eq('teacher_id', tid).order('created_at', { ascending: false }),
-        supabase.from('courses').select('id, title').eq('teacher_id', tid).eq('status', 'published'),
-      ]);
+      const scopedIds = await resolveTeacherIdCandidates(tid);
+
+      let allCourses: Course[] = [];
+      const backendRes = await fetch(apiUrl(`/api/teacher/courses?userId=${encodeURIComponent(tid)}`));
+      if (backendRes.ok) {
+        const backendJson = await backendRes.json();
+        if (backendJson?.success && Array.isArray(backendJson.courses)) {
+          allCourses = backendJson.courses.map((c: any) => ({
+            id: c.id,
+            title: (c.title || c.name || 'Untitled').trim() || 'Untitled',
+            status: c.status,
+          }));
+        }
+      }
+      if (allCourses.length === 0) {
+        const { data, error } = await supabase
+          .from('courses')
+          .select('id, title, status')
+          .in('teacher_id', scopedIds)
+          .order('created_at', { ascending: false });
+        if (error && error.code !== 'PGRST116') throw error;
+        allCourses = (data || []).map((c: any) => ({
+          id: c.id,
+          title: (c.title || 'Untitled').trim() || 'Untitled',
+          status: c.status,
+        }));
+      }
+
+      // Dropdown: draft + published (same as other teacher flows); cards still resolve archived titles below.
+      const forSelect = allCourses.filter(c => c.status !== 'archived');
+
+      const classesRes = await selectClassesForTeacher(supabase, scopedIds);
       if (classesRes.error) throw classesRes.error;
 
       const courseMap: Record<string, { title: string }> = {};
-      (coursesRes.data || []).forEach((c: any) => { courseMap[c.id] = { title: c.title }; });
+      allCourses.forEach(c => { courseMap[c.id] = { title: c.title }; });
 
-      const enriched = (classesRes.data || []).map((cls: any) => ({
-        ...cls,
-        course: cls.course_id ? (courseMap[cls.course_id] || null) : null,
-      }));
+      const enriched = (classesRes.data || []).map((cls: Record<string, unknown>) => {
+        const row = normalizeClassRow(cls) as ClassRecord;
+        return {
+          ...row,
+          course: row.course_id ? (courseMap[String(row.course_id)] || null) : null,
+        };
+      });
 
       setClasses(enriched);
-      setCourses(coursesRes.data || []);
+      setCourses(forSelect);
     } catch (err: any) {
       toast.error('Failed to load classes: ' + err.message);
     } finally {
@@ -137,7 +171,7 @@ export default function TeacherClasses() {
       status: cls.status,
       start_date: cls.start_date ? cls.start_date.slice(0, 10) : '',
       end_date: cls.end_date ? cls.end_date.slice(0, 10) : '',
-      capacity: cls.capacity,
+      capacity: cls.capacity ?? 30,
     });
     setActiveMenu(null);
     setShowModal(true);
@@ -160,12 +194,12 @@ export default function TeacherClasses() {
         capacity: Number(form.capacity),
       };
       if (editing) {
-        const { error } = await supabase.from('classes').update(payload).eq('id', editing.id);
+        const { error } = await saveClassRow(supabase, { mode: 'update', id: editing.id, payload });
         if (error) throw error;
         toast.success('Class updated');
       } else {
         payload.student_ids = [];
-        const { error } = await supabase.from('classes').insert(payload);
+        const { error } = await saveClassRow(supabase, { mode: 'insert', payload });
         if (error) throw error;
         toast.success('Class created');
       }

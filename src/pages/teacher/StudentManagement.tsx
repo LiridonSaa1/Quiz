@@ -3,10 +3,12 @@ import { supabase } from '../../supabase';
 import TeacherLayout from '../../components/layout/TeacherLayout';
 import { Users, UserPlus, Search, UserCheck, UserX, BookOpen, X } from 'lucide-react';
 import { toast } from 'sonner';
-import { UserProfile } from '../../types';
+import { UserProfile, UserRole } from '../../types';
 import { cn } from '../../lib/utils';
 import AddStudentModal from '../../components/AddStudentModal';
 import { resolveTeacherIdCandidates } from '../../lib/teacherScope';
+import { apiUrl, authFetch } from '../../lib/apiUrl';
+import { isMissingCoursesStudentIdsError } from '../../lib/schemaErrors';
 import { motion } from 'motion/react';
 import {
   AdminListPageShell,
@@ -72,19 +74,94 @@ export default function StudentManagement() {
       const { data: { session } } = await supabase.auth.getSession();
       if (!session?.user?.id) return;
 
+      const studentsRes = await authFetch(
+        `/api/teacher/students?userId=${encodeURIComponent(session.user.id)}`
+      );
+      if (studentsRes.ok) {
+        const json = await studentsRes.json();
+        if (json?.success && Array.isArray(json.students) && Array.isArray(json.courses)) {
+          setCourses(json.courses);
+          setStudents(
+            json.students.map((s: {
+              uid: string;
+              email?: string | null;
+              displayName?: string | null;
+              role?: string | null;
+              teacherId?: string | null;
+              status?: string | null;
+              createdAt?: string | null;
+              enrolledCourses?: string[];
+            }) => ({
+              uid: s.uid,
+              email: s.email ?? '',
+              displayName: s.displayName ?? '',
+              role: (s.role === 'teacher' || s.role === 'admin' ? s.role : 'student') as UserRole,
+              teacherId: s.teacherId,
+              status: s.status === 'inactive' ? 'inactive' : 'active',
+              createdAt: s.createdAt || new Date().toISOString(),
+              enrolledCourses: Array.isArray(s.enrolledCourses) ? s.enrolledCourses : [],
+            }))
+          );
+          return;
+        }
+      }
+
+      // Fallback when API unavailable: direct Supabase (requires permissive profiles SELECT RLS).
       const scopedIds = await resolveTeacherIdCandidates(session.user.id);
 
-      const coursesSnap = await supabase
-        .from('courses')
-        .select('id, title, name, student_ids')
-        .in('teacher_id', scopedIds);
-      if (coursesSnap.error) throw coursesSnap.error;
+      let courseRows: { id: string; title?: string; name?: string; student_ids?: string[] }[] = [];
+      let coursesFromApi = false;
+      const coursesOnlyRes = await fetch(
+        apiUrl(`/api/teacher/courses?userId=${encodeURIComponent(session.user.id)}`)
+      );
+      if (coursesOnlyRes.ok) {
+        const backendJson = await coursesOnlyRes.json();
+        if (backendJson?.success && Array.isArray(backendJson.courses)) {
+          courseRows = backendJson.courses;
+          coursesFromApi = true;
+        }
+      }
+      if (!coursesFromApi) {
+        const withIds = await supabase
+          .from('courses')
+          .select('id, title, student_ids')
+          .in('teacher_id', scopedIds);
+        const missingStudentIds = Boolean(withIds.error && isMissingCoursesStudentIdsError(withIds.error));
+        if (missingStudentIds) {
+          const narrow = await supabase.from('courses').select('id, title').in('teacher_id', scopedIds);
+          if (narrow.error) throw narrow.error;
+          courseRows = narrow.data || [];
+        } else {
+          if (withIds.error) throw withIds.error;
+          courseRows = withIds.data || [];
+        }
+      }
 
-      const coursesData = (coursesSnap.data || []).map((c: { id: string; title?: string; name?: string; student_ids?: string[] }) => ({
+      const coursesData = courseRows.map((c: { id: string; title?: string; name?: string; student_ids?: string[] }) => ({
         id: c.id,
         name: c.title || c.name || 'Untitled',
         studentIds: Array.isArray(c.student_ids) ? c.student_ids : [],
       }));
+
+      const { data: classRows, error: clsErr } = await supabase
+        .from('classes')
+        .select('course_id, student_ids')
+        .in('teacher_id', scopedIds);
+      if (!clsErr && classRows?.length) {
+        const byCourseId = new Map(coursesData.map(c => [c.id, c] as const));
+        classRows.forEach((cl: { course_id?: string | null; student_ids?: unknown[] }) => {
+          const cid = cl.course_id != null ? String(cl.course_id) : '';
+          if (!cid || !byCourseId.has(cid)) return;
+          const row = byCourseId.get(cid)!;
+          const set = new Set(row.studentIds);
+          (Array.isArray(cl.student_ids) ? cl.student_ids : []).forEach((sid: unknown) => {
+            const s = String(sid || '');
+            if (s) set.add(s);
+          });
+          row.studentIds = [...set];
+        });
+      }
+
       setCourses(coursesData);
 
       const enrolledIds = new Set<string>();

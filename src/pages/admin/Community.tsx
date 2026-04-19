@@ -17,6 +17,7 @@ import {
   HelpCircle, BookMarked, Sparkles, Globe
 } from 'lucide-react';
 import { cn } from '../../lib/utils';
+import { apiUrl, authFetch } from '../../lib/apiUrl';
 
 type PostStatus   = 'active' | 'pinned' | 'archived';
 type PostCategory = 'general' | 'q_and_a' | 'resources' | 'showcase';
@@ -98,7 +99,10 @@ export default function AdminCommunity() {
 
   const fetchMembers = async () => {
     try {
-      const [tRes, sRes] = await Promise.all([fetch('/api/admin/teachers'), fetch('/api/admin/students')]);
+      const [tRes, sRes] = await Promise.all([
+        fetch('/api/admin/teachers'),
+        authFetch(apiUrl('/api/admin/students')),
+      ]);
       const [t, s] = await Promise.all([tRes.json(), sRes.json()]);
       const combined = [
         ...(t.teachers || []).map((x: any) => ({ id: x.uid, displayName: x.displayName, email: x.email })),

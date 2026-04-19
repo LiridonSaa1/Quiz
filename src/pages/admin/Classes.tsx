@@ -18,6 +18,8 @@ import {
 } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import StyledSelect from '../../components/ui/StyledSelect';
+import { authFetch } from '../../lib/apiUrl';
+import { normalizeClassRow, saveClassRow, selectAllClassesOrdered } from '../../lib/classesTable';
 type ClassStatus = 'active' | 'upcoming' | 'completed' | 'archived';
 
 interface ClassRecord {
@@ -89,28 +91,60 @@ export default function AdminClasses() {
   const fetchAll = async () => {
     setLoading(true);
     try {
-      const [classesRes, coursesRes, teachersRes] = await Promise.all([
-        supabase.from('classes').select('*').order('created_at', { ascending: false }),
+      const [classesRes, coursesRes, teachersHttpRes] = await Promise.all([
+        selectAllClassesOrdered(supabase),
         supabase.from('courses').select('id, title').eq('status', 'published'),
-        supabase.from('profiles').select('id, display_name, email').eq('role', 'teacher'),
+        authFetch('/api/admin/teachers'),
       ]);
       if (classesRes.error) throw classesRes.error;
+
+      const teachersJson = await teachersHttpRes.json().catch(() => ({}));
+      type Row = { id: string; display_name: string; email: string };
+      let teacherRows: Row[] = [];
+      if (teachersHttpRes.ok && teachersJson.success && Array.isArray(teachersJson.teachers)) {
+        teacherRows = teachersJson.teachers.map((t: Record<string, unknown>) => ({
+          id: String(t.uid ?? t.id ?? ''),
+          display_name: String((t.displayName as string) ?? (t.display_name as string) ?? ''),
+          email: String((t.email as string) ?? ''),
+        })).filter((r: Row) => r.id);
+      } else {
+        const fb = await supabase.from('profiles').select('id, display_name, email').eq('role', 'teacher');
+        if (fb.error) throw fb.error;
+        teacherRows = (fb.data || []).map((t: any) => ({
+          id: String(t.id),
+          display_name: String(t.display_name || ''),
+          email: String(t.email || ''),
+        }));
+      }
 
       const courseMap: Record<string, { title: string }> = {};
       (coursesRes.data || []).forEach((c: any) => { courseMap[c.id] = { title: c.title }; });
 
       const teacherMap: Record<string, { display_name: string; email: string }> = {};
-      (teachersRes.data || []).forEach((t: any) => { teacherMap[t.id] = { display_name: t.display_name, email: t.email }; });
+      teacherRows.forEach((t) => {
+        teacherMap[t.id] = { display_name: t.display_name, email: t.email };
+      });
 
-      const enriched = (classesRes.data || []).map((cls: any) => ({
-        ...cls,
-        course: cls.course_id ? (courseMap[cls.course_id] || null) : null,
-        teacher: cls.teacher_id ? (teacherMap[cls.teacher_id] ? { display_name: teacherMap[cls.teacher_id].display_name, email: teacherMap[cls.teacher_id].email } : null) : null,
-      }));
+      const enriched = (classesRes.data || []).map((cls: Record<string, unknown>) => {
+        const row = normalizeClassRow(cls) as ClassRecord;
+        return {
+          ...row,
+          course: row.course_id ? (courseMap[String(row.course_id)] || null) : null,
+          teacher: row.teacher_id
+            ? (teacherMap[String(row.teacher_id)]
+                ? { display_name: teacherMap[String(row.teacher_id)].display_name, email: teacherMap[String(row.teacher_id)].email }
+                : null)
+            : null,
+        };
+      });
 
-      setClasses(enriched as ClassRecord[]);
+      setClasses(enriched);
       setCourses(coursesRes.data || []);
-      setTeachers((teachersRes.data || []).map((t: any) => ({ id: t.id, displayName: t.display_name, email: t.email })));
+      setTeachers(teacherRows.map(t => ({
+        id: t.id,
+        displayName: t.display_name || t.email || 'Teacher',
+        email: t.email,
+      })));
     } catch (err: any) {
       toast.error('Failed to load classes: ' + err.message);
     } finally {
@@ -136,7 +170,7 @@ export default function AdminClasses() {
       status: cls.status,
       start_date: cls.start_date ? cls.start_date.slice(0, 10) : '',
       end_date: cls.end_date ? cls.end_date.slice(0, 10) : '',
-      capacity: cls.capacity,
+      capacity: cls.capacity ?? 30,
     });
     setShowModal(true);
     setActiveMenu(null);
@@ -158,12 +192,12 @@ export default function AdminClasses() {
       };
 
       if (editingClass) {
-        const { error } = await supabase.from('classes').update(payload).eq('id', editingClass.id);
+        const { error } = await saveClassRow(supabase, { mode: 'update', id: editingClass.id, payload });
         if (error) throw error;
         toast.success('Class updated successfully');
       } else {
         payload.student_ids = [];
-        const { error } = await supabase.from('classes').insert(payload);
+        const { error } = await saveClassRow(supabase, { mode: 'insert', payload });
         if (error) throw error;
         toast.success('Class created successfully');
       }

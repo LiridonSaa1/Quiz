@@ -7,6 +7,7 @@ import AdminLayout from '../../components/layout/AdminLayout';
 import { cn } from '../../lib/utils';
 import AddStudentModal from '../../components/AddStudentModal';
 import { motion } from 'motion/react';
+import { apiUrl, authFetch } from '../../lib/apiUrl';
 import {
   AdminListFilterBar,
   AdminListPageShell,
@@ -69,7 +70,7 @@ export default function AdminStudents() {
   const fetchData = async () => {
     setLoading(true);
     try {
-      const res = await fetch('/api/admin/students');
+      const res = await authFetch(apiUrl('/api/admin/students'));
       const json = await res.json();
       if (!res.ok || !json.success) throw new Error(json.error || 'Failed to fetch students');
       setStudents(json.students);

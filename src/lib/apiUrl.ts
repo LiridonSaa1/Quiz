@@ -1,13 +1,19 @@
 import { supabase } from '../supabase';
 
 /**
- * Prefix for `/api/...` requests. Leave unset when the UI and Express share the same origin (`npm run dev` or `npm run preview` after our preview script change).
- * Set `VITE_API_BASE_URL` when the frontend is deployed separately from the API (e.g. `https://api.myapp.com`).
+ * Prefix for `/api/...` requests.
+ * Leave unset when the UI and API share one origin (recommended: `npm run dev` → open the URL printed in the terminal).
+ * If you set `VITE_API_BASE_URL`, it must be the exact API origin (scheme + host + port) from that log — e.g. `http://localhost:5002`
+ * if Express bound to 5002 because 5000 was busy.
+ * Set when the frontend is deployed separately from the API (e.g. `https://api.myapp.com`).
  */
 export function apiUrl(path: string): string {
+  const s = path.trim();
+  // Already an absolute URL (e.g. after a prior apiUrl call) — do not prefix again.
+  if (/^https?:\/\//i.test(s)) return s;
   const raw = import.meta.env.VITE_API_BASE_URL;
   const base = typeof raw === 'string' ? raw.replace(/\/$/, '') : '';
-  const p = path.startsWith('/') ? path : `/${path}`;
+  const p = s.startsWith('/') ? s : `/${s}`;
   return `${base}${p}`;
 }
 
@@ -45,16 +51,46 @@ export async function readApiError(res: Response): Promise<string> {
 }
 
 /**
+ * Resolves a usable access token (refreshes once if the session was not hydrated yet).
+ */
+async function resolveAccessToken(): Promise<string | null> {
+  const first = await supabase.auth.getSession();
+  let token = first.data.session?.access_token ?? null;
+  if (token) return token;
+
+  const refreshed = await supabase.auth.refreshSession();
+  if (refreshed.error) return null;
+  return refreshed.data.session?.access_token ?? null;
+}
+
+/**
  * Authenticated fetch — automatically attaches the current Supabase session JWT as
  * `Authorization: Bearer <token>` so server-side ownership checks can verify the caller.
+ * Retries once after `refreshSession()` on 401 (expired token or session not hydrated yet).
  */
 export async function authFetch(path: string, init: RequestInit = {}): Promise<Response> {
-  const { data: { session } } = await supabase.auth.getSession();
-  const token = session?.access_token;
-  const headers: Record<string, string> = {
-    ...(init.headers as Record<string, string> | undefined),
+  const buildHeaders = async (): Promise<Record<string, string>> => {
+    const headers: Record<string, string> = {
+      ...(init.headers as Record<string, string> | undefined),
+    };
+    const existingAuth = headers['Authorization'] || headers['authorization'];
+    if (!existingAuth) {
+      const token = await resolveAccessToken();
+      if (token) headers['Authorization'] = `Bearer ${token}`;
+    }
+    if (init.body && !headers['Content-Type']) headers['Content-Type'] = 'application/json';
+    return headers;
   };
-  if (token) headers['Authorization'] = `Bearer ${token}`;
-  if (init.body && !headers['Content-Type']) headers['Content-Type'] = 'application/json';
-  return fetch(apiUrl(path), { ...init, headers });
+
+  const url = apiUrl(path);
+  let headers = await buildHeaders();
+  let res = await fetch(url, { ...init, headers, credentials: 'same-origin' });
+
+  if (res.status === 401) {
+    await supabase.auth.refreshSession();
+    headers = await buildHeaders();
+    res = await fetch(url, { ...init, headers, credentials: 'same-origin' });
+  }
+
+  return res;
 }

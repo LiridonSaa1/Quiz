@@ -11,6 +11,7 @@ import {
   ADMIN_LIST_ITEM_CARD,
 } from '../../components/admin/AdminListPageShell';
 import { supabase } from '../../supabase';
+import { apiUrl, authFetch } from '../../lib/apiUrl';
 import {
   Award, Plus, Search, CheckCircle2, XCircle,
   X, Pencil, Trash2, Eye, BookOpen,
@@ -103,7 +104,7 @@ export default function AdminCertificates() {
       const [{ data: rawCerts, error }, { data: c }, studentsApiRes] = await Promise.all([
         supabase.from('certificates').select('*').order('issued_at', { ascending: false }),
         supabase.from('courses').select('id,title'),
-        fetch('/api/admin/students').then(async (r) => {
+        authFetch(apiUrl('/api/admin/students')).then(async (r) => {
           const json = await r.json().catch(() => null);
           return r.ok && json?.success ? json.students : null;
         }).catch(() => null),

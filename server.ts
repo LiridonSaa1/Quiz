@@ -1,4 +1,5 @@
 import "dotenv/config";
+import { isMissingCoursesStudentIdsError } from "./src/lib/schemaErrors.ts";
 import express, { Request, Response } from "express";
 import { createServer as createViteServer } from "vite";
 import path from "path";
@@ -107,6 +108,82 @@ async function startServer() {
 
   app.use(express.json());
 
+  // Allow SPA + API on different origins (Authorization header + preflight).
+  app.use((req: Request, res: Response, next) => {
+    const origin = req.headers.origin as string | undefined;
+    if (origin) {
+      res.setHeader("Access-Control-Allow-Origin", origin);
+      res.setHeader("Access-Control-Allow-Credentials", "true");
+      res.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS");
+      res.setHeader(
+        "Access-Control-Allow-Headers",
+        "Authorization, Content-Type, X-Requested-With",
+      );
+    }
+    if (req.method === "OPTIONS") return res.status(204).end();
+    next();
+  });
+
+  const normalizeRole = (r: string | undefined | null) =>
+    String(r || "student").toLowerCase().trim();
+
+  const getAuthUser = async (req: Request): Promise<{ userId: string; role: string } | null> => {
+    const auth = req.headers["authorization"] || "";
+    const token = auth.startsWith("Bearer ") ? auth.slice(7).trim() : "";
+    if (!token) return null;
+    const {
+      data: { user },
+      error,
+    } = await supabaseAdmin.auth.getUser(token);
+    if (error || !user) {
+      if (process.env.NODE_ENV !== "production") {
+        console.warn("[getAuthUser] auth.getUser failed:", error?.message || "no user");
+      }
+      return null;
+    }
+    const { data: profile } = await supabaseAdmin
+      .from("profiles")
+      .select("role")
+      .eq("id", user.id)
+      .maybeSingle();
+    return { userId: user.id, role: normalizeRole(profile?.role) };
+  };
+
+  const assertSessionHost = async (req: Request, res: Response, sessionId: string): Promise<string | null> => {
+    const caller = await getAuthUser(req);
+    if (!caller) {
+      res.status(401).json({ error: "Unauthorized" });
+      return null;
+    }
+    if (caller.role !== "teacher" && caller.role !== "admin") {
+      res.status(403).json({ error: "Forbidden: teacher or admin role required" });
+      return null;
+    }
+    if (caller.role === "admin") return caller.userId;
+    const { data: session } = await supabaseAdmin.from("live_sessions").select("host_id").eq("id", sessionId).single();
+    if (!session || session.host_id !== caller.userId) {
+      res.status(403).json({ error: "Forbidden: you are not the host of this session" });
+      return null;
+    }
+    return caller.userId;
+  };
+
+  const assertAuthenticated = async (
+    req: Request,
+    res: Response,
+  ): Promise<{ userId: string; role: string } | null> => {
+    const caller = await getAuthUser(req);
+    if (!caller) {
+      res.status(401).json({ error: "Unauthorized" });
+      return null;
+    }
+    return caller;
+  };
+
+  app.get("/favicon.ico", (_req, res) => {
+    res.redirect(302, "/favicon.svg");
+  });
+
   const COURSE_MUTABLE_KEYS = new Set([
     "teacher_id",
     "title",
@@ -207,7 +284,7 @@ async function startServer() {
   /** Missing-column errors from Postgres/PostgREST; retry with a narrower select. */
   const isRecoverableSchemaColumnError = (error: any) => {
     if (!error) return false;
-    if (error.code === "42703") return true;
+    if (error.code === "42703" || error.code === 42703) return true;
     const hay = `${error.message || ""} ${error.details || ""} ${error.hint || ""}`.toLowerCase();
     return hay.includes("does not exist") && hay.includes("column");
   };
@@ -516,9 +593,13 @@ async function startServer() {
     }
   });
 
-  // Route to fetch all students (bypasses RLS using service role)
+  // Route to fetch all students (bypasses RLS using service role) — admin only
   app.get("/api/admin/students", async (req, res) => {
     try {
+      const caller = await getAuthUser(req);
+      if (!caller) return res.status(401).json({ error: "Unauthorized" });
+      if (caller.role !== "admin") return res.status(403).json({ error: "Forbidden: admin role required" });
+
       const [profilesRes, teachersRes, coursesRes] = await Promise.all([
         supabaseAdmin.from('profiles').select('*').eq('role', 'student'),
         supabaseAdmin.from('teachers').select('user_id, first_name, last_name'),
@@ -526,6 +607,7 @@ async function startServer() {
       ]);
 
       if (profilesRes.error) throw profilesRes.error;
+      if (teachersRes.error) throw teachersRes.error;
 
       const teacherMap: Record<string, string> = {};
       const teacherOptions: { id: string; name: string }[] = [];
@@ -536,11 +618,32 @@ async function startServer() {
       });
 
       const enrolledCountMap: Record<string, number> = {};
-      (coursesRes.data || []).forEach((c: any) => {
-        (c.student_ids || []).forEach((sid: string) => {
-          enrolledCountMap[sid] = (enrolledCountMap[sid] || 0) + 1;
+      if (coursesRes.error) {
+        if (!isMissingCoursesStudentIdsError(coursesRes.error)) throw coursesRes.error;
+        const { data: classRows, error: classesErr } = await supabaseAdmin
+          .from('classes')
+          .select('course_id, student_ids');
+        if (classesErr) throw classesErr;
+        const perStudent = new Map<string, Set<string>>();
+        (classRows || []).forEach((cl: any) => {
+          const cid = cl.course_id != null ? String(cl.course_id) : '';
+          (Array.isArray(cl.student_ids) ? cl.student_ids : []).forEach((sid: unknown) => {
+            const s = String(sid || '');
+            if (!s || !cid) return;
+            if (!perStudent.has(s)) perStudent.set(s, new Set());
+            perStudent.get(s)!.add(cid);
+          });
         });
-      });
+        perStudent.forEach((set, sid) => {
+          enrolledCountMap[sid] = set.size;
+        });
+      } else {
+        (coursesRes.data || []).forEach((c: any) => {
+          (c.student_ids || []).forEach((sid: string) => {
+            enrolledCountMap[sid] = (enrolledCountMap[sid] || 0) + 1;
+          });
+        });
+      }
 
       const students = (profilesRes.data || []).map((p: any) => ({
         uid: p.id,
@@ -1045,6 +1148,148 @@ async function startServer() {
       if (error) throw error;
       res.json({ success: true, courses: data || [] });
     } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  // Teacher students (service role) — scoped to the authenticated teacher only (not global admin list).
+  app.get(["/api/teacher/students", "/api/teacher/students/"], async (req, res) => {
+    try {
+      const caller = await getAuthUser(req);
+      if (!caller) return res.status(401).json({ error: "Unauthorized" });
+      if (caller.role !== "teacher") {
+        return res.status(403).json({ error: "Forbidden: teacher role required" });
+      }
+
+      const userId = typeof req.query.userId === "string" ? req.query.userId.trim() : "";
+      if (!userId) return res.status(400).json({ error: "userId is required" });
+      if (caller.userId !== userId) {
+        return res.status(403).json({ error: "Forbidden" });
+      }
+
+      const teacherIds = await getTeacherIdCandidates(userId);
+      const scopedIds = teacherIds.length > 0 ? teacherIds : [userId];
+
+      let courseRows: any[] = [];
+      const coursesWithIdsRes = await supabaseAdmin
+        .from("courses")
+        .select("id, title, student_ids")
+        .in("teacher_id", scopedIds)
+        .order("created_at", { ascending: false });
+
+      if (coursesWithIdsRes.error) {
+        if (!isMissingCoursesStudentIdsError(coursesWithIdsRes.error)) throw coursesWithIdsRes.error;
+        const fallback = await supabaseAdmin
+          .from("courses")
+          .select("id, title")
+          .in("teacher_id", scopedIds)
+          .order("created_at", { ascending: false });
+        if (fallback.error) throw fallback.error;
+        courseRows = fallback.data || [];
+      } else {
+        courseRows = coursesWithIdsRes.data || [];
+      }
+
+      const coursesData = (courseRows || []).map((c: any) => ({
+        id: String(c.id),
+        name: (c.title != null && String(c.title).trim() !== "" ? String(c.title) : "Untitled") as string,
+        studentIds: Array.isArray(c.student_ids) ? c.student_ids.map((x: unknown) => String(x)) : [],
+      }));
+
+      const courseTitleById: Record<string, string> = {};
+      coursesData.forEach((c) => {
+        courseTitleById[c.id] = c.name;
+      });
+
+      const enrolledIds = new Set<string>();
+      coursesData.forEach((c) => {
+        c.studentIds.forEach((sid) => {
+          if (sid) enrolledIds.add(sid);
+        });
+      });
+
+      // Legacy DBs without courses.student_ids: enrollments may live on classes.student_ids only
+      const { data: classRows, error: classesErr } = await supabaseAdmin
+        .from("classes")
+        .select("id, name, course_id, student_ids")
+        .in("teacher_id", scopedIds);
+      if (!classesErr && Array.isArray(classRows) && classRows.length > 0) {
+        classRows.forEach((cl: any) => {
+          const cid = cl.course_id != null ? String(cl.course_id) : "";
+          const linkedTitle = cid ? courseTitleById[cid] : "";
+          const className =
+            typeof cl.name === "string" && cl.name.trim() !== "" ? String(cl.name).trim() : "Class";
+          (Array.isArray(cl.student_ids) ? cl.student_ids : []).forEach((sid: unknown) => {
+            const s = String(sid || "");
+            if (!s) return;
+            enrolledIds.add(s);
+            if (cid && linkedTitle) {
+              const cdata = coursesData.find((x) => x.id === cid);
+              if (cdata && !cdata.studentIds.includes(s)) cdata.studentIds.push(s);
+              return;
+            }
+            const displayName = linkedTitle || className;
+            const syntheticId = `__class_${String(cl.id || "")}`;
+            let row = coursesData.find((x) => x.id === syntheticId);
+            if (!row) {
+              row = { id: syntheticId, name: displayName, studentIds: [] as string[] };
+              coursesData.push(row);
+            }
+            if (!row.studentIds.includes(s)) row.studentIds.push(s);
+          });
+        });
+      }
+
+      const [linkedRes, enrolledRes] = await Promise.all([
+        supabaseAdmin
+          .from("profiles")
+          .select("*")
+          .in("teacher_id", scopedIds)
+          .eq("role", "student")
+          .order("created_at", { ascending: false }),
+        enrolledIds.size > 0
+          ? supabaseAdmin.from("profiles").select("*").in("id", [...enrolledIds])
+          : Promise.resolve({ data: [] as any[], error: null }),
+      ]);
+
+      if (linkedRes.error) throw linkedRes.error;
+      if (enrolledRes.error) throw enrolledRes.error;
+
+      const byId = new Map<string, any>();
+      (linkedRes.data || []).forEach((d: any) => {
+        if (d?.id) byId.set(String(d.id), d);
+      });
+      (enrolledRes.data || []).forEach((d: any) => {
+        if (d?.id && !byId.has(String(d.id))) byId.set(String(d.id), d);
+      });
+
+      const coursesByStudent: Record<string, string[]> = {};
+      coursesData.forEach((c) => {
+        c.studentIds.forEach((sid) => {
+          if (!coursesByStudent[sid]) coursesByStudent[sid] = [];
+          coursesByStudent[sid].push(c.name);
+        });
+      });
+
+      const merged = [...byId.values()].sort(
+        (a: any, b: any) =>
+          new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime(),
+      );
+
+      const students = merged.map((d: any) => ({
+        uid: String(d.id),
+        email: d.email,
+        displayName: d.display_name,
+        role: d.role,
+        teacherId: d.teacher_id,
+        status: d.status || "active",
+        createdAt: d.created_at,
+        enrolledCourses: coursesByStudent[String(d.id)] || [],
+      }));
+
+      res.json({ success: true, students, courses: coursesData });
+    } catch (e: any) {
+      console.error("GET /api/teacher/students", e);
       res.status(500).json({ error: e.message });
     }
   });
@@ -1624,10 +1869,9 @@ async function startServer() {
       if (studentsRes.error) throw studentsRes.error;
       let courses: any[] = [];
       if (enrollmentsResWithIds.error) {
-        const isMissingStudentIdsColumn =
-          enrollmentsResWithIds.error?.code === '42703' ||
-          String(enrollmentsResWithIds.error?.message || '').includes('courses.student_ids');
-        if (!isMissingStudentIdsColumn) throw enrollmentsResWithIds.error;
+        if (!isMissingCoursesStudentIdsError(enrollmentsResWithIds.error)) {
+          throw enrollmentsResWithIds.error;
+        }
       } else {
         courses = enrollmentsResWithIds.data || [];
       }
@@ -1677,10 +1921,7 @@ async function startServer() {
       let courses: any[] = [];
       let usesStudentIds = true;
       if (coursesResWithIds.error) {
-        const isMissingStudentIdsColumn =
-          coursesResWithIds.error?.code === '42703' ||
-          String(coursesResWithIds.error?.message || '').includes('courses.student_ids');
-        if (!isMissingStudentIdsColumn) throw coursesResWithIds.error;
+        if (!isMissingCoursesStudentIdsError(coursesResWithIds.error)) throw coursesResWithIds.error;
         const coursesResFallback = await supabaseAdmin
           .from('courses')
           .select('id, title, category, level, status, created_at, total_students, teacher_id');
@@ -2119,36 +2360,6 @@ async function startServer() {
 
   // ── TEACHER LIVE SESSIONS ───────────────────────────────────
 
-  // Auth helper: validates Bearer token and returns { userId, role } or null
-  const getAuthUser = async (req: Request): Promise<{ userId: string; role: string } | null> => {
-    const auth = req.headers['authorization'] || '';
-    const token = auth.startsWith('Bearer ') ? auth.slice(7).trim() : '';
-    if (!token) return null;
-    const { data: { user }, error } = await supabaseAdmin.auth.getUser(token);
-    if (error || !user) return null;
-    const { data: profile } = await supabaseAdmin.from('profiles').select('role').eq('id', user.id).single();
-    return { userId: user.id, role: profile?.role || 'student' };
-  };
-
-  // Check caller is a teacher/admin who is host of the given session
-  const assertSessionHost = async (req: Request, res: Response, sessionId: string): Promise<string | null> => {
-    const caller = await getAuthUser(req);
-    if (!caller) { res.status(401).json({ error: 'Unauthorized' }); return null; }
-    if (caller.role !== 'teacher' && caller.role !== 'admin') { res.status(403).json({ error: 'Forbidden: teacher or admin role required' }); return null; }
-    // For admins, skip host check
-    if (caller.role === 'admin') return caller.userId;
-    const { data: session } = await supabaseAdmin.from('live_sessions').select('host_id').eq('id', sessionId).single();
-    if (!session || session.host_id !== caller.userId) { res.status(403).json({ error: 'Forbidden: you are not the host of this session' }); return null; }
-    return caller.userId;
-  };
-
-  // Assert authenticated participant (teacher or student who can access the session)
-  const assertAuthenticated = async (req: Request, res: Response): Promise<{ userId: string; role: string } | null> => {
-    const caller = await getAuthUser(req);
-    if (!caller) { res.status(401).json({ error: 'Unauthorized' }); return null; }
-    return caller;
-  };
-
   // Create quiz (service role) — bypasses RLS; caller must own the course.
   const teacherQuizzesPostHandler = async (req: Request, res: Response) => {
     try {
@@ -2216,7 +2427,167 @@ async function startServer() {
   app.post("/api/teacher/quizzes", teacherQuizzesPostHandler);
   app.post("/api/teacher/quizzes/", teacherQuizzesPostHandler);
 
-  // Admin users list for dashboard user management
+  /** Replace all questions for a quiz (service role — bypasses RLS; browser insert often fails on questions policy). */
+  app.post("/api/teacher/quizzes/:quizId/save-questions", async (req: Request, res: Response) => {
+    try {
+      const caller = await assertAuthenticated(req, res);
+      if (!caller) return;
+      if (caller.role !== "teacher" && caller.role !== "admin") {
+        return res.status(403).json({ error: "Forbidden: teacher or admin role required" });
+      }
+      const quizId = typeof req.params.quizId === "string" ? req.params.quizId.trim() : "";
+      if (!quizId) return res.status(400).json({ error: "Quiz id is required" });
+
+      const rows = (req.body as { questions?: unknown })?.questions;
+      if (!Array.isArray(rows)) {
+        return res.status(400).json({ error: "Body must include questions: []" });
+      }
+
+      const { data: quizRow, error: qErr } = await supabaseAdmin
+        .from("quizzes")
+        .select("id, course_id")
+        .eq("id", quizId)
+        .maybeSingle();
+      if (qErr) throw qErr;
+      if (!quizRow?.id) return res.status(404).json({ error: "Quiz not found." });
+
+      if (caller.role !== "admin") {
+        const gate = await assertTeacherOwnsCourse(caller.userId, String(quizRow.course_id));
+        if (!gate.ok) {
+          return res.status(403).json({ error: "You do not have access to this quiz." });
+        }
+      }
+
+      const { error: delErr } = await supabaseAdmin.from("questions").delete().eq("quiz_id", quizId);
+      if (delErr) throw delErr;
+
+      if (rows.length === 0) {
+        return res.json({ success: true });
+      }
+
+      const insertRows = rows.map((r: Record<string, unknown>, idx: number) => {
+        const orderVal =
+          typeof r.order === "number"
+            ? r.order
+            : typeof r["order"] === "number"
+              ? (r["order"] as number)
+              : idx;
+        return {
+          quiz_id: quizId,
+          type: typeof r.type === "string" && r.type.trim() ? r.type.trim() : "multiple-choice",
+          text:
+            typeof r.text === "string" && r.text.trim()
+              ? r.text.trim()
+              : typeof r.text === "string"
+                ? " "
+                : " ",
+          media_url: r.media_url ?? null,
+          media_type: r.media_type ?? null,
+          reading_passage: r.reading_passage ?? null,
+          options: r.options ?? null,
+          correct_answer: r.correct_answer ?? null,
+          points: (() => {
+            const raw = r.points;
+            const n =
+              typeof raw === "number" && !Number.isNaN(raw) ? raw : Number(raw);
+            return Number.isFinite(n) ? n : 1;
+          })(),
+          explanation: r.explanation ?? null,
+          order: orderVal,
+        };
+      });
+
+      const { error: insErr } = await supabaseAdmin.from("questions").insert(insertRows);
+      if (insErr) {
+        const msg = [insErr.message, insErr.details, insErr.hint].filter(Boolean).join(" — ") || insErr.code || "Insert failed";
+        return res.status(400).json({ error: msg });
+      }
+
+      res.json({ success: true });
+    } catch (e: any) {
+      console.error("POST /api/teacher/quizzes/:quizId/save-questions", e);
+      res.status(500).json({ error: e?.message || "Failed to save questions" });
+    }
+  });
+
+  /** Delete quiz + attempts/questions (service role). Teachers may only delete quizzes for courses they own. */
+  const teacherQuizDeleteHandler = async (req: Request, res: Response) => {
+    try {
+      const caller = await assertAuthenticated(req, res);
+      if (!caller) return;
+      if (caller.role !== "teacher" && caller.role !== "admin") {
+        return res.status(403).json({ error: "Forbidden: teacher or admin role required" });
+      }
+      const quizId = typeof req.params.id === "string" ? req.params.id.trim() : "";
+      if (!quizId) return res.status(400).json({ error: "Quiz id is required" });
+
+      const { data: quizRow, error: qErr } = await supabaseAdmin
+        .from("quizzes")
+        .select("id, course_id")
+        .eq("id", quizId)
+        .maybeSingle();
+      if (qErr) throw qErr;
+      if (!quizRow?.id) return res.status(404).json({ error: "Quiz not found." });
+
+      if (caller.role !== "admin") {
+        const gate = await assertTeacherOwnsCourse(caller.userId, String(quizRow.course_id));
+        if (!gate.ok) {
+          return res.status(403).json({ error: "You do not have access to this quiz." });
+        }
+      }
+
+      const { error: qDelErr } = await supabaseAdmin.from("questions").delete().eq("quiz_id", quizId);
+      if (qDelErr) throw qDelErr;
+
+      const attRes = await supabaseAdmin.from("attempts").delete().eq("quiz_id", quizId);
+      if (attRes.error) {
+        const code = String((attRes.error as { code?: string }).code || "");
+        const msg = String(attRes.error.message || "");
+        const missingTable =
+          code === "42P01" ||
+          code === "PGRST205" ||
+          /does not exist|could not find the table/i.test(msg);
+        if (!missingTable) throw attRes.error;
+      }
+
+      const qaRes = await supabaseAdmin.from("quiz_attempts").delete().eq("quiz_id", quizId);
+      if (qaRes.error) {
+        const msg = String(qaRes.error.message || "");
+        const code = String((qaRes.error as { code?: string }).code || "");
+        const missingTable =
+          code === "42P01" ||
+          code === "PGRST205" ||
+          /could not find the table|does not exist/i.test(msg);
+        if (!missingTable) throw qaRes.error;
+      }
+
+      const { data: deleted, error: dErr } = await supabaseAdmin
+        .from("quizzes")
+        .delete()
+        .eq("id", quizId)
+        .select("id");
+      if (dErr) {
+        if (dErr.code === "23503") {
+          return res.status(409).json({
+            error:
+              "This quiz cannot be deleted because something still references it (e.g. a lesson). Remove that link first.",
+          });
+        }
+        throw dErr;
+      }
+      if (!deleted?.length) {
+        return res.status(404).json({ error: "Quiz not found or already deleted." });
+      }
+      res.json({ success: true });
+    } catch (e: any) {
+      console.error("DELETE /api/teacher/quizzes/:id", e);
+      res.status(500).json({ error: e?.message || "Failed to delete quiz" });
+    }
+  };
+  app.delete("/api/teacher/quizzes/:id", teacherQuizDeleteHandler);
+  app.post("/api/teacher/quizzes/:id/delete", teacherQuizDeleteHandler);
+
+  // Admin users list for dashboard user management (teachers only)
   app.get('/api/admin/users', async (req, res) => {
     try {
       const caller = await assertAuthenticated(req, res);
@@ -2226,12 +2597,58 @@ async function startServer() {
       const { data, error } = await supabaseAdmin
         .from('profiles')
         .select('id, email, display_name, role, teacher_id, status, created_at')
+        .eq('role', 'teacher')
         .order('created_at', { ascending: false });
 
       if (error) throw error;
       res.json({ success: true, users: data || [] });
     } catch (e: unknown) {
       res.status(500).json({ error: (e as Error).message || 'Failed to load users' });
+    }
+  });
+
+  /** Set teacher status; disabling a teacher also disables profiles with teacher_id = that teacher. */
+  app.patch('/api/admin/users/:userId/status', async (req, res) => {
+    try {
+      const caller = await assertAuthenticated(req, res);
+      if (!caller) return;
+      if (caller.role !== 'admin') return res.status(403).json({ error: 'Forbidden: admin role required' });
+
+      const userId = String(req.params.userId || '').trim();
+      const status = req.body?.status;
+      if (!userId) return res.status(400).json({ error: 'userId required' });
+      if (status !== 'active' && status !== 'inactive') {
+        return res.status(400).json({ error: 'status must be active or inactive' });
+      }
+
+      const { data: profile, error: pErr } = await supabaseAdmin
+        .from('profiles')
+        .select('id, role')
+        .eq('id', userId)
+        .maybeSingle();
+      if (pErr) throw pErr;
+      if (!profile) return res.status(404).json({ error: 'User not found' });
+      if (profile.role !== 'teacher') {
+        return res.status(400).json({ error: 'Only teacher accounts can be updated from this action' });
+      }
+
+      const { error: uErr } = await supabaseAdmin.from('profiles').update({ status }).eq('id', userId);
+      if (uErr) throw uErr;
+
+      let cascadedCount = 0;
+      if (status === 'inactive') {
+        const { data: students, error: cErr } = await supabaseAdmin
+          .from('profiles')
+          .update({ status: 'inactive' })
+          .eq('teacher_id', userId)
+          .select('id');
+        if (cErr) throw cErr;
+        cascadedCount = students?.length ?? 0;
+      }
+
+      res.json({ success: true, cascadedCount });
+    } catch (e: unknown) {
+      res.status(500).json({ error: (e as Error).message || 'Failed to update status' });
     }
   });
 
@@ -3142,7 +3559,7 @@ async function startServer() {
     if (req.path.startsWith("/api")) {
       return res.status(404).json({
         error:
-          "No API route matched. Start the app with npm run dev (tsx server.ts) and use the printed URL, or set VITE_API_BASE_URL to your API server.",
+          "No API route matched. Start the app with npm run dev (tsx server.ts) and open the app at the URL printed in the terminal (same host/port as the API). If you set VITE_API_BASE_URL, it must match that URL (e.g. if the server says port 5002, use http://localhost:5002 — not a stale port). Restart the server after git pull.",
         method: req.method,
         path: req.path,
       });

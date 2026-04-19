@@ -124,7 +124,21 @@ export interface Quiz {
   updatedAt: string;
 }
 
-export type QuestionType = 'multiple-choice' | 'true-false' | 'short-answer' | 'long-answer' | 'file-upload';
+/** Quiz question kinds used in QuizBuilder / DB `questions.type` */
+export type QuestionType =
+  | 'multiple-choice'
+  | 'true-false'
+  | 'open-text'
+  | 'fill-in-the-blank'
+  | 'short-answer'
+  | 'long-answer'
+  | 'file-upload'
+  | 'image'
+  | 'video'
+  | 'reading'
+  | 'instruction'
+  | 'matching'
+  | 'ordering';
 
 export interface Question {
   id: string;

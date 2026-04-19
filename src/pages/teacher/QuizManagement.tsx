@@ -11,7 +11,7 @@ import {
 import { toast } from 'sonner';
 import { Quiz } from '../../types';
 import { cn } from '../../lib/utils';
-import { authFetch } from '../../lib/apiUrl';
+import { authFetch, readApiError } from '../../lib/apiUrl';
 import { resolveTeacherIdCandidates } from '../../lib/teacherScope';
 import { fetchTeacherQuizzesFromSupabase, missingQuizzesPublishedColumn } from '../../lib/fetchTeacherQuizzes';
 import { Link, useNavigate } from 'react-router-dom';
@@ -180,14 +180,16 @@ export default function QuizManagement() {
     if (!quizToDelete) return;
     setDeleting(true);
     try {
-      await supabase.from('questions').delete().eq('quiz_id', quizToDelete.id);
-      const { error } = await supabase.from('quizzes').delete().eq('id', quizToDelete.id);
-      if (error) throw error;
+      const res = await authFetch(`/api/teacher/quizzes/${encodeURIComponent(quizToDelete.id)}/delete`, {
+        method: 'POST',
+      });
+      if (!res.ok) throw new Error(await readApiError(res));
       toast.success('Quiz deleted');
       setQuizToDelete(null);
       fetchData();
-    } catch {
-      toast.error('Failed to delete quiz');
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : 'Failed to delete quiz';
+      toast.error(msg);
     } finally {
       setDeleting(false);
     }

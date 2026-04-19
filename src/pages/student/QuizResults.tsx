@@ -184,9 +184,17 @@ export default function QuizResults() {
           <div className="space-y-6">
             {questions.map((q, index) => {
               const studentAnswer = attempt.answers[q.id];
-              const isCorrect = q.type === 'open-text' 
-                ? q.correctAnswer.toLowerCase().split(',').some(k => studentAnswer?.toLowerCase().includes(k.trim()))
-                : studentAnswer === q.correctAnswer;
+              const isInstruction = q.type === 'instruction';
+              const isCorrect = isInstruction
+                ? true
+                : q.type === 'open-text' || q.type === 'fill-in-the-blank'
+                  ? String(q.correctAnswer ?? '')
+                      .toLowerCase()
+                      .split(',')
+                      .map((k) => k.trim())
+                      .filter(Boolean)
+                      .some((k) => studentAnswer?.toLowerCase().includes(k))
+                  : studentAnswer === q.correctAnswer;
 
               return (
                 <div key={q.id} className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
@@ -197,20 +205,27 @@ export default function QuizResults() {
                       </span>
                       <span className={cn(
                         "text-xs font-bold px-3 py-1 rounded-full",
-                        isCorrect ? "bg-green-50 text-green-600" : "bg-red-50 text-red-600"
+                        isInstruction
+                          ? "bg-slate-100 text-slate-600"
+                          : isCorrect ? "bg-green-50 text-green-600" : "bg-red-50 text-red-600"
                       )}>
-                        {isCorrect ? 'Correct' : 'Incorrect'}
+                        {isInstruction ? 'Text' : isCorrect ? 'Correct' : 'Incorrect'}
                       </span>
                     </div>
                     <span className="text-xs font-bold text-slate-400 uppercase tracking-widest">
-                      {q.points} Points
+                      {isInstruction ? '—' : `${q.points} Points`}
                     </span>
                   </div>
                   <div className="p-8 space-y-6">
-                    <h3 className="text-xl font-bold text-slate-900 leading-tight">{q.text}</h3>
+                    <h3 className={cn(
+                      "leading-tight",
+                      isInstruction ? "text-slate-800 font-normal text-base whitespace-pre-wrap" : "text-xl font-bold text-slate-900"
+                    )}>{q.text}</h3>
                     
                     <div className="space-y-3">
-                      {q.options ? (
+                      {isInstruction ? (
+                        <p className="text-sm text-slate-500">Display-only content (not scored).</p>
+                      ) : Array.isArray(q.options) && q.options.length > 0 ? (
                         q.options.map((opt) => (
                           <div 
                             key={opt.id}
@@ -244,8 +259,10 @@ export default function QuizResults() {
                             <div className="text-slate-900 font-semibold">{studentAnswer || 'No answer provided'}</div>
                           </div>
                           <div className="bg-green-50 p-4 rounded-xl border border-green-100">
-                            <div className="text-xs font-bold text-green-400 uppercase tracking-widest mb-2">Correct Keywords</div>
-                            <div className="text-green-700 font-semibold">{q.correctAnswer}</div>
+                            <div className="text-xs font-bold text-green-400 uppercase tracking-widest mb-2">
+                              {q.type === 'fill-in-the-blank' ? 'Acceptable answers' : 'Correct Keywords'}
+                            </div>
+                            <div className="text-green-700 font-semibold">{String(q.correctAnswer ?? '')}</div>
                           </div>
                         </div>
                       )}

@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
 import { supabase } from '../supabase';
+import { isProfileAccessAllowed } from '../lib/profileAccess';
 import {
   Mail, Lock, Shield, GraduationCap,
   BookOpen, Users, Trophy, Eye, EyeOff,
@@ -101,8 +102,27 @@ export default function Login() {
     e.preventDefault();
     setLoading(true);
     try {
-      const { error } = await supabase.auth.signInWithPassword({ email, password });
+      const { data: signData, error } = await supabase.auth.signInWithPassword({ email, password });
       if (error) throw error;
+      const uid = signData.user?.id;
+      if (!uid) throw new Error('No user id returned');
+
+      const { data: prof, error: profileError } = await supabase
+        .from('profiles')
+        .select('status')
+        .eq('id', uid)
+        .single();
+
+      if (profileError) {
+        await supabase.auth.signOut();
+        throw new Error(profileError.message || 'Could not load your profile');
+      }
+      if (!isProfileAccessAllowed(prof?.status)) {
+        await supabase.auth.signOut();
+        toast.error('This account has been disabled. Contact an administrator.', { id: 'account-disabled' });
+        return;
+      }
+
       toast.success('Welcome back!');
       navigate('/');
     } catch (err: any) {
