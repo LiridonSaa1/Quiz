@@ -14,6 +14,7 @@ import {
 } from 'lucide-react';
 import { QuizAttempt, Quiz, Question } from '../../types';
 import { cn } from '../../lib/utils';
+import { questionBodyFromRow } from '../../lib/questionText';
 import { motion } from 'motion/react';
 import { LayoutPageSkeleton } from '../../components/ui/Skeleton';
 import { fetchAttemptRowById, normalizeAttempts } from '../../lib/quizAttempts';
@@ -89,10 +90,10 @@ export default function QuizResults() {
 
         if (questionsError) throw questionsError;
 
-        setQuestions(questionsData.map(q => ({
+        setQuestions(questionsData.map((q) => ({
           id: q.id,
           quizId: q.quiz_id,
-          text: q.text,
+          text: questionBodyFromRow(q as Record<string, unknown>),
           type: q.type,
           options: q.options,
           correctAnswer: q.correct_answer,

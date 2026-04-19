@@ -2465,39 +2465,80 @@ async function startServer() {
         return res.json({ success: true });
       }
 
-      const insertRows = rows.map((r: Record<string, unknown>, idx: number) => {
-        const orderVal =
-          typeof r.order === "number"
-            ? r.order
-            : typeof r["order"] === "number"
-              ? (r["order"] as number)
-              : idx;
-        return {
-          quiz_id: quizId,
-          type: typeof r.type === "string" && r.type.trim() ? r.type.trim() : "multiple-choice",
-          text:
-            typeof r.text === "string" && r.text.trim()
-              ? r.text.trim()
-              : typeof r.text === "string"
-                ? " "
-                : " ",
-          media_url: r.media_url ?? null,
-          media_type: r.media_type ?? null,
-          reading_passage: r.reading_passage ?? null,
-          options: r.options ?? null,
-          correct_answer: r.correct_answer ?? null,
-          points: (() => {
-            const raw = r.points;
-            const n =
-              typeof raw === "number" && !Number.isNaN(raw) ? raw : Number(raw);
-            return Number.isFinite(n) ? n : 1;
-          })(),
-          explanation: r.explanation ?? null,
-          order: orderVal,
-        };
-      });
+      const normalizeQuestionBody = (r: Record<string, unknown>) => {
+        const raw = r.text ?? r.question_text;
+        if (typeof raw === "string" && raw.trim()) return raw.trim();
+        if (typeof raw === "string") return raw.length ? raw : " ";
+        return " ";
+      };
 
-      const { error: insErr } = await supabaseAdmin.from("questions").insert(insertRows);
+      const buildInsertRows = (mode: "text" | "question_text" | "both") =>
+        rows.map((r: Record<string, unknown>, idx: number) => {
+          const orderVal =
+            typeof r.order === "number"
+              ? r.order
+              : typeof r["order"] === "number"
+                ? (r["order"] as number)
+                : idx;
+          const qtext = normalizeQuestionBody(r);
+          const row: Record<string, unknown> = {
+            quiz_id: quizId,
+            type: typeof r.type === "string" && r.type.trim() ? r.type.trim() : "multiple-choice",
+            media_url: r.media_url ?? null,
+            media_type: r.media_type ?? null,
+            reading_passage: r.reading_passage ?? null,
+            options: r.options ?? null,
+            correct_answer: r.correct_answer ?? null,
+            points: (() => {
+              const raw = r.points;
+              const n =
+                typeof raw === "number" && !Number.isNaN(raw) ? raw : Number(raw);
+              return Number.isFinite(n) ? n : 1;
+            })(),
+            explanation: r.explanation ?? null,
+            order: orderVal,
+          };
+          if (mode === "both") {
+            row.text = qtext;
+            row.question_text = qtext;
+          } else {
+            row[mode] = qtext;
+          }
+          return row;
+        });
+
+      const errToStr = (e: typeof insErr) =>
+        e
+          ? [e.message, e.details, e.hint, (e as { code?: string }).code].filter(Boolean).join(" — ")
+          : "";
+
+      let insertRows = buildInsertRows("text");
+      let { error: insErr } = await supabaseAdmin.from("questions").insert(insertRows);
+
+      let errStr = errToStr(insErr);
+
+      const looksLikeQuestionTextMissing =
+        insErr &&
+        (/question_text/i.test(errStr) ||
+          /null value[^\n]*question_text/i.test(errStr) ||
+          /column[^\n]*\btext\b.*does not exist|PGRST204[^\n]*\btext\b/i.test(errStr));
+
+      if (looksLikeQuestionTextMissing) {
+        insertRows = buildInsertRows("question_text");
+        ({ error: insErr } = await supabaseAdmin.from("questions").insert(insertRows));
+        errStr = errToStr(insErr);
+      }
+
+      const looksLikeTextMissingAfterLegacy =
+        insErr &&
+        (/null value[^\n]*\btext\b/i.test(errStr) ||
+          /column[^\n]*question_text\b.*does not exist|PGRST204[^\n]*question_text/i.test(errStr));
+
+      if (looksLikeTextMissingAfterLegacy) {
+        insertRows = buildInsertRows("both");
+        ({ error: insErr } = await supabaseAdmin.from("questions").insert(insertRows));
+      }
+
       if (insErr) {
         const msg = [insErr.message, insErr.details, insErr.hint].filter(Boolean).join(" — ") || insErr.code || "Insert failed";
         return res.status(400).json({ error: msg });

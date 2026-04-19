@@ -38,6 +38,7 @@ import { AIPanel, AITriggerButton } from '../../components/AIPanel';
 import { generateQuizQuestions } from '../../lib/gemini';
 import { motion } from 'motion/react';
 import { isDirectVideoFileUrl, isLikelyVideoLink, toEmbedVideoUrl } from '../../lib/quizMedia';
+import { questionBodyFromRow } from '../../lib/questionText';
 
 const QUIZ_MEDIA_BUCKET = 'quiz-media';
 
@@ -220,11 +221,11 @@ export default function QuizBuilder() {
             .order('created_at', { ascending: true });
 
           if (questionsError) throw questionsError;
-          setQuestions(questionsData.map(q => ({
+          setQuestions(questionsData.map((q) => ({
             id: q.id,
             quizId: q.quiz_id,
             type: q.type,
-            text: q.text,
+            text: questionBodyFromRow(q as Record<string, unknown>),
             mediaUrl: q.media_url,
             mediaType: q.media_type,
             readingPassage: q.reading_passage,

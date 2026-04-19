@@ -18,6 +18,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import { QuizPageSkeleton } from '../../components/ui/Skeleton';
 import { insertAttemptWithFallback } from '../../lib/quizAttempts';
 import { isDirectVideoFileUrl, isLikelyVideoLink, toEmbedVideoUrl } from '../../lib/quizMedia';
+import { questionBodyFromRow } from '../../lib/questionText';
 
 function QuizMediaDisplay({ url, mediaType }: { url: string; mediaType?: string }) {
   const treatAsVideo = mediaType === 'video' || (mediaType !== 'image' && isLikelyVideoLink(url));
@@ -106,10 +107,10 @@ export default function QuizTaking() {
 
       if (questionsError) throw questionsError;
 
-      let formattedQuestions = questionsData.map(q => ({
+      let formattedQuestions = questionsData.map((q) => ({
         id: q.id,
         quizId: q.quiz_id,
-        text: q.text,
+        text: questionBodyFromRow(q as Record<string, unknown>),
         type: q.type,
         options: q.options,
         correctAnswer: q.correct_answer,
