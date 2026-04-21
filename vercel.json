@@ -1,0 +1,15 @@
+{
+  "routes": [
+    {
+      "src": "/api/(.*)",
+      "dest": "/api/[...route].ts"
+    },
+    {
+      "handle": "filesystem"
+    },
+    {
+      "src": "/(.*)",
+      "dest": "/index.html"
+    }
+  ]
+}

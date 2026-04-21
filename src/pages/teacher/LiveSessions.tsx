@@ -18,7 +18,7 @@ import {
   Video, Plus, Search, Trash2, Pencil, X,
   BookOpen, CalendarDays, Radio, CheckCircle2,
   XCircle, Play, Loader2, Users, Download,
-  UserCheck, ChevronUp, ChevronDown,
+  UserCheck, ChevronUp,
 } from 'lucide-react';
 import { cn } from '../../lib/utils';
 
@@ -565,12 +565,12 @@ function NewSessionModal({
     scheduled_at: new Date(Date.now() + 86400000).toISOString().slice(0, 16),
     duration_minutes: 60,
     course_id: '',
-    class_id: '',
     meeting_url: '',
     max_participants: 100,
   });
   const [saving, setSaving] = useState(false);
   const [classes, setClasses] = useState<ClassOption[]>([]);
+  const [selectedClassIds, setSelectedClassIds] = useState<string[]>([]);
   const [userSearch, setUserSearch] = useState('');
   const [searchResults, setSearchResults] = useState<UserOption[]>([]);
   const [selectedUsers, setSelectedUsers] = useState<UserOption[]>([]);
@@ -621,7 +621,7 @@ function NewSessionModal({
           max_participants: Number(form.max_participants) || 100,
           meeting_url: form.meeting_url || null,
           course_id: form.course_id || null,
-          class_id: form.class_id || null,
+          class_ids: selectedClassIds,
           participant_ids: selectedUsers.map(u => u.id),
         }),
       });
@@ -738,20 +738,35 @@ function NewSessionModal({
             <p className="text-xs font-bold text-slate-400 uppercase tracking-wider">Invitations</p>
             {classes.length > 0 && (
               <div>
-                <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">Invite entire class</label>
-                <div className="relative">
-                  <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 pointer-events-none" />
-                  <select
-                    value={form.class_id}
-                    onChange={e => setForm(p => ({ ...p, class_id: e.target.value }))}
-                    className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 appearance-none pr-9"
-                  >
-                    <option value="">— Select a class —</option>
-                    {classes.map(c => (
-                      <option key={c.id} value={c.id}>{c.name} ({c.student_ids?.length || 0} students)</option>
-                    ))}
-                  </select>
+                <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">Invite by class</label>
+                <div className="space-y-1.5 border border-slate-200 rounded-xl p-3 bg-slate-50 max-h-40 overflow-y-auto">
+                  {classes.map(c => {
+                    const checked = selectedClassIds.includes(c.id);
+                    return (
+                      <label key={c.id} className="flex items-center justify-between gap-3 px-2 py-1.5 rounded-lg hover:bg-white cursor-pointer">
+                        <span className="flex items-center gap-2 min-w-0">
+                          <input
+                            type="checkbox"
+                            checked={checked}
+                            onChange={(e) => {
+                              setSelectedClassIds((prev) =>
+                                e.target.checked ? [...prev, c.id] : prev.filter((id) => id !== c.id),
+                              );
+                            }}
+                            className="rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
+                          />
+                          <span className="text-sm text-slate-700 truncate">{c.name}</span>
+                        </span>
+                        <span className="text-xs text-slate-400 shrink-0">{c.student_ids?.length || 0} students</span>
+                      </label>
+                    );
+                  })}
                 </div>
+                {selectedClassIds.length > 0 && (
+                  <p className="mt-2 text-xs text-indigo-600 font-medium">
+                    {selectedClassIds.length} class{selectedClassIds.length > 1 ? 'es' : ''} selected
+                  </p>
+                )}
               </div>
             )}
             <div>
@@ -803,6 +818,11 @@ function NewSessionModal({
                 </div>
               )}
             </div>
+            {selectedClassIds.length === 0 && selectedUsers.length === 0 && (
+              <p className="text-xs text-amber-600 bg-amber-50 border border-amber-100 rounded-lg px-3 py-2">
+                Tip: Select at least one class or one student to send invitations.
+              </p>
+            )}
           </div>
 
           <div className="flex gap-3 pt-2 border-t border-slate-100">

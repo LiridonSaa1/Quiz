@@ -14,13 +14,15 @@ import { supabase } from '../../supabase';
 import {
   Award, Plus, Search, CheckCircle2, XCircle,
   X, Pencil, Trash2, Eye,
-  Hash, Calendar,
+  Hash, Calendar, Download,
 } from 'lucide-react';
 import { cn } from '../../lib/utils';
-import { authFetch } from '../../lib/apiUrl';
+import { authFetch, apiUrl } from '../../lib/apiUrl';
+import { resolveTeacherIdCandidates } from '../../lib/teacherScope';
 import { format } from 'date-fns';
 
 type CertStatus = 'issued' | 'revoked';
+type CertTemplate = 'classic' | 'modern' | 'minimal';
 
 interface Certificate {
   id: string;
@@ -82,6 +84,7 @@ const generateCertNumber = () => {
 const emptyForm = {
   student_id: '', course_id: '', title: '', issued_at: new Date().toISOString().substring(0, 10),
   certificate_number: generateCertNumber(), grade: '', score: '', status: 'issued' as CertStatus,
+  template: 'classic' as CertTemplate,
 };
 
 export default function TeacherCertificates() {
@@ -98,6 +101,130 @@ export default function TeacherCertificates() {
   const [students, setStudents] = useState<StudentRec[]>([]);
   const [deleteId, setDeleteId] = useState<string | null>(null);
   const [previewCert, setPreviewCert] = useState<Certificate | null>(null);
+  const [previewTemplate, setPreviewTemplate] = useState<CertTemplate>('classic');
+
+  const TEMPLATE_OPTIONS: Array<{ id: CertTemplate; label: string }> = [
+    { id: 'classic', label: 'Classic Gold' },
+    { id: 'modern', label: 'Modern Indigo' },
+    { id: 'minimal', label: 'Minimal Clean' },
+  ];
+
+  const templateClass = (t: CertTemplate) => {
+    if (t === 'modern') return 'from-indigo-100 via-violet-50 to-fuchsia-100';
+    if (t === 'minimal') return 'from-slate-100 via-white to-slate-50';
+    return 'from-amber-100 via-yellow-50 to-orange-100';
+  };
+
+  const renderCertificateHtml = (cert: Certificate, template: CertTemplate) => {
+    const gradeHtml = cert.grade
+      ? `<div style="text-align:center;"><div style="font-size:24px;font-weight:700;color:#059669;">${cert.grade}</div><div style="font-size:12px;color:#64748b;">Grade</div></div>`
+      : '';
+    const scoreHtml = cert.score !== null
+      ? `<div style="text-align:center;"><div style="font-size:24px;font-weight:700;color:#2563eb;">${cert.score}%</div><div style="font-size:12px;color:#64748b;">Score</div></div>`
+      : '';
+
+    const bg =
+      template === 'modern'
+        ? 'linear-gradient(135deg, #e0e7ff 0%, #f5f3ff 45%, #fae8ff 100%)'
+        : template === 'minimal'
+          ? 'linear-gradient(135deg, #f1f5f9 0%, #ffffff 55%, #f8fafc 100%)'
+          : 'linear-gradient(135deg, #fef3c7 0%, #fffbeb 45%, #fde68a 100%)';
+
+    const accent = template === 'modern' ? '#4f46e5' : template === 'minimal' ? '#334155' : '#d97706';
+    const subtitle = template === 'modern' ? 'Excellence Recognition' : template === 'minimal' ? 'Official Completion Record' : 'Certificate of Achievement';
+    const titleLen = String(cert.title || '').trim().length;
+    const titleSize = titleLen > 58 ? 42 : titleLen > 44 ? 50 : 58;
+    const studentLen = String(cert.student?.display_name || '').trim().length;
+    const studentSize = studentLen > 24 ? 44 : 50;
+
+    return `
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Certificate ${cert.certificate_number}</title>
+    <style>
+      @page { size: A4 landscape; margin: 0; }
+      html, body { margin: 0; padding: 0; }
+      * { -webkit-print-color-adjust: exact; print-color-adjust: exact; box-sizing: border-box; }
+      .toolbar {
+        position: fixed;
+        top: 10px;
+        right: 10px;
+        z-index: 10;
+        display: flex;
+        gap: 8px;
+      }
+      .toolbar button {
+        border: 1px solid #cbd5e1;
+        background: #ffffff;
+        color: #0f172a;
+        border-radius: 8px;
+        padding: 8px 12px;
+        font-size: 12px;
+        font-weight: 600;
+        cursor: pointer;
+      }
+      .toolbar button.primary {
+        background: #16a34a;
+        color: #ffffff;
+        border-color: #16a34a;
+      }
+      @media print {
+        .toolbar { display: none !important; }
+      }
+    </style>
+  </head>
+  <body style="padding:18px;background:#e2e8f0;font-family:Inter,Arial,sans-serif;">
+    <div class="toolbar">
+      <button class="primary" onclick="window.print()">Print / Save PDF</button>
+      <button onclick="window.close()">Close</button>
+    </div>
+    <div style="max-width:960px;margin:0 auto;background:${bg};border:2px solid ${accent};border-radius:20px;padding:48px;position:relative;box-shadow:0 24px 60px rgba(15,23,42,0.18);">
+      <div style="position:absolute;inset:10px;border:1px solid ${accent};opacity:0.35;border-radius:16px;pointer-events:none;"></div>
+      <div style="position:absolute;top:18px;left:18px;width:42px;height:42px;border-top:3px solid ${accent};border-left:3px solid ${accent};border-radius:10px;"></div>
+      <div style="position:absolute;top:18px;right:18px;width:42px;height:42px;border-top:3px solid ${accent};border-right:3px solid ${accent};border-radius:10px;"></div>
+      <div style="position:absolute;bottom:18px;left:18px;width:42px;height:42px;border-bottom:3px solid ${accent};border-left:3px solid ${accent};border-radius:10px;"></div>
+      <div style="position:absolute;bottom:18px;right:18px;width:42px;height:42px;border-bottom:3px solid ${accent};border-right:3px solid ${accent};border-radius:10px;"></div>
+      <div style="text-align:center;position:relative;">
+        <div style="display:inline-flex;align-items:center;gap:10px;padding:6px 14px;border-radius:999px;background:rgba(255,255,255,0.75);border:1px solid rgba(15,23,42,0.12);font-size:11px;letter-spacing:0.18em;text-transform:uppercase;color:${accent};font-weight:800;">${subtitle}</div>
+        <div style="margin-top:14px;font-size:12px;color:#475569;letter-spacing:0.08em;text-transform:uppercase;">Presented To</div>
+        <h1 style="margin:10px 0 0 0;font-size:${studentSize}px;line-height:1.08;color:#0f172a;font-family:Georgia,'Times New Roman',serif;">${cert.student?.display_name || 'Student Name'}</h1>
+        <div style="margin-top:14px;font-size:13px;color:#64748b;">for outstanding performance and successful completion of</div>
+        <h2 style="margin:10px auto 0 auto;font-size:${titleSize}px;line-height:1.15;color:${accent};font-family:Georgia,'Times New Roman',serif;max-width:1080px;word-break:break-word;overflow-wrap:anywhere;">${cert.title}</h2>
+        ${cert.course?.title ? `<div style="margin-top:8px;color:#475569;">${cert.course.title}</div>` : ''}
+        <div style="display:flex;gap:32px;justify-content:center;margin-top:24px;">${gradeHtml}${scoreHtml}</div>
+        <div style="display:flex;align-items:end;justify-content:space-between;margin-top:34px;padding-top:18px;border-top:1px solid #cbd5e1;">
+          <div style="text-align:left;font-size:12px;color:#64748b;">
+            Issued on ${format(new Date(cert.issued_at), 'MMMM d, yyyy')}<br/>
+            <span style="font-family:ui-monospace,Menlo,Consolas,monospace;">${cert.certificate_number}</span>
+          </div>
+          <div style="display:flex;flex-direction:column;align-items:center;gap:8px;">
+            <div style="width:84px;height:84px;border-radius:999px;background:radial-gradient(circle at 30% 30%, ${template === 'modern' ? '#818cf8,#4f46e5' : template === 'minimal' ? '#94a3b8,#334155' : '#f59e0b,#b45309'});box-shadow:inset 0 0 0 3px rgba(255,255,255,0.55),0 10px 24px rgba(15,23,42,0.22);display:flex;align-items:center;justify-content:center;color:#fff;font-size:30px;font-weight:800;">★</div>
+            <div style="font-size:11px;color:#64748b;letter-spacing:0.08em;text-transform:uppercase;">Verified</div>
+          </div>
+          <div style="text-align:right;">
+            <div style="width:180px;border-top:2px solid #94a3b8;margin-left:auto;"></div>
+            <div style="font-size:11px;color:#64748b;margin-top:6px;">Authorized Signature</div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <script>window.focus();</script>
+  </body>
+</html>`;
+  };
+
+  const downloadCertificate = (cert: Certificate, template: CertTemplate) => {
+    const win = window.open('', '_blank', 'width=1200,height=900');
+    if (!win) {
+      toast.error('Pop-up blocked. Please allow pop-ups for print preview.');
+      return;
+    }
+    win.document.open();
+    win.document.write(renderCertificateHtml(cert, template));
+    win.document.close();
+  };
 
   const fetchData = async () => {
     setLoading(true);
@@ -110,10 +237,11 @@ export default function TeacherCertificates() {
         return;
       }
       const tid = session.user.id;
+      const teacherIds = await resolveTeacherIdCandidates(tid);
 
       const [{ data: rawCerts, error }, { data: c }, teacherStudentsPayload] = await Promise.all([
         supabase.from('certificates').select('*').order('issued_at', { ascending: false }),
-        supabase.from('courses').select('id,title').eq('teacher_id', tid),
+        supabase.from('courses').select('id,title,status').in('teacher_id', teacherIds),
         authFetch(`/api/teacher/students?userId=${encodeURIComponent(tid)}`).then(async (r) => {
           const json = await r.json().catch(() => null);
           return r.ok && json?.success && Array.isArray(json.students) ? json.students : null;
@@ -137,7 +265,21 @@ export default function TeacherCertificates() {
         s = (directStudents || []) as StudentRec[];
       }
 
-      const courseList = c || [];
+      let courseList = (c || []) as Array<{ id: string; title: string; status?: string }>;
+      if (courseList.length === 0) {
+        const coursesRes = await fetch(apiUrl(`/api/teacher/courses?userId=${encodeURIComponent(tid)}`));
+        if (coursesRes.ok) {
+          const json = await coursesRes.json().catch(() => null);
+          if (json?.success && Array.isArray(json.courses)) {
+            courseList = json.courses.map((row: any) => ({
+              id: String(row.id),
+              title: String(row.title || row.name || 'Untitled'),
+              status: row.status ? String(row.status) : undefined,
+            }));
+          }
+        }
+      }
+      const courseOptions = courseList.filter((course) => course.status !== 'archived');
       const courseIdSet = new Set(courseList.map((course: any) => course.id));
       const studentIdSet = new Set(s.map((p) => p.id));
 
@@ -159,7 +301,7 @@ export default function TeacherCertificates() {
       }));
 
       setCerts(enriched);
-      setCourses(courseList);
+      setCourses(courseOptions.map((course) => ({ id: course.id, title: course.title })));
       setStudents(s || []);
     } catch {
       toast.error('Failed to load certificates');
@@ -207,6 +349,7 @@ export default function TeacherCertificates() {
       grade: c.grade || '',
       score: c.score !== null ? String(c.score) : '',
       status: c.status,
+      template: 'classic',
     });
     setShowModal(true);
   };
@@ -388,6 +531,9 @@ export default function TeacherCertificates() {
                       <button type="button" onClick={() => setPreviewCert(cert)} className="p-2 rounded-lg text-slate-400 hover:bg-amber-50 hover:text-amber-600 transition-colors" title="Preview">
                         <Eye className="w-4 h-4" />
                       </button>
+                      <button type="button" onClick={() => downloadCertificate(cert, 'classic')} className="p-2 rounded-lg text-slate-400 hover:bg-emerald-50 hover:text-emerald-600 transition-colors" title="Download / Print">
+                        <Download className="w-4 h-4" />
+                      </button>
                       <button type="button" onClick={() => openEdit(cert)} className="p-2 rounded-lg text-slate-400 hover:bg-indigo-50 hover:text-indigo-600 transition-colors">
                         <Pencil className="w-4 h-4" />
                       </button>
@@ -441,6 +587,16 @@ export default function TeacherCertificates() {
                   {courses.map(c => <option key={c.id} value={c.id}>{c.title}</option>)}
                 </select>
               </div>
+              <div>
+                <label className="text-xs font-semibold text-slate-600 uppercase tracking-wide">Design Template</label>
+                <select
+                  value={form.template}
+                  onChange={e => setForm(f => ({ ...f, template: e.target.value as CertTemplate }))}
+                  className="mt-1 w-full px-3 py-2.5 text-sm border border-slate-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-amber-500/30"
+                >
+                  {TEMPLATE_OPTIONS.map(t => <option key={t.id} value={t.id}>{t.label}</option>)}
+                </select>
+              </div>
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="text-xs font-semibold text-slate-600 uppercase tracking-wide">Grade</label>
@@ -487,6 +643,27 @@ export default function TeacherCertificates() {
             </div>
             <div className="flex justify-end gap-3 p-5 border-t border-slate-100">
               <button onClick={() => setShowModal(false)} className="px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-100 rounded-lg transition-colors">Cancel</button>
+              <button type="button" onClick={() => {
+                const cert: Certificate = {
+                  id: 'preview',
+                  student_id: form.student_id,
+                  course_id: form.course_id || null,
+                  title: form.title || 'Certificate of Completion',
+                  issued_at: form.issued_at || new Date().toISOString().substring(0, 10),
+                  certificate_number: form.certificate_number || generateCertNumber(),
+                  grade: form.grade || null,
+                  score: form.score !== '' ? Number(form.score) : null,
+                  status: form.status,
+                  created_at: new Date().toISOString(),
+                  student: students.find(s => s.id === form.student_id) || null,
+                  course: form.course_id ? ({ title: (courses.find(c => c.id === form.course_id)?.title || '') }) : null,
+                };
+                downloadCertificate(cert, form.template);
+              }}
+                className="px-4 py-2 text-sm font-medium text-emerald-700 bg-emerald-50 hover:bg-emerald-100 rounded-lg transition-colors"
+              >
+                Download Sample
+              </button>
               <button onClick={handleSave} disabled={saving}
                 className="px-4 py-2 text-sm font-semibold bg-amber-500 hover:bg-amber-600 text-white rounded-lg transition-colors disabled:opacity-50">
                 {saving ? 'Saving...' : editId ? 'Update' : 'Issue'}
@@ -503,7 +680,7 @@ export default function TeacherCertificates() {
               <span className="text-sm font-semibold text-slate-600">Certificate Preview</span>
               <button onClick={() => setPreviewCert(null)} className="p-2 hover:bg-slate-100 rounded-lg"><X className="w-4 h-4" /></button>
             </div>
-            <div className="p-8 bg-gradient-to-br from-amber-50 to-yellow-50 relative overflow-hidden">
+            <div className={cn("p-8 bg-gradient-to-br relative overflow-hidden", templateClass(previewTemplate))}>
               <div className="absolute inset-3 border-2 border-amber-200 rounded-xl pointer-events-none" />
               <div className="absolute inset-4 border border-amber-100 rounded-xl pointer-events-none" />
               <div className="absolute top-6 left-6 w-8 h-8 border-t-2 border-l-2 border-amber-400 rounded-tl-lg" />
@@ -512,14 +689,14 @@ export default function TeacherCertificates() {
               <div className="absolute bottom-6 right-6 w-8 h-8 border-b-2 border-r-2 border-amber-400 rounded-br-lg" />
 
               <div className="relative text-center py-4 px-6">
-                <div className="w-16 h-16 bg-gradient-to-br from-amber-400 to-orange-500 rounded-full flex items-center justify-center mx-auto mb-4 shadow-lg shadow-amber-200">
+                <div className="w-16 h-16 bg-gradient-to-br from-amber-400 to-orange-500 rounded-full flex items-center justify-center mx-auto mb-4 shadow-lg shadow-amber-200 ring-4 ring-white/70">
                   <Award className="w-8 h-8 text-white" />
                 </div>
-                <p className="text-xs font-bold text-amber-600 uppercase tracking-[0.3em] mb-1">Certificate of Achievement</p>
-                <p className="text-xs text-slate-400 mb-4">This is to certify that</p>
-                <h2 className="text-3xl font-bold text-slate-800 mb-1">{previewCert.student?.display_name || 'Student Name'}</h2>
-                <p className="text-xs text-slate-400 mb-4">has successfully completed</p>
-                <h3 className="text-xl font-semibold text-amber-700 mb-2">{previewCert.title}</h3>
+                <p className="text-[11px] font-bold text-amber-700 uppercase tracking-[0.28em] mb-1">Certificate of Excellence</p>
+                <p className="text-xs text-slate-500 mb-3">Presented to</p>
+                <h2 className="text-4xl font-bold text-slate-800 mb-2 tracking-tight" style={{ fontFamily: 'Georgia, "Times New Roman", serif' }}>{previewCert.student?.display_name || 'Student Name'}</h2>
+                <p className="text-xs text-slate-500 mb-3">for outstanding completion of</p>
+                <h3 className="text-2xl font-semibold text-amber-700 mb-2" style={{ fontFamily: 'Georgia, "Times New Roman", serif' }}>{previewCert.title}</h3>
                 {previewCert.course?.title && (
                   <p className="text-sm text-slate-500 mb-4">{previewCert.course.title}</p>
                 )}
@@ -545,8 +722,20 @@ export default function TeacherCertificates() {
                 </div>
               </div>
             </div>
-            <div className="flex justify-end p-4 border-t border-slate-100">
+            <div className="flex items-center justify-between p-4 border-t border-slate-100">
+              <select
+                value={previewTemplate}
+                onChange={(e) => setPreviewTemplate(e.target.value as CertTemplate)}
+                className="px-3 py-2 text-sm border border-slate-200 rounded-lg bg-white"
+              >
+                {TEMPLATE_OPTIONS.map(t => <option key={t.id} value={t.id}>{t.label}</option>)}
+              </select>
+              <div className="flex gap-2">
+                <button onClick={() => downloadCertificate(previewCert, previewTemplate)} className="px-4 py-2 text-sm font-medium bg-emerald-500 hover:bg-emerald-600 text-white rounded-lg inline-flex items-center gap-1.5">
+                  <Download className="w-4 h-4" /> Download
+                </button>
               <button onClick={() => setPreviewCert(null)} className="px-4 py-2 text-sm font-medium bg-amber-500 hover:bg-amber-600 text-white rounded-lg">Close</button>
+              </div>
             </div>
           </div>
         </div>

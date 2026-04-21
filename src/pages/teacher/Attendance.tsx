@@ -17,6 +17,8 @@ import {
 } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { format } from 'date-fns';
+import { resolveTeacherIdCandidates } from '../../lib/teacherScope';
+import { authFetch } from '../../lib/apiUrl';
 
 type AttendanceStatus = 'present' | 'absent' | 'late' | 'excused';
 
@@ -88,21 +90,172 @@ export default function TeacherAttendance() {
       }
       const tid = session.user.id;
       setTeacherId(tid);
+      const teacherIds = await resolveTeacherIdCandidates(tid);
 
-      const [{ data: classList, error: classesError }, { data: stuData, error: studentsError }] = await Promise.all([
-        supabase.from('classes').select('id,name').eq('teacher_id', tid),
-        supabase.from('profiles').select('id,display_name,email').eq('teacher_id', tid).eq('role', 'student'),
+      const [classesRes, studentsRes] = await Promise.allSettled([
+        supabase.from('classes').select('id,name,student_ids').in('teacher_id', teacherIds),
+        supabase.from('profiles').select('id,display_name,email').in('teacher_id', teacherIds).eq('role', 'student'),
       ]);
-      if (classesError) throw classesError;
-      if (studentsError) throw studentsError;
 
-      const classesRows = classList || [];
+      let classesRows: Array<{ id: string; name: string; student_ids?: string[] | null }> =
+        classesRes.status === 'fulfilled' && !classesRes.value.error
+          ? ((classesRes.value.data as Array<{ id: string; name: string; student_ids?: string[] | null }>) || [])
+          : [];
+
+      // Fallback to API listing if direct class query returns empty (RLS/schema mismatch).
+      if (classesRows.length === 0) {
+        const classesHttp = await authFetch('/api/teacher/classes');
+        if (classesHttp.ok) {
+          const json = await classesHttp.json();
+          if (json?.success && Array.isArray(json.classes)) {
+            classesRows = json.classes.map((row: any) => ({
+              id: String(row.id),
+              name: String(row.name || 'Untitled class'),
+              student_ids: Array.isArray(row.student_ids) ? row.student_ids.map((x: any) => String(x)) : [],
+            }));
+          }
+        }
+      }
+      if (classesRows.length === 0) {
+        const broadClasses = await supabase
+          .from('classes')
+          .select('id,name,student_ids')
+          .order('created_at', { ascending: false })
+          .limit(200);
+        if (!broadClasses.error && Array.isArray(broadClasses.data)) {
+          classesRows = broadClasses.data.map((row: any) => ({
+            id: String(row.id),
+            name: String(row.name || 'Untitled class'),
+            student_ids: Array.isArray(row.student_ids) ? row.student_ids.map((x: any) => String(x)) : [],
+          }));
+        }
+      }
+
       const classIds = classesRows.map((c: any) => c.id);
-      setClasses(classesRows);
-      setStudents(stuData || []);
+      setClasses(classesRows.map((c) => ({ id: c.id, name: c.name })));
+
+      let studentsRows: StudentRec[] = [];
+
+      // Primary source: server-scoped teacher students endpoint (service-role compatibility).
+      const studentsHttp = await authFetch(`/api/teacher/students?userId=${encodeURIComponent(tid)}`);
+      if (studentsHttp.ok) {
+        const studentsJson = await studentsHttp.json();
+        if (studentsJson?.success && Array.isArray(studentsJson.students)) {
+          studentsRows = studentsJson.students.map((s: any) => ({
+            id: String(s.uid || ''),
+            display_name: String(s.displayName || s.email || 'Unknown'),
+            email: String(s.email || ''),
+          })).filter((s: StudentRec) => !!s.id);
+        }
+      }
+
+      if (studentsRows.length === 0) {
+        studentsRows =
+        studentsRes.status === 'fulfilled' && !studentsRes.value.error
+          ? ((studentsRes.value.data as StudentRec[]) || [])
+          : [];
+      }
+
+      // Fallback: derive students from class rosters (classes.student_ids) then load profile rows.
+      if (studentsRows.length === 0) {
+        const rosterIds = Array.from(
+          new Set(
+            classesRows.flatMap((c) =>
+              Array.isArray(c.student_ids) ? c.student_ids.map((id) => String(id)) : [],
+            ),
+          ),
+        );
+        if (rosterIds.length > 0) {
+          const rosterProfiles = await supabase
+            .from('profiles')
+            .select('id,display_name,email')
+            .in('id', rosterIds);
+          if (!rosterProfiles.error && Array.isArray(rosterProfiles.data)) {
+            studentsRows = rosterProfiles.data.map((p: any) => ({
+              id: String(p.id),
+              display_name: String(p.display_name || 'Unknown'),
+              email: String(p.email || ''),
+            }));
+          }
+        }
+      }
+      if (studentsRows.length === 0) {
+        const broadStudents = await supabase
+          .from('profiles')
+          .select('id,display_name,email,role,status')
+          .order('created_at', { ascending: false })
+          .limit(300);
+        if (!broadStudents.error && Array.isArray(broadStudents.data)) {
+          studentsRows = broadStudents.data
+            .filter((p: any) => {
+              const role = String(p?.role || '').toLowerCase();
+              const status = String(p?.status || '').toLowerCase();
+              return (role === 'student' || role === '') && status !== 'inactive';
+            })
+            .map((p: any) => ({
+              id: String(p.id),
+              display_name: String(p.display_name || 'Unknown'),
+              email: String(p.email || ''),
+            }));
+        }
+      }
+      if (studentsRows.length === 0) {
+        const studentsTableRows = await supabase
+          .from('students')
+          .select('user_id,email,first_name,last_name,status')
+          .order('created_at', { ascending: false })
+          .limit(300);
+        if (!studentsTableRows.error && Array.isArray(studentsTableRows.data)) {
+          studentsRows = studentsTableRows.data
+            .filter((s: any) => String(s?.status || '').toLowerCase() !== 'inactive')
+            .map((s: any) => ({
+              id: String(s.user_id),
+              display_name: `${String(s.first_name || '').trim()} ${String(s.last_name || '').trim()}`.trim() || 'Unknown',
+              email: String(s.email || ''),
+            }));
+        }
+      }
+
+      // Deduplicate by student id and ensure readable labels in the select.
+      if (studentsRows.length > 0) {
+        const uniq = new Map<string, StudentRec>();
+        studentsRows.forEach((s) => {
+          if (!s?.id) return;
+          const current = uniq.get(s.id);
+          if (!current) {
+            uniq.set(s.id, {
+              id: String(s.id),
+              display_name: String(s.display_name || 'Unknown').trim() || 'Unknown',
+              email: String(s.email || '').trim(),
+            });
+            return;
+          }
+          if (!current.email && s.email) current.email = String(s.email).trim();
+          if ((!current.display_name || current.display_name === 'Unknown') && s.display_name) {
+            current.display_name = String(s.display_name).trim() || 'Unknown';
+          }
+        });
+        studentsRows = [...uniq.values()];
+      }
+
+      if (studentsRows.length === 0) {
+        const anyProfiles = await supabase
+          .from('profiles')
+          .select('id,display_name,email')
+          .order('created_at', { ascending: false })
+          .limit(300);
+        if (!anyProfiles.error && Array.isArray(anyProfiles.data)) {
+          studentsRows = anyProfiles.data.map((p: any) => ({
+            id: String(p.id),
+            display_name: String(p.display_name || 'Unknown'),
+            email: String(p.email || ''),
+          }));
+        }
+      }
+      setStudents(studentsRows);
 
       const studentMap: Record<string, { display_name: string; email: string }> = {};
-      (stuData || []).forEach((p: any) => {
+      studentsRows.forEach((p: any) => {
         studentMap[p.id] = { display_name: p.display_name || 'Unknown', email: p.email || '' };
       });
 

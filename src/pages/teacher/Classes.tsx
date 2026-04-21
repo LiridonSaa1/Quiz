@@ -18,8 +18,8 @@ import {
 import { cn } from '../../lib/utils';
 import StyledSelect from '../../components/ui/StyledSelect';
 import { resolveTeacherIdCandidates } from '../../lib/teacherScope';
-import { apiUrl } from '../../lib/apiUrl';
-import { normalizeClassRow, saveClassRow, selectClassesForTeacher } from '../../lib/classesTable';
+import { apiUrl, authFetch, readApiError } from '../../lib/apiUrl';
+import { normalizeClassRow } from '../../lib/classesTable';
 
 type ClassStatus = 'active' | 'upcoming' | 'completed' | 'archived';
 
@@ -104,17 +104,26 @@ export default function TeacherClasses() {
     try {
       const scopedIds = await resolveTeacherIdCandidates(tid);
 
+      const classesHttp = await authFetch('/api/teacher/classes');
+      if (!classesHttp.ok) throw new Error(await readApiError(classesHttp));
+      const classesJson = await classesHttp.json();
+      const classesRows = Array.isArray(classesJson?.classes) ? classesJson.classes : [];
+
       let allCourses: Course[] = [];
-      const backendRes = await fetch(apiUrl(`/api/teacher/courses?userId=${encodeURIComponent(tid)}`));
-      if (backendRes.ok) {
-        const backendJson = await backendRes.json();
-        if (backendJson?.success && Array.isArray(backendJson.courses)) {
-          allCourses = backendJson.courses.map((c: any) => ({
-            id: c.id,
-            title: (c.title || c.name || 'Untitled').trim() || 'Untitled',
-            status: c.status,
-          }));
+      try {
+        const backendRes = await fetch(apiUrl(`/api/teacher/courses?userId=${encodeURIComponent(tid)}`));
+        if (backendRes.ok) {
+          const backendJson = await backendRes.json();
+          if (backendJson?.success && Array.isArray(backendJson.courses)) {
+            allCourses = backendJson.courses.map((c: any) => ({
+              id: c.id,
+              title: (c.title || c.name || 'Untitled').trim() || 'Untitled',
+              status: c.status,
+            }));
+          }
         }
+      } catch {
+        // Keep classes visible even if course title enrichment fails.
       }
       if (allCourses.length === 0) {
         const { data, error } = await supabase
@@ -122,24 +131,22 @@ export default function TeacherClasses() {
           .select('id, title, status')
           .in('teacher_id', scopedIds)
           .order('created_at', { ascending: false });
-        if (error && error.code !== 'PGRST116') throw error;
-        allCourses = (data || []).map((c: any) => ({
-          id: c.id,
-          title: (c.title || 'Untitled').trim() || 'Untitled',
-          status: c.status,
-        }));
+        if (!error || error.code === 'PGRST116') {
+          allCourses = (data || []).map((c: any) => ({
+            id: c.id,
+            title: (c.title || 'Untitled').trim() || 'Untitled',
+            status: c.status,
+          }));
+        }
       }
 
       // Dropdown: draft + published (same as other teacher flows); cards still resolve archived titles below.
       const forSelect = allCourses.filter(c => c.status !== 'archived');
 
-      const classesRes = await selectClassesForTeacher(supabase, scopedIds);
-      if (classesRes.error) throw classesRes.error;
-
       const courseMap: Record<string, { title: string }> = {};
       allCourses.forEach(c => { courseMap[c.id] = { title: c.title }; });
 
-      const enriched = (classesRes.data || []).map((cls: Record<string, unknown>) => {
+      const enriched = classesRows.map((cls: Record<string, unknown>) => {
         const row = normalizeClassRow(cls) as ClassRecord;
         return {
           ...row,
@@ -187,22 +194,24 @@ export default function TeacherClasses() {
         name: form.name.trim(),
         description: form.description.trim() || null,
         course_id: form.course_id || null,
-        teacher_id: teacherId,
-        status: form.status,
+        status: form.status || 'upcoming',
         start_date: form.start_date || null,
         end_date: form.end_date || null,
         capacity: Number(form.capacity),
       };
-      if (editing) {
-        const { error } = await saveClassRow(supabase, { mode: 'update', id: editing.id, payload });
-        if (error) throw error;
-        toast.success('Class updated');
-      } else {
-        payload.student_ids = [];
-        const { error } = await saveClassRow(supabase, { mode: 'insert', payload });
-        if (error) throw error;
-        toast.success('Class created');
-      }
+      if (!editing) payload.student_ids = [];
+
+      const res = await authFetch('/api/teacher/classes/save', {
+        method: 'POST',
+        body: JSON.stringify({
+          mode: editing ? 'update' : 'insert',
+          id: editing?.id || null,
+          payload,
+        }),
+      });
+      if (!res.ok) throw new Error(await readApiError(res));
+      toast.success(editing ? 'Class updated' : 'Class created');
+
       setShowModal(false);
       fetchData(teacherId);
     } catch (err: any) {

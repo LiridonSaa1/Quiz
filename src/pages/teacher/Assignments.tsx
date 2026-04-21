@@ -17,6 +17,8 @@ import {
 } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { format, isPast, isToday } from 'date-fns';
+import { resolveTeacherIdCandidates } from '../../lib/teacherScope';
+import { apiUrl, authFetch } from '../../lib/apiUrl';
 
 type AssignmentStatus = 'draft' | 'published' | 'closed';
 type AssignmentType = 'homework' | 'project' | 'essay' | 'quiz' | 'lab' | 'other';
@@ -104,31 +106,84 @@ export default function TeacherAssignments() {
     if (!teacherId) return;
     setLoading(true);
     try {
-      const [{ data: rawData, error }, { data: c }, { data: cl }] = await Promise.all([
+      const teacherIds = await resolveTeacherIdCandidates(teacherId);
+      const [assignmentsRes, coursesRes, classesRes] = await Promise.allSettled([
         supabase
           .from('assignments')
           .select('*')
-          .eq('teacher_id', teacherId)
+          .in('teacher_id', teacherIds)
           .order('created_at', { ascending: false }),
-        supabase.from('courses').select('id,title').eq('teacher_id', teacherId),
-        supabase.from('classes').select('id,name').eq('teacher_id', teacherId),
+        supabase.from('courses').select('id,title').in('teacher_id', teacherIds),
+        supabase.from('classes').select('id,name').in('teacher_id', teacherIds),
       ]);
-      if (error) throw error;
+
+      const rawData =
+        assignmentsRes.status === 'fulfilled' && !assignmentsRes.value.error
+          ? (assignmentsRes.value.data || [])
+          : [];
+
+      let coursesData: Course[] =
+        coursesRes.status === 'fulfilled' && !coursesRes.value.error
+          ? ((coursesRes.value.data || []) as Course[])
+          : [];
+      let classesData: ClassRec[] =
+        classesRes.status === 'fulfilled' && !classesRes.value.error
+          ? ((classesRes.value.data || []) as ClassRec[])
+          : [];
+
+      // Fallback to server endpoints when direct client queries return no rows (RLS/schema drift).
+      if (coursesData.length === 0) {
+        const coursesRes = await fetch(apiUrl(`/api/teacher/courses?userId=${encodeURIComponent(teacherId)}`));
+        if (coursesRes.ok) {
+          const json = await coursesRes.json();
+          if (json?.success && Array.isArray(json.courses)) {
+            coursesData = json.courses.map((row: any) => ({
+              id: String(row.id),
+              title: String(row.title || row.name || 'Untitled'),
+            }));
+          }
+        }
+      }
+      if (classesData.length === 0) {
+        const classesRes = await authFetch('/api/teacher/classes');
+        if (classesRes.ok) {
+          const json = await classesRes.json();
+          if (json?.success && Array.isArray(json.classes)) {
+            classesData = json.classes.map((row: any) => ({
+              id: String(row.id),
+              name: String(row.name || 'Untitled class'),
+            }));
+          }
+        }
+      }
+      if (classesData.length === 0) {
+        const broadClasses = await supabase
+          .from('classes')
+          .select('id,name')
+          .order('created_at', { ascending: false })
+          .limit(200);
+        if (!broadClasses.error && Array.isArray(broadClasses.data)) {
+          classesData = broadClasses.data.map((row: any) => ({
+            id: String(row.id),
+            name: String(row.name || 'Untitled class'),
+          }));
+        }
+      }
 
       const courseMap: Record<string, string> = {};
-      (c || []).forEach((course: any) => { courseMap[course.id] = course.title; });
+      coursesData.forEach((course: any) => { courseMap[course.id] = course.title; });
       const classMap: Record<string, string> = {};
-      (cl || []).forEach((cls: any) => { classMap[cls.id] = cls.name; });
+      classesData.forEach((cls: any) => { classMap[cls.id] = cls.name; });
 
       setAssignments((rawData || []).map((a: any) => ({
         ...a,
         course: a.course_id ? { title: courseMap[a.course_id] || 'Unknown course' } : null,
         class_name: a.class_id ? (classMap[a.class_id] || null) : null,
       })));
-      setCourses(c || []);
-      setClasses(cl || []);
+      setCourses(coursesData);
+      setClasses(classesData);
     } catch {
-      toast.error('Failed to load assignments');
+      toast.error('Failed to load assignment data');
     } finally {
       setLoading(false);
     }

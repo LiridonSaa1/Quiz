@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
 import { supabase } from '../supabase';
+import { apiUrl } from '../lib/apiUrl';
 import { isProfileAccessAllowed } from '../lib/profileAccess';
 import {
   Mail, Lock, Shield, GraduationCap,
@@ -80,7 +81,7 @@ export default function Login() {
   const checkConnection = async () => {
     setChecking(true);
     try {
-      const res  = await fetch('/api/health');
+      const res  = await fetch(apiUrl('/api/health'));
       const data = await res.json();
       data.supabase?.status === 'connected'
         ? toast.success('Database connected!')
@@ -92,7 +93,7 @@ export default function Login() {
   const seedAdmin = async () => {
     setSeeding(true);
     try {
-      const text = await fetch('/api/admin/seed').then(r => r.text());
+      const text = await fetch(apiUrl('/api/admin/seed')).then(r => r.text());
       text.includes('Success') ? toast.success('Admin seeded!') : toast.error('Seed failed.');
     } catch { toast.error('Could not reach backend.'); }
     finally   { setSeeding(false); }

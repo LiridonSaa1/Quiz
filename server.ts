@@ -1,7 +1,6 @@
 import "dotenv/config";
-import { isMissingCoursesStudentIdsError } from "./src/lib/schemaErrors.ts";
+import { isMissingCoursesStudentIdsError } from "./src/lib/schemaErrors.js";
 import express, { Request, Response } from "express";
-import { createServer as createViteServer } from "vite";
 import path from "path";
 import { fileURLToPath } from "url";
 import { createClient } from '@supabase/supabase-js';
@@ -97,14 +96,13 @@ async function nextInvoiceNumberForPaymentDate(paymentDateYmd: string): Promise<
   return `${prefix}${String(maxSeq + 1).padStart(4, "0")}`;
 }
 
-async function startServer() {
+type CreateAppOptions = {
+  includeFrontend?: boolean;
+};
+
+export async function createApp(options: CreateAppOptions = {}) {
+  const includeFrontend = options.includeFrontend ?? true;
   const app = express();
-  const parsedPort = Number(process.env.PORT);
-  const preferredPort = Number.isInteger(parsedPort) && parsedPort > 0 ? parsedPort : 5000;
-  const preferredHost = process.env.HOST || "0.0.0.0";
-  const hostCandidates = preferredHost === "0.0.0.0" ? [preferredHost] : [preferredHost, "0.0.0.0"];
-  const maxPortAttempts = 10;
-  const recoverableListenErrors = new Set(["EACCES", "EADDRINUSE"]);
 
   app.use(express.json());
 
@@ -2745,12 +2743,16 @@ async function startServer() {
       if (!caller) return;
       if (caller.role !== 'teacher' && caller.role !== 'admin') return res.status(403).json({ error: 'Forbidden: teacher role required' });
 
-      const { participant_ids, class_id, ...sessionData } = req.body;
+      const { participant_ids, class_id, class_ids, ...sessionData } = req.body;
+      const classIds: string[] = Array.isArray(class_ids)
+        ? class_ids.map((x: unknown) => String(x || '').trim()).filter(Boolean)
+        : class_id
+          ? [String(class_id).trim()]
+          : [];
       // Force host_id to the authenticated caller
-      const payload = {
+      const payload: Record<string, unknown> = {
         ...sessionData,
         host_id: caller.userId,
-        class_id: class_id || null,
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
       };
@@ -2760,8 +2762,12 @@ async function startServer() {
 
       const inviteIds: string[] = Array.isArray(participant_ids) ? [...participant_ids] : [];
 
-      if (class_id) {
-        const { data: classRow } = await supabaseAdmin.from('classes').select('student_ids').eq('id', class_id).single();
+      for (const cid of classIds) {
+        const { data: classRow } = await supabaseAdmin
+          .from('classes')
+          .select('student_ids')
+          .eq('id', cid)
+          .maybeSingle();
         ((classRow?.student_ids as string[]) || []).forEach((uid: string) => {
           if (!inviteIds.includes(uid)) inviteIds.push(uid);
         });
@@ -2872,8 +2878,15 @@ async function startServer() {
     if (!caller) { res.status(401).json({ error: 'Unauthorized' }); return null; }
     if (caller.role === 'admin') return caller.userId;
     // Check if host
-    const { data: sessionRow } = await supabaseAdmin
-      .from('live_sessions').select('host_id,course_id,class_id,status').eq('id', sessionId).single();
+    const sessionRes = await supabaseAdmin
+      .from('live_sessions')
+      .select('host_id,course_id,status')
+      .eq('id', sessionId)
+      .single();
+    if (sessionRes.error) {
+      res.status(404).json({ error: 'Session not found' }); return null;
+    }
+    const sessionRow = (sessionRes.data || {}) as { host_id?: string; course_id?: string; status?: string };
     if (!sessionRow) { res.status(404).json({ error: 'Session not found' }); return null; }
     if (sessionRow.host_id === caller.userId) return caller.userId;
     // Check if invited participant AND not removed by host
@@ -2891,13 +2904,6 @@ async function startServer() {
         const { data: course } = await supabaseAdmin
           .from('courses').select('student_ids').eq('id', sessionRow.course_id).single();
         if (course && Array.isArray(course.student_ids) && course.student_ids.includes(caller.userId)) {
-          return caller.userId;
-        }
-      }
-      if (sessionRow.class_id) {
-        const { data: cls } = await supabaseAdmin
-          .from('classes').select('student_ids').eq('id', sessionRow.class_id).single();
-        if (cls && Array.isArray(cls.student_ids) && cls.student_ids.includes(caller.userId)) {
           return caller.userId;
         }
       }
@@ -3234,13 +3240,130 @@ async function startServer() {
       if (!caller) return;
       if (caller.role !== 'teacher' && caller.role !== 'admin') return res.status(403).json({ error: 'Forbidden' });
       const { teacher_id } = req.query;
-      const effectiveTeacherId = caller.role === 'admin' ? (teacher_id as string | undefined) : caller.userId;
-      let query = supabaseAdmin.from('classes').select('id, name, student_ids, course_id');
-      if (effectiveTeacherId) query = query.eq('teacher_id', effectiveTeacherId);
+      const baseTeacherId =
+        caller.role === 'admin'
+          ? (typeof teacher_id === 'string' ? teacher_id : '')
+          : caller.userId;
+      const teacherIdCandidates = await getTeacherIdCandidates(baseTeacherId || caller.userId);
+
+      let query = supabaseAdmin
+        .from('classes')
+        .select('*')
+        .order('created_at', { ascending: false });
+      if (teacherIdCandidates.length > 0) query = query.in('teacher_id', teacherIdCandidates);
       const { data, error } = await query;
       if (error) throw error;
       res.json({ success: true, classes: data || [] });
     } catch (e: unknown) { res.status(500).json({ error: (e as Error).message }); }
+  });
+
+  // Create/update class (teacher/admin) with teacher_id FK compatibility.
+  app.post('/api/teacher/classes/save', async (req, res) => {
+    try {
+      const caller = await assertAuthenticated(req, res);
+      if (!caller) return;
+      if (caller.role !== 'teacher' && caller.role !== 'admin') {
+        return res.status(403).json({ error: 'Forbidden: teacher or admin role required' });
+      }
+
+      const body = (req.body || {}) as Record<string, unknown>;
+      const mode = body.mode === 'update' ? 'update' : 'insert';
+      const classId = typeof body.id === 'string' ? body.id.trim() : '';
+      const payload = (body.payload || {}) as Record<string, unknown>;
+
+      const name = typeof payload.name === 'string' ? payload.name.trim() : '';
+      if (!name) return res.status(400).json({ error: 'Class name is required' });
+
+      // Resolve best teacher_id candidates for live schema:
+      // 1) teachers.id rows linked to caller.userId, then 2) caller.userId/profile id candidates.
+      const teacherIdCandidates: string[] = [];
+      const pushCandidate = (v: unknown) => {
+        const s = String(v || '').trim();
+        if (!s) return;
+        if (!teacherIdCandidates.includes(s)) teacherIdCandidates.push(s);
+      };
+
+      const { data: teacherRows, error: teacherRowsErr } = await supabaseAdmin
+        .from('teachers')
+        .select('id, user_id')
+        .eq('user_id', caller.userId)
+        .limit(20);
+      if (teacherRowsErr) throw teacherRowsErr;
+      (teacherRows || []).forEach((t: any) => {
+        pushCandidate(t?.id);
+        pushCandidate(t?.user_id);
+      });
+
+      if (!teacherIdCandidates.length) {
+        // Attempt to bootstrap a teachers row if table requires teacher IDs.
+        const { data: profileRow, error: profileErr } = await supabaseAdmin
+          .from('profiles')
+          .select('id, email')
+          .eq('id', caller.userId)
+          .maybeSingle();
+        if (profileErr) throw profileErr;
+        if (profileRow?.id && profileRow?.email) {
+          const ins = await supabaseAdmin
+            .from('teachers')
+            .insert({ user_id: profileRow.id, email: profileRow.email })
+            .select('id, user_id')
+            .single();
+          if (!ins.error && ins.data) {
+            pushCandidate((ins.data as any).id);
+            pushCandidate((ins.data as any).user_id);
+          }
+        }
+      }
+
+      // Always include auth user id / related teacher candidates as fallback.
+      const fallbackCandidates = await getTeacherIdCandidates(caller.userId);
+      fallbackCandidates.forEach((id) => pushCandidate(id));
+      if (!teacherIdCandidates.length) {
+        return res.status(400).json({ error: 'No valid teacher id candidates were found.' });
+      }
+
+      const baseRow: Record<string, unknown> = {
+        name,
+        description: typeof payload.description === 'string' ? payload.description.trim() || null : (payload.description ?? null),
+        course_id: payload.course_id ?? null,
+        status: payload.status ?? 'upcoming',
+        start_date: payload.start_date ?? null,
+        end_date: payload.end_date ?? null,
+        capacity: Number.isFinite(Number(payload.capacity)) ? Number(payload.capacity) : 30,
+      };
+      if (mode === 'insert') {
+        baseRow.student_ids = Array.isArray(payload.student_ids) ? payload.student_ids : [];
+      }
+
+      let lastError: any = null;
+      for (const teacherIdCandidate of teacherIdCandidates) {
+        const row = { ...baseRow, teacher_id: teacherIdCandidate };
+        const result =
+          mode === 'update'
+            ? await supabaseAdmin.from('classes').update(row).eq('id', classId).select('id').maybeSingle()
+            : await supabaseAdmin.from('classes').insert(row).select('id').single();
+
+        if (!result.error) {
+          return res.json({ success: true, class: result.data || null });
+        }
+
+        const msg = `${result.error.message || ''} ${result.error.details || ''}`;
+        const isTeacherFk = result.error.code === '23503' && /classes_teacher_id_fkey|table "teachers"|table "profiles"/i.test(msg);
+        if (!isTeacherFk) {
+          return res.status(400).json({ error: [result.error.message, result.error.details, result.error.hint].filter(Boolean).join(' — ') || 'Failed to save class' });
+        }
+        lastError = result.error;
+      }
+
+      return res.status(400).json({
+        error:
+          [lastError?.message, lastError?.details, lastError?.hint].filter(Boolean).join(' — ') ||
+          'Could not resolve a valid teacher_id for classes table foreign key.',
+      });
+    } catch (e: any) {
+      console.error('POST /api/teacher/classes/save', e);
+      return res.status(500).json({ error: e?.message || 'Failed to save class' });
+    }
   });
 
   // ── STUDENT LIVE SESSIONS ───────────────────────────────────
@@ -3278,10 +3401,7 @@ async function startServer() {
         const { data: rows } = await supabaseAdmin.from('live_sessions').select('id').in('course_id', courseIds).eq('status', 'ended');
         enrolledSessionIds.push(...(rows || []).map((s: { id: string }) => s.id));
       }
-      if (classIds.length > 0) {
-        const { data: rows } = await supabaseAdmin.from('live_sessions').select('id').in('class_id', classIds).eq('status', 'ended');
-        enrolledSessionIds.push(...(rows || []).map((s: { id: string }) => s.id));
-      }
+      // NOTE: some DBs no longer have live_sessions.class_id; invitations handle class-based access.
 
       const allSessionIds = Array.from(new Set([...invitedSessionIds, ...enrolledSessionIds]));
       if (allSessionIds.length === 0) return res.json({ success: true, sessions: [] });
@@ -3608,20 +3728,35 @@ async function startServer() {
     next();
   });
 
-  // Vite middleware for development
-  if (process.env.NODE_ENV !== "production") {
-    const vite = await createViteServer({
-      server: { middlewareMode: true },
-      appType: "spa",
-    });
-    app.use(vite.middlewares);
-  } else {
-    const distPath = path.join(process.cwd(), 'dist');
-    app.use(express.static(distPath));
-    app.get('*', (req, res) => {
-      res.sendFile(path.join(distPath, 'index.html'));
-    });
+  // UI middleware is only needed when running as a standalone web server.
+  if (includeFrontend) {
+    if (process.env.NODE_ENV !== "production") {
+      const { createServer } = await import("vite");
+      const vite = await createServer({
+        server: { middlewareMode: true },
+        appType: "spa",
+      });
+      app.use(vite.middlewares);
+    } else {
+      const distPath = path.join(process.cwd(), "dist");
+      app.use(express.static(distPath));
+      app.get("*", (_req, res) => {
+        res.sendFile(path.join(distPath, "index.html"));
+      });
+    }
   }
+
+  return app;
+}
+
+async function startServer() {
+  const parsedPort = Number(process.env.PORT);
+  const preferredPort = Number.isInteger(parsedPort) && parsedPort > 0 ? parsedPort : 5000;
+  const preferredHost = process.env.HOST || "0.0.0.0";
+  const hostCandidates = preferredHost === "0.0.0.0" ? [preferredHost] : [preferredHost, "0.0.0.0"];
+  const maxPortAttempts = 10;
+  const recoverableListenErrors = new Set(["EACCES", "EADDRINUSE"]);
+  const app = await createApp({ includeFrontend: true });
 
   const tryListen = (port: number, host: string) =>
     new Promise<void>((resolve, reject) => {
@@ -3667,5 +3802,6 @@ async function startServer() {
   );
 }
 
-startServer();
-
+if (!process.env.VERCEL) {
+  startServer();
+}
