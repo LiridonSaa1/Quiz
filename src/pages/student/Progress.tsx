@@ -6,6 +6,7 @@ import { TrendingUp, Target, Trophy, CheckCircle2, BookOpen, Zap, BarChart2, Sta
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, BarChart, Bar, Cell } from 'recharts';
 import { cn } from '../../lib/utils';
 import { format, subDays } from 'date-fns';
+import { fetchAttemptRowsByStudentId } from '../../lib/quizAttempts';
 
 function AnimatedCounter({ value, suffix = '' }: { value: number; suffix?: string }) {
   const [count, setCount] = useState(0);
@@ -38,9 +39,9 @@ export default function StudentProgress() {
       if (!session) return;
       const uid = session.user.id;
 
-      const [coursesSnap, attemptsSnap] = await Promise.all([
+      const [coursesSnap, attemptRows] = await Promise.all([
         supabase.from('courses').select('id, title').contains('student_ids', [uid]),
-        supabase.from('attempts').select('*').eq('student_id', uid).order('completed_at', { ascending: true }),
+        fetchAttemptRowsByStudentId(supabase, uid),
       ]);
 
       const coursesData = coursesSnap.data || [];
@@ -53,7 +54,7 @@ export default function StudentProgress() {
         (quizzes || []).forEach((q: any) => { qMap[q.id] = { title: q.title, courseId: q.course_id }; });
       }
       setQuizMap(qMap);
-      setAttempts(attemptsSnap.data || []);
+      setAttempts(attemptRows || []);
       setLoading(false);
     };
     load();

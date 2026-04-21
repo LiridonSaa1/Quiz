@@ -8,6 +8,8 @@ import {
   BookOpen, Sparkles, Trophy, Filter, ChevronRight, Zap
 } from 'lucide-react';
 import { cn } from '../../lib/utils';
+import { selectPublishedQuizzesCompat } from '../../lib/quizzesCompat';
+import { fetchAttemptRowsByStudentId } from '../../lib/quizAttempts';
 
 interface QuizItem {
   id: string;
@@ -55,13 +57,13 @@ export default function StudentQuizzes() {
       const courseColorMap: Record<string, string> = {};
       courses.forEach((c: any, i: number) => { courseColorMap[c.id] = COURSE_COLORS[i % COURSE_COLORS.length]; });
 
-      const [quizzesSnap, attemptsSnap] = await Promise.all([
-        supabase.from('quizzes').select('*').in('course_id', courseIds).eq('published', true),
-        supabase.from('attempts').select('quiz_id, score, total_points, passed').eq('student_id', uid),
+      const [quizRows, attemptsSnap] = await Promise.all([
+        selectPublishedQuizzesCompat(supabase, courseIds, '*'),
+        fetchAttemptRowsByStudentId(supabase, uid),
       ]);
 
       const attemptMap: Record<string, { score: number; total: number; passed: boolean }> = {};
-      (attemptsSnap.data || []).forEach((a: any) => {
+      (attemptsSnap || []).forEach((a: any) => {
         const prev = attemptMap[a.quiz_id];
         const pct = a.total_points > 0 ? a.score / a.total_points : 0;
         if (!prev || pct > (prev.score / prev.total)) {
@@ -69,7 +71,7 @@ export default function StudentQuizzes() {
         }
       });
 
-      const mapped: QuizItem[] = (quizzesSnap.data || []).map((q: any) => {
+      const mapped: QuizItem[] = (quizRows || []).map((q: any) => {
         const att = attemptMap[q.id];
         return {
           id: q.id,

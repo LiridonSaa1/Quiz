@@ -75,6 +75,7 @@ export interface Module {
   order: number;
   status: string;
   totalLessons: number;
+  totalQuizzes?: number;
   createdAt: string;
   updatedAt: string;
 }

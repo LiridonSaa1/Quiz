@@ -242,6 +242,15 @@ export async function createApp(options: CreateAppOptions = {}) {
     );
   };
 
+  const isSessionParticipantsTableMissing = (error: any) => {
+    const haystack = `${error?.message || ""} ${error?.details || ""} ${error?.hint || ""}`.toLowerCase();
+    return (
+      (error?.code === "PGRST205" && haystack.includes("public.session_participants")) ||
+      (error?.code === "42P01" && haystack.includes("session_participants")) ||
+      haystack.includes("could not find the table 'public.session_participants'")
+    );
+  };
+
   const normalizeAttempts = (rows: any[], passingScoreByQuiz: Record<string, number> = {}) => {
     return (rows || []).map((row: any) => {
       const rawScore = toFiniteNumber(row?.score, 0);
@@ -1292,6 +1301,83 @@ export async function createApp(options: CreateAppOptions = {}) {
     }
   });
 
+  // Teacher can update only students linked to them.
+  app.patch('/api/teacher/students/:studentId', async (req, res) => {
+    try {
+      const caller = await getAuthUser(req);
+      if (!caller) return res.status(401).json({ error: 'Unauthorized' });
+      if (caller.role !== 'teacher') return res.status(403).json({ error: 'Forbidden: teacher role required' });
+
+      const studentId = String(req.params.studentId || '').trim();
+      if (!studentId) return res.status(400).json({ error: 'studentId is required' });
+
+      const teacherIds = await getTeacherIdCandidates(caller.userId);
+      const scopedIds = teacherIds.length > 0 ? teacherIds : [caller.userId];
+
+      const { data: student, error: sErr } = await supabaseAdmin
+        .from('profiles')
+        .select('id, role, teacher_id')
+        .eq('id', studentId)
+        .maybeSingle();
+      if (sErr) throw sErr;
+      if (!student) return res.status(404).json({ error: 'Student not found' });
+      if (student.role !== 'student') return res.status(400).json({ error: 'Target user is not a student' });
+      if (!student.teacher_id || !scopedIds.includes(String(student.teacher_id))) {
+        return res.status(403).json({ error: 'Forbidden: student is not linked to your account' });
+      }
+
+      const body = (req.body || {}) as Record<string, unknown>;
+      const update: Record<string, unknown> = {};
+      if (typeof body.display_name === 'string') update.display_name = body.display_name.trim();
+      if (typeof body.email === 'string') update.email = body.email.trim();
+      if (body.status === 'active' || body.status === 'inactive') update.status = body.status;
+      if (Object.keys(update).length === 0) return res.status(400).json({ error: 'No valid fields to update' });
+
+      const { data, error } = await supabaseAdmin
+        .from('profiles')
+        .update(update)
+        .eq('id', studentId)
+        .select('id, email, display_name, role, teacher_id, status, created_at')
+        .single();
+      if (error) throw error;
+      res.json({ success: true, student: data });
+    } catch (e: any) {
+      res.status(500).json({ error: e?.message || 'Failed to update student' });
+    }
+  });
+
+  // Teacher can delete only students linked to them.
+  app.delete('/api/teacher/students/:studentId', async (req, res) => {
+    try {
+      const caller = await getAuthUser(req);
+      if (!caller) return res.status(401).json({ error: 'Unauthorized' });
+      if (caller.role !== 'teacher') return res.status(403).json({ error: 'Forbidden: teacher role required' });
+
+      const studentId = String(req.params.studentId || '').trim();
+      if (!studentId) return res.status(400).json({ error: 'studentId is required' });
+
+      const teacherIds = await getTeacherIdCandidates(caller.userId);
+      const scopedIds = teacherIds.length > 0 ? teacherIds : [caller.userId];
+      const { data: student, error: sErr } = await supabaseAdmin
+        .from('profiles')
+        .select('id, role, teacher_id')
+        .eq('id', studentId)
+        .maybeSingle();
+      if (sErr) throw sErr;
+      if (!student) return res.status(404).json({ error: 'Student not found' });
+      if (student.role !== 'student') return res.status(400).json({ error: 'Target user is not a student' });
+      if (!student.teacher_id || !scopedIds.includes(String(student.teacher_id))) {
+        return res.status(403).json({ error: 'Forbidden: student is not linked to your account' });
+      }
+
+      const { error } = await supabaseAdmin.from('profiles').delete().eq('id', studentId);
+      if (error) throw error;
+      res.json({ success: true });
+    } catch (e: any) {
+      res.status(500).json({ error: e?.message || 'Failed to delete student' });
+    }
+  });
+
   // Teacher quizzes (service role) — same scoping as courses; avoids PostgREST 400s when RLS/schema differ.
   const teacherQuizzesGetHandler = async (req: Request, res: Response) => {
     try {
@@ -1309,6 +1395,49 @@ export async function createApp(options: CreateAppOptions = {}) {
   };
   app.get("/api/teacher/quizzes", teacherQuizzesGetHandler);
   app.get("/api/teacher/quizzes/", teacherQuizzesGetHandler);
+
+  // Teacher quiz question counts (service role) — avoids RLS issues when counting from browser.
+  app.get("/api/teacher/quizzes/question-counts", async (req: Request, res: Response) => {
+    try {
+      const caller = await assertAuthenticated(req, res);
+      if (!caller) return;
+      if (caller.role !== "teacher" && caller.role !== "admin") {
+        return res.status(403).json({ error: "Forbidden: teacher or admin role required" });
+      }
+
+      const requestedUserId =
+        typeof req.query.userId === "string" && req.query.userId.trim()
+          ? req.query.userId.trim()
+          : caller.userId;
+      const baseUserId = caller.role === "admin" ? requestedUserId : caller.userId;
+
+      const teacherIds = await getTeacherIdCandidates(baseUserId);
+      const scopedIds = teacherIds.length > 0 ? teacherIds : [baseUserId];
+      const quizRows = await loadTeacherQuizzesForScopedIds(scopedIds, baseUserId);
+      const quizIds = (quizRows || []).map((q: any) => String(q?.id || "")).filter(Boolean);
+
+      if (quizIds.length === 0) {
+        return res.json({ success: true, counts: {} });
+      }
+
+      const { data, error } = await supabaseAdmin
+        .from("questions")
+        .select("quiz_id")
+        .in("quiz_id", quizIds);
+      if (error) throw error;
+
+      const counts: Record<string, number> = {};
+      (data || []).forEach((row: any) => {
+        const qid = row?.quiz_id ? String(row.quiz_id) : "";
+        if (!qid) return;
+        counts[qid] = (counts[qid] || 0) + 1;
+      });
+
+      return res.json({ success: true, counts });
+    } catch (e: any) {
+      return res.status(500).json({ error: e?.message || "Failed to load quiz question counts" });
+    }
+  });
 
   // Teacher modules (service role) — same scoping as POST /api/teacher/modules so rows always
   // show after create even when RLS differs between environments.
@@ -1335,8 +1464,54 @@ export async function createApp(options: CreateAppOptions = {}) {
       if (error) throw error;
 
       const rows = data || [];
-      rows.sort((a: any, b: any) => (Number(a?.order) || 0) - (Number(b?.order) || 0));
-      res.json({ success: true, modules: rows });
+      const moduleIds = rows.map((m: any) => String(m?.id || "")).filter(Boolean);
+
+      const lessonCountByModule: Record<string, number> = {};
+      const quizCountByModule: Record<string, number> = {};
+      if (moduleIds.length > 0) {
+        const { data: lessonRows, error: lessonErr } = await supabaseAdmin
+          .from("lessons")
+          .select("id,module_id")
+          .in("module_id", moduleIds);
+        if (lessonErr) throw lessonErr;
+
+        const lessonIds: string[] = [];
+        const moduleByLessonId: Record<string, string> = {};
+        (lessonRows || []).forEach((l: any) => {
+          const moduleId = String(l?.module_id || "");
+          const lessonId = String(l?.id || "");
+          if (!moduleId || !lessonId) return;
+          lessonCountByModule[moduleId] = (lessonCountByModule[moduleId] || 0) + 1;
+          moduleByLessonId[lessonId] = moduleId;
+          lessonIds.push(lessonId);
+        });
+
+        if (lessonIds.length > 0) {
+          const { data: quizRows, error: quizErr } = await supabaseAdmin
+            .from("quizzes")
+            .select("id,lesson_id")
+            .in("lesson_id", lessonIds);
+          if (quizErr) throw quizErr;
+
+          (quizRows || []).forEach((q: any) => {
+            const lessonId = String(q?.lesson_id || "");
+            const moduleId = moduleByLessonId[lessonId];
+            if (!moduleId) return;
+            quizCountByModule[moduleId] = (quizCountByModule[moduleId] || 0) + 1;
+          });
+        }
+      }
+
+      const enrichedRows = rows.map((m: any) => {
+        const moduleId = String(m?.id || "");
+        return {
+          ...m,
+          total_lessons: lessonCountByModule[moduleId] ?? m?.total_lessons ?? 0,
+          total_quizzes: quizCountByModule[moduleId] ?? 0,
+        };
+      });
+      enrichedRows.sort((a: any, b: any) => (Number(a?.order) || 0) - (Number(b?.order) || 0));
+      res.json({ success: true, modules: enrichedRows });
     } catch (e: any) {
       res.status(500).json({ error: e.message });
     }
@@ -1399,6 +1574,45 @@ export async function createApp(options: CreateAppOptions = {}) {
     }
     return { ok: true as const, course };
   };
+
+  app.patch("/api/teacher/courses/:id/status", async (req, res) => {
+    try {
+      const caller = await assertAuthenticated(req, res);
+      if (!caller) return;
+      if (caller.role !== "teacher") {
+        return res.status(403).json({ error: "Forbidden: teacher role required" });
+      }
+
+      const courseId = typeof req.params.id === "string" ? req.params.id.trim() : "";
+      if (!courseId) return res.status(400).json({ error: "Course id is required" });
+
+      const statusRaw = String(req.body?.status || "").trim().toLowerCase();
+      const nextStatus = statusRaw === "published" ? "published" : statusRaw === "draft" ? "draft" : "";
+      if (!nextStatus) {
+        return res.status(400).json({ error: "status must be 'published' or 'draft'" });
+      }
+
+      const ownership = await assertTeacherOwnsCourse(caller.userId, courseId);
+      if (!ownership.ok) {
+        if (ownership.reason === "not_found") {
+          return res.status(404).json({ error: "Course not found" });
+        }
+        return res.status(403).json({ error: "Forbidden: you do not own this course" });
+      }
+
+      const { data, error } = await supabaseAdmin
+        .from("courses")
+        .update({ status: nextStatus, updated_at: new Date().toISOString() })
+        .eq("id", courseId)
+        .select("*")
+        .single();
+      if (error) throw error;
+
+      return res.json({ success: true, course: data });
+    } catch (e: any) {
+      return res.status(500).json({ error: e?.message || "Failed to update course status" });
+    }
+  });
 
   app.post("/api/teacher/modules", async (req, res) => {
     try {
@@ -2425,6 +2639,63 @@ export async function createApp(options: CreateAppOptions = {}) {
   app.post("/api/teacher/quizzes", teacherQuizzesPostHandler);
   app.post("/api/teacher/quizzes/", teacherQuizzesPostHandler);
 
+  /** Load quiz questions for edit (service role) — bypasses RLS; teachers may only read quizzes for courses they own. */
+  app.get("/api/teacher/quizzes/:quizId/questions", async (req: Request, res: Response) => {
+    try {
+      const caller = await assertAuthenticated(req, res);
+      if (!caller) return;
+      if (caller.role !== "teacher" && caller.role !== "admin") {
+        return res.status(403).json({ error: "Forbidden: teacher or admin role required" });
+      }
+
+      const quizId = typeof req.params.quizId === "string" ? req.params.quizId.trim() : "";
+      if (!quizId) return res.status(400).json({ error: "Quiz id is required" });
+
+      const { data: quizRow, error: qErr } = await supabaseAdmin
+        .from("quizzes")
+        .select("id, course_id")
+        .eq("id", quizId)
+        .maybeSingle();
+      if (qErr) throw qErr;
+      if (!quizRow?.id) return res.status(404).json({ error: "Quiz not found." });
+
+      if (caller.role !== "admin") {
+        const gate = await assertTeacherOwnsCourse(caller.userId, String(quizRow.course_id));
+        if (!gate.ok) {
+          return res.status(403).json({ error: "You do not have access to this quiz." });
+        }
+      }
+
+      let qRes = await supabaseAdmin
+        .from("questions")
+        .select("*")
+        .eq("quiz_id", quizId)
+        .order("order", { ascending: true })
+        .order("created_at", { ascending: true });
+
+      if (qRes.error) {
+        qRes = await supabaseAdmin
+          .from("questions")
+          .select("*")
+          .eq("quiz_id", quizId)
+          .order("created_at", { ascending: true });
+      }
+
+      if (qRes.error) {
+        qRes = await supabaseAdmin
+          .from("questions")
+          .select("*")
+          .eq("quiz_id", quizId);
+      }
+
+      if (qRes.error) throw qRes.error;
+      res.json({ success: true, questions: qRes.data || [] });
+    } catch (e: any) {
+      console.error("GET /api/teacher/quizzes/:quizId/questions", e);
+      res.status(500).json({ error: e?.message || "Failed to load questions" });
+    }
+  });
+
   /** Replace all questions for a quiz (service role — bypasses RLS; browser insert often fails on questions policy). */
   app.post("/api/teacher/quizzes/:quizId/save-questions", async (req: Request, res: Response) => {
     try {
@@ -2691,6 +2962,134 @@ export async function createApp(options: CreateAppOptions = {}) {
     }
   });
 
+  // Admin can update any student profile.
+  app.patch('/api/admin/students/:studentId', async (req, res) => {
+    try {
+      const caller = await assertAuthenticated(req, res);
+      if (!caller) return;
+      if (caller.role !== 'admin') return res.status(403).json({ error: 'Forbidden: admin role required' });
+
+      const studentId = String(req.params.studentId || '').trim();
+      if (!studentId) return res.status(400).json({ error: 'studentId required' });
+
+      const { data: profile, error: pErr } = await supabaseAdmin
+        .from('profiles')
+        .select('id, role')
+        .eq('id', studentId)
+        .maybeSingle();
+      if (pErr) throw pErr;
+      if (!profile) return res.status(404).json({ error: 'Student not found' });
+      if (profile.role !== 'student') return res.status(400).json({ error: 'Target user is not a student' });
+
+      const body = (req.body || {}) as Record<string, unknown>;
+      const update: Record<string, unknown> = {};
+      if (typeof body.display_name === 'string') update.display_name = body.display_name.trim();
+      if (typeof body.email === 'string') update.email = body.email.trim();
+      if (body.status === 'active' || body.status === 'inactive') update.status = body.status;
+      if (typeof body.teacher_id === 'string' || body.teacher_id === null) update.teacher_id = body.teacher_id;
+      if (Object.keys(update).length === 0) return res.status(400).json({ error: 'No valid fields to update' });
+
+      const { data, error } = await supabaseAdmin
+        .from('profiles')
+        .update(update)
+        .eq('id', studentId)
+        .select('id, email, display_name, role, teacher_id, status, created_at')
+        .single();
+      if (error) throw error;
+      res.json({ success: true, student: data });
+    } catch (e: any) {
+      res.status(500).json({ error: e?.message || 'Failed to update student' });
+    }
+  });
+
+  app.delete('/api/admin/students/:studentId', async (req, res) => {
+    try {
+      const caller = await assertAuthenticated(req, res);
+      if (!caller) return;
+      if (caller.role !== 'admin') return res.status(403).json({ error: 'Forbidden: admin role required' });
+      const studentId = String(req.params.studentId || '').trim();
+      if (!studentId) return res.status(400).json({ error: 'studentId required' });
+
+      const { data: profile, error: pErr } = await supabaseAdmin
+        .from('profiles')
+        .select('id, role')
+        .eq('id', studentId)
+        .maybeSingle();
+      if (pErr) throw pErr;
+      if (!profile) return res.status(404).json({ error: 'Student not found' });
+      if (profile.role !== 'student') return res.status(400).json({ error: 'Target user is not a student' });
+
+      const { error } = await supabaseAdmin.from('profiles').delete().eq('id', studentId);
+      if (error) throw error;
+      res.json({ success: true });
+    } catch (e: any) {
+      res.status(500).json({ error: e?.message || 'Failed to delete student' });
+    }
+  });
+
+  // Admin can update/delete any teacher profile.
+  app.patch('/api/admin/teachers/:teacherId', async (req, res) => {
+    try {
+      const caller = await assertAuthenticated(req, res);
+      if (!caller) return;
+      if (caller.role !== 'admin') return res.status(403).json({ error: 'Forbidden: admin role required' });
+      const teacherId = String(req.params.teacherId || '').trim();
+      if (!teacherId) return res.status(400).json({ error: 'teacherId required' });
+
+      const { data: profile, error: pErr } = await supabaseAdmin
+        .from('profiles')
+        .select('id, role')
+        .eq('id', teacherId)
+        .maybeSingle();
+      if (pErr) throw pErr;
+      if (!profile) return res.status(404).json({ error: 'Teacher not found' });
+      if (profile.role !== 'teacher') return res.status(400).json({ error: 'Target user is not a teacher' });
+
+      const body = (req.body || {}) as Record<string, unknown>;
+      const update: Record<string, unknown> = {};
+      if (typeof body.display_name === 'string') update.display_name = body.display_name.trim();
+      if (typeof body.email === 'string') update.email = body.email.trim();
+      if (body.status === 'active' || body.status === 'inactive') update.status = body.status;
+      if (Object.keys(update).length === 0) return res.status(400).json({ error: 'No valid fields to update' });
+
+      const { data, error } = await supabaseAdmin
+        .from('profiles')
+        .update(update)
+        .eq('id', teacherId)
+        .select('id, email, display_name, role, status, created_at')
+        .single();
+      if (error) throw error;
+      res.json({ success: true, teacher: data });
+    } catch (e: any) {
+      res.status(500).json({ error: e?.message || 'Failed to update teacher' });
+    }
+  });
+
+  app.delete('/api/admin/teachers/:teacherId', async (req, res) => {
+    try {
+      const caller = await assertAuthenticated(req, res);
+      if (!caller) return;
+      if (caller.role !== 'admin') return res.status(403).json({ error: 'Forbidden: admin role required' });
+      const teacherId = String(req.params.teacherId || '').trim();
+      if (!teacherId) return res.status(400).json({ error: 'teacherId required' });
+
+      const { data: profile, error: pErr } = await supabaseAdmin
+        .from('profiles')
+        .select('id, role')
+        .eq('id', teacherId)
+        .maybeSingle();
+      if (pErr) throw pErr;
+      if (!profile) return res.status(404).json({ error: 'Teacher not found' });
+      if (profile.role !== 'teacher') return res.status(400).json({ error: 'Target user is not a teacher' });
+
+      const { error } = await supabaseAdmin.from('profiles').delete().eq('id', teacherId);
+      if (error) throw error;
+      res.json({ success: true });
+    } catch (e: any) {
+      res.status(500).json({ error: e?.message || 'Failed to delete teacher' });
+    }
+  });
+
   // List sessions for logged-in teacher (teacher or admin only)
   app.get('/api/teacher/live-sessions', async (req, res) => {
     try {
@@ -2714,10 +3113,11 @@ export async function createApp(options: CreateAppOptions = {}) {
       const invitedCounts: Record<string, number> = {};
       const joinedCounts: Record<string, number> = {};
       if (ids.length > 0) {
-        const { data: pData } = await supabaseAdmin
+        const { data: pData, error: pErr } = await supabaseAdmin
           .from('session_participants')
           .select('session_id,joined_at')
           .in('session_id', ids);
+        if (pErr && !isSessionParticipantsTableMissing(pErr)) throw pErr;
         (pData || []).forEach((p: { session_id: string; joined_at: string | null }) => {
           invitedCounts[p.session_id] = (invitedCounts[p.session_id] || 0) + 1;
           if (p.joined_at) joinedCounts[p.session_id] = (joinedCounts[p.session_id] || 0) + 1;
@@ -2781,7 +3181,12 @@ export async function createApp(options: CreateAppOptions = {}) {
           invited_at: new Date().toISOString(),
           created_at: new Date().toISOString(),
         }));
-        await supabaseAdmin.from('session_participants').upsert(participantRows, { onConflict: 'session_id,user_id' });
+        const upsertRes = await supabaseAdmin
+          .from('session_participants')
+          .upsert(participantRows, { onConflict: 'session_id,user_id' });
+        if (upsertRes.error && !isSessionParticipantsTableMissing(upsertRes.error)) {
+          throw upsertRes.error;
+        }
 
         const notifRows = inviteIds.map((uid: string) => ({
           user_id: uid,
@@ -2822,8 +3227,9 @@ export async function createApp(options: CreateAppOptions = {}) {
 
       if (req.body.status === 'live') {
         update.started_at = new Date().toISOString();
-        const { data: parts } = await supabaseAdmin
+        const { data: parts, error: partsErr } = await supabaseAdmin
           .from('session_participants').select('user_id').eq('session_id', req.params.id);
+        if (partsErr && !isSessionParticipantsTableMissing(partsErr)) throw partsErr;
         if (parts && parts.length > 0) {
           const notifRows = (parts as Array<{ user_id: string }>).map((p) => ({
             user_id: p.user_id,
@@ -2863,8 +3269,11 @@ export async function createApp(options: CreateAppOptions = {}) {
       .from('live_sessions').select('host_id').eq('id', sessionId).single();
     if (!sessionRow) { res.status(404).json({ error: 'Session not found' }); return null; }
     if (sessionRow.host_id === caller.userId) return caller.userId;
-    const { data: participation } = await supabaseAdmin
+    const { data: participation, error: partErr } = await supabaseAdmin
       .from('session_participants').select('id,is_removed').eq('session_id', sessionId).eq('user_id', caller.userId).single();
+    if (partErr && !isSessionParticipantsTableMissing(partErr)) {
+      throw partErr;
+    }
     if (participation && (participation as { id: string; is_removed?: boolean }).is_removed) {
       res.status(403).json({ error: 'Forbidden: you have been removed from this session' }); return null;
     }
@@ -2890,8 +3299,11 @@ export async function createApp(options: CreateAppOptions = {}) {
     if (!sessionRow) { res.status(404).json({ error: 'Session not found' }); return null; }
     if (sessionRow.host_id === caller.userId) return caller.userId;
     // Check if invited participant AND not removed by host
-    const { data: participation } = await supabaseAdmin
+    const { data: participation, error: partErr } = await supabaseAdmin
       .from('session_participants').select('id,is_removed').eq('session_id', sessionId).eq('user_id', caller.userId).single();
+    if (partErr && !isSessionParticipantsTableMissing(partErr)) {
+      throw partErr;
+    }
     if (participation && !(participation as { id: string; is_removed?: boolean }).is_removed) {
       return caller.userId;
     }
@@ -3368,6 +3780,75 @@ export async function createApp(options: CreateAppOptions = {}) {
 
   // ── STUDENT LIVE SESSIONS ───────────────────────────────────
 
+  // Student enroll in a published course owned by their assigned teacher.
+  app.post('/api/student/courses/:courseId/enroll', async (req, res) => {
+    try {
+      const caller = await assertAuthenticated(req, res);
+      if (!caller) return;
+      if (caller.role !== 'student' && caller.role !== 'admin') {
+        return res.status(403).json({ error: 'Forbidden: student or admin role required' });
+      }
+
+      const courseId = String(req.params.courseId || '').trim();
+      if (!courseId) return res.status(400).json({ error: 'courseId is required' });
+
+      const { data: profile, error: profileErr } = await supabaseAdmin
+        .from('profiles')
+        .select('teacher_id')
+        .eq('id', caller.userId)
+        .single();
+      if (profileErr) throw profileErr;
+
+      const linkedTeacherId = profile?.teacher_id ? String(profile.teacher_id) : '';
+      if (!linkedTeacherId) {
+        return res.status(403).json({ error: 'Student has no assigned teacher' });
+      }
+
+      const teacherIds = await getTeacherIdCandidates(linkedTeacherId);
+      const scopedIds = teacherIds.length > 0 ? teacherIds : [linkedTeacherId];
+
+      const { data: course, error: courseErr } = await supabaseAdmin
+        .from('courses')
+        .select('id, title, teacher_id, status, student_ids, total_students')
+        .eq('id', courseId)
+        .single();
+      if (courseErr) throw courseErr;
+      if (!course) return res.status(404).json({ error: 'Course not found' });
+
+      const courseTeacherId = String(course.teacher_id || '');
+      if (!scopedIds.includes(courseTeacherId)) {
+        return res.status(403).json({ error: 'Forbidden: this course is not from your assigned teacher' });
+      }
+      if (String(course.status || '').toLowerCase() !== 'published') {
+        return res.status(403).json({ error: 'Only published courses can be enrolled' });
+      }
+
+      const studentIds = Array.isArray(course.student_ids)
+        ? course.student_ids.map((sid: unknown) => String(sid))
+        : [];
+      if (studentIds.includes(caller.userId)) {
+        return res.json({ success: true, alreadyEnrolled: true });
+      }
+
+      const nextStudentIds = [...studentIds, caller.userId];
+      const nextTotalStudents = Math.max(nextStudentIds.length, Number(course.total_students || 0) + 1);
+
+      const { error: updErr } = await supabaseAdmin
+        .from('courses')
+        .update({
+          student_ids: nextStudentIds,
+          total_students: nextTotalStudents,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', courseId);
+      if (updErr) throw updErr;
+
+      return res.json({ success: true, enrolled: true });
+    } catch (e: any) {
+      return res.status(500).json({ error: e?.message || 'Failed to enroll in course' });
+    }
+  });
+
   // Get live sessions for which the authenticated student is an invited participant
   app.get('/api/student/live-sessions', async (req, res) => {
     try {
@@ -3383,7 +3864,7 @@ export async function createApp(options: CreateAppOptions = {}) {
         .from('session_participants')
         .select('session_id,is_removed')
         .eq('user_id', caller.userId);
-      if (pErr) throw pErr;
+      if (pErr && !isSessionParticipantsTableMissing(pErr)) throw pErr;
 
       const invitedSessionIds = (participantRows || [])
         .filter((p: { session_id: string; is_removed?: boolean }) => !p.is_removed)
@@ -3414,10 +3895,45 @@ export async function createApp(options: CreateAppOptions = {}) {
 
       if (status) query = query.eq('status', status as string);
 
-      const { data, error } = await query;
-      if (error) throw error;
+      let { data, error } = await query;
+      if (error) {
+        const msg = `${error.message || ''} ${error.details || ''}`.toLowerCase();
+        const classIdCacheErr =
+          error.code === 'PGRST204' ||
+          (msg.includes('class_id') && (msg.includes('schema cache') || msg.includes('could not find') || msg.includes('does not exist')));
+        if (!classIdCacheErr) throw error;
+
+        // Fallback: retry without relation joins in case stale relationship cache still references class_id.
+        let fallbackQuery = supabaseAdmin
+          .from('live_sessions')
+          .select('id, title, status, scheduled_at, duration_minutes, recording_url, host_id')
+          .in('id', allSessionIds)
+          .order('scheduled_at', { ascending: false });
+        if (status) fallbackQuery = fallbackQuery.eq('status', status as string);
+
+        const fallback = await fallbackQuery;
+        if (fallback.error) throw fallback.error;
+
+        const hostIds = Array.from(new Set((fallback.data || []).map((r: any) => String(r.host_id || '')).filter(Boolean)));
+        let hostMap: Record<string, { id: string; display_name: string }> = {};
+        if (hostIds.length > 0) {
+          const hostsRes = await supabaseAdmin.from('profiles').select('id,display_name').in('id', hostIds);
+          if (!hostsRes.error) {
+            hostMap = Object.fromEntries(
+              (hostsRes.data || []).map((h: any) => [String(h.id), { id: String(h.id), display_name: String(h.display_name || 'Teacher') }]),
+            );
+          }
+        }
+        data = (fallback.data || []).map((row: any) => ({
+          ...row,
+          host: row.host_id ? hostMap[String(row.host_id)] || null : null,
+        }));
+      }
       res.json({ success: true, sessions: data || [] });
-    } catch (e: unknown) { res.status(500).json({ error: (e as Error).message }); }
+    } catch (e: unknown) {
+      console.error('GET /api/student/live-sessions', e);
+      res.status(500).json({ error: (e as Error).message });
+    }
   });
 
   // ── LIVE SESSION RECORDING UPLOAD ──────────────────────────

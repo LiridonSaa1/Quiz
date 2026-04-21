@@ -9,6 +9,7 @@ import {
 } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { useNavigate } from 'react-router-dom';
+import { selectPublishedQuizzesCompat } from '../../lib/quizzesCompat';
 
 interface ExamEntry {
   id: string;
@@ -62,12 +63,8 @@ export default function StudentExams() {
       const courseMap: Record<string, string> = {};
       (coursesData || []).forEach((c: any) => { courseMap[c.id] = c.title; });
 
-      const { data: quizzesData } = await supabase
-        .from('quizzes')
-        .select('*')
-        .in('course_id', courseIds)
-        .eq('type', 'exam')
-        .eq('published', true);
+      const quizRows = await selectPublishedQuizzesCompat(supabase, courseIds, '*');
+      const quizzesData = (quizRows || []).filter((q: any) => String(q?.type || '') === 'exam');
 
       if (!quizzesData?.length) { setLoading(false); return; }
 

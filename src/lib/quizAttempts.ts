@@ -110,6 +110,15 @@ export const fetchAttemptRowsByStudentId = async (supabase: SupabaseClient, stud
   return modern.data || [];
 };
 
+export const deleteAttemptRowsByQuizId = async (supabase: SupabaseClient, quizId: string) => {
+  const legacy = await supabase.from('attempts').delete().eq('quiz_id', quizId);
+  if (!legacy.error) return;
+  if (!isAttemptsTableMissing(legacy.error)) throw legacy.error;
+
+  const modern = await supabase.from('quiz_attempts').delete().eq('quiz_id', quizId);
+  if (modern.error) throw modern.error;
+};
+
 export const fetchAttemptRowById = async (supabase: SupabaseClient, attemptId: string) => {
   const legacy = await supabase.from('attempts').select('*').eq('id', attemptId).maybeSingle();
   if (!legacy.error) return legacy.data || null;

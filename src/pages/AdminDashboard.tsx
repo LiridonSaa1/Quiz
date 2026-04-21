@@ -63,10 +63,15 @@ export default function AdminDashboard() {
         const rawErr =
           (typeof usersJson?.error === 'string' && usersJson.error) ||
           (!usersHttpRes.ok ? `Users list failed (${usersHttpRes.status})` : '');
-        const apiErr =
-          /unauthorized/i.test(rawErr) || usersHttpRes.status === 401
-            ? 'The API could not verify your session. Use the same Supabase project in the server (.env: SUPABASE_SERVICE_ROLE_KEY, VITE_SUPABASE_URL) as in the app (VITE_SUPABASE_URL, VITE_SUPABASE_ANON_KEY).'
-            : rawErr;
+        let apiErr = rawErr;
+        if (/unauthorized/i.test(rawErr) || usersHttpRes.status === 401) {
+          const {
+            data: { session: activeSession },
+          } = await supabase.auth.getSession();
+          apiErr = activeSession?.access_token
+            ? 'Your session token was rejected by the API. Sign out and sign in again. If this persists, verify server env (SUPABASE_SERVICE_ROLE_KEY, VITE_SUPABASE_URL) matches app env (VITE_SUPABASE_URL, VITE_SUPABASE_ANON_KEY).'
+            : 'Your session expired. Please sign in again.';
+        }
         const { data: fallbackRows, error: fbErr } = await supabase
           .from('profiles')
           .select('*')

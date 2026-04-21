@@ -9,6 +9,9 @@ import {
 } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { cn } from '../../lib/utils';
+import { authFetch } from '../../lib/apiUrl';
+import { selectPublishedQuizzesCompat } from '../../lib/quizzesCompat';
+import { fetchAttemptRowsByStudentId } from '../../lib/quizAttempts';
 
 interface CourseProgress {
   id: string;
@@ -225,31 +228,43 @@ export default function ContinueLearning() {
       if (!session) return;
       const uid = session.user.id;
 
-      const [profileSnap, coursesSnap, attemptsSnap] = await Promise.all([
-        supabase.from('profiles').select('display_name').eq('id', uid).single(),
-        supabase.from('courses').select('*').contains('student_ids', [uid]),
-        supabase.from('attempts').select('*').eq('student_id', uid).order('completed_at', { ascending: false }),
+      const [profileSnap, attemptRows] = await Promise.all([
+        supabase.from('profiles').select('display_name, teacher_id').eq('id', uid).single(),
+        fetchAttemptRowsByStudentId(supabase, uid),
       ]);
 
       if (profileSnap.data) setStudentName(profileSnap.data.display_name || '');
-      const attemptsData: AttemptData[] = attemptsSnap.data || [];
+      const attemptsData: AttemptData[] = attemptRows || [];
       setAttempts(attemptsData);
 
-      const raw = coursesSnap.data || [];
-      if (raw.length === 0) { setLoading(false); return; }
+      const linkedTeacherId = profileSnap.data?.teacher_id || null;
+      let raw: any[] = [];
+      if (linkedTeacherId) {
+        const coursesRes = await authFetch(`/api/teacher/courses?userId=${encodeURIComponent(String(linkedTeacherId))}`);
+        const coursesJson = coursesRes.ok ? await coursesRes.json() : { courses: [] };
+        raw = Array.isArray(coursesJson?.courses)
+          ? coursesJson.courses.filter((c: any) => String(c?.status || '').toLowerCase() === 'published')
+          : [];
+      }
 
-      const courseIds = raw.map((c: any) => c.id);
-      const teacherIds = [...new Set(raw.map((c: any) => c.teacher_id).filter(Boolean))] as string[];
+      // Continue page should show only courses the student has enrolled in.
+      const enrolledOnly = raw.filter((c: any) =>
+        Array.isArray(c?.student_ids) && c.student_ids.map((sid: unknown) => String(sid)).includes(uid)
+      );
+      if (enrolledOnly.length === 0) { setLoading(false); return; }
 
-      const [quizzesSnap, teachersSnap] = await Promise.all([
-        supabase.from('quizzes').select('id, course_id').in('course_id', courseIds).eq('published', true),
+      const courseIds = enrolledOnly.map((c: any) => c.id);
+      const teacherIds = [...new Set(enrolledOnly.map((c: any) => c.teacher_id).filter(Boolean))] as string[];
+
+      const [quizRows, teachersSnap] = await Promise.all([
+        selectPublishedQuizzesCompat(supabase, courseIds, 'id, course_id'),
         teacherIds.length > 0
           ? supabase.from('profiles').select('id, display_name').in('id', teacherIds)
           : Promise.resolve({ data: [] }),
       ]);
 
       const quizzesByCourse: Record<string, string[]> = {};
-      (quizzesSnap.data || []).forEach((q: any) => {
+      (quizRows || []).forEach((q: any) => {
         if (!quizzesByCourse[q.course_id]) quizzesByCourse[q.course_id] = [];
         quizzesByCourse[q.course_id].push(q.id);
       });
@@ -258,7 +273,7 @@ export default function ContinueLearning() {
       const teacherMap: Record<string, string> = {};
       (teachersSnap.data || []).forEach((t: any) => { teacherMap[t.id] = t.display_name || ''; });
 
-      const mapped: CourseProgress[] = raw.map((c: any, i: number) => {
+      const mapped: CourseProgress[] = enrolledOnly.map((c: any, i: number) => {
         const cq = quizzesByCourse[c.id] || [];
         const meta = getMeta(c.level, i);
         return {

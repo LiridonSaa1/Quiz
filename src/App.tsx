@@ -58,6 +58,7 @@ import AdminProfile from './pages/admin/Profile';
 import AdminSecurityPage from './pages/admin/Security';
 import StudentDashboard from './pages/student/Dashboard';
 import StudentCourses from './pages/student/Courses';
+import StudentCourseDetail from './pages/student/CourseDetail';
 import ContinueLearning from './pages/student/ContinueLearning';
 import StudentLessons from './pages/student/Lessons';
 import StudentQuizzes from './pages/student/Quizzes';
@@ -276,6 +277,7 @@ function StudentRoutes() {
     <Routes>
       <Route path="/" element={<StudentDashboard />} />
       <Route path="/courses" element={<StudentCourses />} />
+      <Route path="/courses/:courseId" element={<StudentCourseDetail />} />
       <Route path="/continue" element={<ContinueLearning />} />
       <Route path="/lessons" element={<StudentLessons />} />
       <Route path="/quizzes" element={<StudentQuizzes />} />

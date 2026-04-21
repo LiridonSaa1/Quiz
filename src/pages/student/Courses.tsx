@@ -1,13 +1,18 @@
 import React, { useEffect, useState, useMemo } from 'react';
 import { supabase } from '../../supabase';
 import StudentLayout from '../../components/layout/StudentLayout';
+import { resolveTeacherIdCandidates } from '../../lib/teacherScope';
+import { authFetch } from '../../lib/apiUrl';
+import { selectPublishedQuizzesCompat } from '../../lib/quizzesCompat';
 import {
   BookOpen, Search, Clock, Users, Play, CheckCircle2,
   Layers, Flame, Trophy, ChevronRight, Filter,
-  GraduationCap, Sparkles, Lock, Star
+  GraduationCap, Sparkles, Lock, Star, UserPlus
 } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { cn } from '../../lib/utils';
+import { toast } from 'sonner';
+import { fetchAttemptRowsByStudentId } from '../../lib/quizAttempts';
 
 interface CourseData {
   id: string;
@@ -22,6 +27,7 @@ interface CourseData {
   quizCount: number;
   attemptedQuizzes: number;
   status: string;
+  isEnrolled: boolean;
 }
 
 type FilterTab = 'all' | 'inprogress' | 'completed' | 'notstarted';
@@ -67,7 +73,18 @@ function CircleProgress({ pct }: { pct: number }) {
   );
 }
 
-function CourseCard({ course, index }: { course: CourseData; index: number; key?: React.Key }) {
+function CourseCard({
+  course,
+  index,
+  onEnroll,
+  enrolling,
+}: {
+  course: CourseData;
+  index: number;
+  onEnroll: (courseId: string) => void;
+  enrolling: boolean;
+  key?: React.Key;
+}) {
   const meta = getMeta(course.level, index);
   const pct = course.quizCount > 0
     ? Math.round((course.attemptedQuizzes / course.quizCount) * 100)
@@ -181,26 +198,38 @@ function CourseCard({ course, index }: { course: CourseData; index: number; key?
         </div>
 
         {/* CTA */}
-        <Link
-          to={`/student/quizzes`}
-          className={cn(
-            'flex items-center justify-center gap-2 w-full py-2.5 rounded-2xl text-sm font-bold transition-all',
-            isCompleted
-              ? 'bg-emerald-50 text-emerald-700 hover:bg-emerald-100 border border-emerald-200'
-              : isStarted
-              ? 'bg-gradient-to-r from-blue-500 to-violet-500 text-white hover:opacity-90 shadow-lg shadow-blue-200/60'
-              : 'bg-slate-900 text-white hover:bg-slate-800 shadow-lg shadow-slate-200'
-          )}
-        >
-          {isCompleted ? (
-            <><CheckCircle2 className="w-4 h-4" /> View Completion</>
-          ) : isStarted ? (
-            <><Play className="w-4 h-4" /> Continue</>
-          ) : (
-            <><Sparkles className="w-4 h-4" /> Start Learning</>
-          )}
-          <ChevronRight className="w-4 h-4 ml-auto" />
-        </Link>
+        {course.isEnrolled ? (
+          <Link
+            to={`/student/courses/${course.id}`}
+            className={cn(
+              'flex items-center justify-center gap-2 w-full py-2.5 rounded-2xl text-sm font-bold transition-all',
+              isCompleted
+                ? 'bg-emerald-50 text-emerald-700 hover:bg-emerald-100 border border-emerald-200'
+                : isStarted
+                ? 'bg-gradient-to-r from-blue-500 to-violet-500 text-white hover:opacity-90 shadow-lg shadow-blue-200/60'
+              : 'bg-gradient-to-r from-emerald-500 to-teal-500 text-white hover:from-emerald-400 hover:to-teal-400 shadow-lg shadow-emerald-200'
+            )}
+          >
+            {isCompleted ? (
+              <><CheckCircle2 className="w-4 h-4" /> View Completion</>
+            ) : isStarted ? (
+              <><Play className="w-4 h-4" /> Continue</>
+            ) : (
+              <><Sparkles className="w-4 h-4" /> Start Course</>
+            )}
+            <ChevronRight className="w-4 h-4 ml-auto" />
+          </Link>
+        ) : (
+          <button
+            type="button"
+            onClick={() => onEnroll(course.id)}
+            disabled={enrolling}
+            className="flex items-center justify-center gap-2 w-full py-2.5 rounded-2xl text-sm font-bold transition-all bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-60 disabled:cursor-not-allowed shadow-lg shadow-emerald-200"
+          >
+            <UserPlus className="w-4 h-4" />
+            {enrolling ? 'Enrolling...' : 'Enroll'}
+          </button>
+        )}
       </div>
     </div>
   );
@@ -227,7 +256,9 @@ function SkeletonCard() {
 export default function StudentCourses() {
   const [courses, setCourses] = useState<CourseData[]>([]);
   const [studentName, setStudentName] = useState('');
+  const [studentId, setStudentId] = useState('');
   const [loading, setLoading] = useState(true);
+  const [enrollingCourseId, setEnrollingCourseId] = useState<string | null>(null);
   const [search, setSearch] = useState('');
   const [filterTab, setFilterTab] = useState<FilterTab>('all');
 
@@ -236,54 +267,119 @@ export default function StudentCourses() {
       const { data: { session } } = await supabase.auth.getSession();
       if (!session) return;
       const uid = session.user.id;
+      setStudentId(uid);
 
-      const [profileSnap, coursesSnap] = await Promise.all([
-        supabase.from('profiles').select('display_name').eq('id', uid).single(),
-        supabase.from('courses').select('*').contains('student_ids', [uid]),
-      ]);
+      const profileSnap = await supabase
+        .from('profiles')
+        .select('display_name, teacher_id')
+        .eq('id', uid)
+        .single();
 
       if (profileSnap.data) setStudentName(profileSnap.data.display_name || '');
 
-      const rawCourses = coursesSnap.data || [];
+      const linkedTeacherId = profileSnap.data?.teacher_id || null;
+      if (!linkedTeacherId) {
+        setCourses([]);
+        setLoading(false);
+        return;
+      }
+
+      const teacherIdCandidates = await resolveTeacherIdCandidates(String(linkedTeacherId));
+      const scopedTeacherIds = teacherIdCandidates.length > 0 ? teacherIdCandidates : [String(linkedTeacherId)];
+      if (import.meta.env.DEV) {
+        console.debug('[StudentCourses] linkedTeacherId:', linkedTeacherId);
+        console.debug('[StudentCourses] scopedTeacherIds:', scopedTeacherIds);
+      }
+
+      const coursesRes = await authFetch(`/api/teacher/courses?userId=${encodeURIComponent(String(linkedTeacherId))}`);
+      const coursesJson = coursesRes.ok ? await coursesRes.json() : { courses: [] };
+      const rawCourses = Array.isArray(coursesJson?.courses)
+        ? coursesJson.courses.filter((c: any) => String(c?.status || '').toLowerCase() === 'published')
+        : [];
+      if (import.meta.env.DEV) {
+        console.debug('[StudentCourses] fetched courses count:', rawCourses.length);
+      }
       if (rawCourses.length === 0) { setLoading(false); return; }
 
       const courseIds = rawCourses.map((c: any) => c.id);
       const teacherIds = [...new Set(rawCourses.map((c: any) => c.teacher_id).filter(Boolean))] as string[];
 
-      const [quizzesSnap, attemptsSnap, teachersSnap] = await Promise.all([
-        supabase.from('quizzes').select('id, course_id').in('course_id', courseIds).eq('published', true),
-        supabase.from('attempts').select('quiz_id').eq('student_id', uid),
+      const [modulesSnap, lessonsByCourseSnap, attemptsSnap, teachersSnap] = await Promise.all([
+        supabase.from('modules').select('id, course_id').in('course_id', courseIds),
+        supabase.from('lessons').select('id, course_id, module_id').in('course_id', courseIds),
+        fetchAttemptRowsByStudentId(supabase, uid),
         teacherIds.length > 0
           ? supabase.from('profiles').select('id, display_name').in('id', teacherIds)
           : Promise.resolve({ data: [] }),
       ]);
 
-      const quizzesByCourse: Record<string, string[]> = {};
-      (quizzesSnap.data || []).forEach((q: any) => {
-        if (!quizzesByCourse[q.course_id]) quizzesByCourse[q.course_id] = [];
-        quizzesByCourse[q.course_id].push(q.id);
+      const modules = modulesSnap.data || [];
+      const moduleToCourse: Record<string, string> = {};
+      modules.forEach((m: any) => {
+        const mid = String(m?.id || '');
+        const cid = String(m?.course_id || '');
+        if (mid && cid) moduleToCourse[mid] = cid;
       });
 
-      const attemptedQuizIds = new Set((attemptsSnap.data || []).map((a: any) => a.quiz_id));
+      const lessonsByCourse = lessonsByCourseSnap.data || [];
+      const lessonsCountByCourse: Record<string, number> = {};
+      const lessonIdsByCourse: Record<string, string[]> = {};
+      (lessonsByCourse || []).forEach((l: any) => {
+        const lid = String(l?.id || '');
+        const directCourseId = String(l?.course_id || '');
+        const mappedCourseId = directCourseId || moduleToCourse[String(l?.module_id || '')] || '';
+        if (!lid || !mappedCourseId) return;
+        lessonsCountByCourse[mappedCourseId] = (lessonsCountByCourse[mappedCourseId] || 0) + 1;
+        if (!lessonIdsByCourse[mappedCourseId]) lessonIdsByCourse[mappedCourseId] = [];
+        lessonIdsByCourse[mappedCourseId].push(lid);
+      });
+
+      const quizRowsByCourse = await selectPublishedQuizzesCompat(supabase, courseIds, 'id, course_id, lesson_id');
+      const allLessonIds = Object.values(lessonIdsByCourse).flat();
+      const quizRowsByLesson = allLessonIds.length > 0
+        ? await supabase.from('quizzes').select('id, lesson_id').in('lesson_id', allLessonIds)
+        : { data: [] as any[] };
+
+      const quizzesByCourse: Record<string, string[]> = {};
+      (quizRowsByCourse || []).forEach((q: any) => {
+        const cid = String(q?.course_id || '');
+        const qid = String(q?.id || '');
+        if (!cid || !qid) return;
+        if (!quizzesByCourse[cid]) quizzesByCourse[cid] = [];
+        if (!quizzesByCourse[cid].includes(qid)) quizzesByCourse[cid].push(qid);
+      });
+      (quizRowsByLesson.data || []).forEach((q: any) => {
+        const lessonId = String(q?.lesson_id || '');
+        const qid = String(q?.id || '');
+        if (!lessonId || !qid) return;
+        const cid = Object.keys(lessonIdsByCourse).find((courseKey) => lessonIdsByCourse[courseKey].includes(lessonId));
+        if (!cid) return;
+        if (!quizzesByCourse[cid]) quizzesByCourse[cid] = [];
+        if (!quizzesByCourse[cid].includes(qid)) quizzesByCourse[cid].push(qid);
+      });
+
+      const attemptedQuizIds = new Set((attemptsSnap || []).map((a: any) => a.quiz_id));
       const teacherMap: Record<string, string> = {};
       (teachersSnap.data || []).forEach((t: any) => { teacherMap[t.id] = t.display_name || 'Unknown'; });
 
       const mapped: CourseData[] = rawCourses.map((c: any) => {
         const cQuizzes = quizzesByCourse[c.id] || [];
         const attempted = cQuizzes.filter(qid => attemptedQuizIds.has(qid)).length;
+        const courseStudentIds = Array.isArray(c.student_ids) ? c.student_ids.map((sid: unknown) => String(sid)) : [];
         return {
           id: c.id,
           title: c.title || 'Untitled Course',
           description: c.description || c.short_description || '',
           level: c.level || '',
           language: c.language || '',
-          total_lessons: c.total_lessons ?? 0,
+          total_lessons: lessonsCountByCourse[c.id] ?? c.total_lessons ?? 0,
           total_students: c.total_students ?? 0,
           teacher_id: c.teacher_id,
           teacher_name: teacherMap[c.teacher_id] || 'Your Teacher',
           quizCount: cQuizzes.length,
           attemptedQuizzes: attempted,
           status: c.status || 'published',
+          isEnrolled: courseStudentIds.includes(uid),
         };
       });
 
@@ -292,6 +388,35 @@ export default function StudentCourses() {
     };
     fetchData();
   }, []);
+
+  const enrollInCourse = async (courseId: string) => {
+    if (!studentId || enrollingCourseId) return;
+    setEnrollingCourseId(courseId);
+    try {
+      const res = await authFetch(`/api/student/courses/${encodeURIComponent(courseId)}/enroll`, {
+        method: 'POST',
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok || !json?.success) throw new Error(json?.error || 'Failed to enroll');
+      toast.success('Enrollment successful');
+
+      setCourses((prev) =>
+        prev.map((course) =>
+          course.id === courseId
+            ? {
+                ...course,
+                isEnrolled: true,
+                total_students: (course.total_students || 0) + 1,
+              }
+            : course
+        )
+      );
+    } catch (e) {
+      toast.error((e as Error)?.message || 'Failed to enroll');
+    } finally {
+      setEnrollingCourseId(null);
+    }
+  };
 
   const firstName = studentName.split(' ')[0] || 'Student';
 
@@ -480,7 +605,13 @@ export default function StudentCourses() {
         ) : (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
             {filtered.map((course, i) => (
-              <CourseCard key={course.id} course={course} index={i} />
+              <CourseCard
+                key={course.id}
+                course={course}
+                index={i}
+                onEnroll={enrollInCourse}
+                enrolling={enrollingCourseId === course.id}
+              />
             ))}
           </div>
         )}

@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { supabase } from '../../supabase';
 import { UserProfile } from '../../types';
-import { Users, UserPlus, Search, UserCheck, UserX, BookOpen, X } from 'lucide-react';
+import { Users, UserPlus, Search, UserCheck, UserX, BookOpen, X, Pencil, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
 import AdminLayout from '../../components/layout/AdminLayout';
 import { cn } from '../../lib/utils';
@@ -92,6 +92,38 @@ export default function AdminStudents() {
       toast.success(`Student ${newStatus === 'active' ? 'activated' : 'deactivated'}`);
       fetchData();
     } catch { toast.error('Failed to update status'); }
+  };
+
+  const editStudent = async (student: StudentWithMeta) => {
+    const displayName = window.prompt('Student name', student.displayName || '');
+    if (displayName === null) return;
+    const email = window.prompt('Student email', student.email || '');
+    if (email === null) return;
+    try {
+      const res = await authFetch(apiUrl(`/api/admin/students/${encodeURIComponent(student.uid)}`), {
+        method: 'PATCH',
+        body: JSON.stringify({ display_name: displayName, email }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok || !json?.success) throw new Error(json?.error || 'Failed to update student');
+      toast.success('Student updated');
+      fetchData();
+    } catch (e: any) {
+      toast.error(e?.message || 'Failed to update student');
+    }
+  };
+
+  const deleteStudent = async (student: StudentWithMeta) => {
+    if (!window.confirm(`Delete student "${student.displayName || student.email}"?`)) return;
+    try {
+      const res = await authFetch(apiUrl(`/api/admin/students/${encodeURIComponent(student.uid)}`), { method: 'DELETE' });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok || !json?.success) throw new Error(json?.error || 'Failed to delete student');
+      toast.success('Student deleted');
+      fetchData();
+    } catch (e: any) {
+      toast.error(e?.message || 'Failed to delete student');
+    }
   };
 
   const filtered = students.filter(s => {
@@ -202,19 +234,37 @@ export default function AdminStudents() {
                           <div className="text-sm font-semibold text-slate-900 truncate">{student.displayName || '—'}</div>
                           <div className="text-xs text-slate-400 truncate">{student.email}</div>
                         </div>
-                        <button
-                          type="button"
-                          onClick={() => toggleStatus(student)}
-                          title={student.status === 'active' ? 'Deactivate' : 'Activate'}
-                          className={cn(
-                            'p-2 rounded-lg shrink-0 transition-all',
-                            student.status === 'active'
-                              ? 'text-slate-400 hover:text-orange-600 hover:bg-orange-50'
-                              : 'text-slate-400 hover:text-emerald-600 hover:bg-emerald-50'
-                          )}
-                        >
-                          {student.status === 'active' ? <UserX className="w-4 h-4" /> : <UserCheck className="w-4 h-4" />}
-                        </button>
+                        <div className="flex items-center gap-1 shrink-0">
+                          <button
+                            type="button"
+                            onClick={() => editStudent(student)}
+                            title="Edit"
+                            className="p-2 rounded-lg text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 transition-all"
+                          >
+                            <Pencil className="w-4 h-4" />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => toggleStatus(student)}
+                            title={student.status === 'active' ? 'Deactivate' : 'Activate'}
+                            className={cn(
+                              'p-2 rounded-lg transition-all',
+                              student.status === 'active'
+                                ? 'text-slate-400 hover:text-orange-600 hover:bg-orange-50'
+                                : 'text-slate-400 hover:text-emerald-600 hover:bg-emerald-50'
+                            )}
+                          >
+                            {student.status === 'active' ? <UserX className="w-4 h-4" /> : <UserCheck className="w-4 h-4" />}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => deleteStudent(student)}
+                            title="Delete"
+                            className="p-2 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 transition-all"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </div>
                       </div>
                       <div className="mt-4 space-y-2 text-xs">
                         <div className="flex items-center justify-between gap-2 text-slate-500">

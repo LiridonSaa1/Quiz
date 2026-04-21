@@ -187,13 +187,30 @@ export default function QuizBuilder() {
         setCourses(mapCourseRows(courseRows));
 
         if (quizId) {
-          const { data: quiz, error: quizError } = await supabase
-            .from('quizzes')
-            .select('*')
-            .eq('id', quizId)
-            .single();
+          let quiz: any | null = null;
 
-          if (quizError) throw quizError;
+          const quizBackendRes = await fetch(
+            apiUrl(`/api/teacher/quizzes?userId=${encodeURIComponent(session.user.id)}`)
+          );
+          if (quizBackendRes.ok) {
+            const quizBackendJson = await quizBackendRes.json();
+            if (quizBackendJson?.success && Array.isArray(quizBackendJson.quizzes)) {
+              quiz =
+                quizBackendJson.quizzes.find((row: any) => String(row?.id) === String(quizId)) || null;
+            }
+          }
+
+          if (!quiz) {
+            const { data: quizRows, error: quizError } = await supabase
+              .from('quizzes')
+              .select('*')
+              .eq('id', quizId)
+              .limit(1);
+            if (quizError) throw quizError;
+            quiz = Array.isArray(quizRows) && quizRows.length > 0 ? quizRows[0] : null;
+          }
+
+          if (!quiz) throw new Error('Quiz not found or you do not have access.');
 
           const row = quiz as Record<string, unknown>;
           const published =
@@ -213,15 +230,30 @@ export default function QuizBuilder() {
             createdAt: quiz.created_at
           } as Quiz);
 
-          const { data: questionsData, error: questionsError } = await supabase
-            .from('questions')
-            .select('*')
-            .eq('quiz_id', quizId)
-            .order('order', { ascending: true })
-            .order('created_at', { ascending: true });
+          let questionRows: any[] | null = null;
 
-          if (questionsError) throw questionsError;
-          setQuestions(questionsData.map((q) => ({
+          const questionsBackendRes = await authFetch(
+            `/api/teacher/quizzes/${encodeURIComponent(quizId)}/questions`
+          );
+          if (questionsBackendRes.ok) {
+            const questionsBackendJson = await questionsBackendRes.json();
+            if (questionsBackendJson?.success && Array.isArray(questionsBackendJson.questions)) {
+              questionRows = questionsBackendJson.questions;
+            }
+          }
+
+          if (questionRows === null) {
+            const { data: questionsData, error: questionsError } = await supabase
+              .from('questions')
+              .select('*')
+              .eq('quiz_id', quizId)
+              .order('order', { ascending: true })
+              .order('created_at', { ascending: true });
+            if (questionsError) throw questionsError;
+            questionRows = questionsData ?? [];
+          }
+
+          setQuestions(questionRows.map((q) => ({
             id: q.id,
             quizId: q.quiz_id,
             type: q.type,
@@ -247,17 +279,57 @@ export default function QuizBuilder() {
   }, [quizId]);
 
   const handleAIGenerateQuestions = async (input: string) => {
-    const generated = await generateQuizQuestions(input, 5);
-    const mapped: Partial<Question>[] = generated.map(q => ({
-      type: q.type as QuestionType,
-      text: q.text,
-      options: q.options,
-      correctAnswer: q.correctAnswer,
-      explanation: q.explanation,
-      points: q.points,
-    }));
-    setQuestions(prev => [...prev, ...mapped]);
-    toast.success(`Added ${mapped.length} AI-generated questions!`);
+    const generated = await generateQuizQuestions(input);
+    if (!generated.length) {
+      throw new Error('No questions could be generated from this content. Please add more source text.');
+    }
+
+    const existingTexts = new Set(
+      questions
+        .map((q) => String(q.text || '').trim().toLowerCase())
+        .filter(Boolean),
+    );
+
+    const mapped: Partial<Question>[] = [];
+
+    for (const q of generated) {
+      const text = String(q.text || '').trim();
+      if (!text) continue;
+      const key = text.toLowerCase();
+      if (existingTexts.has(key)) continue;
+      existingTexts.add(key);
+
+      const safeOptions = Array.isArray(q.options)
+        ? q.options
+            .slice(0, 4)
+            .map((opt, idx) => ({ id: String(idx + 1), text: String(opt?.text || `Option ${idx + 1}`) }))
+        : [];
+
+      while (safeOptions.length < 4) {
+        safeOptions.push({
+          id: String(safeOptions.length + 1),
+          text: `Option ${safeOptions.length + 1}`,
+        });
+      }
+
+      const correctAnswer = safeOptions.some((opt) => opt.id === q.correctAnswer) ? q.correctAnswer : safeOptions[0].id;
+
+      mapped.push({
+        type: 'multiple-choice',
+        text,
+        options: safeOptions,
+        correctAnswer,
+        explanation: typeof q.explanation === 'string' ? q.explanation : '',
+        points: Number.isFinite(q.points) ? Math.max(1, Number(q.points)) : 1,
+      });
+    }
+
+    if (!mapped.length) {
+      throw new Error('No new unique questions were generated. Try adding more content detail.');
+    }
+
+    setQuestions((prev) => [...prev, ...mapped]);
+    toast.success(`Added ${mapped.length} AI-generated multiple-choice questions.`);
   };
 
   const addQuestion = (type: QuestionType) => {
@@ -525,9 +597,12 @@ export default function QuizBuilder() {
               open={aiOpen}
               onClose={() => setAiOpen(false)}
               label="AI Question Generator"
-              description="Describe a topic — AI will generate 5 quiz questions"
-              placeholder='e.g. "French Revolution — causes, timeline, and outcomes — mix MCQ and true/false"'
+              description="Paste lesson text/transcript or upload a transcript file. AI will auto-decide how many MCQ to generate."
+              placeholder='Paste source content here (lesson text, audio/video transcript, notes)...'
               buttonLabel="Generate Questions"
+              allowTextFileUpload
+              fileUploadLabel="Upload transcript/text file"
+              fileUploadHint="Supported: .txt, .md, .srt, .vtt, .json, .csv"
               onSubmit={handleAIGenerateQuestions}
             />
 
@@ -1041,3 +1116,4 @@ export default function QuizBuilder() {
     </TeacherLayout>
   );
 }
+

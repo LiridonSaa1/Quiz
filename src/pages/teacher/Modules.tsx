@@ -3,7 +3,7 @@ import { supabase } from '../../supabase';
 import TeacherLayout from '../../components/layout/TeacherLayout';
 import {
   Plus, Search, Layers, Trash2, Edit2,
-  BookOpen, X, Save, PlayCircle, ChevronRight
+  BookOpen, X, Save, PlayCircle, ChevronRight, HelpCircle
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { Module, Course } from '../../types';
@@ -153,7 +153,46 @@ export default function TeacherModules() {
         modulesData = fallback || [];
       }
 
-      setModules((modulesData || []).map(m => ({
+      const normalizedModules = modulesData || [];
+      const moduleIds = normalizedModules.map((m: any) => String(m.id)).filter(Boolean);
+      const lessonCountByModule: Record<string, number> = {};
+      const quizCountByModule: Record<string, number> = {};
+
+      if (moduleIds.length > 0) {
+        const { data: lessonRows, error: lessonErr } = await supabase
+          .from('lessons')
+          .select('id, module_id')
+          .in('module_id', moduleIds);
+        if (lessonErr) throw lessonErr;
+
+        const lessonIds: string[] = [];
+        const moduleByLessonId: Record<string, string> = {};
+        (lessonRows || []).forEach((l: any) => {
+          const moduleId = String(l?.module_id || '');
+          const lessonId = String(l?.id || '');
+          if (!moduleId || !lessonId) return;
+          lessonCountByModule[moduleId] = (lessonCountByModule[moduleId] || 0) + 1;
+          moduleByLessonId[lessonId] = moduleId;
+          lessonIds.push(lessonId);
+        });
+
+        if (lessonIds.length > 0) {
+          const { data: quizRows, error: quizErr } = await supabase
+            .from('quizzes')
+            .select('id, lesson_id')
+            .in('lesson_id', lessonIds);
+          if (quizErr) throw quizErr;
+
+          (quizRows || []).forEach((q: any) => {
+            const lessonId = String(q?.lesson_id || '');
+            const moduleId = moduleByLessonId[lessonId];
+            if (!moduleId) return;
+            quizCountByModule[moduleId] = (quizCountByModule[moduleId] || 0) + 1;
+          });
+        }
+      }
+
+      setModules((normalizedModules || []).map(m => ({
         id: m.id,
         courseId: m.course_id,
         title: m.title,
@@ -161,7 +200,8 @@ export default function TeacherModules() {
         description: m.description,
         order: m.order,
         status: normalizeModuleStatus(m.status),
-        totalLessons: m.total_lessons || 0,
+        totalLessons: lessonCountByModule[String(m.id)] ?? m.total_lessons ?? 0,
+        totalQuizzes: quizCountByModule[String(m.id)] ?? m.total_quizzes ?? 0,
         createdAt: m.created_at,
         updatedAt: m.updated_at,
       })));
@@ -585,8 +625,15 @@ export default function TeacherModules() {
                               <span className="truncate">{getCourseTitle(mod.courseId)}</span>
                             </span>
                             <span className="inline-flex items-center gap-1 text-xs text-slate-400">
-                              <PlayCircle className="w-3.5 h-3.5 text-slate-300" />
+                              <BookOpen className="w-3.5 h-3.5 text-slate-300" />
                               {mod.totalLessons} lesson{mod.totalLessons !== 1 ? 's' : ''}
+                            </span>
+                          </div>
+                          <div className="flex items-center justify-between">
+                            <span className="text-[11px] text-slate-400">Quiz count</span>
+                            <span className="inline-flex items-center gap-1 text-xs text-slate-500">
+                              <HelpCircle className="w-3.5 h-3.5 text-slate-300" />
+                              {mod.totalQuizzes || 0} quiz{(mod.totalQuizzes || 0) !== 1 ? 'zes' : ''}
                             </span>
                           </div>
                           <div className="flex items-center gap-1">

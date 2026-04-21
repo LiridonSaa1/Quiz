@@ -162,10 +162,19 @@ export default function TeacherCourses() {
   const toggleStatus = async (course: any) => {
     const newStatus = course.status === 'published' ? 'draft' : 'published';
     try {
-      await supabase.from('courses').update({ status: newStatus }).eq('id', course.id);
+      const res = await authFetch(`/api/teacher/courses/${encodeURIComponent(course.id)}/status`, {
+        method: 'PATCH',
+        body: JSON.stringify({ status: newStatus }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok || !json?.success) {
+        throw new Error(json?.error || 'Failed to update status');
+      }
       toast.success(`Course ${newStatus === 'published' ? 'published' : 'set to draft'}`);
       fetchCourses();
-    } catch { toast.error('Failed to update status'); }
+    } catch (e: any) {
+      toast.error(e?.message || 'Failed to update status');
+    }
   };
 
   const filtered = courses.filter(c => {

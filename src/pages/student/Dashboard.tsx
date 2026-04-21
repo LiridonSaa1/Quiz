@@ -7,6 +7,7 @@ import { Link } from 'react-router-dom';
 import { Quiz } from '../../types';
 import { cn } from '../../lib/utils';
 import { fetchAttemptRowsByStudentId, normalizeAttempts } from '../../lib/quizAttempts';
+import { selectPublishedQuizzesCompat } from '../../lib/quizzesCompat';
 
 interface LiveSessionBanner {
   id: string;
@@ -31,25 +32,25 @@ export default function StudentDashboard() {
         let quizzes: Quiz[] = [];
         let attempts: any[] = [];
 
-        const coursesSnap = await supabase
-          .from('courses')
-          .select('*')
-          .contains('student_ids', [studentId]);
-        if (!coursesSnap.error) {
-          courses = coursesSnap.data || [];
+        const profileSnap = await supabase
+          .from('profiles')
+          .select('teacher_id')
+          .eq('id', studentId)
+          .single();
+        const linkedTeacherId = profileSnap.data?.teacher_id || null;
+        if (linkedTeacherId) {
+          const coursesRes = await authFetch(`/api/teacher/courses?userId=${encodeURIComponent(String(linkedTeacherId))}`);
+          const coursesJson = coursesRes.ok ? await coursesRes.json() : { courses: [] };
+          courses = Array.isArray(coursesJson?.courses)
+            ? coursesJson.courses.filter((c: any) => String(c?.status || '').toLowerCase() === 'published')
+            : [];
         }
         setEnrolledCourses(courses);
 
         if (courses.length > 0) {
           const courseIds = courses.map((c: any) => c.id);
-          const quizzesSnap = await supabase
-            .from('quizzes')
-            .select('*')
-            .in('course_id', courseIds)
-            .eq('published', true);
-          if (!quizzesSnap.error) {
-            quizzes = (quizzesSnap.data as any) || [];
-          }
+          const quizRows = await selectPublishedQuizzesCompat(supabase, courseIds, '*');
+          quizzes = (quizRows as any) || [];
         }
         setAvailableQuizzes(quizzes);
 

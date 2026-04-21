@@ -6,6 +6,7 @@ import { BarChart3, Search, CheckCircle2, XCircle, Trophy, Clock, ChevronRight, 
 import { Link } from 'react-router-dom';
 import { cn } from '../../lib/utils';
 import { format } from 'date-fns';
+import { fetchAttemptRowsByStudentId } from '../../lib/quizAttempts';
 
 type TabFilter = 'all' | 'passed' | 'failed';
 
@@ -22,8 +23,8 @@ export default function StudentResults() {
       if (!session) return;
       const uid = session.user.id;
 
-      const [attemptsSnap, coursesSnap] = await Promise.all([
-        supabase.from('attempts').select('*').eq('student_id', uid).order('completed_at', { ascending: false }),
+      const [attemptRows, coursesSnap] = await Promise.all([
+        fetchAttemptRowsByStudentId(supabase, uid),
         supabase.from('courses').select('id').contains('student_ids', [uid]),
       ]);
 
@@ -35,7 +36,7 @@ export default function StudentResults() {
         setQuizMap(m);
       }
 
-      setAttempts(attemptsSnap.data || []);
+      setAttempts(attemptRows || []);
       setLoading(false);
     };
     load();

@@ -118,14 +118,6 @@ export default function QuizManagement() {
         quizRows = await fetchTeacherQuizzesFromSupabase(supabase, scopedIds, session.user.id);
       }
 
-      let questionsSnapData: { quiz_id: string }[] | null = null;
-      const qCount = await supabase.from('questions').select('quiz_id');
-      if (qCount.error) {
-        questionsSnapData = [];
-      } else {
-        questionsSnapData = (qCount.data ?? []) as { quiz_id: string }[];
-      }
-
       const courseMap: Record<string, string> = {};
       const options: { id: string; name: string }[] = [];
       (courseRows || []).forEach(c => {
@@ -135,10 +127,27 @@ export default function QuizManagement() {
       setCourseOptions(options);
 
       const questionCountMap: Record<string, number> = {};
-      (questionsSnapData || []).forEach((q: { quiz_id: string }) => {
-        if (!q?.quiz_id) return;
-        questionCountMap[q.quiz_id] = (questionCountMap[q.quiz_id] || 0) + 1;
-      });
+      const countRes = await authFetch(
+        `/api/teacher/quizzes/question-counts?userId=${encodeURIComponent(session.user.id)}`
+      );
+      if (countRes.ok) {
+        const countJson = await countRes.json();
+        if (countJson?.success && countJson.counts && typeof countJson.counts === 'object') {
+          Object.entries(countJson.counts as Record<string, unknown>).forEach(([quizId, count]) => {
+            const n = Number(count);
+            questionCountMap[quizId] = Number.isFinite(n) ? Math.max(0, Math.floor(n)) : 0;
+          });
+        }
+      } else {
+        // Fallback for older API: may still be limited by RLS in some environments.
+        const qCount = await supabase.from('questions').select('quiz_id');
+        if (!qCount.error) {
+          (qCount.data ?? []).forEach((q: { quiz_id: string }) => {
+            if (!q?.quiz_id) return;
+            questionCountMap[q.quiz_id] = (questionCountMap[q.quiz_id] || 0) + 1;
+          });
+        }
+      }
 
       setQuizzes((quizRows || []).map((d: Record<string, any>) => ({
         id: d.id,

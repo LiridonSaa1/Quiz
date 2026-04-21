@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { supabase } from '../../supabase';
 import { UserProfile } from '../../types';
-import { ShieldCheck, UserPlus, Search, UserCheck, UserX } from 'lucide-react';
+import { ShieldCheck, UserPlus, Search, UserCheck, UserX, Pencil, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
 import AdminLayout from '../../components/layout/AdminLayout';
 import { cn } from '../../lib/utils';
@@ -14,6 +14,7 @@ import {
   ADMIN_LIST_CARD_GRID,
   ADMIN_LIST_ITEM_CARD,
 } from '../../components/admin/AdminListPageShell';
+import { authFetch, apiUrl } from '../../lib/apiUrl';
 
 const AVATAR_COLORS = [
   'from-violet-500 to-indigo-600',
@@ -59,6 +60,38 @@ export default function AdminTeachers() {
       fetchUsers();
     } catch {
       toast.error('Failed to update teacher status');
+    }
+  };
+
+  const editTeacher = async (user: UserProfile) => {
+    const displayName = window.prompt('Teacher name', user.displayName || '');
+    if (displayName === null) return;
+    const email = window.prompt('Teacher email', user.email || '');
+    if (email === null) return;
+    try {
+      const res = await authFetch(apiUrl(`/api/admin/teachers/${encodeURIComponent(user.uid)}`), {
+        method: 'PATCH',
+        body: JSON.stringify({ display_name: displayName, email }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok || !json?.success) throw new Error(json?.error || 'Failed to update teacher');
+      toast.success('Teacher updated');
+      fetchUsers();
+    } catch (e: any) {
+      toast.error(e?.message || 'Failed to update teacher');
+    }
+  };
+
+  const deleteTeacher = async (user: UserProfile) => {
+    if (!window.confirm(`Delete teacher "${user.displayName || user.email}"?`)) return;
+    try {
+      const res = await authFetch(apiUrl(`/api/admin/teachers/${encodeURIComponent(user.uid)}`), { method: 'DELETE' });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok || !json?.success) throw new Error(json?.error || 'Failed to delete teacher');
+      toast.success('Teacher deleted');
+      fetchUsers();
+    } catch (e: any) {
+      toast.error(e?.message || 'Failed to delete teacher');
     }
   };
 
@@ -143,19 +176,37 @@ export default function AdminTeachers() {
                         <div className="text-xs text-slate-400 truncate">{user.email}</div>
                       </div>
                     </div>
-                    <button
-                      type="button"
-                      onClick={() => toggleUserStatus(user)}
-                      title={user.status === 'active' ? 'Deactivate' : 'Activate'}
-                      className={cn(
-                        'p-2 rounded-lg shrink-0 transition-all',
-                        user.status === 'active'
-                          ? 'text-slate-400 hover:text-orange-600 hover:bg-orange-50'
-                          : 'text-slate-400 hover:text-emerald-600 hover:bg-emerald-50'
-                      )}
-                    >
-                      {user.status === 'active' ? <UserX className="w-4 h-4" /> : <UserCheck className="w-4 h-4" />}
-                    </button>
+                    <div className="flex items-center gap-1 shrink-0">
+                      <button
+                        type="button"
+                        onClick={() => editTeacher(user)}
+                        title="Edit"
+                        className="p-2 rounded-lg text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 transition-all"
+                      >
+                        <Pencil className="w-4 h-4" />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => toggleUserStatus(user)}
+                        title={user.status === 'active' ? 'Deactivate' : 'Activate'}
+                        className={cn(
+                          'p-2 rounded-lg transition-all',
+                          user.status === 'active'
+                            ? 'text-slate-400 hover:text-orange-600 hover:bg-orange-50'
+                            : 'text-slate-400 hover:text-emerald-600 hover:bg-emerald-50'
+                        )}
+                      >
+                        {user.status === 'active' ? <UserX className="w-4 h-4" /> : <UserCheck className="w-4 h-4" />}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => deleteTeacher(user)}
+                        title="Delete"
+                        className="p-2 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 transition-all"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    </div>
                   </div>
                   <div className="mt-4 flex flex-wrap items-center gap-2 justify-between text-xs">
                     <span className={cn(

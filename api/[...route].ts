@@ -1,13 +1,14 @@
 import type { Express } from "express";
-import { createApp } from "../server.ts";
 
 let cachedAppPromise: Promise<Express> | null = null;
 
-const getApp = () => {
+const getApp = async () => {
   if (!cachedAppPromise) {
-    cachedAppPromise = createApp({ includeFrontend: false });
+    cachedAppPromise = import("../server.js").then(({ createApp }) =>
+      createApp({ includeFrontend: false }),
+    );
   }
-  return cachedAppPromise;
+  return await cachedAppPromise;
 };
 
 export default async function handler(req: any, res: any) {

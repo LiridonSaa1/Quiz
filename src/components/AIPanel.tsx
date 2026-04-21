@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Sparkles, X, Send, Loader2, AlertCircle } from 'lucide-react';
+import { Sparkles, X, Send, Loader2, AlertCircle, Paperclip } from 'lucide-react';
 
 interface AIPanelProps {
   placeholder?: string;
@@ -9,7 +9,14 @@ interface AIPanelProps {
   onSubmit: (input: string) => Promise<void>;
   open: boolean;
   onClose: () => void;
+  allowTextFileUpload?: boolean;
+  acceptedTextFileTypes?: string;
+  fileUploadLabel?: string;
+  fileUploadHint?: string;
+  maxTextFileChars?: number;
 }
+
+const DEFAULT_TEXT_FILE_TYPES = '.txt,.md,.srt,.vtt,.json,.csv,text/plain,text/vtt,application/json,text/csv';
 
 export function AIPanel({
   placeholder = 'Describe what you want to create...',
@@ -19,19 +26,52 @@ export function AIPanel({
   onSubmit,
   open,
   onClose,
+  allowTextFileUpload = false,
+  acceptedTextFileTypes = DEFAULT_TEXT_FILE_TYPES,
+  fileUploadLabel = 'Attach transcript/text file',
+  fileUploadHint = 'Supported: .txt, .md, .srt, .vtt, .json, .csv',
+  maxTextFileChars = 20000,
 }: AIPanelProps) {
-  const [input, setInput]     = useState('');
+  const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
-  const [error, setError]     = useState<string | null>(null);
-  const textareaRef           = useRef<HTMLTextAreaElement>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [attachedFile, setAttachedFile] = useState<string>('');
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   useEffect(() => {
     if (open) {
       setInput('');
       setError(null);
+      setAttachedFile('');
       setTimeout(() => textareaRef.current?.focus(), 80);
     }
   }, [open]);
+
+  const handleFilePick = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file || loading) return;
+
+    try {
+      const raw = await file.text();
+      const cleaned = raw.replace(/\r/g, '\n').replace(/\u0000/g, '').trim();
+      if (!cleaned) {
+        setError('The uploaded file is empty. Please upload a file with transcript/text content.');
+        return;
+      }
+
+      const clipped = cleaned.length > maxTextFileChars ? cleaned.slice(0, maxTextFileChars) : cleaned;
+      setInput((prev) => (prev.trim() ? `${prev.trim()}\n\n${clipped}` : clipped));
+      setAttachedFile(
+        cleaned.length > maxTextFileChars
+          ? `${file.name} (trimmed to ${maxTextFileChars.toLocaleString()} chars)`
+          : `${file.name} (${cleaned.length.toLocaleString()} chars)`,
+      );
+      setError(null);
+    } catch {
+      setError('Could not read this file. Please upload a plain text or transcript file.');
+    }
+  };
 
   const handleSubmit = async () => {
     if (!input.trim() || loading) return;
@@ -40,9 +80,10 @@ export function AIPanel({
     try {
       await onSubmit(input.trim());
       setInput('');
+      setAttachedFile('');
       onClose();
     } catch (e: any) {
-      setError(e?.message || 'Something went wrong. Check your Gemini API key.');
+      setError(e?.message || 'Something went wrong. Check your AI key/configuration.');
     } finally {
       setLoading(false);
     }
@@ -52,21 +93,14 @@ export function AIPanel({
 
   return (
     <div className="fixed inset-0 z-[90] flex items-end sm:items-center justify-center p-4">
-      {/* Backdrop */}
-      <button
-        className="absolute inset-0 bg-black/50 backdrop-blur-sm"
-        onClick={onClose}
-        disabled={loading}
-      />
+      <button className="absolute inset-0 bg-black/50 backdrop-blur-sm" onClick={onClose} disabled={loading} />
 
-      {/* Panel */}
-      <div className="relative w-full max-w-lg rounded-2xl overflow-hidden shadow-2xl"
-        style={{ background: 'linear-gradient(145deg,#0f1117,#14101f)' }}>
-
-        {/* Top gradient accent */}
+      <div
+        className="relative w-full max-w-lg rounded-2xl overflow-hidden shadow-2xl"
+        style={{ background: 'linear-gradient(145deg,#0f1117,#14101f)' }}
+      >
         <div className="h-px bg-gradient-to-r from-transparent via-violet-500/60 to-transparent" />
 
-        {/* Header */}
         <div className="flex items-center justify-between px-5 pt-5 pb-4 border-b border-white/[0.06]">
           <div className="flex items-center gap-3">
             <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-violet-500 to-indigo-600 flex items-center justify-center shadow-lg shadow-violet-900/50">
@@ -86,18 +120,42 @@ export function AIPanel({
           </button>
         </div>
 
-        {/* Body */}
         <div className="p-5 space-y-4">
           <textarea
             ref={textareaRef}
             value={input}
-            onChange={e => setInput(e.target.value)}
-            onKeyDown={e => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) handleSubmit(); }}
+            onChange={(e) => setInput(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) handleSubmit();
+            }}
             placeholder={placeholder}
-            rows={4}
+            rows={6}
             disabled={loading}
             className="w-full rounded-xl px-4 py-3 text-sm text-white placeholder:text-slate-600 bg-white/[0.05] border border-white/[0.08] focus:outline-none focus:border-violet-500/50 focus:bg-violet-500/5 transition-all resize-none leading-relaxed disabled:opacity-50"
           />
+
+          {allowTextFileUpload && (
+            <div className="rounded-xl border border-white/[0.08] bg-white/[0.03] p-3">
+              <label className="flex items-center justify-between gap-3 cursor-pointer">
+                <span className="inline-flex items-center gap-2 text-xs font-semibold text-slate-200">
+                  <Paperclip className="w-3.5 h-3.5 text-violet-400" />
+                  {fileUploadLabel}
+                </span>
+                <input
+                  type="file"
+                  accept={acceptedTextFileTypes}
+                  className="hidden"
+                  onChange={(e) => void handleFilePick(e)}
+                  disabled={loading}
+                />
+                <span className="text-[11px] font-semibold text-violet-300 px-2.5 py-1 rounded-lg bg-violet-500/10 border border-violet-500/20">
+                  Upload
+                </span>
+              </label>
+              <p className="text-[11px] text-slate-500 mt-2">{fileUploadHint}</p>
+              {attachedFile && <p className="text-[11px] text-emerald-300 mt-1.5">Attached: {attachedFile}</p>}
+            </div>
+          )}
 
           {error && (
             <div className="flex items-start gap-2.5 p-3 bg-red-500/10 border border-red-500/20 rounded-xl">
@@ -107,7 +165,7 @@ export function AIPanel({
           )}
 
           <div className="flex items-center justify-between gap-3">
-            <span className="text-[11px] text-slate-600">⌘ + Enter to generate</span>
+            <span className="text-[11px] text-slate-600">Ctrl/Cmd + Enter to generate</span>
             <div className="flex items-center gap-2">
               <button
                 onClick={onClose}
@@ -122,9 +180,13 @@ export function AIPanel({
                 className="flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-semibold text-white bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-500 hover:to-indigo-500 transition-all shadow-lg shadow-violet-900/40 disabled:opacity-40 disabled:cursor-not-allowed"
               >
                 {loading ? (
-                  <><Loader2 className="w-3.5 h-3.5 animate-spin" /> Generating…</>
+                  <>
+                    <Loader2 className="w-3.5 h-3.5 animate-spin" /> Generating...
+                  </>
                 ) : (
-                  <><Send className="w-3.5 h-3.5" /> {buttonLabel}</>
+                  <>
+                    <Send className="w-3.5 h-3.5" /> {buttonLabel}
+                  </>
                 )}
               </button>
             </div>
@@ -134,8 +196,6 @@ export function AIPanel({
     </div>
   );
 }
-
-/* ── Trigger button ─────────────────────────────────────────── */
 
 interface AITriggerProps {
   onClick: () => void;
