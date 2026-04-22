@@ -11,6 +11,11 @@ export default defineConfig(({mode}) => {
   // Default: API on 5000 (tsx server.ts). Vite dev server uses a different port so /api can proxy to Express
   // without binding the same port twice when you run `vite` and `tsx server.ts` in two terminals.
   const apiProxyTarget = (env.VITE_API_PROXY_TARGET || 'http://127.0.0.1:5000').replace(/\/$/, '');
+  const devPort = Number(env.VITE_DEV_PORT) || 5173;
+  const disableHmr = process.env.DISABLE_HMR === 'true';
+  const hmrHost = env.VITE_HMR_HOST || undefined;
+  const hmrPort = Number(env.VITE_HMR_PORT) || undefined;
+  const hmrClientPort = Number(env.VITE_HMR_CLIENT_PORT) || undefined;
   return {
     plugins: [react(), tailwindcss()],
     define: {
@@ -23,9 +28,16 @@ export default defineConfig(({mode}) => {
     },
     server: {
       host: '0.0.0.0',
-      port: Number(env.VITE_DEV_PORT) || 5173,
+      port: devPort,
       allowedHosts: true,
-      hmr: process.env.DISABLE_HMR !== 'true',
+      hmr: disableHmr
+        ? false
+        : {
+            host: hmrHost,
+            port: hmrPort,
+            clientPort: hmrClientPort,
+            protocol: 'ws',
+          },
       proxy: {
         '/api': {
           target: apiProxyTarget,

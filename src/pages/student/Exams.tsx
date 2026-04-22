@@ -9,9 +9,7 @@ import {
 } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { useNavigate } from 'react-router-dom';
-import { selectPublishedQuizzesCompat } from '../../lib/quizzesCompat';
 import { authFetch } from '../../lib/apiUrl';
-import { resolveTeacherIdCandidates } from '../../lib/teacherScope';
 import { fetchAttemptRowsByStudentId } from '../../lib/quizAttempts';
 
 interface ExamEntry {
@@ -53,50 +51,51 @@ export default function StudentExams() {
       }
       const uid = session.user.id;
 
-      const profileSnap = await supabase
-        .from('profiles')
-        .select('teacher_id')
-        .eq('id', uid)
-        .single();
-      const linkedTeacherId = String(profileSnap.data?.teacher_id || '').trim();
-      if (!linkedTeacherId) {
-        setLoading(false);
-        return;
-      }
+      const { data: enrolledCourses } = await supabase
+        .from('courses')
+        .select('id, title, status, student_ids')
+        .contains('student_ids', [uid]);
 
-      const teacherIdCandidates = await resolveTeacherIdCandidates(linkedTeacherId);
-      const scopedTeacherIds = teacherIdCandidates.length > 0 ? teacherIdCandidates : [linkedTeacherId];
-
-      const coursesRes = await authFetch(`/api/teacher/courses?userId=${encodeURIComponent(linkedTeacherId)}`);
-      const coursesJson = coursesRes.ok ? await coursesRes.json() : { courses: [] };
-      const coursesData = Array.isArray(coursesJson?.courses)
-        ? coursesJson.courses.filter((c: any) => {
-            const isPublished = String(c?.status || '').toLowerCase() === 'published';
-            const isTeacherScoped = scopedTeacherIds.includes(String(c?.teacher_id || ''));
-            const studentIds = Array.isArray(c?.student_ids) ? c.student_ids.map((sid: unknown) => String(sid)) : [];
-            const isEnrolled = studentIds.includes(uid);
-            return isPublished && isTeacherScoped && isEnrolled;
-          })
-        : [];
+      const coursesData = (enrolledCourses || []).filter((c: any) => {
+        const status = String(c?.status || '').toLowerCase();
+        return status === '' || status === 'published' || status === 'active';
+      });
 
       if (!coursesData.length) {
         setLoading(false);
         return;
       }
 
-      const { data: coursesFallback } = await supabase
-        .from('courses')
-        .select('id, title')
-        .in('id', coursesData.map((c: any) => c.id));
-      const courseIds = (coursesFallback || coursesData || []).map((c: any) => c.id);
+      const courseIds = (coursesData || []).map((c: any) => c.id);
 
       if (!courseIds.length) { setLoading(false); return; }
 
       const courseMap: Record<string, string> = {};
-      (coursesFallback || coursesData || []).forEach((c: any) => { courseMap[c.id] = c.title; });
+      (coursesData || []).forEach((c: any) => { courseMap[c.id] = c.title; });
 
-      const quizRows = await selectPublishedQuizzesCompat(supabase, courseIds, '*');
-      const quizzesData = (quizRows || []).filter((q: any) => String(q?.type || '') === 'exam');
+      const examsByCourse: any[] = [];
+      await Promise.all(
+        courseIds.map(async (courseId: string) => {
+          try {
+            const res = await authFetch(`/api/student/quizzes?courseId=${encodeURIComponent(courseId)}`);
+            const json = await res.json().catch(() => ({}));
+            if (!res.ok) return;
+            const rows = Array.isArray(json?.quizzes) ? json.quizzes : [];
+            rows.forEach((row: any) => examsByCourse.push(row));
+          } catch {
+            // Ignore one-course failure and continue with others.
+          }
+        })
+      );
+      const uniqueQuizMap = new Map<string, any>();
+      examsByCourse.forEach((row: any) => {
+        const id = String(row?.id || '').trim();
+        if (!id) return;
+        if (!uniqueQuizMap.has(id)) uniqueQuizMap.set(id, row);
+      });
+      const quizzesData = Array.from(uniqueQuizMap.values()).filter(
+        (q: any) => String(q?.type || 'standard').toLowerCase() === 'exam'
+      );
 
       if (!quizzesData?.length) { setLoading(false); return; }
 
@@ -234,8 +233,17 @@ export default function StudentExams() {
 
       {/* Exam Cards */}
       {loading ? (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          {[...Array(4)].map((_, i) => <div key={i} className="h-56 bg-white rounded-2xl border border-slate-100 animate-pulse" />)}
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
+          {[...Array(6)].map((_, i) => (
+            <div key={i} className="bg-white rounded-3xl border border-slate-100 overflow-hidden shadow-sm">
+              <div className="h-3 bg-slate-200 animate-pulse" />
+              <div className="p-5 space-y-3">
+                <div className="h-5 w-3/4 bg-slate-100 rounded-xl animate-pulse" />
+                <div className="h-3 w-full bg-slate-100 rounded animate-pulse" />
+                <div className="h-10 bg-slate-100 rounded-2xl animate-pulse mt-4" />
+              </div>
+            </div>
+          ))}
         </div>
       ) : visible.length === 0 ? (
         <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }}
@@ -249,140 +257,72 @@ export default function StudentExams() {
           </p>
         </motion.div>
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
           <AnimatePresence>
             {visible.map((exam, i) => {
-              const statusColor = exam.passed
-                ? 'from-emerald-500 to-teal-500'
-                : !exam.canAttempt && exam.attemptsUsed > 0
-                  ? 'from-rose-500 to-red-500'
-                  : 'from-fuchsia-500 to-violet-500';
+              const statusColor = exam.passed ? 'from-emerald-500 to-teal-500' : 'from-violet-500 to-purple-500';
               const latestAttemptId = exam.attempts[0]?.id ? String(exam.attempts[0].id) : null;
-              const stateLabel = exam.passed ? 'Passed' : !exam.canAttempt && exam.attemptsUsed > 0 ? 'No attempts left' : 'Can attempt';
+              const stateLabel = exam.passed ? 'Passed' : exam.attemptsUsed > 0 ? 'Completed' : 'New';
+              const scorePct = exam.bestScore !== null ? Math.round(Number(exam.bestScore) || 0) : null;
 
               return (
                 <motion.div key={exam.id}
-                  initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0, scale: 0.95 }}
-                  transition={{ delay: i * 0.06 }}
-                  className="bg-white rounded-2xl border border-slate-100 shadow-sm hover:shadow-lg transition-all overflow-hidden group">
-                  {/* Top accent bar */}
+                  initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, scale: 0.95 }}
+                  transition={{ duration: 0.35, delay: i * 0.05 }}
+                  whileHover={{ y: -4, transition: { duration: 0.2 } }}
+                  className="bg-white rounded-3xl border border-slate-100 overflow-hidden shadow-sm hover:shadow-xl hover:shadow-slate-200/80 transition-shadow flex flex-col group">
                   <div className={cn('h-1.5 bg-gradient-to-r', statusColor)} />
-
-                  <div className="p-5">
-                    {/* Header */}
-                    <div className="flex items-start gap-3 mb-4">
-                      <div className={cn('w-11 h-11 rounded-xl flex items-center justify-center shrink-0 bg-gradient-to-br', statusColor)}>
-                        {exam.passed
-                          ? <Trophy className="w-5 h-5 text-white" />
-                          : !exam.canAttempt && exam.attemptsUsed > 0
-                            ? <Lock className="w-5 h-5 text-white" />
-                            : <GraduationCap className="w-5 h-5 text-white" />}
+                  <div className="p-5 flex flex-col flex-1">
+                    <div className="flex items-start justify-between mb-3">
+                      <div className="p-2.5 bg-violet-50 rounded-xl group-hover:bg-violet-100 transition-colors">
+                        <GraduationCap className="w-4 h-4 text-violet-600" />
                       </div>
-                      <div className="flex-1 min-w-0">
-                        <h3 className="text-slate-900 font-bold text-base leading-tight">{exam.title}</h3>
-                        <div className="flex items-center gap-1.5 mt-1">
-                          <BookOpen className="w-3 h-3 text-slate-400" />
-                          <span className="text-xs text-slate-400 truncate">{exam.courseName}</span>
-                        </div>
-                        <div className="mt-2">
-                          <span className={cn(
-                            'inline-flex items-center gap-1 text-[10px] font-bold px-2 py-1 rounded-full border',
-                            exam.passed
-                              ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
-                              : !exam.canAttempt && exam.attemptsUsed > 0
-                                ? 'bg-rose-50 text-rose-700 border-rose-200'
-                                : 'bg-blue-50 text-blue-700 border-blue-200'
-                          )}>
-                            {stateLabel}
-                          </span>
-                        </div>
-                        {exam.description && (
-                          <p className="text-xs text-slate-500 mt-1.5 line-clamp-2">{exam.description}</p>
-                        )}
+                      {scorePct !== null && (
+                        <span className={cn('text-xs font-bold px-2.5 py-1 rounded-xl',
+                          exam.passed ? 'bg-emerald-50 text-emerald-700' : 'bg-red-50 text-red-600')}>
+                          {scorePct}%
+                        </span>
+                      )}
+                    </div>
+                    <div className="flex-1">
+                      <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">{exam.courseName}</span>
+                      <h3 className="text-sm font-black text-slate-900 mt-0.5 mb-2 line-clamp-2 group-hover:text-violet-600 transition-colors">{exam.title}</h3>
+                      <p className="text-xs text-slate-400 line-clamp-2 leading-relaxed mb-4">{exam.description || 'Formal assessment for this course.'}</p>
+                      <div className="flex gap-2 mb-5">
+                        <span className="flex items-center gap-1 bg-slate-50 border border-slate-100 text-slate-500 text-[11px] font-semibold px-2 py-1 rounded-lg">
+                          <Clock className="w-3 h-3" /> {exam.timeLimit} min
+                        </span>
+                        <span className="flex items-center gap-1 bg-slate-50 border border-slate-100 text-slate-500 text-[11px] font-semibold px-2 py-1 rounded-lg">
+                          <FileText className="w-3 h-3" /> {exam.questionCount} Q
+                        </span>
+                        <span className={cn(
+                          'flex items-center gap-1 border text-[11px] font-semibold px-2 py-1 rounded-lg',
+                          exam.passed
+                            ? 'bg-emerald-50 border-emerald-100 text-emerald-700'
+                            : exam.attemptsUsed > 0
+                              ? 'bg-blue-50 border-blue-100 text-blue-700'
+                              : 'bg-violet-50 border-violet-100 text-violet-700'
+                        )}>
+                          {exam.passed ? <Trophy className="w-3 h-3" /> : exam.attemptsUsed > 0 ? <CheckCircle2 className="w-3 h-3" /> : <Zap className="w-3 h-3" />}
+                          {stateLabel}
+                        </span>
                       </div>
                     </div>
 
-                    {/* Info Grid */}
-                    <div className="grid grid-cols-3 gap-2 mb-4">
-                      {[
-                        { icon: Timer,    label: 'Minutes',   value: exam.timeLimit     },
-                        { icon: FileText, label: 'Questions', value: exam.questionCount },
-                        { icon: Target,   label: 'Pass Mark', value: `${exam.passMark}%` },
-                      ].map(m => (
-                        <div key={m.label} className="bg-slate-50 rounded-xl p-2.5 text-center">
-                          <m.icon className="w-3.5 h-3.5 text-slate-400 mx-auto mb-1" />
-                          <div className="text-sm font-black text-slate-800">{m.value}</div>
-                          <div className="text-[9px] text-slate-400 uppercase tracking-wide">{m.label}</div>
-                        </div>
-                      ))}
-                    </div>
-
-                    {/* Attempt History */}
-                    {exam.attempts.length > 0 && (
-                      <div className="mb-4 space-y-1.5">
-                        <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Attempt History</p>
-                        {exam.attempts.slice(0, 3).map((att, j) => (
-                          <div key={att.id} className="flex items-center justify-between bg-slate-50 rounded-lg px-3 py-2">
-                            <div className="flex items-center gap-2">
-                              {att.passed
-                                ? <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500" />
-                                : <XCircle className="w-3.5 h-3.5 text-rose-400" />}
-                              <span className="text-xs text-slate-600 font-medium">Attempt {j + 1}</span>
-                            </div>
-                            <div className="flex items-center gap-3">
-                              <span className={cn('text-xs font-black', att.passed ? 'text-emerald-600' : 'text-rose-500')}>
-                                {att.score}%
-                              </span>
-                              <span className={cn('text-[9px] font-bold px-1.5 py-0.5 rounded-md border',
-                                att.passed
-                                  ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
-                                  : 'bg-rose-50 text-rose-600 border-rose-200')}>
-                                {att.passed ? 'PASSED' : 'FAILED'}
-                              </span>
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-
-                    {/* Attempts counter */}
-                    <div className="flex items-center gap-2 mb-4">
-                      <div className="flex gap-1">
-                        {Array.from({ length: exam.maxAttempts }).map((_, j) => (
-                          <div key={j} className={cn('w-5 h-1.5 rounded-full',
-                            j < exam.attemptsUsed ? 'bg-rose-400' : 'bg-slate-200')} />
-                        ))}
-                      </div>
-                      <span className="text-[10px] text-slate-400 font-medium">
-                        {exam.attemptsUsed}/{exam.maxAttempts} attempts used
-                      </span>
-                    </div>
-
-                    {/* CTA */}
-                    {exam.passed ? (
-                      latestAttemptId ? (
-                        <button
-                          onClick={() => navigate(`/student/results/${latestAttemptId}`)}
-                          className="w-full flex items-center justify-center gap-2 bg-emerald-50 border border-emerald-200 text-emerald-700 py-2.5 rounded-xl text-sm font-bold hover:bg-emerald-100 transition-all"
-                        >
-                          <Trophy className="w-4 h-4" /> View Result
-                        </button>
-                      ) : (
-                        <div className="flex items-center justify-center gap-2 bg-emerald-50 border border-emerald-200 text-emerald-700 py-2.5 rounded-xl text-sm font-bold">
-                          <Trophy className="w-4 h-4" /> Passed
-                        </div>
-                      )
-                    ) : !exam.canAttempt ? (
-                      <div className="flex items-center justify-center gap-2 bg-slate-50 border border-slate-200 text-slate-400 py-2.5 rounded-xl text-sm font-bold">
-                        <Lock className="w-4 h-4" /> No Attempts Remaining
-                      </div>
-                    ) : (
+                    {exam.attemptsUsed === 0 && (
                       <button onClick={() => navigate(`/student/quiz/${exam.id}`)}
-                        className="w-full flex items-center justify-center gap-2 bg-gradient-to-r from-fuchsia-600 to-violet-600 hover:from-fuchsia-700 hover:to-violet-700 text-white py-2.5 rounded-xl text-sm font-bold transition-all shadow-lg shadow-fuchsia-500/20 group-hover:shadow-fuchsia-500/30">
-                        <Zap className="w-4 h-4" />
-                        {exam.attemptsUsed > 0 ? 'Retake' : 'Start'}
-                        <ChevronRight className="w-4 h-4" />
+                        className="flex items-center justify-center gap-2 w-full py-2.5 rounded-2xl text-sm font-bold transition-all bg-gradient-to-r from-violet-500 to-purple-500 text-white hover:opacity-90 shadow-lg shadow-violet-200/60">
+                        <Zap className="w-4 h-4" /> Start Exam
+                        <ChevronRight className="w-4 h-4 ml-auto" />
+                      </button>
+                    )}
+                    {exam.attemptsUsed > 0 && latestAttemptId && (
+                      <button
+                        onClick={() => navigate(`/student/results/${latestAttemptId}`)}
+                        className="mt-2 inline-flex items-center justify-center gap-2 w-full py-2.5 rounded-2xl text-xs font-bold transition-all bg-slate-100 text-slate-600 hover:bg-slate-200"
+                      >
+                        <CheckCircle2 className="w-3.5 h-3.5" />
+                        View Result
                       </button>
                     )}
                   </div>

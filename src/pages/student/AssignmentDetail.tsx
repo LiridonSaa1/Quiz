@@ -2,8 +2,6 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import StudentLayout from '../../components/layout/StudentLayout';
 import { supabase } from '../../supabase';
-import { authFetch } from '../../lib/apiUrl';
-import { resolveTeacherIdCandidates } from '../../lib/teacherScope';
 import { ArrowLeft, Calendar, BookOpen, ClipboardList, CheckCircle2, Circle } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { format, isPast, isToday } from 'date-fns';
@@ -65,29 +63,16 @@ export default function StudentAssignmentDetail() {
       const uid = session.user.id;
       setStudentId(uid);
 
-      const profileSnap = await supabase.from('profiles').select('teacher_id').eq('id', uid).single();
-      const linkedTeacherId = String(profileSnap.data?.teacher_id || '').trim();
-      if (!linkedTeacherId) {
-        setLoading(false);
-        return;
-      }
-
-      const teacherIdCandidates = await resolveTeacherIdCandidates(linkedTeacherId);
-      const scopedTeacherIds = teacherIdCandidates.length > 0 ? teacherIdCandidates : [linkedTeacherId];
-
-      const coursesRes = await authFetch(`/api/teacher/courses?userId=${encodeURIComponent(linkedTeacherId)}`);
-      const coursesJson = coursesRes.ok ? await coursesRes.json() : { courses: [] };
-      const courses = Array.isArray(coursesJson?.courses)
-        ? coursesJson.courses
-            .filter((c: any) => {
-              const isPublished = String(c?.status || '').toLowerCase() === 'published';
-              const isTeacherScoped = scopedTeacherIds.includes(String(c?.teacher_id || ''));
-              const studentIds = Array.isArray(c?.student_ids) ? c.student_ids.map((sid: unknown) => String(sid)) : [];
-              const isEnrolled = studentIds.includes(uid);
-              return isPublished && isTeacherScoped && isEnrolled;
-            })
-            .map((c: any) => ({ id: String(c.id), title: String(c.title || 'Course') }))
-        : [];
+      const { data: enrolledCourses } = await supabase
+        .from('courses')
+        .select('id,title,status,student_ids')
+        .contains('student_ids', [uid]);
+      const courses = (enrolledCourses || [])
+        .filter((c: any) => {
+          const status = String(c?.status || '').toLowerCase();
+          return status === '' || status === 'published' || status === 'active';
+        })
+        .map((c: any) => ({ id: String(c.id), title: String(c.title || 'Course') }));
       if (!courses.length) {
         setLoading(false);
         return;

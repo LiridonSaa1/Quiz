@@ -19,6 +19,7 @@ import { motion } from 'motion/react';
 import { LayoutPageSkeleton } from '../../components/ui/Skeleton';
 import { fetchAttemptRowById, normalizeAttempts } from '../../lib/quizAttempts';
 import { fetchStudentAccessibleQuizById } from '../../lib/studentQuizAccess';
+import { authFetch } from '../../lib/apiUrl';
 
 const DEFAULT_QUIZ_SETTINGS = {
   shuffleQuestions: false,
@@ -28,6 +29,16 @@ const DEFAULT_QUIZ_SETTINGS = {
   maxAttempts: 0,
   allowRetry: false,
 };
+
+const GRADABLE_QUESTION_TYPES = new Set([
+  'multiple-choice',
+  'true-false',
+  'image',
+  'video',
+  'reading',
+  'open-text',
+  'fill-in-the-blank',
+]);
 
 export default function QuizResults() {
   const { attemptId } = useParams();
@@ -90,14 +101,12 @@ export default function QuizResults() {
           updatedAt: String(quizData?.updated_at || quizData?.created_at || normalizedAttempt.created_at || new Date().toISOString()),
         } as Quiz);
 
-        const { data: questionsData, error: questionsError } = await supabase
-          .from('questions')
-          .select('*')
-          .eq('quiz_id', normalizedAttempt.quiz_id)
-          .order('order', { ascending: true });
-
-        if (questionsError) throw questionsError;
-
+        const questionsRes = await authFetch(`/api/student/quizzes/${encodeURIComponent(normalizedAttempt.quiz_id)}/questions`);
+        const questionsJson = await questionsRes.json().catch(() => ({}));
+        if (!questionsRes.ok) {
+          throw new Error(String(questionsJson?.error || 'Failed to load quiz questions'));
+        }
+        const questionsData = (((questionsJson as any)?.questions as any[]) || []);
         setQuestions(questionsData.map((q) => ({
           id: q.id,
           quizId: q.quiz_id,
@@ -130,8 +139,95 @@ export default function QuizResults() {
   }
   if (!attempt || !quiz) return null;
 
-  const scorePercentage = Math.round((attempt.score / attempt.totalPoints) * 100);
+  const normalizeComparableAnswer = (value: unknown): string => {
+    if (value === null || value === undefined) return '';
+    if (typeof value === 'number' || typeof value === 'boolean') return String(value);
+    if (Array.isArray(value)) {
+      if (value.length === 1) return normalizeComparableAnswer(value[0]);
+      return value.map((item) => normalizeComparableAnswer(item)).join('|');
+    }
+    if (typeof value === 'object') {
+      const candidate = value as Record<string, unknown>;
+      if (candidate.id !== undefined) return normalizeComparableAnswer(candidate.id);
+      if (candidate.value !== undefined) return normalizeComparableAnswer(candidate.value);
+      if (candidate.answer !== undefined) return normalizeComparableAnswer(candidate.answer);
+      return JSON.stringify(candidate);
+    }
+
+    const raw = String(value).trim();
+    if (!raw) return '';
+    try {
+      const parsed = JSON.parse(raw);
+      if (parsed !== raw) return normalizeComparableAnswer(parsed);
+    } catch {
+      // Keep raw string when not JSON.
+    }
+    return raw;
+  };
+
+  const isAnswerCorrect = (question: Question, studentAnswerRaw: unknown) => {
+    const questionType = String(question.type || '').trim().toLowerCase();
+    const normalizedStudentAnswer = normalizeComparableAnswer(studentAnswerRaw);
+    const normalizedCorrectAnswer = normalizeComparableAnswer(question.correctAnswer);
+
+    if (questionType === 'open-text' || questionType === 'fill-in-the-blank') {
+      const raw = normalizedCorrectAnswer;
+      const keywords = raw.toLowerCase().split(',').map((k) => k.trim()).filter(Boolean);
+      const studentText = normalizedStudentAnswer.toLowerCase();
+      return keywords.some((k) => studentText.includes(k));
+    }
+
+    if (Array.isArray(question.options) && question.options.length > 0) {
+      const selectedOption = question.options.find(
+        (opt) => normalizeComparableAnswer(opt.id) === normalizedStudentAnswer
+      );
+      const selectedText = selectedOption ? normalizeComparableAnswer(selectedOption.text) : normalizedStudentAnswer;
+
+      const correctOption = question.options.find(
+        (opt) => normalizeComparableAnswer(opt.id) === normalizedCorrectAnswer
+      );
+      const correctText = correctOption ? normalizeComparableAnswer(correctOption.text) : normalizedCorrectAnswer;
+
+      return (
+        normalizedStudentAnswer === normalizedCorrectAnswer ||
+        selectedText === normalizedCorrectAnswer ||
+        normalizedStudentAnswer === correctText ||
+        selectedText === correctText
+      );
+    }
+
+    return normalizedStudentAnswer === normalizedCorrectAnswer;
+  };
+
+  const recomputedFromAnswers = questions.reduce((acc, q) => {
+    const questionType = String(q.type || '').trim().toLowerCase();
+    if (!GRADABLE_QUESTION_TYPES.has(questionType)) return acc;
+    const questionPoints = Number.isFinite(Number(q.points)) ? Number(q.points) : 0;
+    const studentAnswer = attempt.answers?.[q.id];
+    const isCorrect = isAnswerCorrect(q, studentAnswer);
+    return acc + (isCorrect ? questionPoints : 0);
+  }, 0);
+  const recomputedTotalPoints = questions.reduce((acc, q) => {
+    const questionType = String(q.type || '').trim().toLowerCase();
+    if (!GRADABLE_QUESTION_TYPES.has(questionType)) return acc;
+    const questionPoints = Number.isFinite(Number(q.points)) ? Number(q.points) : 0;
+    return acc + questionPoints;
+  }, 0);
+  const effectiveScore = recomputedTotalPoints > 0 ? recomputedFromAnswers : Number(attempt.score ?? 0);
+  const effectiveTotalPoints = recomputedTotalPoints > 0 ? recomputedTotalPoints : Number(attempt.totalPoints ?? 0);
+  const scorePercentage = effectiveTotalPoints > 0 ? Math.round((effectiveScore / effectiveTotalPoints) * 100) : 0;
   const passingPercent = Number(quiz.settings?.passingScore ?? 50);
+  const resolveAnswerText = (question: Question, answerValue: unknown) => {
+    if (answerValue === null || answerValue === undefined || String(answerValue).trim() === '') {
+      return 'No answer provided';
+    }
+    const normalized = String(answerValue);
+    if (Array.isArray(question.options) && question.options.length > 0) {
+      const selected = question.options.find((opt) => String(opt.id) === normalized);
+      if (selected) return selected.text;
+    }
+    return normalized;
+  };
 
   return (
     <StudentLayout>
@@ -163,7 +259,7 @@ export default function QuizResults() {
               {attempt.passed ? 'Congratulations!' : 'Keep Practicing!'}
             </h2>
             <p className="text-slate-600 text-lg">
-              You scored <span className="font-bold text-slate-900">{attempt.score}</span> out of <span className="font-bold text-slate-900">{attempt.totalPoints}</span> points.
+              You scored <span className="font-bold text-slate-900">{effectiveScore}</span> out of <span className="font-bold text-slate-900">{effectiveTotalPoints}</span> points.
             </p>
             <div className="mt-6 flex flex-wrap gap-4 justify-center md:justify-start">
               <div className="bg-white/50 backdrop-blur-md px-6 py-3 rounded-2xl border border-white/50">
@@ -190,20 +286,21 @@ export default function QuizResults() {
             <HelpCircle className="w-6 h-6 text-slate-400" />
             Review Your Answers
           </h2>
+          {questions.length === 0 && (
+            <div className="rounded-2xl border border-amber-200 bg-amber-50 px-5 py-4 text-sm text-amber-700">
+              We could not load question review details for this attempt yet.
+            </div>
+          )}
           <div className="space-y-6">
             {questions.map((q, index) => {
               const studentAnswer = attempt.answers[q.id];
-              const isInstruction = q.type === 'instruction';
-              const isCorrect = isInstruction
-                ? true
-                : q.type === 'open-text' || q.type === 'fill-in-the-blank'
-                  ? String(q.correctAnswer ?? '')
-                      .toLowerCase()
-                      .split(',')
-                      .map((k) => k.trim())
-                      .filter(Boolean)
-                      .some((k) => studentAnswer?.toLowerCase().includes(k))
-                  : studentAnswer === q.correctAnswer;
+              const normalizedStudentAnswer = normalizeComparableAnswer(studentAnswer);
+              const normalizedCorrectAnswer = normalizeComparableAnswer(q.correctAnswer);
+              const questionType = String(q.type || '').trim().toLowerCase();
+              const isInstruction = questionType === 'instruction';
+              const isCorrect = isInstruction ? true : isAnswerCorrect(q, studentAnswer);
+              const studentAnswerText = resolveAnswerText(q, studentAnswer);
+              const correctAnswerText = resolveAnswerText(q, q.correctAnswer);
 
               return (
                 <div key={q.id} className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
@@ -240,22 +337,22 @@ export default function QuizResults() {
                             key={opt.id}
                             className={cn(
                               "flex items-center gap-4 p-4 rounded-xl border-2 transition-all",
-                              opt.id === q.correctAnswer 
+                              normalizeComparableAnswer(opt.id) === normalizedCorrectAnswer
                                 ? "border-green-500 bg-green-50" 
-                                : opt.id === studentAnswer && !isCorrect
+                                : normalizeComparableAnswer(opt.id) === normalizedStudentAnswer && !isCorrect
                                 ? "border-red-500 bg-red-50"
                                 : "border-slate-50 bg-slate-50/50"
                             )}
                           >
                             <div className={cn(
                               "w-5 h-5 rounded-full border-2 flex items-center justify-center shrink-0",
-                              opt.id === q.correctAnswer ? "border-green-500 bg-green-500" : "border-slate-200"
+                              normalizeComparableAnswer(opt.id) === normalizedCorrectAnswer ? "border-green-500 bg-green-500" : "border-slate-200"
                             )}>
-                              {opt.id === q.correctAnswer && <CheckCircle2 className="w-3 h-3 text-white" />}
+                              {normalizeComparableAnswer(opt.id) === normalizedCorrectAnswer && <CheckCircle2 className="w-3 h-3 text-white" />}
                             </div>
                             <span className={cn(
                               "font-semibold",
-                              opt.id === q.correctAnswer ? "text-green-700" : "text-slate-600"
+                              normalizeComparableAnswer(opt.id) === normalizedCorrectAnswer ? "text-green-700" : "text-slate-600"
                             )}>
                               {opt.text}
                             </span>
@@ -276,6 +373,29 @@ export default function QuizResults() {
                         </div>
                       )}
                     </div>
+
+                    {!isInstruction && (
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div className={cn(
+                          "p-4 rounded-xl border",
+                          isCorrect ? "bg-slate-50 border-slate-100" : "bg-red-50 border-red-100"
+                        )}>
+                          <div className={cn(
+                            "text-xs font-bold uppercase tracking-widest mb-2",
+                            isCorrect ? "text-slate-400" : "text-red-500"
+                          )}>
+                            Your Answer
+                          </div>
+                          <div className={cn("font-semibold", isCorrect ? "text-slate-800" : "text-red-700")}>
+                            {studentAnswerText}
+                          </div>
+                        </div>
+                        <div className="p-4 rounded-xl border border-green-100 bg-green-50">
+                          <div className="text-xs font-bold text-green-500 uppercase tracking-widest mb-2">Correct Answer</div>
+                          <div className="text-green-700 font-semibold">{correctAnswerText}</div>
+                        </div>
+                      </div>
+                    )}
 
                     {q.explanation && (
                       <div className="mt-6 p-4 bg-blue-50 border border-blue-100 rounded-xl flex items-start gap-3">

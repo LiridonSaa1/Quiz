@@ -99,10 +99,16 @@ export interface Lesson {
 export interface LessonContent {
   id: string;
   lessonId: string;
-  contentType: string;
-  title?: string;
-  content?: string;
-  fileUrl?: string;
+  contentType: 'video' | 'audio' | 'pdf' | 'text';
+  title?: string | null;
+  description?: string | null;
+  storagePath?: string | null;
+  signedUrl?: string | null;
+  mimeType?: string | null;
+  sizeBytes?: number | null;
+  textContent?: string | null;
+  pdfPage?: number | null;
+  durationSeconds?: number | null;
   order: number;
 }
 
@@ -232,4 +238,54 @@ export interface Notification {
   readAt?: string;
   actionUrl?: string;
   createdAt: string;
+}
+
+export interface LessonDiscussionQuestion {
+  id: string;
+  lessonId: string;
+  authorId: string;
+  title: string;
+  body: string;
+  isPinned: boolean;
+  bestAnswerId?: string | null;
+  answersCount: number;
+  reactionsCount: number;
+  helpfulScore: number;
+  lastActivityAt: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface LessonDiscussionAnswer {
+  id: string;
+  questionId: string;
+  authorId: string;
+  body: string;
+  isBest: boolean;
+  repliesCount: number;
+  reactionsCount: number;
+  helpfulScore: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface LessonDiscussionReply {
+  id: string;
+  answerId: string;
+  authorId: string;
+  parentReplyId?: string | null;
+  body: string;
+  depth: number;
+  reactionsCount: number;
+  helpfulScore: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface DiscussionUserStats {
+  userId: string;
+  reputation: number;
+  answersCount: number;
+  bestAnswersCount: number;
+  helpfulReactionsReceived: number;
 }

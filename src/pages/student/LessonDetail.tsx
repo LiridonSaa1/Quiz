@@ -1,10 +1,11 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import StudentLayout from '../../components/layout/StudentLayout';
 import { supabase } from '../../supabase';
 import { authFetch } from '../../lib/apiUrl';
-import { BookOpen, ArrowLeft, Clock, CheckCircle2, Circle, Play } from 'lucide-react';
+import { BookOpen, ArrowLeft, Clock, CheckCircle2, Circle, Play, Video, Headphones, FileText, AlignLeft } from 'lucide-react';
 import { cn } from '../../lib/utils';
+import LessonDiscussionBoard from '../../components/discussion/LessonDiscussionBoard';
 
 type LessonDetailRow = {
   id: string;
@@ -19,39 +20,34 @@ type LessonDetailRow = {
   course_id: string | null;
 };
 
-type LessonProgress = {
-  startedAt: string;
+type LessonContentRow = {
+  id: string;
+  type: 'video' | 'audio' | 'pdf' | 'text';
+  title: string | null;
+  description: string | null;
+  text_content: string | null;
+  signed_url?: string | null;
+  pdf_page?: number | null;
+  duration_seconds?: number | null;
+  position: number;
+};
+
+type LessonProgressRow = {
   completed: boolean;
-  lastVisitedAt: string;
-};
-
-const readProgress = (studentId: string, lessonId: string): LessonProgress | null => {
-  try {
-    const raw = localStorage.getItem(`lesson_progress:${studentId}:${lessonId}`);
-    if (!raw) return null;
-    const parsed = JSON.parse(raw) as Partial<LessonProgress>;
-    return {
-      startedAt: parsed.startedAt || new Date().toISOString(),
-      completed: Boolean(parsed.completed),
-      lastVisitedAt: parsed.lastVisitedAt || new Date().toISOString(),
-    };
-  } catch {
-    return null;
-  }
-};
-
-const saveProgress = (studentId: string, lessonId: string, progress: LessonProgress) => {
-  localStorage.setItem(`lesson_progress:${studentId}:${lessonId}`, JSON.stringify(progress));
+  last_video_position: number;
 };
 
 export default function StudentLessonDetail() {
   const { lessonId = '' } = useParams();
   const [loading, setLoading] = useState(true);
-  const [studentId, setStudentId] = useState('');
   const [lesson, setLesson] = useState<LessonDetailRow | null>(null);
+  const [contents, setContents] = useState<LessonContentRow[]>([]);
   const [completed, setCompleted] = useState(false);
-  const [startedAt, setStartedAt] = useState('');
+  const [lastVideoPosition, setLastVideoPosition] = useState(0);
   const [linkedQuizId, setLinkedQuizId] = useState<string | null>(null);
+  const [activeTab, setActiveTab] = useState<'video' | 'audio' | 'pdf' | 'text'>('video');
+  const videoRef = useRef<HTMLVideoElement | null>(null);
+  const lastSyncRef = useRef<number>(0);
 
   useEffect(() => {
     const load = async () => {
@@ -61,17 +57,16 @@ export default function StudentLessonDetail() {
           setLoading(false);
           return;
         }
-        const uid = session.user.id;
-        setStudentId(uid);
 
-        const lessonsRes = await authFetch('/api/student/lessons');
-        const lessonsJson = lessonsRes.ok ? await lessonsRes.json() : { lessons: [] };
-        const rows = Array.isArray(lessonsJson?.lessons) ? lessonsJson.lessons : [];
-        const found = rows.find((l: any) => String(l.id) === String(lessonId));
-        if (!found) {
+        const detailRes = await authFetch(`/api/student/lessons/${encodeURIComponent(lessonId)}/detail`);
+        const detailJson = detailRes.ok ? await detailRes.json() : {};
+        if (!detailRes.ok || !detailJson?.lesson) {
           setLoading(false);
           return;
         }
+        const found = detailJson.lesson;
+        const contentRows = Array.isArray(detailJson.contents) ? detailJson.contents : [];
+        const progress = (detailJson.progress || {}) as LessonProgressRow;
 
         const normalized: LessonDetailRow = {
           id: String(found.id),
@@ -86,22 +81,15 @@ export default function StudentLessonDetail() {
           course_id: found.course_id ? String(found.course_id) : null,
         };
         setLesson(normalized);
+        setContents(contentRows);
+        setCompleted(Boolean(progress?.completed));
+        setLastVideoPosition(Number(progress?.last_video_position || 0));
 
-        const progress = readProgress(uid, lessonId);
-        if (progress) {
-          setCompleted(progress.completed);
-          setStartedAt(progress.startedAt);
-          saveProgress(uid, lessonId, { ...progress, lastVisitedAt: new Date().toISOString() });
-        } else {
-          const initial: LessonProgress = {
-            startedAt: new Date().toISOString(),
-            completed: false,
-            lastVisitedAt: new Date().toISOString(),
-          };
-          setStartedAt(initial.startedAt);
-          setCompleted(false);
-          saveProgress(uid, lessonId, initial);
-        }
+        const availableTabs = new Set(contentRows.map((c: LessonContentRow) => c.type));
+        if (availableTabs.has('video')) setActiveTab('video');
+        else if (availableTabs.has('audio')) setActiveTab('audio');
+        else if (availableTabs.has('pdf')) setActiveTab('pdf');
+        else setActiveTab('text');
 
         if (normalized.type === 'quiz') {
           const quizRes = await supabase
@@ -123,15 +111,20 @@ export default function StudentLessonDetail() {
     void load();
   }, [lessonId]);
 
-  const toggleCompleted = () => {
-    if (!studentId || !lessonId) return;
+  const persistProgress = async (nextCompleted: boolean, nextVideoPosition: number) => {
+    await authFetch(`/api/student/lessons/${encodeURIComponent(lessonId)}/progress`, {
+      method: 'PUT',
+      body: JSON.stringify({
+        completed: nextCompleted,
+        lastVideoPosition: nextVideoPosition,
+      }),
+    });
+  };
+
+  const toggleCompleted = async () => {
     const next = !completed;
     setCompleted(next);
-    saveProgress(studentId, lessonId, {
-      startedAt: startedAt || new Date().toISOString(),
-      completed: next,
-      lastVisitedAt: new Date().toISOString(),
-    });
+    await persistProgress(next, lastVideoPosition);
   };
 
   const statusLabel = useMemo(() => {
@@ -139,6 +132,24 @@ export default function StudentLessonDetail() {
     if (completed) return 'Completed';
     return lesson.type === 'quiz' ? 'Quiz lesson' : 'In progress';
   }, [lesson, completed]);
+
+  const sections = useMemo(() => {
+    const byType: Record<string, LessonContentRow[]> = { video: [], audio: [], pdf: [], text: [] };
+    contents.forEach((c) => {
+      if (!byType[c.type]) byType[c.type] = [];
+      byType[c.type].push(c);
+    });
+    return byType;
+  }, [contents]);
+
+  const tabConfig = [
+    { key: 'video', label: 'Video', icon: Video },
+    { key: 'audio', label: 'Audio', icon: Headphones },
+    { key: 'pdf', label: 'Book/PDF', icon: FileText },
+    { key: 'text', label: 'Text', icon: AlignLeft },
+  ] as const;
+
+  const activeItems = sections[activeTab] || [];
 
   return (
     <StudentLayout>
@@ -189,7 +200,7 @@ export default function StudentLessonDetail() {
 
             <div className="bg-white rounded-3xl border border-slate-100 p-6 flex flex-wrap gap-3">
               <button
-                onClick={toggleCompleted}
+                onClick={() => void toggleCompleted()}
                 className={cn(
                   'inline-flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold transition-all',
                   completed
@@ -220,6 +231,83 @@ export default function StudentLessonDetail() {
                 </Link>
               )}
             </div>
+
+            {contents.length > 0 ? (
+              <div className="bg-white rounded-3xl border border-slate-100 p-6 space-y-4">
+                <div className="flex flex-wrap gap-2">
+                  {tabConfig
+                    .filter((tab) => (sections[tab.key] || []).length > 0)
+                    .map((tab) => (
+                      <button
+                        key={tab.key}
+                        onClick={() => setActiveTab(tab.key)}
+                        className={cn(
+                          'inline-flex items-center gap-2 px-3 py-2 rounded-xl text-sm font-semibold transition-all',
+                          activeTab === tab.key
+                            ? 'bg-indigo-600 text-white'
+                            : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                        )}
+                      >
+                        <tab.icon className="w-4 h-4" />
+                        {tab.label}
+                      </button>
+                    ))}
+                </div>
+
+                <div className="space-y-4">
+                  {activeItems.map((item) => (
+                    <div key={item.id} className="rounded-2xl border border-slate-100 p-4 space-y-2">
+                      <h3 className="text-base font-bold text-slate-900">{item.title || 'Untitled content'}</h3>
+                      {item.description && <p className="text-sm text-slate-500">{item.description}</p>}
+
+                      {item.type === 'video' && item.signed_url && (
+                        <video
+                          ref={videoRef}
+                          src={item.signed_url}
+                          controls
+                          className="w-full rounded-xl bg-black"
+                          onLoadedMetadata={(e) => {
+                            if (lastVideoPosition > 0) {
+                              e.currentTarget.currentTime = lastVideoPosition;
+                            }
+                          }}
+                          onTimeUpdate={(e) => {
+                            const current = e.currentTarget.currentTime;
+                            setLastVideoPosition(current);
+                            const now = Date.now();
+                            if (now - lastSyncRef.current > 5000) {
+                              lastSyncRef.current = now;
+                              void persistProgress(completed, current);
+                            }
+                          }}
+                        />
+                      )}
+                      {item.type === 'audio' && item.signed_url && (
+                        <audio src={item.signed_url} controls className="w-full" />
+                      )}
+                      {item.type === 'pdf' && item.signed_url && (
+                        <iframe
+                          title={item.title || 'PDF'}
+                          src={`${item.signed_url}#page=${Math.max(1, Number(item.pdf_page || 1))}`}
+                          className="w-full h-[70vh] rounded-xl border border-slate-200"
+                        />
+                      )}
+                      {item.type === 'text' && (
+                        <div
+                          className="prose prose-slate max-w-none"
+                          dangerouslySetInnerHTML={{ __html: item.text_content || '<p>No text content.</p>' }}
+                        />
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ) : (
+              <div className="bg-white rounded-3xl border border-slate-100 p-8 text-sm text-slate-500">
+                No lesson content has been added yet.
+              </div>
+            )}
+            <LessonDiscussionBoard lessonId={lesson.id} title="Questions About This Lesson" />
           </div>
         )}
       </div>

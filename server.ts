@@ -2090,6 +2090,375 @@ export async function createApp(options: CreateAppOptions = {}) {
   app.delete("/api/teacher/lessons/:id", teacherLessonDeleteHandler);
   app.post("/api/teacher/lessons/:id/delete", teacherLessonDeleteHandler);
 
+  const isLessonContentsTableMissing = (error: any) => {
+    const hay = `${error?.message || ''} ${error?.details || ''} ${error?.hint || ''}`.toLowerCase();
+    return (
+      (error?.code === 'PGRST205' && hay.includes('lesson_contents')) ||
+      (error?.code === '42P01' && hay.includes('lesson_contents')) ||
+      hay.includes("could not find the table 'public.lesson_contents'")
+    );
+  };
+
+  const isLessonProgressTableMissing = (error: any) => {
+    const hay = `${error?.message || ''} ${error?.details || ''} ${error?.hint || ''}`.toLowerCase();
+    return (
+      (error?.code === 'PGRST205' && hay.includes('lesson_progress')) ||
+      (error?.code === '42P01' && hay.includes('lesson_progress')) ||
+      hay.includes("could not find the table 'public.lesson_progress'")
+    );
+  };
+
+  const toLessonCompleted = (row: any) => {
+    if (typeof row?.completed === 'boolean') return row.completed;
+    const progressPercent = Number(row?.progress_percent);
+    if (Number.isFinite(progressPercent)) return progressPercent >= 100;
+    const status = String(row?.status || '').toLowerCase();
+    if (status) return status === 'completed' || status === 'done';
+    return false;
+  };
+
+  const fetchLessonProgressRows = async (studentId: string, lessonIds: string[]) => {
+    if (!lessonIds.length) return { rows: [], storage: 'database' as const };
+    const primary = await supabaseAdmin
+      .from('lesson_progress')
+      .select('student_id,lesson_id,completed,last_video_position,last_opened_at,updated_at')
+      .eq('student_id', studentId)
+      .in('lesson_id', lessonIds);
+    if (!primary.error) {
+      return {
+        rows: (primary.data || []).map((row: any) => ({ ...row, completed: toLessonCompleted(row) })),
+        storage: 'database' as const,
+      };
+    }
+    if (isLessonProgressTableMissing(primary.error)) {
+      return { rows: [], storage: 'table_missing' as const };
+    }
+    if (!isRecoverableSchemaColumnError(primary.error)) throw primary.error;
+
+    const fallback = await supabaseAdmin
+      .from('lesson_progress')
+      .select('student_id,lesson_id,last_video_position,last_opened_at,updated_at,progress_percent,status')
+      .eq('student_id', studentId)
+      .in('lesson_id', lessonIds);
+    if (fallback.error) {
+      if (isLessonProgressTableMissing(fallback.error)) {
+        return { rows: [], storage: 'table_missing' as const };
+      }
+      throw fallback.error;
+    }
+    return {
+      rows: (fallback.data || []).map((row: any) => ({ ...row, completed: toLessonCompleted(row) })),
+      storage: 'database' as const,
+    };
+  };
+
+  const fetchLessonProgressSingle = async (studentId: string, lessonId: string) => {
+    const many = await fetchLessonProgressRows(studentId, [lessonId]);
+    return { row: many.rows[0] || null, storage: many.storage };
+  };
+
+  const upsertLessonProgressWithFallback = async (
+    studentId: string,
+    lessonId: string,
+    completed: boolean,
+    lastVideoPosition: number
+  ) => {
+    const nowIso = new Date().toISOString();
+    const primary = await supabaseAdmin
+      .from('lesson_progress')
+      .upsert(
+        {
+          student_id: studentId,
+          lesson_id: lessonId,
+          completed,
+          last_video_position: lastVideoPosition,
+          last_opened_at: nowIso,
+          updated_at: nowIso,
+        },
+        { onConflict: 'student_id,lesson_id' }
+      )
+      .select('student_id,lesson_id,completed,last_video_position,last_opened_at,updated_at')
+      .single();
+    if (!primary.error) {
+      return { row: { ...primary.data, completed: toLessonCompleted(primary.data) }, storage: 'database' as const };
+    }
+    if (isLessonProgressTableMissing(primary.error)) {
+      return { row: null, storage: 'table_missing' as const };
+    }
+    if (!isRecoverableSchemaColumnError(primary.error)) throw primary.error;
+
+    const fallback = await supabaseAdmin
+      .from('lesson_progress')
+      .upsert(
+        {
+          student_id: studentId,
+          lesson_id: lessonId,
+          last_video_position: lastVideoPosition,
+          progress_percent: completed ? 100 : 0,
+          status: completed ? 'completed' : 'in_progress',
+          last_opened_at: nowIso,
+          updated_at: nowIso,
+        },
+        { onConflict: 'student_id,lesson_id' }
+      )
+      .select('student_id,lesson_id,last_video_position,last_opened_at,updated_at,progress_percent,status')
+      .single();
+    if (fallback.error) {
+      if (isLessonProgressTableMissing(fallback.error)) {
+        return { row: null, storage: 'table_missing' as const };
+      }
+      throw fallback.error;
+    }
+    return { row: { ...fallback.data, completed: toLessonCompleted(fallback.data) }, storage: 'database' as const };
+  };
+
+  const ensureLessonMediaBucket = async () => {
+    await supabaseAdmin.storage.createBucket('lesson-media', { public: false }).catch(() => {});
+  };
+
+  // Teacher lesson content CRUD
+  app.get('/api/teacher/lessons/:lessonId/contents', async (req, res) => {
+    try {
+      const lessonId = typeof req.params.lessonId === 'string' ? req.params.lessonId.trim() : '';
+      const userId = typeof req.query.userId === 'string' ? req.query.userId.trim() : '';
+      if (!lessonId) return res.status(400).json({ error: 'lessonId is required' });
+      if (!userId) return res.status(400).json({ error: 'userId is required' });
+
+      const { data: lesson, error: lessonErr } = await supabaseAdmin
+        .from('lessons')
+        .select('id,course_id')
+        .eq('id', lessonId)
+        .maybeSingle();
+      if (lessonErr) throw lessonErr;
+      if (!lesson) return res.status(404).json({ error: 'Lesson not found' });
+
+      const gate = await assertTeacherOwnsCourse(userId, String((lesson as any).course_id || ''));
+      if (!gate.ok) return res.status(403).json({ error: 'Forbidden: no access to this lesson' });
+
+      const contentsRes = await supabaseAdmin
+        .from('lesson_contents')
+        .select('*')
+        .eq('lesson_id', lessonId)
+        .order('position', { ascending: true });
+      if (contentsRes.error) {
+        if (isLessonContentsTableMissing(contentsRes.error)) {
+          return res.json({ success: true, contents: [], storage: 'table_missing' });
+        }
+        throw contentsRes.error;
+      }
+      return res.json({ success: true, contents: contentsRes.data || [], storage: 'database' });
+    } catch (e: any) {
+      return res.status(500).json({ error: e?.message || 'Failed to load lesson contents' });
+    }
+  });
+
+  app.post('/api/teacher/lessons/:lessonId/contents', async (req, res) => {
+    try {
+      const lessonId = typeof req.params.lessonId === 'string' ? req.params.lessonId.trim() : '';
+      const userId = typeof req.body?.userId === 'string' ? req.body.userId.trim() : '';
+      if (!lessonId) return res.status(400).json({ error: 'lessonId is required' });
+      if (!userId) return res.status(400).json({ error: 'userId is required' });
+
+      const { data: lesson, error: lessonErr } = await supabaseAdmin
+        .from('lessons')
+        .select('id,course_id')
+        .eq('id', lessonId)
+        .maybeSingle();
+      if (lessonErr) throw lessonErr;
+      if (!lesson) return res.status(404).json({ error: 'Lesson not found' });
+      const gate = await assertTeacherOwnsCourse(userId, String((lesson as any).course_id || ''));
+      if (!gate.ok) return res.status(403).json({ error: 'Forbidden: no access to this lesson' });
+
+      const payload: Record<string, unknown> = {
+        lesson_id: lessonId,
+        type: String(req.body?.type || 'text'),
+        title: typeof req.body?.title === 'string' ? req.body.title.trim() || null : null,
+        description: typeof req.body?.description === 'string' ? req.body.description.trim() || null : null,
+        storage_path: typeof req.body?.storage_path === 'string' ? req.body.storage_path.trim() || null : null,
+        mime_type: typeof req.body?.mime_type === 'string' ? req.body.mime_type.trim() || null : null,
+        size_bytes: Number.isFinite(Number(req.body?.size_bytes)) ? Number(req.body.size_bytes) : null,
+        text_content: typeof req.body?.text_content === 'string' ? req.body.text_content : null,
+        pdf_page: Number.isFinite(Number(req.body?.pdf_page)) ? Math.max(1, Number(req.body.pdf_page)) : null,
+        duration_seconds: Number.isFinite(Number(req.body?.duration_seconds)) ? Math.max(0, Number(req.body.duration_seconds)) : null,
+        position: Number.isFinite(Number(req.body?.position)) ? Math.max(1, Number(req.body.position)) : 1,
+        updated_at: new Date().toISOString(),
+      };
+
+      const ins = await supabaseAdmin.from('lesson_contents').insert(payload).select('*').single();
+      if (ins.error) {
+        if (isLessonContentsTableMissing(ins.error)) {
+          return res.status(501).json({ error: 'lesson_contents table is not available in this database yet.' });
+        }
+        throw ins.error;
+      }
+      return res.json({ success: true, content: ins.data });
+    } catch (e: any) {
+      return res.status(500).json({ error: e?.message || 'Failed to create lesson content' });
+    }
+  });
+
+  app.patch('/api/teacher/lessons/:lessonId/contents/:contentId', async (req, res) => {
+    try {
+      const lessonId = String(req.params.lessonId || '').trim();
+      const contentId = String(req.params.contentId || '').trim();
+      const userId = typeof req.body?.userId === 'string' ? req.body.userId.trim() : '';
+      if (!lessonId || !contentId) return res.status(400).json({ error: 'lessonId and contentId are required' });
+      if (!userId) return res.status(400).json({ error: 'userId is required' });
+
+      const { data: lesson, error: lessonErr } = await supabaseAdmin
+        .from('lessons')
+        .select('id,course_id')
+        .eq('id', lessonId)
+        .maybeSingle();
+      if (lessonErr) throw lessonErr;
+      if (!lesson) return res.status(404).json({ error: 'Lesson not found' });
+      const gate = await assertTeacherOwnsCourse(userId, String((lesson as any).course_id || ''));
+      if (!gate.ok) return res.status(403).json({ error: 'Forbidden: no access to this lesson' });
+
+      const updates: Record<string, unknown> = { updated_at: new Date().toISOString() };
+      if (req.body?.type !== undefined) updates.type = String(req.body.type || 'text');
+      if (req.body?.title !== undefined) updates.title = typeof req.body.title === 'string' ? req.body.title.trim() || null : null;
+      if (req.body?.description !== undefined) updates.description = typeof req.body.description === 'string' ? req.body.description.trim() || null : null;
+      if (req.body?.storage_path !== undefined) updates.storage_path = typeof req.body.storage_path === 'string' ? req.body.storage_path.trim() || null : null;
+      if (req.body?.mime_type !== undefined) updates.mime_type = typeof req.body.mime_type === 'string' ? req.body.mime_type.trim() || null : null;
+      if (req.body?.size_bytes !== undefined) updates.size_bytes = Number.isFinite(Number(req.body.size_bytes)) ? Number(req.body.size_bytes) : null;
+      if (req.body?.text_content !== undefined) updates.text_content = typeof req.body.text_content === 'string' ? req.body.text_content : null;
+      if (req.body?.pdf_page !== undefined) updates.pdf_page = Number.isFinite(Number(req.body.pdf_page)) ? Math.max(1, Number(req.body.pdf_page)) : null;
+      if (req.body?.duration_seconds !== undefined) updates.duration_seconds = Number.isFinite(Number(req.body.duration_seconds)) ? Math.max(0, Number(req.body.duration_seconds)) : null;
+      if (req.body?.position !== undefined) updates.position = Number.isFinite(Number(req.body.position)) ? Math.max(1, Number(req.body.position)) : 1;
+
+      const upd = await supabaseAdmin
+        .from('lesson_contents')
+        .update(updates)
+        .eq('id', contentId)
+        .eq('lesson_id', lessonId)
+        .select('*')
+        .single();
+      if (upd.error) {
+        if (isLessonContentsTableMissing(upd.error)) {
+          return res.status(501).json({ error: 'lesson_contents table is not available in this database yet.' });
+        }
+        throw upd.error;
+      }
+      return res.json({ success: true, content: upd.data });
+    } catch (e: any) {
+      return res.status(500).json({ error: e?.message || 'Failed to update lesson content' });
+    }
+  });
+
+  app.delete('/api/teacher/lessons/:lessonId/contents/:contentId', async (req, res) => {
+    try {
+      const lessonId = String(req.params.lessonId || '').trim();
+      const contentId = String(req.params.contentId || '').trim();
+      const userId = typeof req.query.userId === 'string' ? req.query.userId.trim() : '';
+      if (!lessonId || !contentId) return res.status(400).json({ error: 'lessonId and contentId are required' });
+      if (!userId) return res.status(400).json({ error: 'userId is required' });
+
+      const { data: lesson, error: lessonErr } = await supabaseAdmin
+        .from('lessons')
+        .select('id,course_id')
+        .eq('id', lessonId)
+        .maybeSingle();
+      if (lessonErr) throw lessonErr;
+      if (!lesson) return res.status(404).json({ error: 'Lesson not found' });
+      const gate = await assertTeacherOwnsCourse(userId, String((lesson as any).course_id || ''));
+      if (!gate.ok) return res.status(403).json({ error: 'Forbidden: no access to this lesson' });
+
+      const del = await supabaseAdmin
+        .from('lesson_contents')
+        .delete()
+        .eq('id', contentId)
+        .eq('lesson_id', lessonId);
+      if (del.error) {
+        if (isLessonContentsTableMissing(del.error)) {
+          return res.status(501).json({ error: 'lesson_contents table is not available in this database yet.' });
+        }
+        throw del.error;
+      }
+      return res.json({ success: true });
+    } catch (e: any) {
+      return res.status(500).json({ error: e?.message || 'Failed to delete lesson content' });
+    }
+  });
+
+  app.put('/api/teacher/lessons/:lessonId/contents/reorder', async (req, res) => {
+    try {
+      const lessonId = String(req.params.lessonId || '').trim();
+      const userId = typeof req.body?.userId === 'string' ? req.body.userId.trim() : '';
+      const orderedIds = Array.isArray(req.body?.orderedIds) ? req.body.orderedIds.map((x: unknown) => String(x)) : [];
+      if (!lessonId) return res.status(400).json({ error: 'lessonId is required' });
+      if (!userId) return res.status(400).json({ error: 'userId is required' });
+      if (!orderedIds.length) return res.status(400).json({ error: 'orderedIds is required' });
+
+      const { data: lesson, error: lessonErr } = await supabaseAdmin
+        .from('lessons')
+        .select('id,course_id')
+        .eq('id', lessonId)
+        .maybeSingle();
+      if (lessonErr) throw lessonErr;
+      if (!lesson) return res.status(404).json({ error: 'Lesson not found' });
+      const gate = await assertTeacherOwnsCourse(userId, String((lesson as any).course_id || ''));
+      if (!gate.ok) return res.status(403).json({ error: 'Forbidden: no access to this lesson' });
+
+      for (let i = 0; i < orderedIds.length; i += 1) {
+        const id = orderedIds[i];
+        const upd = await supabaseAdmin
+          .from('lesson_contents')
+          .update({ position: i + 1, updated_at: new Date().toISOString() })
+          .eq('id', id)
+          .eq('lesson_id', lessonId);
+        if (upd.error) {
+          if (isLessonContentsTableMissing(upd.error)) {
+            return res.status(501).json({ error: 'lesson_contents table is not available in this database yet.' });
+          }
+          throw upd.error;
+        }
+      }
+      return res.json({ success: true });
+    } catch (e: any) {
+      return res.status(500).json({ error: e?.message || 'Failed to reorder lesson contents' });
+    }
+  });
+
+  // Signed upload URL for lesson media
+  app.post('/api/teacher/lessons/:lessonId/contents/upload-url', async (req, res) => {
+    try {
+      const lessonId = String(req.params.lessonId || '').trim();
+      const userId = typeof req.body?.userId === 'string' ? req.body.userId.trim() : '';
+      const fileName = typeof req.body?.fileName === 'string' ? req.body.fileName.trim() : '';
+      const contentType = typeof req.body?.contentType === 'string' ? req.body.contentType.trim() : 'application/octet-stream';
+      if (!lessonId) return res.status(400).json({ error: 'lessonId is required' });
+      if (!userId) return res.status(400).json({ error: 'userId is required' });
+      if (!fileName) return res.status(400).json({ error: 'fileName is required' });
+
+      const { data: lesson, error: lessonErr } = await supabaseAdmin
+        .from('lessons')
+        .select('id,course_id')
+        .eq('id', lessonId)
+        .maybeSingle();
+      if (lessonErr) throw lessonErr;
+      if (!lesson) return res.status(404).json({ error: 'Lesson not found' });
+      const gate = await assertTeacherOwnsCourse(userId, String((lesson as any).course_id || ''));
+      if (!gate.ok) return res.status(403).json({ error: 'Forbidden: no access to this lesson' });
+
+      const cleanName = fileName.replace(/[^\w.\-]/g, '_');
+      const storagePath = `lesson/${lessonId}/${Date.now()}_${cleanName}`;
+      await ensureLessonMediaBucket();
+      const signed = await supabaseAdmin.storage.from('lesson-media').createSignedUploadUrl(storagePath);
+      if (signed.error) throw signed.error;
+      return res.json({
+        success: true,
+        bucket: 'lesson-media',
+        storagePath,
+        signedUrl: signed.data.signedUrl,
+        token: signed.data.token,
+        contentType,
+      });
+    } catch (e: any) {
+      return res.status(500).json({ error: e?.message || 'Failed to create upload URL' });
+    }
+  });
+
   app.get('/api/admin/analytics', async (req, res) => {
     try {
       const certsPromise = (async () => {
@@ -4660,6 +5029,121 @@ export async function createApp(options: CreateAppOptions = {}) {
     }
   });
 
+  const isQuizRuntimeStateTableMissing = (error: any) => {
+    const haystack = `${error?.message || ''} ${error?.details || ''} ${error?.hint || ''}`.toLowerCase();
+    return (
+      (error?.code === 'PGRST205' && haystack.includes('quiz_runtime_state')) ||
+      (error?.code === '42P01' && haystack.includes('quiz_runtime_state')) ||
+      haystack.includes("could not find the table 'public.quiz_runtime_state'")
+    );
+  };
+
+  app.get('/api/student/quiz-runtime/:quizId', async (req, res) => {
+    try {
+      const caller = await assertAuthenticated(req, res);
+      if (!caller) return;
+      if (caller.role !== 'student' && caller.role !== 'admin') {
+        return res.status(403).json({ error: 'Forbidden: student or admin role required' });
+      }
+
+      const quizId = typeof req.params?.quizId === 'string' ? req.params.quizId.trim() : '';
+      if (!quizId) return res.status(400).json({ error: 'quizId is required' });
+
+      const runtimeRes = await supabaseAdmin
+        .from('quiz_runtime_state')
+        .select('quiz_id,student_id,started_at,expires_at_ms,violation_count,current_question_index,updated_at')
+        .eq('quiz_id', quizId)
+        .eq('student_id', caller.userId)
+        .maybeSingle();
+
+      if (runtimeRes.error) {
+        if (isQuizRuntimeStateTableMissing(runtimeRes.error)) {
+          return res.json({ success: true, runtime: null, storage: 'table_missing' });
+        }
+        throw runtimeRes.error;
+      }
+
+      return res.json({ success: true, runtime: runtimeRes.data || null, storage: 'database' });
+    } catch (e: any) {
+      return res.status(500).json({ error: e?.message || 'Failed to fetch quiz runtime state' });
+    }
+  });
+
+  app.put('/api/student/quiz-runtime/:quizId', async (req, res) => {
+    try {
+      const caller = await assertAuthenticated(req, res);
+      if (!caller) return;
+      if (caller.role !== 'student' && caller.role !== 'admin') {
+        return res.status(403).json({ error: 'Forbidden: student or admin role required' });
+      }
+
+      const quizId = typeof req.params?.quizId === 'string' ? req.params.quizId.trim() : '';
+      if (!quizId) return res.status(400).json({ error: 'quizId is required' });
+
+      const startedAt = typeof req.body?.startedAt === 'string' ? req.body.startedAt : null;
+      const expiresAtMs = Number.isFinite(Number(req.body?.expiresAtMs)) ? Number(req.body.expiresAtMs) : null;
+      const violationCount = Number.isFinite(Number(req.body?.violationCount)) ? Number(req.body.violationCount) : 0;
+      const currentQuestionIndex = Number.isFinite(Number(req.body?.currentQuestionIndex))
+        ? Math.max(0, Number(req.body.currentQuestionIndex))
+        : 0;
+
+      const upsertRes = await supabaseAdmin
+        .from('quiz_runtime_state')
+        .upsert(
+          {
+            quiz_id: quizId,
+            student_id: caller.userId,
+            started_at: startedAt,
+            expires_at_ms: expiresAtMs,
+            violation_count: Math.max(0, violationCount),
+            current_question_index: currentQuestionIndex,
+            updated_at: new Date().toISOString(),
+          },
+          { onConflict: 'quiz_id,student_id' }
+        )
+        .select('quiz_id,student_id,started_at,expires_at_ms,violation_count,current_question_index,updated_at')
+        .single();
+
+      if (upsertRes.error) {
+        if (isQuizRuntimeStateTableMissing(upsertRes.error)) {
+          return res.json({ success: true, runtime: null, storage: 'table_missing' });
+        }
+        throw upsertRes.error;
+      }
+
+      return res.json({ success: true, runtime: upsertRes.data, storage: 'database' });
+    } catch (e: any) {
+      return res.status(500).json({ error: e?.message || 'Failed to update quiz runtime state' });
+    }
+  });
+
+  app.delete('/api/student/quiz-runtime/:quizId', async (req, res) => {
+    try {
+      const caller = await assertAuthenticated(req, res);
+      if (!caller) return;
+      if (caller.role !== 'student' && caller.role !== 'admin') {
+        return res.status(403).json({ error: 'Forbidden: student or admin role required' });
+      }
+
+      const quizId = typeof req.params?.quizId === 'string' ? req.params.quizId.trim() : '';
+      if (!quizId) return res.status(400).json({ error: 'quizId is required' });
+
+      const deleteRes = await supabaseAdmin
+        .from('quiz_runtime_state')
+        .delete()
+        .eq('quiz_id', quizId)
+        .eq('student_id', caller.userId);
+
+      if (deleteRes.error && !isQuizRuntimeStateTableMissing(deleteRes.error)) {
+        throw deleteRes.error;
+      }
+
+      return res.json({ success: true });
+    } catch (e: any) {
+      return res.status(500).json({ error: e?.message || 'Failed to clear quiz runtime state' });
+    }
+  });
+
   // Student lessons: only from enrolled courses (optionally one specific course).
   app.get('/api/student/lessons', async (req, res) => {
     try {
@@ -4737,21 +5221,188 @@ export async function createApp(options: CreateAppOptions = {}) {
         courseMap[String(c.id)] = String(c.title || 'Course');
       });
       const allowedCourseIds = new Set(scopedCourseIds);
+      const lessonIds = (lessonRows || []).map((l: any) => String(l.id)).filter(Boolean);
+      let progressMap: Record<string, { completed: boolean; last_video_position: number }> = {};
+      if (lessonIds.length > 0) {
+        const progressRes = await fetchLessonProgressRows(caller.userId, lessonIds);
+        (progressRes.rows || []).forEach((p: any) => {
+          const lid = String(p.lesson_id || '');
+          if (!lid) return;
+          progressMap[lid] = {
+            completed: toLessonCompleted(p),
+            last_video_position: Number(p.last_video_position || 0),
+          };
+        });
+      }
 
       const lessons = (lessonRows || []).map((l: any) => {
         const mod = moduleMap[String(l.module_id)] || { title: '', courseId: '' };
         const resolvedCourseId = String(l.course_id || mod.courseId || '');
+        const progress = progressMap[String(l.id)] || { completed: false, last_video_position: 0 };
         return {
           ...l,
           module_title: mod.title,
           course_id: resolvedCourseId,
           course_title: courseMap[resolvedCourseId] || 'Course',
+          progress_completed: progress.completed,
+          last_video_position: progress.last_video_position,
         };
       }).filter((l: any) => allowedCourseIds.has(String(l.course_id || '')));
 
       return res.json({ success: true, lessons });
     } catch (e: any) {
       return res.status(500).json({ error: e?.message || 'Failed to load student lessons' });
+    }
+  });
+
+  app.get('/api/student/lessons/:lessonId/detail', async (req, res) => {
+    try {
+      const caller = await assertAuthenticated(req, res);
+      if (!caller) return;
+      if (caller.role !== 'student' && caller.role !== 'admin') {
+        return res.status(403).json({ error: 'Forbidden: student or admin role required' });
+      }
+      const lessonId = String(req.params.lessonId || '').trim();
+      if (!lessonId) return res.status(400).json({ error: 'lessonId is required' });
+
+      const { data: lesson, error: lessonErr } = await supabaseAdmin
+        .from('lessons')
+        .select('*')
+        .eq('id', lessonId)
+        .maybeSingle();
+      if (lessonErr) throw lessonErr;
+      if (!lesson) return res.status(404).json({ error: 'Lesson not found' });
+
+      const lessonCourseId = String((lesson as any).course_id || '').trim();
+      if (!lessonCourseId) return res.status(400).json({ error: 'Lesson is missing course_id' });
+
+      const { data: enrolledRows, error: enrollErr } = await supabaseAdmin
+        .from('courses')
+        .select('id,title')
+        .contains('student_ids', [caller.userId]);
+      if (enrollErr) throw enrollErr;
+      const enrolledSet = new Set((enrolledRows || []).map((c: any) => String(c.id)));
+      if (!enrolledSet.has(lessonCourseId) && caller.role !== 'admin') {
+        return res.status(403).json({ error: 'You are not enrolled in this lesson course' });
+      }
+
+      const { data: moduleRow } = await supabaseAdmin
+        .from('modules')
+        .select('id,title')
+        .eq('id', (lesson as any).module_id)
+        .maybeSingle();
+      const contentsRes = await supabaseAdmin
+        .from('lesson_contents')
+        .select('*')
+        .eq('lesson_id', lessonId)
+        .order('position', { ascending: true });
+      if (contentsRes.error && !isLessonContentsTableMissing(contentsRes.error)) throw contentsRes.error;
+
+      const progressRes = await fetchLessonProgressSingle(caller.userId, lessonId);
+
+      const contentRows = (contentsRes.data || []).map((row: any) => ({
+        ...row,
+        signed_url: row?.storage_path
+          ? null
+          : null,
+      }));
+      for (const row of contentRows) {
+        const path = String(row?.storage_path || '').trim();
+        if (!path) continue;
+        await ensureLessonMediaBucket();
+        const signed = await supabaseAdmin.storage.from('lesson-media').createSignedUrl(path, 3600);
+        row.signed_url = signed.error ? null : signed.data?.signedUrl || null;
+      }
+
+      return res.json({
+        success: true,
+        lesson: {
+          ...lesson,
+          module_title: (moduleRow as any)?.title || '',
+          course_title: (enrolledRows || []).find((c: any) => String(c.id) === lessonCourseId)?.title || 'Course',
+        },
+        contents: contentRows,
+        progress: progressRes.row || null,
+      });
+    } catch (e: any) {
+      return res.status(500).json({ error: e?.message || 'Failed to load lesson detail' });
+    }
+  });
+
+  app.get('/api/student/lessons/:lessonId/progress', async (req, res) => {
+    try {
+      const caller = await assertAuthenticated(req, res);
+      if (!caller) return;
+      if (caller.role !== 'student' && caller.role !== 'admin') {
+        return res.status(403).json({ error: 'Forbidden: student or admin role required' });
+      }
+      const lessonId = String(req.params.lessonId || '').trim();
+      if (!lessonId) return res.status(400).json({ error: 'lessonId is required' });
+
+      const progressRes = await fetchLessonProgressSingle(caller.userId, lessonId);
+      return res.json({ success: true, progress: progressRes.row || null, storage: progressRes.storage });
+    } catch (e: any) {
+      return res.status(500).json({ error: e?.message || 'Failed to load lesson progress' });
+    }
+  });
+
+  app.put('/api/student/lessons/:lessonId/progress', async (req, res) => {
+    try {
+      const caller = await assertAuthenticated(req, res);
+      if (!caller) return;
+      if (caller.role !== 'student' && caller.role !== 'admin') {
+        return res.status(403).json({ error: 'Forbidden: student or admin role required' });
+      }
+      const lessonId = String(req.params.lessonId || '').trim();
+      if (!lessonId) return res.status(400).json({ error: 'lessonId is required' });
+
+      const completed = Boolean(req.body?.completed);
+      const lastVideoPosition = Number.isFinite(Number(req.body?.lastVideoPosition))
+        ? Math.max(0, Number(req.body.lastVideoPosition))
+        : 0;
+
+      const upsertRes = await upsertLessonProgressWithFallback(caller.userId, lessonId, completed, lastVideoPosition);
+      return res.json({ success: true, progress: upsertRes.row, storage: upsertRes.storage });
+    } catch (e: any) {
+      return res.status(500).json({ error: e?.message || 'Failed to update lesson progress' });
+    }
+  });
+
+  app.get('/api/student/courses/:courseId/progress', async (req, res) => {
+    try {
+      const caller = await assertAuthenticated(req, res);
+      if (!caller) return;
+      if (caller.role !== 'student' && caller.role !== 'admin') {
+        return res.status(403).json({ error: 'Forbidden: student or admin role required' });
+      }
+      const courseId = String(req.params.courseId || '').trim();
+      if (!courseId) return res.status(400).json({ error: 'courseId is required' });
+
+      const lessonRowsRes = await supabaseAdmin
+        .from('lessons')
+        .select('id')
+        .eq('course_id', courseId)
+        .eq('status', 'published');
+      if (lessonRowsRes.error && !isRecoverableSchemaColumnError(lessonRowsRes.error)) throw lessonRowsRes.error;
+      const lessonRows = lessonRowsRes.data || [];
+      const lessonIds = lessonRows.map((l: any) => String(l.id)).filter(Boolean);
+      if (!lessonIds.length) return res.json({ success: true, totalLessons: 0, completedLessons: 0, progressPercent: 0 });
+
+      const progressRes = await fetchLessonProgressRows(caller.userId, lessonIds);
+      if (progressRes.storage === 'table_missing') {
+        return res.json({ success: true, totalLessons: lessonIds.length, completedLessons: 0, progressPercent: 0, storage: 'table_missing' });
+      }
+      const completedSet = new Set(
+        (progressRes.rows || [])
+          .filter((p: any) => toLessonCompleted(p))
+          .map((p: any) => String(p.lesson_id))
+      );
+      const completedLessons = completedSet.size;
+      const totalLessons = lessonIds.length;
+      const progressPercent = totalLessons > 0 ? Math.round((completedLessons / totalLessons) * 100) : 0;
+      return res.json({ success: true, totalLessons, completedLessons, progressPercent });
+    } catch (e: any) {
+      return res.status(500).json({ error: e?.message || 'Failed to load course progress' });
     }
   });
 
@@ -5035,47 +5686,460 @@ export async function createApp(options: CreateAppOptions = {}) {
     } catch (e: any) { res.status(500).json({ error: e.message }); }
   });
 
-  // ── MODULES (ADMIN) ───────────────────────────────────────────
-  // Student-visible community feed (global posts + class-targeted posts for enrolled classes).
-  app.get('/api/student/community', async (req, res) => {
+  const canModerateDiscussion = (role: string) => role === 'teacher' || role === 'admin';
+  const canMarkBestAnswer = (role: string) => role === 'teacher' || role === 'admin';
+  const canUseDiscussion = (role: string) => role === 'student' || role === 'teacher' || role === 'admin';
+  const asInt = (value: unknown, fallback: number) => {
+    const n = Number(value);
+    return Number.isFinite(n) ? n : fallback;
+  };
+
+  const awardDiscussionBadges = async (userId: string) => {
+    const [{ data: stats }, { data: badgeRows }] = await Promise.all([
+      supabaseAdmin.from('discussion_user_stats').select('*').eq('user_id', userId).maybeSingle(),
+      supabaseAdmin.from('discussion_badges').select('*'),
+    ]);
+    if (!stats || !Array.isArray(badgeRows) || badgeRows.length === 0) return;
+    const pending: Array<{ user_id: string; badge_id: string }> = [];
+    for (const badge of badgeRows) {
+      const key = String((badge as any).key || '');
+      const threshold = asInt((badge as any).threshold, 1);
+      const answersCount = asInt((stats as any).answers_count, 0);
+      const bestAnswers = asInt((stats as any).best_answers_count, 0);
+      const helpfulReceived = asInt((stats as any).helpful_reactions_received, 0);
+      const shouldGrant =
+        (key === 'first_answer' && answersCount >= threshold) ||
+        (key === 'helpful_contributor' && helpfulReceived >= threshold) ||
+        (key === 'mentor' && bestAnswers >= threshold);
+      if (shouldGrant) pending.push({ user_id: userId, badge_id: String((badge as any).id || '') });
+    }
+    if (pending.length > 0) {
+      await supabaseAdmin.from('discussion_user_badges').upsert(pending, { onConflict: 'user_id,badge_id' });
+    }
+  };
+
+  const addDiscussionNotification = async (userId: string, title: string, message: string, actionUrl: string) => {
+    await supabaseAdmin.from('notifications').insert({
+      user_id: userId,
+      title,
+      message: message.slice(0, 240),
+      type: 'info',
+      read: false,
+      action_url: actionUrl,
+      created_at: new Date().toISOString(),
+    });
+  };
+
+  const resolveQuestionOrdering = (sort: string) => {
+    if (sort === 'helpful') return { col: 'helpful_score', asc: false };
+    if (sort === 'recent') return { col: 'last_activity_at', asc: false };
+    return { col: 'created_at', asc: false };
+  };
+
+  app.get('/api/student/community', async (_req, res) => {
+    res.json({ success: true, posts: [], deprecated: true, message: 'Use lesson discussion endpoints.' });
+  });
+
+  app.get('/api/student/lessons/:lessonId/discussions', async (req, res) => {
     try {
       const caller = await assertAuthenticated(req, res);
       if (!caller) return;
-      if (caller.role !== 'student') {
-        return res.status(403).json({ error: 'Forbidden: student role required' });
-      }
+      if (!canUseDiscussion(caller.role)) return res.status(403).json({ error: 'Forbidden' });
+      const lessonId = String(req.params.lessonId || '').trim();
+      const q = String(req.query.q || '').trim().toLowerCase();
+      const sort = String(req.query.sort || 'recent').trim();
+      const limit = Math.min(50, Math.max(1, asInt(req.query.limit, 20)));
+      const cursor = String(req.query.cursor || '').trim();
 
-      const { data: visibleClasses, error: classErr } = await supabaseAdmin
-        .from('classes')
-        .select('id')
-        .contains('student_ids', [caller.userId]);
-
-      const classErrHay = `${(classErr as any)?.message || ''} ${(classErr as any)?.details || ''} ${(classErr as any)?.hint || ''}`.toLowerCase();
-      const missingClassStudentIds =
-        classErrHay.includes('student_ids') &&
-        /schema cache|could not find|does not exist|42703|undefined column|column/i.test(classErrHay);
-
-      if (classErr && !isClassesTableMissing(classErr) && !missingClassStudentIds) throw classErr;
-
-      const classIds = Array.isArray(visibleClasses)
-        ? visibleClasses.map((row: any) => String(row?.id || '')).filter(Boolean)
-        : [];
-
-      const { data, error } = await selectCommunityPostsCompat();
+      const order = resolveQuestionOrdering(sort);
+      let query = supabaseAdmin
+        .from('lesson_discussion_questions')
+        .select('*, author:profiles!author_id(id,display_name,email)')
+        .eq('lesson_id', lessonId)
+        .is('deleted_at', null)
+        .order('is_pinned', { ascending: false })
+        .order(order.col, { ascending: order.asc })
+        .limit(limit + 1);
+      if (cursor) query = query.lt(order.col, cursor);
+      const { data, error } = await query;
       if (error) throw error;
-
-      const visiblePosts = (data || [])
-        .filter((post: any) => String(post?.status || '') !== 'archived')
-        .filter((post: any) => {
-          const classId = typeof post?.class_id === 'string' ? post.class_id.trim() : '';
-          return !classId || classIds.includes(classId);
-        });
-
-      res.json({ success: true, posts: visiblePosts, classIds });
+      let rows = (data || []) as any[];
+      if (sort === 'unanswered') rows = rows.filter((row) => asInt(row?.answers_count, 0) === 0);
+      if (q) rows = rows.filter((row) => `${row?.title || ''} ${row?.body || ''}`.toLowerCase().includes(q));
+      const hasMore = rows.length > limit;
+      const pageRows = hasMore ? rows.slice(0, limit) : rows;
+      const nextCursor = hasMore ? String(pageRows[pageRows.length - 1]?.[order.col] || '') : null;
+      res.json({ success: true, questions: pageRows, hasMore, nextCursor });
     } catch (e: any) {
-      res.status(500).json({ error: e.message });
+      res.status(500).json({ error: e.message || 'Failed to load lesson discussions' });
     }
   });
+
+  app.post('/api/student/lessons/:lessonId/discussions', async (req, res) => {
+    try {
+      const caller = await assertAuthenticated(req, res);
+      if (!caller) return;
+      if (!canUseDiscussion(caller.role)) return res.status(403).json({ error: 'Forbidden' });
+      const lessonId = String(req.params.lessonId || '').trim();
+      const title = String(req.body?.title || '').trim();
+      const body = String(req.body?.body || '').trim();
+      if (!lessonId || !title || !body) return res.status(400).json({ error: 'lessonId, title, and body are required' });
+      const { data, error } = await supabaseAdmin
+        .from('lesson_discussion_questions')
+        .insert({
+          lesson_id: lessonId,
+          author_id: caller.userId,
+          title,
+          body,
+          is_pinned: false,
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+          last_activity_at: new Date().toISOString(),
+        })
+        .select('*, author:profiles!author_id(id,display_name,email)')
+        .single();
+      if (error) throw error;
+      res.json({ success: true, question: data });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message || 'Failed to create question' });
+    }
+  });
+
+  app.get('/api/student/discussions/questions/:questionId', async (req, res) => {
+    try {
+      const caller = await assertAuthenticated(req, res);
+      if (!caller) return;
+      const questionId = String(req.params.questionId || '').trim();
+      const [{ data: question, error: qErr }, { data: answers, error: aErr }] = await Promise.all([
+        supabaseAdmin.from('lesson_discussion_questions').select('*, author:profiles!author_id(id,display_name,email)').eq('id', questionId).is('deleted_at', null).maybeSingle(),
+        supabaseAdmin.from('lesson_discussion_answers').select('*, author:profiles!author_id(id,display_name,email)').eq('question_id', questionId).is('deleted_at', null).order('is_best', { ascending: false }).order('helpful_score', { ascending: false }).order('created_at', { ascending: true }),
+      ]);
+      if (qErr) throw qErr;
+      if (aErr) throw aErr;
+      const answerIds = (answers || []).map((a: any) => String(a.id)).filter(Boolean);
+      const { data: replies, error: rErr } = answerIds.length
+        ? await supabaseAdmin.from('lesson_discussion_replies').select('*, author:profiles!author_id(id,display_name,email)').in('answer_id', answerIds).is('deleted_at', null).order('created_at', { ascending: true })
+        : { data: [], error: null };
+      if (rErr) throw rErr;
+      res.json({ success: true, question, answers: answers || [], replies: replies || [] });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message || 'Failed to load thread' });
+    }
+  });
+
+  app.patch('/api/student/discussions/questions/:questionId', async (req, res) => {
+    try {
+      const caller = await assertAuthenticated(req, res);
+      if (!caller) return;
+      const questionId = String(req.params.questionId || '').trim();
+      const { data: current, error: currentErr } = await supabaseAdmin.from('lesson_discussion_questions').select('*').eq('id', questionId).maybeSingle();
+      if (currentErr) throw currentErr;
+      if (!current) return res.status(404).json({ error: 'Question not found' });
+      if (String((current as any).author_id || '') !== caller.userId && !canModerateDiscussion(caller.role)) {
+        return res.status(403).json({ error: 'Forbidden' });
+      }
+      const updates: Record<string, unknown> = { updated_at: new Date().toISOString() };
+      if (typeof req.body?.title === 'string') updates.title = String(req.body.title).trim();
+      if (typeof req.body?.body === 'string') updates.body = String(req.body.body).trim();
+      const { data, error } = await supabaseAdmin.from('lesson_discussion_questions').update(updates).eq('id', questionId).select('*, author:profiles!author_id(id,display_name,email)').single();
+      if (error) throw error;
+      res.json({ success: true, question: data });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message || 'Failed to update question' });
+    }
+  });
+
+  app.delete('/api/student/discussions/questions/:questionId', async (req, res) => {
+    try {
+      const caller = await assertAuthenticated(req, res);
+      if (!caller) return;
+      const questionId = String(req.params.questionId || '').trim();
+      const { data: current, error: currentErr } = await supabaseAdmin.from('lesson_discussion_questions').select('id,author_id').eq('id', questionId).maybeSingle();
+      if (currentErr) throw currentErr;
+      if (!current) return res.status(404).json({ error: 'Question not found' });
+      if (String((current as any).author_id || '') !== caller.userId && !canModerateDiscussion(caller.role)) {
+        return res.status(403).json({ error: 'Forbidden' });
+      }
+      const { error } = await supabaseAdmin.from('lesson_discussion_questions').update({ deleted_at: new Date().toISOString(), updated_at: new Date().toISOString() }).eq('id', questionId);
+      if (error) throw error;
+      res.json({ success: true });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message || 'Failed to delete question' });
+    }
+  });
+
+  app.post('/api/student/discussions/questions/:questionId/answers', async (req, res) => {
+    try {
+      const caller = await assertAuthenticated(req, res);
+      if (!caller) return;
+      const questionId = String(req.params.questionId || '').trim();
+      const body = String(req.body?.body || '').trim();
+      if (!body) return res.status(400).json({ error: 'body is required' });
+      const { data: question } = await supabaseAdmin.from('lesson_discussion_questions').select('id,author_id,answers_count').eq('id', questionId).maybeSingle();
+      const { data, error } = await supabaseAdmin
+        .from('lesson_discussion_answers')
+        .insert({ question_id: questionId, author_id: caller.userId, body, created_at: new Date().toISOString(), updated_at: new Date().toISOString() })
+        .select('*, author:profiles!author_id(id,display_name,email)')
+        .single();
+      if (error) throw error;
+      const currentQuestionAnswers = asInt((question as any)?.answers_count, 0);
+      await supabaseAdmin.from('lesson_discussion_questions').update({
+        answers_count: currentQuestionAnswers + 1,
+        last_activity_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      }).eq('id', questionId);
+      const { data: existingStats } = await supabaseAdmin.from('discussion_user_stats').select('*').eq('user_id', caller.userId).maybeSingle();
+      await supabaseAdmin.from('discussion_user_stats').upsert({
+        user_id: caller.userId,
+        answers_count: asInt((existingStats as any)?.answers_count, 0) + 1,
+        reputation: asInt((existingStats as any)?.reputation, 0) + 2,
+        helpful_reactions_received: asInt((existingStats as any)?.helpful_reactions_received, 0),
+        best_answers_count: asInt((existingStats as any)?.best_answers_count, 0),
+        updated_at: new Date().toISOString(),
+      }, { onConflict: 'user_id' });
+      if (question && String((question as any).author_id || '') && String((question as any).author_id || '') !== caller.userId) {
+        await addDiscussionNotification(String((question as any).author_id || ''), 'New answer to your question', body, `/student/community?question=${questionId}`);
+      }
+      await awardDiscussionBadges(caller.userId);
+      res.json({ success: true, answer: data });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message || 'Failed to add answer' });
+    }
+  });
+
+  app.post('/api/student/discussions/answers/:answerId/replies', async (req, res) => {
+    try {
+      const caller = await assertAuthenticated(req, res);
+      if (!caller) return;
+      const answerId = String(req.params.answerId || '').trim();
+      const body = String(req.body?.body || '').trim();
+      const parentReplyId = req.body?.parent_reply_id ? String(req.body.parent_reply_id).trim() : null;
+      if (!body) return res.status(400).json({ error: 'body is required' });
+      let depth = 0;
+      if (parentReplyId) {
+        const { data: parent } = await supabaseAdmin.from('lesson_discussion_replies').select('depth').eq('id', parentReplyId).maybeSingle();
+        depth = Math.min(3, asInt((parent as any)?.depth, 0) + 1);
+      }
+      const { data: answer } = await supabaseAdmin.from('lesson_discussion_answers').select('id,author_id,question_id,replies_count').eq('id', answerId).maybeSingle();
+      const { data, error } = await supabaseAdmin
+        .from('lesson_discussion_replies')
+        .insert({
+          answer_id: answerId,
+          author_id: caller.userId,
+          body,
+          parent_reply_id: parentReplyId,
+          depth,
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        })
+        .select('*, author:profiles!author_id(id,display_name,email)')
+        .single();
+      if (error) throw error;
+      await supabaseAdmin.from('lesson_discussion_answers').update({ replies_count: asInt((answer as any)?.replies_count, 0) + 1, updated_at: new Date().toISOString() }).eq('id', answerId);
+      if (answer && String((answer as any).author_id || '') && String((answer as any).author_id || '') !== caller.userId) {
+        await addDiscussionNotification(String((answer as any).author_id || ''), 'New reply to your answer', body, `/student/community?question=${String((answer as any).question_id || '')}`);
+      }
+      res.json({ success: true, reply: data });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message || 'Failed to add reply' });
+    }
+  });
+
+  app.post('/api/teacher/discussions/questions/:questionId/best-answer/:answerId', async (req, res) => {
+    try {
+      const caller = await assertAuthenticated(req, res);
+      if (!caller) return;
+      if (!canMarkBestAnswer(caller.role)) return res.status(403).json({ error: 'Forbidden' });
+      const questionId = String(req.params.questionId || '').trim();
+      const answerId = String(req.params.answerId || '').trim();
+      await supabaseAdmin.from('lesson_discussion_answers').update({ is_best: false, updated_at: new Date().toISOString() }).eq('question_id', questionId);
+      const { data: answer, error: answerErr } = await supabaseAdmin.from('lesson_discussion_answers').update({ is_best: true, updated_at: new Date().toISOString() }).eq('id', answerId).select('id,author_id').single();
+      if (answerErr) throw answerErr;
+      const { data, error } = await supabaseAdmin.from('lesson_discussion_questions').update({ best_answer_id: answerId, updated_at: new Date().toISOString() }).eq('id', questionId).select('*').single();
+      if (error) throw error;
+      if (answer && String((answer as any).author_id || '')) {
+        const targetUser = String((answer as any).author_id || '');
+        const { data: existingStats } = await supabaseAdmin.from('discussion_user_stats').select('*').eq('user_id', targetUser).maybeSingle();
+        await supabaseAdmin.from('discussion_user_stats').upsert({
+          user_id: targetUser,
+          answers_count: asInt((existingStats as any)?.answers_count, 0),
+          best_answers_count: asInt((existingStats as any)?.best_answers_count, 0) + 1,
+          helpful_reactions_received: asInt((existingStats as any)?.helpful_reactions_received, 0),
+          reputation: asInt((existingStats as any)?.reputation, 0) + 10,
+          updated_at: new Date().toISOString(),
+        }, { onConflict: 'user_id' });
+        await awardDiscussionBadges(String((answer as any).author_id || ''));
+      }
+      res.json({ success: true, question: data });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message || 'Failed to mark best answer' });
+    }
+  });
+
+  app.post('/api/teacher/discussions/questions/:questionId/pin', async (req, res) => {
+    try {
+      const caller = await assertAuthenticated(req, res);
+      if (!caller) return;
+      if (!canModerateDiscussion(caller.role)) return res.status(403).json({ error: 'Forbidden' });
+      const questionId = String(req.params.questionId || '').trim();
+      const isPinned = Boolean(req.body?.is_pinned ?? true);
+      const { data, error } = await supabaseAdmin.from('lesson_discussion_questions').update({ is_pinned: isPinned, updated_at: new Date().toISOString() }).eq('id', questionId).select('*').single();
+      if (error) throw error;
+      res.json({ success: true, question: data });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message || 'Failed to pin question' });
+    }
+  });
+
+  app.post('/api/student/discussions/reactions', async (req, res) => {
+    try {
+      const caller = await assertAuthenticated(req, res);
+      if (!caller) return;
+      const targetType = String(req.body?.target_type || '').trim();
+      const targetId = String(req.body?.target_id || '').trim();
+      const reactionType = String(req.body?.reaction_type || 'like').trim();
+      if (!targetType || !targetId) return res.status(400).json({ error: 'target_type and target_id are required' });
+      const { data, error } = await supabaseAdmin
+        .from('lesson_discussion_reactions')
+        .insert({ user_id: caller.userId, target_type: targetType, target_id: targetId, reaction_type: reactionType })
+        .select()
+        .single();
+      if (error) throw error;
+      res.json({ success: true, reaction: data });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message || 'Failed to add reaction' });
+    }
+  });
+
+  app.delete('/api/student/discussions/reactions', async (req, res) => {
+    try {
+      const caller = await assertAuthenticated(req, res);
+      if (!caller) return;
+      const targetType = String(req.body?.target_type || '').trim();
+      const targetId = String(req.body?.target_id || '').trim();
+      const reactionType = String(req.body?.reaction_type || 'like').trim();
+      const { error } = await supabaseAdmin.from('lesson_discussion_reactions').delete().eq('user_id', caller.userId).eq('target_type', targetType).eq('target_id', targetId).eq('reaction_type', reactionType);
+      if (error) throw error;
+      res.json({ success: true });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message || 'Failed to remove reaction' });
+    }
+  });
+
+  app.post('/api/student/discussions/reports', async (req, res) => {
+    try {
+      const caller = await assertAuthenticated(req, res);
+      if (!caller) return;
+      const targetType = String(req.body?.target_type || '').trim();
+      const targetId = String(req.body?.target_id || '').trim();
+      const reason = String(req.body?.reason || '').trim();
+      const details = req.body?.details ? String(req.body.details) : null;
+      if (!targetType || !targetId || !reason) return res.status(400).json({ error: 'target_type, target_id and reason are required' });
+      const { data, error } = await supabaseAdmin.from('lesson_discussion_reports').insert({
+        reporter_id: caller.userId,
+        target_type: targetType,
+        target_id: targetId,
+        reason,
+        details,
+        status: 'open',
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      }).select().single();
+      if (error) throw error;
+      res.json({ success: true, report: data });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message || 'Failed to submit report' });
+    }
+  });
+
+  app.get('/api/teacher/discussions/reports', async (req, res) => {
+    try {
+      const caller = await assertAuthenticated(req, res);
+      if (!caller) return;
+      if (!canModerateDiscussion(caller.role)) return res.status(403).json({ error: 'Forbidden' });
+      const { data, error } = await supabaseAdmin
+        .from('lesson_discussion_reports')
+        .select('*, reporter:profiles!reporter_id(id,display_name,email), reviewer:profiles!reviewed_by(id,display_name,email)')
+        .order('created_at', { ascending: false });
+      if (error) throw error;
+      res.json({ success: true, reports: data || [] });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message || 'Failed to load reports' });
+    }
+  });
+
+  app.post('/api/teacher/discussions/moderate', async (req, res) => {
+    try {
+      const caller = await assertAuthenticated(req, res);
+      if (!caller) return;
+      if (!canModerateDiscussion(caller.role)) return res.status(403).json({ error: 'Forbidden' });
+      const targetType = String(req.body?.target_type || '').trim();
+      const targetId = String(req.body?.target_id || '').trim();
+      const actionType = String(req.body?.action_type || '').trim();
+      const reason = req.body?.reason ? String(req.body.reason) : null;
+      if (!targetType || !targetId || !actionType) return res.status(400).json({ error: 'target_type, target_id, action_type are required' });
+      if (targetType === 'question') {
+        const deletedAt = actionType === 'restore' ? null : new Date().toISOString();
+        await supabaseAdmin.from('lesson_discussion_questions').update({ deleted_at: deletedAt, is_locked: actionType === 'lock', updated_at: new Date().toISOString() }).eq('id', targetId);
+      }
+      if (targetType === 'answer') {
+        const deletedAt = actionType === 'restore' ? null : new Date().toISOString();
+        await supabaseAdmin.from('lesson_discussion_answers').update({ deleted_at: deletedAt, updated_at: new Date().toISOString() }).eq('id', targetId);
+      }
+      if (targetType === 'reply') {
+        const deletedAt = actionType === 'restore' ? null : new Date().toISOString();
+        await supabaseAdmin.from('lesson_discussion_replies').update({ deleted_at: deletedAt, updated_at: new Date().toISOString() }).eq('id', targetId);
+      }
+      await supabaseAdmin.from('discussion_moderation_actions').insert({
+        actor_id: caller.userId,
+        target_type: targetType,
+        target_id: targetId,
+        action_type: actionType,
+        reason,
+        metadata: req.body?.metadata || {},
+      });
+      res.json({ success: true });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message || 'Failed to moderate content' });
+    }
+  });
+
+  app.get('/api/admin/discussions/moderation', async (req, res) => {
+    try {
+      const caller = await assertAuthenticated(req, res);
+      if (!caller) return;
+      if (caller.role !== 'admin') return res.status(403).json({ error: 'Forbidden: admin role required' });
+      const { data, error } = await supabaseAdmin
+        .from('discussion_moderation_actions')
+        .select('*, actor:profiles!actor_id(id,display_name,email)')
+        .order('created_at', { ascending: false })
+        .limit(200);
+      if (error) throw error;
+      res.json({ success: true, actions: data || [] });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message || 'Failed to load moderation actions' });
+    }
+  });
+
+  app.get('/api/student/discussions/me/stats', async (req, res) => {
+    try {
+      const caller = await assertAuthenticated(req, res);
+      if (!caller) return;
+      const [{ data: stats }, { data: badges }] = await Promise.all([
+        supabaseAdmin.from('discussion_user_stats').select('*').eq('user_id', caller.userId).maybeSingle(),
+        supabaseAdmin
+          .from('discussion_user_badges')
+          .select('awarded_at,badge:discussion_badges!badge_id(id,key,label,description)')
+          .eq('user_id', caller.userId)
+          .order('awarded_at', { ascending: false }),
+      ]);
+      res.json({ success: true, stats: stats || null, badges: badges || [] });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message || 'Failed to load discussion stats' });
+    }
+  });
+
+  // ── MODULES (ADMIN) ───────────────────────────────────────────
 
   // â”€â”€ MODULES (ADMIN) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   app.get('/api/admin/modules', async (req, res) => {
@@ -5223,6 +6287,83 @@ export async function createApp(options: CreateAppOptions = {}) {
   });
 
   // ── ANNOUNCEMENTS ────────────────────────────────────────────
+  const sendAnnouncementNotifications = async ({
+    title,
+    content,
+    priority,
+    audience,
+    classIds,
+    studentIds,
+  }: {
+    title: string;
+    content: string;
+    priority: string;
+    audience: string;
+    classIds: string[];
+    studentIds: string[];
+  }) => {
+    const recipientIds = new Set<string>();
+    studentIds.forEach((sid) => recipientIds.add(sid));
+
+    for (const cid of classIds) {
+      const { data: classRow } = await supabaseAdmin
+        .from('classes')
+        .select('student_ids')
+        .eq('id', cid)
+        .maybeSingle();
+      ((classRow?.student_ids as string[]) || []).forEach((uid: string) => recipientIds.add(String(uid)));
+    }
+
+    let profilesById = new Map<string, string>();
+
+    if (recipientIds.size > 0) {
+      const { data: invitedProfiles } = await supabaseAdmin
+        .from('profiles')
+        .select('id, role')
+        .in('id', [...recipientIds]);
+      profilesById = new Map((invitedProfiles || []).map((p: any) => [String(p.id), String(p.role || '').toLowerCase()]));
+    } else {
+      const normalizedAudience = String(audience || 'all').toLowerCase();
+      const targetRoles = normalizedAudience === 'students'
+        ? ['student']
+        : normalizedAudience === 'teachers'
+          ? ['teacher']
+          : ['student', 'teacher'];
+
+      const { data: audienceProfiles } = await supabaseAdmin
+        .from('profiles')
+        .select('id, role')
+        .in('role', targetRoles);
+
+      profilesById = new Map((audienceProfiles || []).map((p: any) => [String(p.id), String(p.role || '').toLowerCase()]));
+      profilesById.forEach((_, uid) => recipientIds.add(uid));
+    }
+
+    if (recipientIds.size === 0) return;
+
+    const createdAt = new Date().toISOString();
+    const notifRows = [...recipientIds].map((uid) => {
+      const role = profilesById.get(uid) || 'student';
+      const actionUrl =
+        role === 'teacher'
+          ? '/teacher/announcements'
+          : role === 'admin'
+            ? '/admin/announcements'
+            : '/student';
+
+      return {
+        user_id: uid,
+        title: `Announcement: ${String(title || 'New announcement')}`,
+        message: String(content || '').slice(0, 240),
+        type: priority === 'urgent' ? 'warning' : 'info',
+        action_url: actionUrl,
+        created_at: createdAt,
+      };
+    });
+
+    await supabaseAdmin.from('notifications').insert(notifRows);
+  };
+
   app.get('/api/admin/announcements', async (req, res) => {
     try {
       const { data, error } = await supabaseAdmin
@@ -5247,29 +6388,16 @@ export async function createApp(options: CreateAppOptions = {}) {
       if (error) throw error;
 
       if (body.status === 'published') {
-        const inviteIds = new Set<string>();
         const classIds: string[] = Array.isArray(class_ids) ? class_ids.map((x: unknown) => String(x || '').trim()).filter(Boolean) : [];
         const studentIds: string[] = Array.isArray(student_ids) ? student_ids.map((x: unknown) => String(x || '').trim()).filter(Boolean) : [];
-        studentIds.forEach((sid) => inviteIds.add(sid));
-        for (const cid of classIds) {
-          const { data: classRow } = await supabaseAdmin
-            .from('classes')
-            .select('student_ids')
-            .eq('id', cid)
-            .maybeSingle();
-          ((classRow?.student_ids as string[]) || []).forEach((uid: string) => inviteIds.add(String(uid)));
-        }
-        if (inviteIds.size > 0) {
-          const notifRows = [...inviteIds].map((uid) => ({
-            user_id: uid,
-            title: `Announcement: ${String(body.title || 'New announcement')}`,
-            message: String(body.content || '').slice(0, 240),
-            type: body.priority === 'urgent' ? 'warning' : body.priority === 'important' ? 'info' : 'info',
-            action_url: '/student',
-            created_at: new Date().toISOString(),
-          }));
-          await supabaseAdmin.from('notifications').insert(notifRows);
-        }
+        await sendAnnouncementNotifications({
+          title: String(body.title || ''),
+          content: String(body.content || ''),
+          priority: String(body.priority || 'normal'),
+          audience: String(body.target_audience || 'all'),
+          classIds,
+          studentIds,
+        });
       }
       res.json({ success: true, announcement: data });
     } catch (e: any) { res.status(500).json({ error: e.message }); }
@@ -5287,29 +6415,16 @@ export async function createApp(options: CreateAppOptions = {}) {
       if (error) throw error;
 
       if (body.status === 'published') {
-        const inviteIds = new Set<string>();
         const classIds: string[] = Array.isArray(class_ids) ? class_ids.map((x: unknown) => String(x || '').trim()).filter(Boolean) : [];
         const studentIds: string[] = Array.isArray(student_ids) ? student_ids.map((x: unknown) => String(x || '').trim()).filter(Boolean) : [];
-        studentIds.forEach((sid) => inviteIds.add(sid));
-        for (const cid of classIds) {
-          const { data: classRow } = await supabaseAdmin
-            .from('classes')
-            .select('student_ids')
-            .eq('id', cid)
-            .maybeSingle();
-          ((classRow?.student_ids as string[]) || []).forEach((uid: string) => inviteIds.add(String(uid)));
-        }
-        if (inviteIds.size > 0) {
-          const notifRows = [...inviteIds].map((uid) => ({
-            user_id: uid,
-            title: `Announcement: ${String((body.title ?? data?.title) || 'New announcement')}`,
-            message: String((body.content ?? data?.content) || '').slice(0, 240),
-            type: (body.priority ?? data?.priority) === 'urgent' ? 'warning' : (body.priority ?? data?.priority) === 'important' ? 'info' : 'info',
-            action_url: '/student',
-            created_at: new Date().toISOString(),
-          }));
-          await supabaseAdmin.from('notifications').insert(notifRows);
-        }
+        await sendAnnouncementNotifications({
+          title: String((body.title ?? data?.title) || ''),
+          content: String((body.content ?? data?.content) || ''),
+          priority: String((body.priority ?? data?.priority) || 'normal'),
+          audience: String((body.target_audience ?? data?.target_audience) || 'all'),
+          classIds,
+          studentIds,
+        });
       }
       res.json({ success: true, announcement: data });
     } catch (e: any) { res.status(500).json({ error: e.message }); }

@@ -101,6 +101,8 @@ export default function Exams() {
       setLoading(false);
       return;
     }
+    const scopedTeacherIds = await resolveTeacherIdCandidates(session.user.id);
+    const effectiveTeacherIds = scopedTeacherIds.length > 0 ? scopedTeacherIds : [session.user.id];
 
     try {
       let courseRows: { id: string; title: string | null }[] | null = null;
@@ -114,10 +116,22 @@ export default function Exams() {
         }
       }
       if (courseRows === null) {
-        const scopedIds = await resolveTeacherIdCandidates(session.user.id);
-        const { data: cd } = await supabase.from('courses').select('id, title').in('teacher_id', scopedIds);
+        const { data: cd } = await supabase.from('courses').select('id, title').in('teacher_id', effectiveTeacherIds);
         courseRows = cd ?? [];
       }
+
+      const { data: courseRosterRows } = await supabase
+        .from('courses')
+        .select('id,student_ids')
+        .in('teacher_id', effectiveTeacherIds);
+      const allowedStudentIds = new Set<string>();
+      (courseRosterRows || []).forEach((course: any) => {
+        const list = Array.isArray(course?.student_ids) ? course.student_ids : [];
+        list.forEach((sid: any) => {
+          const normalized = String(sid || '').trim();
+          if (normalized) allowedStudentIds.add(normalized);
+        });
+      });
 
       let quizRows: any[] | null = null;
       const qzRes = await authFetch(
@@ -128,8 +142,7 @@ export default function Exams() {
         if (j?.success && Array.isArray(j.quizzes)) quizRows = j.quizzes;
       }
       if (quizRows === null) {
-        const scopedIds = await resolveTeacherIdCandidates(session.user.id);
-        quizRows = await fetchTeacherQuizzesFromSupabase(supabase, scopedIds, session.user.id);
+        quizRows = await fetchTeacherQuizzesFromSupabase(supabase, effectiveTeacherIds, session.user.id);
       }
 
       const examsOnly = (quizRows || []).filter((d: any) => (d.type || 'standard') === 'exam');
@@ -157,7 +170,10 @@ export default function Exams() {
       examsOnly.forEach((ex: any) => {
         passingByQuiz[ex.id] = Number(ex.settings?.passingScore ?? ex.pass_mark ?? 70);
       });
-      const normalizedAttempts = normalizeAttempts(attemptRows, passingByQuiz);
+      const normalizedAttempts = normalizeAttempts(attemptRows, passingByQuiz).filter((a) => {
+        if (allowedStudentIds.size === 0) return true;
+        return allowedStudentIds.has(String(a.student_id || ''));
+      });
 
       const attempts: Record<string, { total: number; passed: number; scores: number[] }> = {};
       normalizedAttempts.forEach((a) => {

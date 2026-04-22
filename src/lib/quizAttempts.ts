@@ -58,6 +58,11 @@ const isMissingColumnError = (error: any) => {
   return error?.code === 'PGRST204' || haystack.includes('could not find the') || haystack.includes('column');
 };
 
+const isRlsPolicyError = (error: any) => {
+  const haystack = `${error?.message || ''} ${error?.details || ''} ${error?.hint || ''}`.toLowerCase();
+  return error?.code === '42501' || haystack.includes('row-level security policy');
+};
+
 const normalizeAttempt = (row: any, passingScore = 50): NormalizedQuizAttempt => {
   const rawScore = toNumber(row?.score, 0);
   const totalPointsRaw = toNumber(row?.total_points, 0);
@@ -154,6 +159,11 @@ export const insertAttemptWithFallback = async (
 
   const modernExtended = await supabase.from('quiz_attempts').insert(modernPayloadExtended).select().single();
   if (!modernExtended.error) return modernExtended.data;
+
+  if (isRlsPolicyError(modernExtended.error)) {
+    throw modernExtended.error;
+  }
+
   if (!isMissingColumnError(modernExtended.error) && !isAttemptsTableMissing(modernExtended.error)) {
     throw modernExtended.error;
   }
@@ -170,7 +180,12 @@ export const insertAttemptWithFallback = async (
       .single();
 
     if (!modernMinimal.error) return modernMinimal.data;
-    if (!isAttemptsTableMissing(modernMinimal.error)) throw modernMinimal.error;
+    if (isRlsPolicyError(modernMinimal.error)) {
+      throw modernMinimal.error;
+    }
+    if (!isAttemptsTableMissing(modernMinimal.error)) {
+      throw modernMinimal.error;
+    }
   }
 
   const legacy = await supabase.from('attempts').insert(payload).select().single();

@@ -5,8 +5,6 @@ import { motion, AnimatePresence } from 'motion/react';
 import { ClipboardList, Search, Calendar, BookOpen, AlertCircle, CheckCircle2, Archive, FileText, ArrowRight, Play } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { format, isPast, isToday } from 'date-fns';
-import { authFetch } from '../../lib/apiUrl';
-import { resolveTeacherIdCandidates } from '../../lib/teacherScope';
 import { Link } from 'react-router-dom';
 
 type AssignmentStatus = 'draft' | 'published' | 'closed';
@@ -54,30 +52,17 @@ export default function StudentAssignments() {
       }
       const uid = session.user.id;
 
-      const profileSnap = await supabase
-        .from('profiles')
-        .select('teacher_id')
-        .eq('id', uid)
-        .single();
-      const linkedTeacherId = String(profileSnap.data?.teacher_id || '').trim();
-      if (!linkedTeacherId) { setLoading(false); return; }
+      const { data: enrolledCourses } = await supabase
+        .from('courses')
+        .select('id, title, status, student_ids')
+        .contains('student_ids', [uid]);
 
-      const teacherIdCandidates = await resolveTeacherIdCandidates(linkedTeacherId);
-      const scopedTeacherIds = teacherIdCandidates.length > 0 ? teacherIdCandidates : [linkedTeacherId];
-
-      const coursesRes = await authFetch(`/api/teacher/courses?userId=${encodeURIComponent(linkedTeacherId)}`);
-      const coursesJson = coursesRes.ok ? await coursesRes.json() : { courses: [] };
-      const courses = Array.isArray(coursesJson?.courses)
-        ? coursesJson.courses
-            .filter((c: any) => {
-              const isPublished = String(c?.status || '').toLowerCase() === 'published';
-              const isTeacherScoped = scopedTeacherIds.includes(String(c?.teacher_id || ''));
-              const studentIds = Array.isArray(c?.student_ids) ? c.student_ids.map((sid: unknown) => String(sid)) : [];
-              const isEnrolled = studentIds.includes(uid);
-              return isPublished && isTeacherScoped && isEnrolled;
-            })
-            .map((c: any) => ({ id: c.id, title: c.title || 'Course' }))
-        : [];
+      const courses = (enrolledCourses || [])
+        .filter((c: any) => {
+          const status = String(c?.status || '').toLowerCase();
+          return status === '' || status === 'published' || status === 'active';
+        })
+        .map((c: any) => ({ id: String(c.id), title: String(c.title || 'Course') }));
       if (!courses.length) { setLoading(false); return; }
       const courseIds = courses.map((c: any) => c.id);
       const courseMap: Record<string, string> = {};
@@ -147,10 +132,19 @@ export default function StudentAssignments() {
           </div>
         </div>
 
-        {/* List */}
+        {/* Cards */}
         {loading ? (
-          <div className="space-y-3">
-            {[1,2,3].map(i => <div key={i} className="h-24 bg-white rounded-2xl border border-slate-100 animate-pulse" />)}
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
+            {[1,2,3,4,5,6].map(i => (
+              <div key={i} className="bg-white rounded-3xl border border-slate-100 overflow-hidden shadow-sm">
+                <div className="h-3 bg-slate-200 animate-pulse" />
+                <div className="p-5 space-y-3">
+                  <div className="h-5 w-3/4 bg-slate-100 rounded-xl animate-pulse" />
+                  <div className="h-3 w-full bg-slate-100 rounded animate-pulse" />
+                  <div className="h-10 bg-slate-100 rounded-2xl animate-pulse mt-4" />
+                </div>
+              </div>
+            ))}
           </div>
         ) : filtered.length === 0 ? (
           <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }}
@@ -165,7 +159,7 @@ export default function StudentAssignments() {
             </p>
           </motion.div>
         ) : (
-          <div className="space-y-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
             <AnimatePresence>
               {filtered.map((a, i) => {
                 const typeCfg = TYPE_CFG[a.type] || TYPE_CFG.other;
@@ -176,20 +170,34 @@ export default function StudentAssignments() {
                 const dueStateLabel = isOverdue ? 'Overdue' : dueToday ? 'Due today' : a.status === 'closed' ? 'Closed' : 'Open';
                 return (
                   <motion.div key={a.id}
-                    initial={{ opacity: 0, x: -16 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0 }}
-                    transition={{ duration: 0.3, delay: i * 0.04 }}
-                    className={cn('bg-white rounded-2xl border shadow-sm hover:shadow-md transition-all p-4 group',
-                      isOverdue ? 'border-rose-200' : 'border-slate-100')}>
-                    <div className="flex items-start gap-4">
-                      <div className={cn('w-10 h-10 rounded-2xl flex items-center justify-center shrink-0 mt-0.5', typeCfg.bg)}>
-                        <ClipboardList className={cn('w-4 h-4', typeCfg.color)} />
+                    initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, scale: 0.95 }}
+                    transition={{ duration: 0.35, delay: i * 0.05 }}
+                    whileHover={{ y: -4, transition: { duration: 0.2 } }}
+                    className={cn(
+                      'bg-white rounded-3xl border overflow-hidden shadow-sm hover:shadow-xl hover:shadow-slate-200/80 transition-shadow flex flex-col group',
+                      isOverdue ? 'border-rose-200' : 'border-slate-100'
+                    )}>
+                    <div className={cn(
+                      'h-1.5 bg-gradient-to-r',
+                      isOverdue ? 'from-rose-500 to-red-500' : 'from-teal-500 to-cyan-500'
+                    )} />
+                    <div className="p-5 flex flex-col flex-1">
+                      <div className="flex items-start justify-between mb-3">
+                        <div className={cn('p-2.5 rounded-xl transition-colors', typeCfg.bg)}>
+                          <ClipboardList className={cn('w-4 h-4', typeCfg.color)} />
+                        </div>
+                        <span className={cn('text-[10px] font-bold px-2 py-0.5 rounded-lg flex items-center gap-1', statusCfg.bg, statusCfg.text)}>
+                          <StatusIcon className="w-3 h-3" /> {statusCfg.label}
+                        </span>
                       </div>
-                      <div className="flex-1 min-w-0">
-                        <div className="flex flex-wrap items-center gap-2 mb-1">
+                      <div className="flex-1">
+                        <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">{a.courseTitle}</span>
+                        <h3 className="text-sm font-black text-slate-900 mt-0.5 mb-2 line-clamp-2 group-hover:text-teal-600 transition-colors">{a.title}</h3>
+                        <p className="text-xs text-slate-400 line-clamp-2 leading-relaxed mb-4">
+                          {a.description || 'Complete this assignment before deadline.'}
+                        </p>
+                        <div className="flex gap-2 mb-5 flex-wrap">
                           <span className={cn('text-[10px] font-bold px-2 py-0.5 rounded-lg', typeCfg.bg, typeCfg.color)}>{typeCfg.label}</span>
-                          <span className={cn('text-[10px] font-bold px-2 py-0.5 rounded-lg flex items-center gap-1', statusCfg.bg, statusCfg.text)}>
-                            <StatusIcon className="w-3 h-3" /> {statusCfg.label}
-                          </span>
                           <span className={cn(
                             'text-[10px] font-bold px-2 py-0.5 rounded-lg',
                             isOverdue
@@ -203,34 +211,30 @@ export default function StudentAssignments() {
                             {dueStateLabel}
                           </span>
                         </div>
-                        <h3 className="text-sm font-bold text-slate-900 group-hover:text-teal-600 transition-colors">{a.title}</h3>
-                        <div className="flex flex-wrap items-center gap-3 mt-1.5">
-                          <span className="flex items-center gap-1 text-xs text-slate-400"><BookOpen className="w-3 h-3" /> {a.courseTitle}</span>
+                        <div className="flex flex-wrap items-center gap-3 mt-1.5 mb-5">
                           {a.due_date && (
                             <span className={cn('flex items-center gap-1 text-xs font-medium', isOverdue ? 'text-rose-500' : 'text-slate-400')}>
-                              <Calendar className="w-3 h-3" /> Due {format(new Date(a.due_date), 'MMM d, yyyy')}
+                              <Calendar className="w-3 h-3" /> {format(new Date(a.due_date), 'MMM d, yyyy')}
                             </span>
                           )}
                           <span className="text-xs text-slate-400 font-medium">Max: {a.max_score} pts</span>
                         </div>
-                        {a.description && <p className="text-xs text-slate-400 mt-1.5 line-clamp-1">{a.description}</p>}
-                        <div className="mt-3 flex flex-wrap items-center gap-2">
-                          <Link
-                            to={`/student/assignments/${a.id}`}
-                            className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg bg-teal-600 text-white text-xs font-semibold hover:bg-teal-700 transition-all"
-                          >
-                            <Play className="w-3.5 h-3.5" />
-                            View Details
-                            <ArrowRight className="w-3.5 h-3.5" />
-                          </Link>
-                          <Link
-                            to="/student/courses"
-                            className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg bg-slate-100 text-slate-600 text-xs font-semibold hover:bg-slate-200 transition-all"
-                          >
-                            Open Course
-                          </Link>
-                        </div>
                       </div>
+                      <Link
+                        to={`/student/assignments/${a.id}`}
+                        className="inline-flex items-center justify-center gap-2 w-full py-2.5 rounded-2xl text-sm font-bold transition-all bg-gradient-to-r from-teal-500 to-cyan-500 text-white hover:opacity-90 shadow-lg shadow-teal-200/60"
+                      >
+                        <Play className="w-3.5 h-3.5" />
+                        View Details
+                        <ArrowRight className="w-3.5 h-3.5 ml-auto" />
+                      </Link>
+                      <Link
+                        to="/student/courses"
+                        className="mt-2 inline-flex items-center justify-center gap-2 w-full py-2.5 rounded-2xl text-xs font-bold transition-all bg-slate-100 text-slate-600 hover:bg-slate-200"
+                      >
+                        <BookOpen className="w-3.5 h-3.5" />
+                        Open Course
+                      </Link>
                     </div>
                   </motion.div>
                 );

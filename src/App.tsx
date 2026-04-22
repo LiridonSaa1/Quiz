@@ -25,6 +25,7 @@ import StudentProfile from './pages/student/Profile';
 import TeacherResults from './pages/teacher/Results';
 import TeacherModules from './pages/teacher/Modules';
 import TeacherLessons from './pages/teacher/Lessons';
+import TeacherLessonContentManager from './pages/teacher/LessonContentManager';
 import TeacherAssignments from './pages/teacher/Assignments';
 import TeacherAttendance from './pages/teacher/Attendance';
 import TeacherCertificates from './pages/teacher/Certificates';
@@ -339,6 +340,7 @@ function TeacherRoutes({ features }: { features: FeatureFlags }) {
       <Route path="/results" element={<TeacherResults />} />
       <Route path="/modules" element={<TeacherModules />} />
       <Route path="/lessons" element={<TeacherLessons />} />
+      <Route path="/lessons/:lessonId/content" element={<TeacherLessonContentManager />} />
       <Route path="/assignments" element={<TeacherAssignments />} />
       <Route path="/attendance" element={<TeacherAttendance />} />
       <Route path="/certificates" element={<TeacherCertificates />} />

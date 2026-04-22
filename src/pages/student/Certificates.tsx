@@ -5,6 +5,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import { Award, CheckCircle2, XCircle, Hash, Calendar, BookOpen, Sparkles, Download } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { format } from 'date-fns';
+import { toast } from 'sonner';
 
 interface Certificate {
   id: string;
@@ -37,12 +38,110 @@ const CERT_GRADIENTS = [
 export default function StudentCertificates() {
   const [certs, setCerts] = useState<Certificate[]>([]);
   const [loading, setLoading] = useState(true);
+  const [studentName, setStudentName] = useState('Student');
+
+  const renderCertificateHtml = (cert: Certificate) => {
+    const accent = '#6d28d9';
+    const bg = '#ffffff';
+    const gradeHtml = cert.grade
+      ? `<div style="padding:8px 14px;border:1px solid #c4b5fd;border-radius:999px;background:#f5f3ff;color:${accent};font-size:12px;font-weight:700;">Grade: ${cert.grade}</div>`
+      : '';
+    const scoreHtml = cert.score != null
+      ? `<div style="padding:8px 14px;border:1px solid #c4b5fd;border-radius:999px;background:#f5f3ff;color:${accent};font-size:12px;font-weight:700;">Score: ${cert.score}%</div>`
+      : '';
+
+    return `<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Certificate - ${cert.title}</title>
+    <style>
+      body { margin: 0; padding: 24px; background: #f8fafc; color: #0f172a; font-family: Inter, system-ui, Arial, sans-serif; }
+      .toolbar { max-width: 980px; margin: 0 auto 12px auto; display: flex; justify-content: flex-end; gap: 8px; }
+      .toolbar button { border: 1px solid #cbd5e1; background: #ffffff; color: #334155; border-radius: 8px; padding: 8px 12px; cursor: pointer; font-weight: 600; }
+      .toolbar button.primary { background: #111827; border-color: #111827; color: #ffffff; }
+      @media print { .toolbar { display: none; } body { background: #fff; padding: 0; } }
+    </style>
+  </head>
+  <body>
+    <div class="toolbar">
+      <button class="primary" onclick="window.print()">Print / Save PDF</button>
+      <button onclick="window.close()">Close</button>
+    </div>
+    <div style="max-width:960px;margin:0 auto;background:${bg};border:2px solid ${accent};border-radius:20px;padding:48px;position:relative;box-shadow:0 24px 60px rgba(15,23,42,0.18);">
+      <div style="position:absolute;inset:10px;border:1px solid ${accent};opacity:0.35;border-radius:16px;pointer-events:none;"></div>
+      <div style="position:absolute;top:18px;left:18px;width:42px;height:42px;border-top:3px solid ${accent};border-left:3px solid ${accent};border-radius:10px;"></div>
+      <div style="position:absolute;top:18px;right:18px;width:42px;height:42px;border-top:3px solid ${accent};border-right:3px solid ${accent};border-radius:10px;"></div>
+      <div style="position:absolute;bottom:18px;left:18px;width:42px;height:42px;border-bottom:3px solid ${accent};border-left:3px solid ${accent};border-radius:10px;"></div>
+      <div style="position:absolute;bottom:18px;right:18px;width:42px;height:42px;border-bottom:3px solid ${accent};border-right:3px solid ${accent};border-radius:10px;"></div>
+      <div style="text-align:center;position:relative;">
+        <div style="display:inline-flex;align-items:center;gap:10px;padding:6px 14px;border-radius:999px;background:rgba(255,255,255,0.75);border:1px solid rgba(15,23,42,0.12);font-size:11px;letter-spacing:0.18em;text-transform:uppercase;color:${accent};font-weight:800;">Certificate of Achievement</div>
+        <div style="margin-top:14px;font-size:12px;color:#475569;letter-spacing:0.08em;text-transform:uppercase;">Presented To</div>
+        <h1 style="margin:10px 0 0 0;font-size:56px;line-height:1.08;color:#0f172a;font-family:Georgia,'Times New Roman',serif;">${studentName}</h1>
+        <div style="margin-top:14px;font-size:13px;color:#64748b;">for successful completion of</div>
+        <h2 style="margin:10px auto 0 auto;font-size:36px;line-height:1.15;color:${accent};font-family:Georgia,'Times New Roman',serif;max-width:1080px;word-break:break-word;overflow-wrap:anywhere;">${cert.title}</h2>
+        ${cert.courseTitle ? `<div style="margin-top:8px;color:#475569;">${cert.courseTitle}</div>` : ''}
+        <div style="display:flex;gap:32px;justify-content:center;margin-top:24px;">${gradeHtml}${scoreHtml}</div>
+        <div style="display:flex;align-items:end;justify-content:space-between;margin-top:34px;padding-top:18px;border-top:1px solid #cbd5e1;">
+          <div style="text-align:left;font-size:12px;color:#64748b;">
+            Issued on ${format(new Date(cert.issued_at), 'MMMM d, yyyy')}<br/>
+            <span style="font-family:ui-monospace,Menlo,Consolas,monospace;">${cert.certificate_number}</span>
+          </div>
+          <div style="display:flex;flex-direction:column;align-items:center;gap:8px;">
+            <div style="width:84px;height:84px;border-radius:999px;background:radial-gradient(circle at 30% 30%, #8b5cf6,#4c1d95);box-shadow:inset 0 0 0 3px rgba(255,255,255,0.55),0 10px 24px rgba(15,23,42,0.22);display:flex;align-items:center;justify-content:center;color:#fff;font-size:30px;font-weight:800;">★</div>
+            <div style="font-size:11px;color:#64748b;letter-spacing:0.08em;text-transform:uppercase;">Verified</div>
+          </div>
+          <div style="text-align:right;">
+            <div style="width:180px;border-top:2px solid #94a3b8;margin-left:auto;"></div>
+            <div style="font-size:11px;color:#64748b;margin-top:6px;">Authorized Signature</div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <script>window.focus();</script>
+  </body>
+</html>`;
+  };
+
+  const downloadCertificate = (cert: Certificate) => {
+    if (cert.status !== 'issued') {
+      toast.error('Only issued certificates can be downloaded.');
+      return;
+    }
+
+    const win = window.open('', '_blank', 'width=1200,height=900');
+    if (!win) {
+      toast.error('Pop-up blocked. Please allow pop-ups for certificate download.');
+      return;
+    }
+
+    win.document.open();
+    win.document.write(renderCertificateHtml(cert));
+    win.document.close();
+  };
 
   useEffect(() => {
     const load = async () => {
       const { data: { session } } = await supabase.auth.getSession();
       if (!session) return;
       const uid = session.user.id;
+      setStudentName(
+        String(
+          session.user.user_metadata?.displayName ||
+          session.user.user_metadata?.display_name ||
+          session.user.email?.split('@')[0] ||
+          'Student'
+        )
+      );
+
+      const { data: profile } = await supabase
+        .from('profiles')
+        .select('display_name')
+        .eq('id', uid)
+        .maybeSingle();
+      if (profile?.display_name) {
+        setStudentName(String(profile.display_name));
+      }
 
       const { data: certsData } = await supabase
         .from('certificates').select('*').eq('student_id', uid).order('issued_at', { ascending: false });
@@ -163,6 +262,20 @@ export default function StudentCertificates() {
                         <Calendar className="w-3 h-3" /> {format(new Date(cert.issued_at), 'MMM d, yyyy')}
                       </div>
                     </div>
+                    <button
+                      type="button"
+                      disabled={cert.status !== 'issued'}
+                      onClick={() => downloadCertificate(cert)}
+                      className={cn(
+                        'mt-4 w-full inline-flex items-center justify-center gap-2 rounded-xl px-3 py-2.5 text-sm font-semibold transition-all',
+                        cert.status === 'issued'
+                          ? 'bg-slate-900 text-white hover:bg-slate-800'
+                          : 'bg-slate-100 text-slate-400 cursor-not-allowed'
+                      )}
+                    >
+                      <Download className="w-4 h-4" />
+                      Download Certificate
+                    </button>
                   </div>
                 </motion.div>
               ))}

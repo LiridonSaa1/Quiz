@@ -33,10 +33,13 @@ interface LessonItem {
   moduleTitle: string;
   courseTitle: string;
   courseGradient: string;
+  progressCompleted?: boolean;
+  lastVideoPosition?: number;
 }
 
 type LessonProgress = {
   completed: boolean;
+  started: boolean;
 };
 
 export default function StudentLessons() {
@@ -44,7 +47,6 @@ export default function StudentLessons() {
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [typeFilter, setTypeFilter] = useState('all');
-  const [studentId, setStudentId] = useState('');
   const [searchParams] = useSearchParams();
   const selectedCourseId = (searchParams.get('courseId') || '').trim();
 
@@ -52,7 +54,6 @@ export default function StudentLessons() {
     const load = async () => {
       const { data: { session } } = await supabase.auth.getSession();
       if (!session) return;
-      setStudentId(session.user.id);
       const lessonsRes = await authFetch(
         selectedCourseId
           ? `/api/student/lessons?courseId=${encodeURIComponent(selectedCourseId)}`
@@ -62,7 +63,9 @@ export default function StudentLessons() {
       const rows = Array.isArray(lessonsJson?.lessons) ? lessonsJson.lessons : [];
       if (!rows.length) { setLoading(false); return; }
 
-      const courseTitleSet: string[] = [...new Set(rows.map((r: any) => String(r.course_title || 'Course')))];
+      const courseTitleSet = Array.from(
+        new Set(rows.map((r: any) => String(r.course_title || 'Course')))
+      ) as string[];
       const courseGradientMap: Record<string, string> = {};
       courseTitleSet.forEach((title, i) => {
         courseGradientMap[title] = COURSE_GRADIENTS[i % COURSE_GRADIENTS.length];
@@ -82,6 +85,8 @@ export default function StudentLessons() {
           moduleTitle: String(l.module_title || ''),
           courseTitle,
           courseGradient: courseGradientMap[courseTitle] || COURSE_GRADIENTS[0],
+          progressCompleted: Boolean(l.progress_completed),
+          lastVideoPosition: Number(l.last_video_position || 0),
         };
       });
 
@@ -104,19 +109,14 @@ export default function StudentLessons() {
   const hasActiveFilters = search.trim() !== '' || typeFilter !== 'all';
   const lessonProgressById = useMemo(() => {
     const out: Record<string, LessonProgress> = {};
-    if (!studentId) return out;
     lessons.forEach((lesson) => {
-      try {
-        const raw = localStorage.getItem(`lesson_progress:${studentId}:${lesson.id}`);
-        if (!raw) return;
-        const parsed = JSON.parse(raw) as Partial<LessonProgress>;
-        out[lesson.id] = { completed: Boolean(parsed.completed) };
-      } catch {
-        // Ignore malformed local progress records.
-      }
+      out[lesson.id] = {
+        completed: Boolean(lesson.progressCompleted),
+        started: Number(lesson.lastVideoPosition || 0) > 0,
+      };
     });
     return out;
-  }, [lessons, studentId]);
+  }, [lessons]);
 
   return (
     <StudentLayout>
@@ -242,7 +242,8 @@ export default function StudentLessons() {
                     const Icon = cfg.icon;
                     const locked = lesson.status === 'locked';
                     const isCompleted = Boolean(lessonProgressById[lesson.id]?.completed);
-                    const primaryLabel = isCompleted ? 'Review' : locked ? 'View details' : 'Start';
+                    const isStarted = Boolean(lessonProgressById[lesson.id]?.started);
+                    const primaryLabel = isCompleted ? 'Review' : locked ? 'View details' : isStarted ? 'Continue' : 'Start';
                     return (
                       <motion.div
                         key={lesson.id}

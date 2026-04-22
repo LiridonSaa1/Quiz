@@ -115,10 +115,19 @@ export default function StudentResults() {
           </div>
         </div>
 
-        {/* List */}
+        {/* Cards */}
         {loading ? (
-          <div className="space-y-3">
-            {[1,2,3,4,5].map(i => <div key={i} className="h-20 bg-white rounded-2xl border border-slate-100 animate-pulse" />)}
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
+            {[1,2,3,4,5,6].map(i => (
+              <div key={i} className="bg-white rounded-3xl border border-slate-100 overflow-hidden shadow-sm">
+                <div className="h-3 bg-slate-200 animate-pulse" />
+                <div className="p-5 space-y-3">
+                  <div className="h-5 w-3/4 bg-slate-100 rounded-xl animate-pulse" />
+                  <div className="h-3 w-full bg-slate-100 rounded animate-pulse" />
+                  <div className="h-10 bg-slate-100 rounded-2xl animate-pulse mt-4" />
+                </div>
+              </div>
+            ))}
           </div>
         ) : filtered.length === 0 ? (
           <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }}
@@ -131,7 +140,7 @@ export default function StudentResults() {
             <p className="text-slate-400 text-sm mt-1">Take some quizzes to see your results here.</p>
           </motion.div>
         ) : (
-          <div className="space-y-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
             <AnimatePresence>
               {filtered.map((attempt, i) => {
                 const pct = attempt.total_points > 0 ? Math.round((attempt.score / attempt.total_points) * 100) : 0;
@@ -141,46 +150,56 @@ export default function StudentResults() {
                   : null;
                 return (
                   <motion.div key={attempt.id}
-                    initial={{ opacity: 0, x: -16 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0 }}
-                    transition={{ duration: 0.3, delay: i * 0.04 }}
-                    className="bg-white rounded-2xl border border-slate-100 shadow-sm hover:shadow-md transition-all group">
-                    <Link to={`/student/results/${attempt.id}`} className="flex items-center gap-4 p-4">
-                      <div className={cn('w-14 h-14 rounded-2xl flex flex-col items-center justify-center shrink-0 font-black text-lg shadow-sm',
-                        passed ? 'bg-emerald-50 text-emerald-600' : 'bg-red-50 text-red-500')}>
-                        <span>{pct}</span>
-                        <span className="text-[10px] font-bold leading-none">%</span>
+                    initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, scale: 0.95 }}
+                    transition={{ duration: 0.35, delay: i * 0.05 }}
+                    whileHover={{ y: -4, transition: { duration: 0.2 } }}
+                    className="bg-white rounded-3xl border border-slate-100 overflow-hidden shadow-sm hover:shadow-xl hover:shadow-slate-200/80 transition-shadow flex flex-col group">
+                    <div className={cn('h-1.5 bg-gradient-to-r', passed ? 'from-emerald-500 to-teal-500' : 'from-rose-500 to-red-500')} />
+                    <Link to={`/student/results/${attempt.id}`} className="p-5 flex flex-col flex-1">
+                      <div className="flex items-start justify-between mb-3">
+                        <div className={cn('p-2.5 rounded-xl', passed ? 'bg-emerald-50' : 'bg-red-50')}>
+                          {passed ? <Trophy className="w-4 h-4 text-emerald-600" /> : <XCircle className="w-4 h-4 text-red-500" />}
+                        </div>
+                        <span className={cn('text-xs font-bold px-2.5 py-1 rounded-xl', passed ? 'bg-emerald-50 text-emerald-700' : 'bg-red-50 text-red-600')}>
+                          {pct}%
+                        </span>
                       </div>
-                      <div className="flex-1 min-w-0">
-                        <h3 className="text-sm font-bold text-slate-900 group-hover:text-emerald-600 transition-colors truncate">
+                      <div className="flex-1">
+                        <h3 className="text-sm font-black text-slate-900 line-clamp-2 group-hover:text-emerald-600 transition-colors">
                           {quizMap[attempt.quiz_id] || 'Quiz'}
                         </h3>
-                        <div className="flex flex-wrap items-center gap-3 mt-1">
-                          <span className={cn('flex items-center gap-1 text-xs font-semibold', passed ? 'text-emerald-600' : 'text-red-500')}>
+                        <div className="flex flex-wrap items-center gap-2 mt-2 mb-3">
+                          <span className={cn('inline-flex items-center gap-1 text-[11px] font-semibold px-2 py-1 rounded-lg',
+                            passed ? 'bg-emerald-50 text-emerald-700' : 'bg-red-50 text-red-600')}>
                             {passed ? <CheckCircle2 className="w-3.5 h-3.5" /> : <XCircle className="w-3.5 h-3.5" />}
                             {passed ? 'Passed' : 'Failed'}
                           </span>
-                          <span className="text-xs text-slate-400">
-                            {attempt.correct_answers ?? '—'}/{attempt.total_questions ?? '—'} correct
-                          </span>
                           {duration != null && (
-                            <span className="flex items-center gap-1 text-xs text-slate-400">
+                            <span className="inline-flex items-center gap-1 text-[11px] font-semibold px-2 py-1 rounded-lg bg-slate-50 text-slate-600">
                               <Clock className="w-3 h-3" /> {duration}m
                             </span>
                           )}
-                          {attempt.completed_at && (
-                            <span className="text-xs text-slate-400">
-                              {format(new Date(attempt.completed_at), 'MMM d, yyyy')}
-                            </span>
-                          )}
                         </div>
-                        <div className="mt-2 h-1.5 bg-slate-100 rounded-full overflow-hidden">
+                        <div className="text-xs text-slate-400 mb-2">
+                          {attempt.correct_answers ?? '—'}/{attempt.total_questions ?? '—'} correct
+                        </div>
+                        {attempt.completed_at && (
+                          <div className="text-xs text-slate-400 mb-3">
+                            {format(new Date(attempt.completed_at), 'MMM d, yyyy')}
+                          </div>
+                        )}
+                        <div className="h-1.5 bg-slate-100 rounded-full overflow-hidden">
                           <motion.div
                             className={cn('h-full rounded-full', passed ? 'bg-emerald-500' : 'bg-red-400')}
                             initial={{ width: 0 }} animate={{ width: `${pct}%` }}
-                            transition={{ duration: 0.8, delay: 0.1 + i * 0.04 }} />
+                            transition={{ duration: 0.8, delay: 0.1 + i * 0.04 }}
+                          />
                         </div>
                       </div>
-                      <ChevronRight className="w-4 h-4 text-slate-300 group-hover:text-emerald-500 transition-colors shrink-0" />
+                      <div className="mt-4 inline-flex items-center justify-center gap-2 w-full py-2.5 rounded-2xl text-sm font-bold transition-all bg-slate-100 text-slate-700 group-hover:bg-slate-900 group-hover:text-white">
+                        View Result
+                        <ChevronRight className="w-4 h-4" />
+                      </div>
                     </Link>
                   </motion.div>
                 );

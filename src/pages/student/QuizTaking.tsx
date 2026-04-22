@@ -61,6 +61,16 @@ const DEFAULT_QUIZ_SETTINGS = {
 };
 
 const QUIZ_VIOLATION_LIMIT = 3;
+const QUESTION_SKIP_DELAY_SECONDS = 5;
+const GRADABLE_QUESTION_TYPES = new Set([
+  'multiple-choice',
+  'true-false',
+  'image',
+  'video',
+  'reading',
+  'open-text',
+  'fill-in-the-blank',
+]);
 
 type ViolationType = 'tab_switch' | 'window_blur' | 'copy' | 'cut' | 'paste';
 
@@ -75,8 +85,25 @@ type QuizProgressSnapshot = {
   violationCount: number;
 };
 
+type QuizTimerSnapshot = {
+  quizId: string;
+  userId: string;
+  startedAt: string;
+  expiresAtMs: number | null;
+};
+
+type QuizRuntimeDbState = {
+  started_at: string | null;
+  expires_at_ms: number | null;
+  violation_count: number | null;
+  current_question_index: number | null;
+};
+
 const getQuizProgressStorageKey = (userId: string, quizId: string) =>
   `quiz_progress:${userId}:${quizId}`;
+
+const getQuizTimerStorageKey = (userId: string, quizId: string) =>
+  `quiz_timer:${userId}:${quizId}`;
 
 function QuizStateScreen({
   title,
@@ -122,6 +149,10 @@ export default function QuizTaking() {
   const [startedAt, setStartedAt] = useState<string>('');
   const [expiresAtMs, setExpiresAtMs] = useState<number | null>(null);
   const [violationCount, setViolationCount] = useState(0);
+  const [showSubmitConfirm, setShowSubmitConfirm] = useState(false);
+  const [questionEnteredAtMs, setQuestionEnteredAtMs] = useState<number>(Date.now());
+  const [questionClockNowMs, setQuestionClockNowMs] = useState<number>(Date.now());
+  const [runtimeHydrated, setRuntimeHydrated] = useState(false);
   const autoSubmittingRef = useRef(false);
   const lastViolationAtRef = useRef(0);
 
@@ -138,11 +169,12 @@ export default function QuizTaking() {
     setQuestions([]);
     setAnswers({});
     setCurrentQuestionIndex(0);
-      setViolationCount(0);
-      setStartedAt('');
-      setExpiresAtMs(null);
-      setSessionUserId('');
-      autoSubmittingRef.current = false;
+    setViolationCount(0);
+    setStartedAt('');
+    setExpiresAtMs(null);
+    setSessionUserId('');
+    setRuntimeHydrated(false);
+    autoSubmittingRef.current = false;
 
     try {
       const { data: { session } } = await supabase.auth.getSession();
@@ -204,6 +236,8 @@ export default function QuizTaking() {
       } as Question));
 
       let savedSnapshot: QuizProgressSnapshot | null = null;
+      let savedTimerSnapshot: QuizTimerSnapshot | null = null;
+      let dbRuntimeSnapshot: QuizRuntimeDbState | null = null;
       if (quizId && userId) {
         try {
           const rawSnapshot = localStorage.getItem(getQuizProgressStorageKey(userId, quizId));
@@ -215,6 +249,26 @@ export default function QuizTaking() {
           }
         } catch {
           // Ignore invalid local snapshot and start fresh.
+        }
+        try {
+          const rawTimerSnapshot = localStorage.getItem(getQuizTimerStorageKey(userId, quizId));
+          if (rawTimerSnapshot) {
+            const parsedTimer = JSON.parse(rawTimerSnapshot) as QuizTimerSnapshot;
+            if (parsedTimer && parsedTimer.quizId === quizId && parsedTimer.userId === userId) {
+              savedTimerSnapshot = parsedTimer;
+            }
+          }
+        } catch {
+          // Ignore invalid timer snapshot and continue.
+        }
+        try {
+          const runtimeRes = await authFetch(`/api/student/quiz-runtime/${encodeURIComponent(quizId)}`);
+          const runtimeJson = await runtimeRes.json().catch(() => ({}));
+          if (runtimeRes.ok && runtimeJson?.runtime && typeof runtimeJson.runtime === 'object') {
+            dbRuntimeSnapshot = runtimeJson.runtime as QuizRuntimeDbState;
+          }
+        } catch {
+          // Best-effort read: local fallback still applies.
         }
       }
 
@@ -239,7 +293,10 @@ export default function QuizTaking() {
       const now = Date.now();
       const freshStartedAt = new Date().toISOString();
       const freshExpiresAt = formattedQuiz.timeLimit > 0 ? now + formattedQuiz.timeLimit * 60 * 1000 : null;
-      const restoredExpiresAt = typeof savedSnapshot?.expiresAtMs === 'number' ? savedSnapshot.expiresAtMs : null;
+      const restoredExpiresAt =
+        (typeof dbRuntimeSnapshot?.expires_at_ms === 'number' ? dbRuntimeSnapshot.expires_at_ms : null) ??
+        (typeof savedSnapshot?.expiresAtMs === 'number' ? savedSnapshot.expiresAtMs : null) ??
+        (typeof savedTimerSnapshot?.expiresAtMs === 'number' ? savedTimerSnapshot.expiresAtMs : null);
       const resolvedExpiresAt = restoredExpiresAt && restoredExpiresAt > now ? restoredExpiresAt : freshExpiresAt;
       const restoredAnswers = savedSnapshot?.answers && typeof savedSnapshot.answers === 'object'
         ? savedSnapshot.answers
@@ -250,15 +307,25 @@ export default function QuizTaking() {
       const restoredViolationCount = Number.isFinite(Number(savedSnapshot?.violationCount))
         ? Math.max(0, Number(savedSnapshot?.violationCount || 0))
         : 0;
-      const resolvedStartedAt = savedSnapshot?.startedAt || freshStartedAt;
+      const dbViolationCount = Number.isFinite(Number(dbRuntimeSnapshot?.violation_count))
+        ? Math.max(0, Number(dbRuntimeSnapshot?.violation_count || 0))
+        : null;
+      const resolvedViolationCount = dbViolationCount ?? restoredViolationCount;
+      const resolvedStartedAt = dbRuntimeSnapshot?.started_at || savedSnapshot?.startedAt || savedTimerSnapshot?.startedAt || freshStartedAt;
+      const dbQuestionIndex = Number.isFinite(Number(dbRuntimeSnapshot?.current_question_index))
+        ? Math.max(0, Math.min(formattedQuestions.length - 1, Number(dbRuntimeSnapshot?.current_question_index || 0)))
+        : null;
+      const resolvedQuestionIndex = dbQuestionIndex ?? restoredIndex;
 
       setStartedAt(resolvedStartedAt);
       setExpiresAtMs(resolvedExpiresAt);
       setTimeLeft(resolvedExpiresAt ? Math.max(0, Math.ceil((resolvedExpiresAt - now) / 1000)) : null);
       setAnswers(restoredAnswers);
-      setCurrentQuestionIndex(restoredIndex);
-      setViolationCount(restoredViolationCount);
+      setCurrentQuestionIndex(resolvedQuestionIndex);
+      setQuestionEnteredAtMs(Date.now());
+      setViolationCount(resolvedViolationCount);
       setQuestions(formattedQuestions);
+      setRuntimeHydrated(true);
     } catch (error) {
       console.error('Failed to load quiz:', error);
       setLoadError('We could not load this quiz right now.');
@@ -322,17 +389,60 @@ export default function QuizTaking() {
     violationCount,
   ]);
 
+  useEffect(() => {
+    if (!quiz || !quizId || !sessionUserId) return;
+    const timerSnapshot: QuizTimerSnapshot = {
+      quizId,
+      userId: sessionUserId,
+      startedAt: startedAt || new Date().toISOString(),
+      expiresAtMs,
+    };
+    try {
+      localStorage.setItem(getQuizTimerStorageKey(sessionUserId, quizId), JSON.stringify(timerSnapshot));
+    } catch {
+      // Ignore storage write issues (private mode/quota).
+    }
+  }, [quiz, quizId, sessionUserId, startedAt, expiresAtMs]);
+
+  useEffect(() => {
+    if (!runtimeHydrated || !quiz || !quizId || !sessionUserId) return;
+    const persistRuntime = async () => {
+      try {
+        await authFetch(`/api/student/quiz-runtime/${encodeURIComponent(quizId)}`, {
+          method: 'PUT',
+          body: JSON.stringify({
+            startedAt: startedAt || new Date().toISOString(),
+            expiresAtMs,
+            violationCount,
+            currentQuestionIndex,
+          }),
+        });
+      } catch {
+        // Best-effort persistence; local snapshot remains fallback.
+      }
+    };
+    void persistRuntime();
+  }, [runtimeHydrated, quiz, quizId, sessionUserId, startedAt, expiresAtMs, violationCount, currentQuestionIndex]);
+
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      setQuestionClockNowMs(Date.now());
+    }, 1000);
+    return () => window.clearInterval(timer);
+  }, []);
+
+  useEffect(() => {
+    setQuestionEnteredAtMs(Date.now());
+  }, [currentQuestionIndex, quiz?.id]);
+
   const reportViolation = useCallback(async (type: ViolationType) => {
     if (!quiz || !quizId || submitting) return;
     const now = Date.now();
     if (now - lastViolationAtRef.current < 900) return;
     lastViolationAtRef.current = now;
 
-    let nextCount = 0;
-    setViolationCount((prev) => {
-      nextCount = prev + 1;
-      return nextCount;
-    });
+    const nextCount = violationCount + 1;
+    setViolationCount(nextCount);
 
     toast.warning(`Academic integrity warning (${nextCount}/${QUIZ_VIOLATION_LIMIT}).`);
 
@@ -356,7 +466,7 @@ export default function QuizTaking() {
       toast.error('Quiz auto-submitted after repeated violations.');
       await handleSubmit();
     }
-  }, [quiz, quizId, submitting, currentQuestionIndex, timeLeft]);
+  }, [quiz, quizId, submitting, currentQuestionIndex, timeLeft, violationCount]);
 
   useEffect(() => {
     if (!quiz || loadError || submitting) return;
@@ -401,6 +511,66 @@ export default function QuizTaking() {
     setAnswers(prev => ({ ...prev, [questionId]: answer }));
   };
 
+  const normalizeComparableAnswer = (value: unknown): string => {
+    if (value === null || value === undefined) return '';
+    if (typeof value === 'number' || typeof value === 'boolean') return String(value);
+    if (Array.isArray(value)) {
+      if (value.length === 1) return normalizeComparableAnswer(value[0]);
+      return value.map((item) => normalizeComparableAnswer(item)).join('|');
+    }
+    if (typeof value === 'object') {
+      const candidate = value as Record<string, unknown>;
+      if (candidate.id !== undefined) return normalizeComparableAnswer(candidate.id);
+      if (candidate.value !== undefined) return normalizeComparableAnswer(candidate.value);
+      if (candidate.answer !== undefined) return normalizeComparableAnswer(candidate.answer);
+      return JSON.stringify(candidate);
+    }
+
+    const raw = String(value).trim();
+    if (!raw) return '';
+    try {
+      const parsed = JSON.parse(raw);
+      if (parsed !== raw) return normalizeComparableAnswer(parsed);
+    } catch {
+      // Keep raw string when not JSON.
+    }
+    return raw;
+  };
+
+  const isAnswerCorrect = (question: Question, studentAnswerRaw: unknown) => {
+    const questionType = String(question.type || '').trim().toLowerCase();
+    const normalizedStudentAnswer = normalizeComparableAnswer(studentAnswerRaw);
+    const normalizedCorrectAnswer = normalizeComparableAnswer(question.correctAnswer);
+
+    if (questionType === 'open-text' || questionType === 'fill-in-the-blank') {
+      const raw = normalizedCorrectAnswer;
+      const keywords = raw.toLowerCase().split(',').map((k) => k.trim()).filter(Boolean);
+      const studentText = normalizedStudentAnswer.toLowerCase();
+      return keywords.some((k) => studentText.includes(k));
+    }
+
+    if (Array.isArray(question.options) && question.options.length > 0) {
+      const selectedOption = question.options.find(
+        (opt) => normalizeComparableAnswer(opt.id) === normalizedStudentAnswer
+      );
+      const selectedText = selectedOption ? normalizeComparableAnswer(selectedOption.text) : normalizedStudentAnswer;
+
+      const correctOption = question.options.find(
+        (opt) => normalizeComparableAnswer(opt.id) === normalizedCorrectAnswer
+      );
+      const correctText = correctOption ? normalizeComparableAnswer(correctOption.text) : normalizedCorrectAnswer;
+
+      return (
+        normalizedStudentAnswer === normalizedCorrectAnswer ||
+        selectedText === normalizedCorrectAnswer ||
+        normalizedStudentAnswer === correctText ||
+        selectedText === correctText
+      );
+    }
+
+    return normalizedStudentAnswer === normalizedCorrectAnswer;
+  };
+
   const handleSubmit = async () => {
     const { data: { session } } = await supabase.auth.getSession();
     if (!quiz || !session || submitting) return;
@@ -411,20 +581,13 @@ export default function QuizTaking() {
       let totalPoints = 0;
 
       questions.forEach(q => {
-        if (q.type === 'instruction') return;
-        totalPoints += q.points;
+        const questionType = String(q.type || '').trim().toLowerCase();
+        if (!GRADABLE_QUESTION_TYPES.has(questionType)) return;
+        const questionPoints = Number.isFinite(Number(q.points)) ? Number(q.points) : 0;
+        totalPoints += questionPoints;
         const studentAnswer = answers[q.id];
-        if (q.type === 'multiple-choice' || q.type === 'true-false' || q.type === 'image' || q.type === 'video' || q.type === 'reading') {
-          if (studentAnswer === q.correctAnswer) {
-            score += q.points;
-          }
-        } else if (q.type === 'open-text' || q.type === 'fill-in-the-blank') {
-          const raw = typeof q.correctAnswer === 'string' ? q.correctAnswer : String(q.correctAnswer ?? '');
-          const keywords = raw.toLowerCase().split(',').map(k => k.trim()).filter(Boolean);
-          const studentText = studentAnswer?.toLowerCase() || '';
-          if (keywords.some(k => studentText.includes(k))) {
-            score += q.points;
-          }
+        if (isAnswerCorrect(q, studentAnswer)) {
+          score += questionPoints;
         }
       });
 
@@ -457,8 +620,16 @@ export default function QuizTaking() {
       if (quizId) {
         try {
           localStorage.removeItem(getQuizProgressStorageKey(session.user.id, quizId));
+          localStorage.removeItem(getQuizTimerStorageKey(session.user.id, quizId));
         } catch {
           // ignore storage cleanup issues
+        }
+        try {
+          await authFetch(`/api/student/quiz-runtime/${encodeURIComponent(quizId)}`, {
+            method: 'DELETE',
+          });
+        } catch {
+          // Ignore cleanup failures; result page navigation should continue.
         }
       }
       navigate(`/student/results/${attempt.id}`);
@@ -508,6 +679,27 @@ export default function QuizTaking() {
     const mins = Math.floor(seconds / 60);
     const secs = seconds % 60;
     return `${mins}:${secs.toString().padStart(2, '0')}`;
+  };
+  const answerableQuestions = questions.filter((question) => question.type !== 'instruction');
+  const answeredCount = answerableQuestions.filter((question) => {
+    const rawAnswer = answers[question.id];
+    return typeof rawAnswer === 'string' && rawAnswer.trim().length > 0;
+  }).length;
+  const currentAnswer = answers[currentQuestion.id];
+  const currentQuestionNeedsAnswer = currentQuestion.type !== 'instruction';
+  const hasCurrentAnswer = typeof currentAnswer === 'string' && currentAnswer.trim().length > 0;
+  const elapsedOnCurrentQuestion = Math.max(0, Math.floor((questionClockNowMs - questionEnteredAtMs) / 1000));
+  const remainingSkipDelay = Math.max(0, QUESTION_SKIP_DELAY_SECONDS - elapsedOnCurrentQuestion);
+  const canSkipUnanswered = remainingSkipDelay === 0;
+  const skipProgressPercent = Math.min(100, (elapsedOnCurrentQuestion / QUESTION_SKIP_DELAY_SECONDS) * 100);
+
+  const handleNextQuestion = () => {
+    if (currentQuestionNeedsAnswer && !hasCurrentAnswer && !canSkipUnanswered) {
+      toast.warning(`Wait ${remainingSkipDelay}s or select an answer before continuing.`);
+      return;
+    }
+    setCurrentQuestionIndex((prev) => Math.min(questions.length - 1, prev + 1));
+    setQuestionEnteredAtMs(Date.now());
   };
 
   return (
@@ -657,11 +849,7 @@ export default function QuizTaking() {
 
           {currentQuestionIndex === questions.length - 1 ? (
             <button
-              onClick={() => {
-                if (confirm('Are you sure you want to submit your quiz?')) {
-                  handleSubmit();
-                }
-              }}
+              onClick={() => setShowSubmitConfirm(true)}
               disabled={submitting}
               className="flex items-center gap-2 px-8 py-3 bg-green-600 text-white font-bold rounded-xl hover:bg-green-700 transition-all shadow-lg shadow-green-100 disabled:opacity-50"
             >
@@ -669,14 +857,79 @@ export default function QuizTaking() {
             </button>
           ) : (
             <button
-              onClick={() => setCurrentQuestionIndex(prev => Math.min(questions.length - 1, prev + 1))}
+              onClick={handleNextQuestion}
               className="flex items-center gap-2 px-8 py-3 bg-slate-900 text-white font-bold rounded-xl hover:bg-slate-800 transition-all shadow-lg shadow-slate-200"
             >
               Next <ChevronRight className="w-5 h-5" />
             </button>
           )}
         </div>
+        {currentQuestionIndex < questions.length - 1 && currentQuestionNeedsAnswer && !hasCurrentAnswer && (
+          <div className="max-w-4xl mx-auto mt-4">
+            <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3">
+              <div className="flex items-center justify-between text-xs font-bold text-amber-700">
+                <span>Select an answer or wait to skip</span>
+                <span>{remainingSkipDelay > 0 ? `${remainingSkipDelay}s` : 'You can skip now'}</span>
+              </div>
+              <div className="mt-2 h-2 w-full overflow-hidden rounded-full bg-amber-100">
+                <div
+                  className="h-full rounded-full bg-amber-500 transition-all duration-300"
+                  style={{ width: `${skipProgressPercent}%` }}
+                />
+              </div>
+            </div>
+          </div>
+        )}
       </footer>
+
+      <AnimatePresence>
+        {showSubmitConfirm && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 p-4"
+          >
+            <motion.div
+              initial={{ opacity: 0, y: 18, scale: 0.96 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              exit={{ opacity: 0, y: 18, scale: 0.96 }}
+              transition={{ duration: 0.2 }}
+              className="w-full max-w-md rounded-3xl border border-slate-200 bg-white p-6 shadow-2xl shadow-slate-900/20"
+            >
+              <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-amber-50 text-amber-600">
+                <AlertCircle className="h-7 w-7" />
+              </div>
+              <h3 className="text-center text-xl font-black text-slate-900">Ready to Submit Quiz?</h3>
+              <p className="mt-3 text-center text-sm leading-6 text-slate-500">
+                Once submitted, you will not be able to change your answers.
+              </p>
+              <div className="mt-4 rounded-2xl border border-slate-100 bg-slate-50 px-4 py-3 text-center text-sm text-slate-600">
+                Answered <span className="font-bold text-slate-900">{answeredCount}</span> of{' '}
+                <span className="font-bold text-slate-900">{answerableQuestions.length}</span> gradable questions.
+              </div>
+              <div className="mt-6 flex items-center gap-3">
+                <button
+                  onClick={() => setShowSubmitConfirm(false)}
+                  className="flex-1 rounded-2xl border border-slate-200 px-4 py-3 text-sm font-bold text-slate-600 transition hover:bg-slate-50"
+                >
+                  Keep Reviewing
+                </button>
+                <button
+                  onClick={() => {
+                    setShowSubmitConfirm(false);
+                    void handleSubmit();
+                  }}
+                  disabled={submitting}
+                  className="flex-1 rounded-2xl bg-green-600 px-4 py-3 text-sm font-bold text-white transition hover:bg-green-700 disabled:opacity-60"
+                >
+                  {submitting ? 'Submitting...' : 'Yes, Submit'}
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }

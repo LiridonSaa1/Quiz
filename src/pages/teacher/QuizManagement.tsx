@@ -134,6 +134,7 @@ export default function QuizManagement() {
         const scopedIds = await resolveTeacherIdCandidates(session.user.id);
         quizRows = await fetchTeacherQuizzesFromSupabase(supabase, scopedIds, session.user.id);
       }
+      const nonExamQuizRows = (quizRows || []).filter((d: Record<string, any>) => String(d?.type || 'standard') !== 'exam');
 
       const courseMap: Record<string, string> = {};
       const options: { id: string; name: string }[] = [];
@@ -167,7 +168,7 @@ export default function QuizManagement() {
         }
       }
 
-      setQuizzes((quizRows || []).map((d: Record<string, any>) => ({
+      setQuizzes(nonExamQuizRows.map((d: Record<string, any>) => ({
         id: d.id,
         courseId: d.course_id,
         teacherId: d.teacher_id,

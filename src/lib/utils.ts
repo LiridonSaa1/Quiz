@@ -22,8 +22,12 @@ export async function sendNotification(
   message: string,
   type: 'info' | 'success' | 'warning' | 'error' = 'info'
 ) {
+  if (!userId || !String(userId).trim()) {
+    return;
+  }
+
   try {
-    await supabase.from('notifications').insert({
+    const { error } = await supabase.from('notifications').insert({
       user_id: userId,
       title,
       message,
@@ -31,6 +35,9 @@ export async function sendNotification(
       read: false,
       created_at: new Date().toISOString(),
     });
+    if (error) {
+      console.error('Error sending notification:', error);
+    }
   } catch (error) {
     console.error('Error sending notification:', error);
   }

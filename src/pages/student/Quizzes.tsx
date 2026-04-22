@@ -96,7 +96,9 @@ export default function StudentQuizzes() {
         }
       });
 
-      const mapped: QuizItem[] = (quizRows || []).map((q: any) => {
+      const mapped: QuizItem[] = (quizRows || [])
+        .filter((q: any) => String(q?.type || 'standard').toLowerCase() !== 'exam')
+        .map((q: any) => {
         const att = attemptMap[q.id];
         return {
           id: q.id,
@@ -231,7 +233,10 @@ export default function StudentQuizzes() {
             <AnimatePresence>
               {filtered.map((quiz, i) => {
                 const pct = quiz.bestScore != null && quiz.bestTotal ? Math.round((quiz.bestScore / quiz.bestTotal) * 100) : null;
-                const stateLabel = quiz.passed ? 'Passed' : quiz.attempted ? 'Attempted' : 'New';
+                const stateLabel = quiz.passed ? 'Passed' : quiz.attempted ? 'Completed' : 'New';
+                const actionHref = quiz.attempted && quiz.latestAttemptId
+                  ? `/student/results/${quiz.latestAttemptId}`
+                  : `/student/quiz/${quiz.id}`;
                 return (
                   <motion.div key={quiz.id}
                     initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, scale: 0.95 }}
@@ -272,19 +277,14 @@ export default function StudentQuizzes() {
                           </span>
                         </div>
                       </div>
-                      <Link to={quiz.passed && quiz.latestAttemptId ? `/student/results/${quiz.latestAttemptId}` : `/student/quiz/${quiz.id}`}
-                        className={cn('flex items-center justify-center gap-2 w-full py-2.5 rounded-2xl text-sm font-bold transition-all',
-                          quiz.attempted
-                            ? 'bg-slate-900 text-white hover:bg-slate-800 shadow-lg shadow-slate-200'
-                            : 'bg-gradient-to-r from-violet-500 to-purple-500 text-white hover:opacity-90 shadow-lg shadow-violet-200/60')}>
-                        {quiz.passed
-                          ? <><CheckCircle2 className="w-4 h-4" /> View Result</>
-                          : quiz.attempted
-                            ? <><Zap className="w-4 h-4" /> Retake</>
-                            : <><Play className="w-4 h-4" /> Start Quiz</>}
-                        <ChevronRight className="w-4 h-4 ml-auto" />
-                      </Link>
-                      {quiz.attempted && !quiz.passed && quiz.latestAttemptId && (
+                      {!quiz.attempted && (
+                        <Link to={actionHref}
+                          className="flex items-center justify-center gap-2 w-full py-2.5 rounded-2xl text-sm font-bold transition-all bg-gradient-to-r from-violet-500 to-purple-500 text-white hover:opacity-90 shadow-lg shadow-violet-200/60">
+                          <Play className="w-4 h-4" /> Start Quiz
+                          <ChevronRight className="w-4 h-4 ml-auto" />
+                        </Link>
+                      )}
+                      {quiz.attempted && quiz.latestAttemptId && (
                         <Link
                           to={`/student/results/${quiz.latestAttemptId}`}
                           className="mt-2 inline-flex items-center justify-center gap-2 w-full py-2.5 rounded-2xl text-xs font-bold transition-all bg-slate-100 text-slate-600 hover:bg-slate-200"
