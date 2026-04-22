@@ -47,8 +47,13 @@ export default function StudentQuizzes() {
 
   useEffect(() => {
     const load = async () => {
+      setLoading(true);
       const { data: { session } } = await supabase.auth.getSession();
-      if (!session) return;
+      if (!session) {
+        setQuizzes([]);
+        setLoading(false);
+        return;
+      }
       const uid = session.user.id;
 
       const courseColorMap: Record<string, string> = {};
@@ -60,7 +65,12 @@ export default function StudentQuizzes() {
         ),
         fetchAttemptRowsByStudentId(supabase, uid),
       ]);
-      const quizzesJson = quizzesRes.ok ? await quizzesRes.json() : { quizzes: [] };
+      const quizzesJson = await quizzesRes.json().catch(() => ({}));
+      if (!quizzesRes.ok) {
+        setQuizzes([]);
+        setLoading(false);
+        return;
+      }
       const quizRows = Array.isArray(quizzesJson?.quizzes) ? quizzesJson.quizzes : [];
       if (!quizRows.length) { setQuizzes([]); setLoading(false); return; }
 
@@ -114,7 +124,6 @@ export default function StudentQuizzes() {
   const filtered = useMemo(() => {
     let list = quizzes;
     if (search) list = list.filter(q => q.title.toLowerCase().includes(search.toLowerCase()) || q.courseTitle.toLowerCase().includes(search.toLowerCase()));
-    if (selectedCourseId) list = list.filter((q: any) => q.courseId === selectedCourseId);
     if (filter === 'new') list = list.filter(q => !q.attempted);
     if (filter === 'attempted') list = list.filter(q => q.attempted);
     if (filter === 'passed') list = list.filter(q => q.passed);

@@ -18,6 +18,7 @@ import { questionBodyFromRow } from '../../lib/questionText';
 import { motion } from 'motion/react';
 import { LayoutPageSkeleton } from '../../components/ui/Skeleton';
 import { fetchAttemptRowById, normalizeAttempts } from '../../lib/quizAttempts';
+import { fetchStudentAccessibleQuizById } from '../../lib/studentQuizAccess';
 
 const DEFAULT_QUIZ_SETTINGS = {
   shuffleQuestions: false,
@@ -62,24 +63,31 @@ export default function QuizResults() {
         };
         setAttempt(formattedAttempt);
 
-        const { data: quizData, error: quizError } = await supabase
-          .from('quizzes')
-          .select('*')
-          .eq('id', normalizedAttempt.quiz_id)
-          .single();
-
-        if (quizError || !quizData) throw quizError;
+        const quizData = await fetchStudentAccessibleQuizById(normalizedAttempt.quiz_id);
+        const settings =
+          quizData?.settings && typeof quizData.settings === 'object'
+            ? { ...DEFAULT_QUIZ_SETTINGS, ...quizData.settings }
+            : { ...DEFAULT_QUIZ_SETTINGS };
+        const passMark = Number(quizData?.pass_mark ?? settings.passingScore ?? DEFAULT_QUIZ_SETTINGS.passingScore);
+        const maxAttempts = Number(quizData?.max_attempts ?? settings.maxAttempts ?? DEFAULT_QUIZ_SETTINGS.maxAttempts);
 
         setQuiz({
-          id: quizData.id,
-          title: quizData.title,
-          description: quizData.description,
-          courseId: quizData.course_id,
-          teacherId: quizData.teacher_id,
-          timeLimit: quizData.time_limit,
-          published: quizData.published,
-          settings: quizData.settings || DEFAULT_QUIZ_SETTINGS,
-          createdAt: quizData.created_at
+          id: quizData?.id || normalizedAttempt.quiz_id,
+          title: String(quizData?.title || 'Quiz'),
+          description: String(quizData?.description || ''),
+          courseId: String(quizData?.course_id || ''),
+          teacherId: quizData?.teacher_id ? String(quizData.teacher_id) : undefined,
+          lessonId: quizData?.lesson_id ? String(quizData.lesson_id) : undefined,
+          type: String(quizData?.type || 'standard'),
+          timeLimit: Number(quizData?.time_limit ?? 0),
+          totalMarks: Number(quizData?.total_marks ?? normalizedAttempt.total_points ?? 0),
+          passMark: Number.isFinite(passMark) ? passMark : DEFAULT_QUIZ_SETTINGS.passingScore,
+          maxAttempts: Number.isFinite(maxAttempts) ? maxAttempts : DEFAULT_QUIZ_SETTINGS.maxAttempts,
+          status: String(quizData?.status || ''),
+          published: typeof quizData?.published === 'boolean' ? quizData.published : undefined,
+          settings,
+          createdAt: String(quizData?.created_at || normalizedAttempt.created_at || new Date().toISOString()),
+          updatedAt: String(quizData?.updated_at || quizData?.created_at || normalizedAttempt.created_at || new Date().toISOString()),
         } as Quiz);
 
         const { data: questionsData, error: questionsError } = await supabase

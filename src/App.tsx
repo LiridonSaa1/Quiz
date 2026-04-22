@@ -172,8 +172,35 @@ export default function App() {
 
   const fetchProfile = async (userId: string) => {
     try {
-      const { data: profile, error } = await supabase.from('profiles').select('*').eq('id', userId).single();
-      if (error) throw error;
+      let profile: any = null;
+      const profileRes = await supabase.from('profiles').select('*').eq('id', userId).maybeSingle();
+      if (profileRes.error) {
+        const fallbackRes = await supabase.from('profiles').select('*').eq('id', userId).limit(1);
+        if (fallbackRes.error) throw fallbackRes.error;
+        profile = (fallbackRes.data || [])[0] || null;
+      } else {
+        profile = profileRes.data;
+      }
+
+      if (!profile) {
+        const { data: { session } } = await supabase.auth.getSession();
+        const authUser = session?.user && session.user.id === userId ? session.user : null;
+        const metadata = authUser?.user_metadata && typeof authUser.user_metadata === 'object'
+          ? authUser.user_metadata as Record<string, unknown>
+          : {};
+
+        setUser({
+          uid: userId,
+          email: String(authUser?.email || ''),
+          displayName: String(metadata.display_name || metadata.full_name || authUser?.email || 'Student'),
+          role: normalizeUserRole(typeof metadata.role === 'string' ? metadata.role : null),
+          teacherId: typeof metadata.teacher_id === 'string' ? metadata.teacher_id : undefined,
+          status: 'active',
+          createdAt: String(authUser?.created_at || new Date().toISOString()),
+        });
+        return;
+      }
+
       if (profile && !isProfileAccessAllowed(profile.status)) {
         await supabase.auth.signOut();
         setUser(null);

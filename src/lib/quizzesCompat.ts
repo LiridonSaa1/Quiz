@@ -11,20 +11,20 @@ export async function selectPublishedQuizzesCompat(
   selectClause = '*'
 ): Promise<any[]> {
   if (!courseIds.length) return [];
-  const withPublished = await supabase
+  const byStatus = await supabase
     .from('quizzes')
     .select(selectClause)
     .in('course_id', courseIds)
-    .eq('published', true);
+    .or('status.eq.published,status.eq.active');
 
-  if (!withPublished.error) return withPublished.data || [];
+  if (!byStatus.error) return byStatus.data || [];
 
   const fallback = await supabase
     .from('quizzes')
     .select(selectClause)
     .in('course_id', courseIds);
   if (fallback.error) {
-    if (!isMissingQuizzesPublishedColumn(withPublished.error)) throw withPublished.error;
+    if (!isMissingQuizzesPublishedColumn(byStatus.error)) throw byStatus.error;
     throw fallback.error;
   }
   return fallback.data || [];

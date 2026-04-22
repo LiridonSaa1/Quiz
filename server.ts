@@ -1677,11 +1677,11 @@ export async function createApp(options: CreateAppOptions = {}) {
 
         if (lessonIds.length > 0) {
           const fetchQuizRows = async () => {
-            const withAvailability = await supabaseAdmin
+            const withStatus = await supabaseAdmin
               .from("quizzes")
-              .select("id,lesson_id,published,status")
+              .select("id,lesson_id,status")
               .in("lesson_id", lessonIds);
-            if (!withAvailability.error) return withAvailability.data || [];
+            if (!withStatus.error) return withStatus.data || [];
             const fallback = await supabaseAdmin
               .from("quizzes")
               .select("id,lesson_id")
@@ -1692,7 +1692,6 @@ export async function createApp(options: CreateAppOptions = {}) {
 
           const quizRows = await fetchQuizRows();
           const isAvailable = (q: any) => {
-            if (typeof q?.published === "boolean") return q.published;
             const status = String(q?.status || "").toLowerCase();
             if (status) return status === "published" || status === "active";
             return true;
@@ -4172,8 +4171,8 @@ export async function createApp(options: CreateAppOptions = {}) {
         .from('quizzes')
         .select('id, course_id, lesson_id')
         .in('course_id', courseIds)
-        .eq('published', true);
-      if (quizRes.error && missingQuizzesPublishedColumn(quizRes.error)) {
+        .or('status.eq.published,status.eq.active');
+      if (quizRes.error && isRecoverableSchemaColumnError(quizRes.error)) {
         quizRes = await supabaseAdmin
           .from('quizzes')
           .select('id, course_id, lesson_id')
@@ -4252,7 +4251,20 @@ export async function createApp(options: CreateAppOptions = {}) {
         .contains('student_ids', [caller.userId]);
       if (ecErr) throw ecErr;
 
-      const enrolledCourseIds = (enrolledCourses || []).map((c: any) => String(c.id)).filter(Boolean);
+      const { data: enrolledClasses, error: classErr } = await supabaseAdmin
+        .from('classes')
+        .select('id,course_id,student_ids')
+        .contains('student_ids', [caller.userId]);
+      if (classErr && !isClassesTableMissing(classErr)) throw classErr;
+
+      const classCourseIds = (enrolledClasses || [])
+        .map((row: any) => String(row?.course_id || '').trim())
+        .filter(Boolean);
+
+      const enrolledCourseIds = Array.from(new Set([
+        ...(enrolledCourses || []).map((c: any) => String(c.id)).filter(Boolean),
+        ...classCourseIds,
+      ]));
       if (enrolledCourseIds.length === 0) return res.json({ success: true, quizzes: [] });
       const courseIds = requestedCourseId
         ? enrolledCourseIds.includes(requestedCourseId) ? [requestedCourseId] : []
@@ -4263,6 +4275,18 @@ export async function createApp(options: CreateAppOptions = {}) {
       (enrolledCourses || []).forEach((course: any) => {
         courseTitleById[String(course.id)] = String(course.title || 'Course');
       });
+      if (classCourseIds.length > 0) {
+        const missingTitleIds = classCourseIds.filter((cid) => !courseTitleById[cid]);
+        if (missingTitleIds.length > 0) {
+          const { data: classLinkedCourses } = await supabaseAdmin
+            .from('courses')
+            .select('id,title')
+            .in('id', missingTitleIds);
+          (classLinkedCourses || []).forEach((course: any) => {
+            courseTitleById[String(course.id)] = String(course.title || 'Course');
+          });
+        }
+      }
 
       const { data: modules, error: modulesErr } = await supabaseAdmin
         .from('modules')
@@ -4278,17 +4302,21 @@ export async function createApp(options: CreateAppOptions = {}) {
       });
 
       const moduleIds = Object.keys(moduleToCourse);
-      const { data: lessonsByCourse } = await supabaseAdmin
+      let lessonsByCourseRes = await supabaseAdmin
         .from('lessons')
         .select('id,course_id,module_id')
         .in('course_id', courseIds);
+      if (lessonsByCourseRes.error && isRecoverableSchemaColumnError(lessonsByCourseRes.error)) {
+        lessonsByCourseRes = { data: [] as any[], error: null as any };
+      }
+      if (lessonsByCourseRes.error) throw lessonsByCourseRes.error;
       const lessonsByModule = moduleIds.length > 0
         ? await supabaseAdmin.from('lessons').select('id,module_id').in('module_id', moduleIds)
         : { data: [] as any[], error: null as any };
       if (lessonsByModule.error && !isRecoverableSchemaColumnError(lessonsByModule.error)) throw lessonsByModule.error;
 
       const lessonToCourse: Record<string, string> = {};
-      (lessonsByCourse || []).forEach((l: any) => {
+      ((lessonsByCourseRes.data as any[]) || []).forEach((l: any) => {
         const lid = String(l?.id || '');
         const cid = String(l?.course_id || '') || moduleToCourse[String(l?.module_id || '')] || '';
         if (lid && cid) lessonToCourse[lid] = cid;
@@ -4305,14 +4333,17 @@ export async function createApp(options: CreateAppOptions = {}) {
         .select('*')
         .in('course_id', courseIds);
       if (quizByCourseRes.error && isRecoverableSchemaColumnError(quizByCourseRes.error)) {
-        quizByCourseRes = await supabaseAdmin.from('quizzes').select('*').in('course_id', courseIds);
+        quizByCourseRes = { data: [] as any[], error: null as any };
       }
       if (quizByCourseRes.error) throw quizByCourseRes.error;
 
-      const quizByLessonRes = lessonIds.length > 0
+      let quizByLessonRes = lessonIds.length > 0
         ? await supabaseAdmin.from('quizzes').select('*').in('lesson_id', lessonIds)
         : { data: [] as any[], error: null as any };
-      if (quizByLessonRes.error && !isRecoverableSchemaColumnError(quizByLessonRes.error)) throw quizByLessonRes.error;
+      if (quizByLessonRes.error && isRecoverableSchemaColumnError(quizByLessonRes.error)) {
+        quizByLessonRes = { data: [] as any[], error: null as any };
+      }
+      if (quizByLessonRes.error) throw quizByLessonRes.error;
 
       const combined = [...(quizByCourseRes.data || []), ...((quizByLessonRes.data as any[]) || [])];
       const deduped: Record<string, any> = {};
@@ -4323,10 +4354,11 @@ export async function createApp(options: CreateAppOptions = {}) {
       });
 
       const quizzes = Object.values(deduped).filter((row: any) => {
-        const status = String(row?.status || '').toLowerCase();
+        const status = String(row?.status || '').trim().toLowerCase();
         if (status) return status === 'published' || status === 'active';
-        const hasPublishedFlag = typeof row?.published === 'boolean';
-        if (hasPublishedFlag) return row.published;
+        if (typeof row?.published === 'boolean') return row.published;
+        const publishedText = String(row?.published || '').trim().toLowerCase();
+        if (publishedText) return publishedText === 'true' || publishedText === '1' || publishedText === 'yes';
         return true;
       }).map((row: any) => ({
         ...row,
@@ -4337,6 +4369,294 @@ export async function createApp(options: CreateAppOptions = {}) {
       return res.json({ success: true, quizzes });
     } catch (e: any) {
       return res.status(500).json({ error: e?.message || 'Failed to load student quizzes' });
+    }
+  });
+
+  app.get('/api/student/quizzes/:quizId/questions', async (req, res) => {
+    try {
+      const caller = await assertAuthenticated(req, res);
+      if (!caller) return;
+      if (caller.role !== 'student' && caller.role !== 'admin') {
+        return res.status(403).json({ error: 'Forbidden: student or admin role required' });
+      }
+
+      const quizId = typeof req.params.quizId === 'string' ? req.params.quizId.trim() : '';
+      if (!quizId) return res.status(400).json({ error: 'Quiz id is required' });
+
+      const { data: quizRow, error: quizErr } = await supabaseAdmin
+        .from('quizzes')
+        .select('id,course_id,lesson_id')
+        .eq('id', quizId)
+        .maybeSingle();
+      if (quizErr) throw quizErr;
+      if (!quizRow?.id) return res.status(404).json({ error: 'Quiz not found' });
+
+      let resolvedCourseId = String((quizRow as any)?.course_id || '').trim();
+      if (!resolvedCourseId) {
+        const lessonId = String((quizRow as any)?.lesson_id || '').trim();
+        if (lessonId) {
+          const { data: lessonRow, error: lessonErr } = await supabaseAdmin
+            .from('lessons')
+            .select('course_id,module_id')
+            .eq('id', lessonId)
+            .maybeSingle();
+          if (lessonErr && !isRecoverableSchemaColumnError(lessonErr)) throw lessonErr;
+          resolvedCourseId = String((lessonRow as any)?.course_id || '').trim();
+          if (!resolvedCourseId) {
+            const moduleId = String((lessonRow as any)?.module_id || '').trim();
+            if (moduleId) {
+              const { data: moduleRow } = await supabaseAdmin
+                .from('modules')
+                .select('course_id')
+                .eq('id', moduleId)
+                .maybeSingle();
+              resolvedCourseId = String((moduleRow as any)?.course_id || '').trim();
+            }
+          }
+        }
+      }
+
+      if (!resolvedCourseId) {
+        return res.status(403).json({ error: 'Quiz is not linked to an enrolled course' });
+      }
+
+      const { data: directCourseRows, error: directErr } = await supabaseAdmin
+        .from('courses')
+        .select('id')
+        .eq('id', resolvedCourseId)
+        .contains('student_ids', [caller.userId]);
+      if (directErr) throw directErr;
+
+      const { data: classRows, error: classErr } = await supabaseAdmin
+        .from('classes')
+        .select('id,course_id,student_ids')
+        .eq('course_id', resolvedCourseId)
+        .contains('student_ids', [caller.userId]);
+      if (classErr && !isClassesTableMissing(classErr)) throw classErr;
+
+      const hasAccess = (directCourseRows || []).length > 0 || (classRows || []).length > 0 || caller.role === 'admin';
+      if (!hasAccess) return res.status(403).json({ error: 'You do not have access to this quiz' });
+
+      let qRes = await supabaseAdmin
+        .from('questions')
+        .select('*')
+        .eq('quiz_id', quizId)
+        .order('order', { ascending: true })
+        .order('created_at', { ascending: true });
+
+      if (qRes.error) {
+        qRes = await supabaseAdmin
+          .from('questions')
+          .select('*')
+          .eq('quiz_id', quizId)
+          .order('created_at', { ascending: true });
+      }
+      if (qRes.error) {
+        qRes = await supabaseAdmin
+          .from('questions')
+          .select('*')
+          .eq('quiz_id', quizId);
+      }
+      if (qRes.error) throw qRes.error;
+
+      return res.json({ success: true, questions: qRes.data || [] });
+    } catch (e: any) {
+      return res.status(500).json({ error: e?.message || 'Failed to load quiz questions' });
+    }
+  });
+
+  // Temporary diagnostic endpoint for student quiz visibility.
+  app.get('/api/student/quizzes-debug', async (req, res) => {
+    try {
+      const caller = await assertAuthenticated(req, res);
+      if (!caller) return;
+      if (caller.role !== 'student' && caller.role !== 'admin') {
+        return res.status(403).json({ error: 'Forbidden: student or admin role required' });
+      }
+
+      const requestedCourseId = typeof req.query.courseId === 'string' ? req.query.courseId.trim() : '';
+
+      const { data: enrolledCourses, error: ecErr } = await supabaseAdmin
+        .from('courses')
+        .select('id,title,student_ids')
+        .contains('student_ids', [caller.userId]);
+      if (ecErr) throw ecErr;
+
+      const { data: enrolledClasses, error: classErr } = await supabaseAdmin
+        .from('classes')
+        .select('id,name,course_id,student_ids')
+        .contains('student_ids', [caller.userId]);
+      if (classErr && !isClassesTableMissing(classErr)) throw classErr;
+
+      const classCourseIds = (enrolledClasses || [])
+        .map((row: any) => String(row?.course_id || '').trim())
+        .filter(Boolean);
+      const enrolledCourseIds = Array.from(new Set([
+        ...(enrolledCourses || []).map((c: any) => String(c.id)).filter(Boolean),
+        ...classCourseIds,
+      ]));
+      const scopedCourseIds = requestedCourseId
+        ? (enrolledCourseIds.includes(requestedCourseId) ? [requestedCourseId] : [])
+        : enrolledCourseIds;
+
+      const { data: directQuizzes } = scopedCourseIds.length > 0
+        ? await supabaseAdmin.from('quizzes').select('id,title,course_id,lesson_id,status').in('course_id', scopedCourseIds)
+        : { data: [] as any[] };
+
+      const { data: modules } = scopedCourseIds.length > 0
+        ? await supabaseAdmin.from('modules').select('id,course_id').in('course_id', scopedCourseIds)
+        : { data: [] as any[] };
+      const moduleToCourse: Record<string, string> = {};
+      (modules || []).forEach((m: any) => {
+        const mid = String(m?.id || '');
+        const cid = String(m?.course_id || '');
+        if (mid && cid) moduleToCourse[mid] = cid;
+      });
+
+      const moduleIds = Object.keys(moduleToCourse);
+      const lessonsByModule = moduleIds.length > 0
+        ? await supabaseAdmin.from('lessons').select('id,module_id').in('module_id', moduleIds)
+        : { data: [] as any[], error: null as any };
+      const lessonToCourse: Record<string, string> = {};
+      ((lessonsByModule.data as any[]) || []).forEach((l: any) => {
+        const lid = String(l?.id || '');
+        const cid = moduleToCourse[String(l?.module_id || '')] || '';
+        if (lid && cid) lessonToCourse[lid] = cid;
+      });
+      const lessonIds = Object.keys(lessonToCourse);
+
+      const quizzesByLesson = lessonIds.length > 0
+        ? await supabaseAdmin.from('quizzes').select('id,title,course_id,lesson_id,status').in('lesson_id', lessonIds)
+        : { data: [] as any[], error: null as any };
+
+      const allQuizzes = [...((directQuizzes as any[]) || []), ...(((quizzesByLesson.data as any[]) || []))];
+      const unique: Record<string, any> = {};
+      allQuizzes.forEach((q: any) => {
+        const qid = String(q?.id || '');
+        if (!qid || unique[qid]) return;
+        unique[qid] = q;
+      });
+
+      const normalized = Object.values(unique).map((row: any) => {
+        const status = String(row?.status || '').toLowerCase();
+        const published = typeof row?.published === 'boolean' ? row.published : null;
+        const visible = status ? (status === 'published' || status === 'active') : (published !== null ? published : true);
+        const resolvedCourseId = String(row?.course_id || '') || lessonToCourse[String(row?.lesson_id || '')] || '';
+        return {
+          id: String(row?.id || ''),
+          title: String(row?.title || ''),
+          status,
+          published,
+          resolvedCourseId,
+          lessonId: String(row?.lesson_id || ''),
+          visible,
+        };
+      });
+
+      return res.json({
+        success: true,
+        userId: caller.userId,
+        requestedCourseId,
+        enrolledCourseIds,
+        scopedCourseIds,
+        classLinks: (enrolledClasses || []).map((c: any) => ({
+          id: String(c?.id || ''),
+          name: String(c?.name || ''),
+          courseId: String(c?.course_id || ''),
+          studentCount: Array.isArray(c?.student_ids) ? c.student_ids.length : 0,
+        })),
+        counts: {
+          directQuizzes: (directQuizzes || []).length,
+          lessonMappedQuizzes: ((quizzesByLesson.data as any[]) || []).length,
+          dedupedQuizzes: normalized.length,
+          visibleAfterPublishFilter: normalized.filter((q: any) => q.visible).length,
+        },
+        quizzes: normalized,
+      });
+    } catch (e: any) {
+      return res.status(500).json({ error: e?.message || 'Failed to debug student quizzes' });
+    }
+  });
+
+  app.post('/api/student/quiz-violation', async (req, res) => {
+    try {
+      const caller = await assertAuthenticated(req, res);
+      if (!caller) return;
+      if (caller.role !== 'student' && caller.role !== 'admin') {
+        return res.status(403).json({ error: 'Forbidden: student or admin role required' });
+      }
+
+      const quizId = typeof req.body?.quizId === 'string' ? req.body.quizId.trim() : '';
+      if (!quizId) return res.status(400).json({ error: 'quizId is required' });
+
+      const violationType = typeof req.body?.type === 'string' ? req.body.type.trim() : 'unknown';
+      const questionIndex = Number.isFinite(Number(req.body?.questionIndex)) ? Number(req.body.questionIndex) : null;
+      const remainingSeconds = Number.isFinite(Number(req.body?.remainingSeconds)) ? Number(req.body.remainingSeconds) : null;
+      const violationCount = Number.isFinite(Number(req.body?.violationCount)) ? Number(req.body.violationCount) : null;
+
+      let quizRes = await supabaseAdmin
+        .from('quizzes')
+        .select('id,title,teacher_id,course_id')
+        .eq('id', quizId)
+        .maybeSingle();
+      if (quizRes.error && missingQuizzesTeacherIdColumn(quizRes.error)) {
+        quizRes = await supabaseAdmin
+          .from('quizzes')
+          .select('id,title,course_id')
+          .eq('id', quizId)
+          .maybeSingle();
+      }
+      if (quizRes.error) throw quizRes.error;
+      if (!quizRes.data) return res.status(404).json({ error: 'Quiz not found' });
+
+      const quizRow = quizRes.data as any;
+      const quizTitle = String(quizRow?.title || 'Quiz');
+      let teacherId = String(quizRow?.teacher_id || '').trim();
+      const courseId = String(quizRow?.course_id || '').trim();
+
+      if (!teacherId && courseId) {
+        const { data: courseRow } = await supabaseAdmin
+          .from('courses')
+          .select('teacher_id')
+          .eq('id', courseId)
+          .maybeSingle();
+        teacherId = String((courseRow as any)?.teacher_id || '').trim();
+      }
+
+      if (!teacherId) {
+        return res.json({ success: true, notified: false, reason: 'missing_teacher' });
+      }
+
+      const { data: studentProfile } = await supabaseAdmin
+        .from('profiles')
+        .select('display_name,email')
+        .eq('id', caller.userId)
+        .maybeSingle();
+      const studentLabel =
+        String((studentProfile as any)?.display_name || '').trim() ||
+        String((studentProfile as any)?.email || '').trim() ||
+        'A student';
+
+      const violationInfo = [
+        `Type: ${violationType || 'unknown'}`,
+        questionIndex !== null ? `Question: ${questionIndex + 1}` : '',
+        remainingSeconds !== null ? `Remaining time: ${remainingSeconds}s` : '',
+        violationCount !== null ? `Warnings: ${violationCount}` : '',
+      ].filter(Boolean).join(' | ');
+
+      await supabaseAdmin.from('notifications').insert({
+        user_id: teacherId,
+        title: 'Quiz Integrity Alert',
+        message: `${studentLabel} triggered a quiz violation in "${quizTitle}". ${violationInfo}`.trim(),
+        type: 'warning',
+        read: false,
+        action_url: `/teacher/results`,
+        created_at: new Date().toISOString(),
+      });
+
+      return res.json({ success: true, notified: true });
+    } catch (e: any) {
+      return res.status(500).json({ error: e?.message || 'Failed to report quiz violation' });
     }
   });
 

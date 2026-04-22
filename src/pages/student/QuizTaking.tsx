@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { supabase } from '../../supabase';
 import { Quiz, Question, QuizAttempt } from '../../types';
@@ -19,6 +19,8 @@ import { QuizPageSkeleton } from '../../components/ui/Skeleton';
 import { insertAttemptWithFallback } from '../../lib/quizAttempts';
 import { isDirectVideoFileUrl, isLikelyVideoLink, toEmbedVideoUrl } from '../../lib/quizMedia';
 import { questionBodyFromRow } from '../../lib/questionText';
+import { fetchStudentAccessibleQuizById } from '../../lib/studentQuizAccess';
+import { authFetch } from '../../lib/apiUrl';
 
 function QuizMediaDisplay({ url, mediaType }: { url: string; mediaType?: string }) {
   const treatAsVideo = mediaType === 'video' || (mediaType !== 'image' && isLikelyVideoLink(url));
@@ -58,6 +60,53 @@ const DEFAULT_QUIZ_SETTINGS = {
   allowRetry: false,
 };
 
+const QUIZ_VIOLATION_LIMIT = 3;
+
+type ViolationType = 'tab_switch' | 'window_blur' | 'copy' | 'cut' | 'paste';
+
+type QuizProgressSnapshot = {
+  quizId: string;
+  userId: string;
+  currentQuestionIndex: number;
+  answers: Record<string, string>;
+  questionOrder: string[];
+  startedAt: string;
+  expiresAtMs: number | null;
+  violationCount: number;
+};
+
+const getQuizProgressStorageKey = (userId: string, quizId: string) =>
+  `quiz_progress:${userId}:${quizId}`;
+
+function QuizStateScreen({
+  title,
+  description,
+  onBack,
+}: {
+  title: string;
+  description: string;
+  onBack: () => void;
+}) {
+  return (
+    <div className="min-h-screen bg-slate-50 flex items-center justify-center p-6">
+      <div className="w-full max-w-lg rounded-3xl border border-slate-200 bg-white p-8 text-center shadow-xl shadow-slate-200/50">
+        <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-2xl bg-amber-50 text-amber-600">
+          <AlertCircle className="h-8 w-8" />
+        </div>
+        <h1 className="text-2xl font-black text-slate-900">{title}</h1>
+        <p className="mt-3 text-sm leading-6 text-slate-500">{description}</p>
+        <button
+          onClick={onBack}
+          className="mt-6 inline-flex items-center gap-2 rounded-2xl bg-slate-900 px-5 py-3 text-sm font-bold text-white transition hover:bg-slate-800"
+        >
+          <ChevronLeft className="h-4 w-4" />
+          Back to Quizzes
+        </button>
+      </div>
+    </div>
+  );
+}
+
 export default function QuizTaking() {
   const { quizId } = useParams();
   const navigate = useNavigate();
@@ -68,46 +117,79 @@ export default function QuizTaking() {
   const [timeLeft, setTimeLeft] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [sessionUserId, setSessionUserId] = useState<string>('');
+  const [startedAt, setStartedAt] = useState<string>('');
+  const [expiresAtMs, setExpiresAtMs] = useState<number | null>(null);
+  const [violationCount, setViolationCount] = useState(0);
+  const autoSubmittingRef = useRef(false);
+  const lastViolationAtRef = useRef(0);
 
   const fetchQuiz = useCallback(async () => {
-    if (!quizId) return;
-    try {
-      const { data: quizData, error: quizError } = await supabase
-        .from('quizzes')
-        .select('*')
-        .eq('id', quizId)
-        .single();
+    if (!quizId) {
+      setLoadError('This quiz link is incomplete.');
+      setLoading(false);
+      return;
+    }
 
-      if (quizError || !quizData) {
-        toast.error('Quiz not found');
-        navigate('/student');
+    setLoading(true);
+    setLoadError(null);
+    setQuiz(null);
+    setQuestions([]);
+    setAnswers({});
+    setCurrentQuestionIndex(0);
+      setViolationCount(0);
+      setStartedAt('');
+      setExpiresAtMs(null);
+      setSessionUserId('');
+      autoSubmittingRef.current = false;
+
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const userId = String(session?.user?.id || '');
+      setSessionUserId(userId);
+
+      const quizData = await fetchStudentAccessibleQuizById(quizId);
+      if (!quizData) {
+        setLoadError('This quiz is not available for your account right now.');
         return;
       }
 
+      const settings =
+        quizData.settings && typeof quizData.settings === 'object'
+          ? { ...DEFAULT_QUIZ_SETTINGS, ...quizData.settings }
+          : { ...DEFAULT_QUIZ_SETTINGS };
+      const passMark = Number(quizData.pass_mark ?? settings.passingScore ?? DEFAULT_QUIZ_SETTINGS.passingScore);
+      const maxAttempts = Number(quizData.max_attempts ?? settings.maxAttempts ?? DEFAULT_QUIZ_SETTINGS.maxAttempts);
+
       const formattedQuiz = {
         id: quizData.id,
-        title: quizData.title,
-        description: quizData.description,
-        courseId: quizData.course_id,
-        teacherId: quizData.teacher_id,
-        timeLimit: quizData.time_limit,
-        published: quizData.published,
-        settings: quizData.settings || DEFAULT_QUIZ_SETTINGS,
-        createdAt: quizData.created_at
+        title: String(quizData.title || 'Quiz'),
+        description: String(quizData.description || ''),
+        courseId: String(quizData.course_id || ''),
+        teacherId: quizData.teacher_id ? String(quizData.teacher_id) : undefined,
+        lessonId: quizData.lesson_id ? String(quizData.lesson_id) : undefined,
+        type: String(quizData.type || 'standard'),
+        timeLimit: Number(quizData.time_limit ?? 0),
+        totalMarks: Number(quizData.total_marks ?? 0),
+        passMark: Number.isFinite(passMark) ? passMark : DEFAULT_QUIZ_SETTINGS.passingScore,
+        maxAttempts: Number.isFinite(maxAttempts) ? maxAttempts : DEFAULT_QUIZ_SETTINGS.maxAttempts,
+        status: String(quizData.status || ''),
+        published: typeof quizData.published === 'boolean' ? quizData.published : undefined,
+        settings,
+        createdAt: String(quizData.created_at || new Date().toISOString()),
+        updatedAt: String(quizData.updated_at || quizData.created_at || new Date().toISOString()),
       } as Quiz;
 
       setQuiz(formattedQuiz);
-      setTimeLeft(formattedQuiz.timeLimit * 60);
 
-      const { data: questionsData, error: questionsError } = await supabase
-        .from('questions')
-        .select('*')
-        .eq('quiz_id', quizId)
-        .order('order', { ascending: true });
+      const questionsRes = await authFetch(`/api/student/quizzes/${encodeURIComponent(quizId)}/questions`);
+      const questionsJson = await questionsRes.json().catch(() => ({}));
+      if (!questionsRes.ok) {
+        throw new Error(String(questionsJson?.error || 'Failed to load quiz questions'));
+      }
 
-      if (questionsError) throw questionsError;
-
-      let formattedQuestions = questionsData.map((q) => ({
+      const builtQuestions = (((questionsJson as any)?.questions as any[]) || []).map((q) => ({
         id: q.id,
         quizId: q.quiz_id,
         text: questionBodyFromRow(q as Record<string, unknown>),
@@ -120,13 +202,66 @@ export default function QuizTaking() {
         readingPassage: q.reading_passage,
         orderIndex: (q as { order?: number; order_index?: number }).order_index ?? (q as { order?: number }).order,
       } as Question));
-      
-      if (formattedQuiz.settings.shuffleQuestions) {
-        formattedQuestions = formattedQuestions.sort(() => Math.random() - 0.5);
+
+      let savedSnapshot: QuizProgressSnapshot | null = null;
+      if (quizId && userId) {
+        try {
+          const rawSnapshot = localStorage.getItem(getQuizProgressStorageKey(userId, quizId));
+          if (rawSnapshot) {
+            const parsed = JSON.parse(rawSnapshot) as QuizProgressSnapshot;
+            if (parsed && parsed.quizId === quizId && parsed.userId === userId) {
+              savedSnapshot = parsed;
+            }
+          }
+        } catch {
+          // Ignore invalid local snapshot and start fresh.
+        }
       }
-      
+
+      const questionById = new Map(builtQuestions.map((q) => [String(q.id), q] as const));
+      let formattedQuestions: Question[] = builtQuestions;
+
+      if (savedSnapshot?.questionOrder?.length) {
+        const restored = savedSnapshot.questionOrder
+          .map((id) => questionById.get(String(id)))
+          .filter(Boolean) as Question[];
+        if (restored.length === builtQuestions.length) {
+          formattedQuestions = restored;
+        }
+      } else if (formattedQuiz.settings.shuffleQuestions) {
+        formattedQuestions = [...builtQuestions].sort(() => Math.random() - 0.5);
+      }
+
+      if (formattedQuestions.length === 0) {
+        setLoadError('This quiz has no questions yet. Ask your teacher to finish setting it up.');
+      }
+
+      const now = Date.now();
+      const freshStartedAt = new Date().toISOString();
+      const freshExpiresAt = formattedQuiz.timeLimit > 0 ? now + formattedQuiz.timeLimit * 60 * 1000 : null;
+      const restoredExpiresAt = typeof savedSnapshot?.expiresAtMs === 'number' ? savedSnapshot.expiresAtMs : null;
+      const resolvedExpiresAt = restoredExpiresAt && restoredExpiresAt > now ? restoredExpiresAt : freshExpiresAt;
+      const restoredAnswers = savedSnapshot?.answers && typeof savedSnapshot.answers === 'object'
+        ? savedSnapshot.answers
+        : {};
+      const restoredIndex = Number.isFinite(Number(savedSnapshot?.currentQuestionIndex))
+        ? Math.max(0, Math.min(formattedQuestions.length - 1, Number(savedSnapshot?.currentQuestionIndex || 0)))
+        : 0;
+      const restoredViolationCount = Number.isFinite(Number(savedSnapshot?.violationCount))
+        ? Math.max(0, Number(savedSnapshot?.violationCount || 0))
+        : 0;
+      const resolvedStartedAt = savedSnapshot?.startedAt || freshStartedAt;
+
+      setStartedAt(resolvedStartedAt);
+      setExpiresAtMs(resolvedExpiresAt);
+      setTimeLeft(resolvedExpiresAt ? Math.max(0, Math.ceil((resolvedExpiresAt - now) / 1000)) : null);
+      setAnswers(restoredAnswers);
+      setCurrentQuestionIndex(restoredIndex);
+      setViolationCount(restoredViolationCount);
       setQuestions(formattedQuestions);
     } catch (error) {
+      console.error('Failed to load quiz:', error);
+      setLoadError('We could not load this quiz right now.');
       toast.error('Failed to load quiz');
     } finally {
       setLoading(false);
@@ -138,17 +273,129 @@ export default function QuizTaking() {
   }, [fetchQuiz]);
 
   useEffect(() => {
-    if (timeLeft === null || timeLeft <= 0) {
-      if (timeLeft === 0) handleSubmit();
+    if (!quiz) return;
+    if (expiresAtMs === null) {
+      setTimeLeft(null);
       return;
     }
 
-    const timer = setInterval(() => {
-      setTimeLeft(prev => (prev !== null ? prev - 1 : null));
-    }, 1000);
+    const syncRemaining = () => {
+      const next = Math.max(0, Math.ceil((expiresAtMs - Date.now()) / 1000));
+      setTimeLeft(next);
+      if (next === 0 && !autoSubmittingRef.current) {
+        autoSubmittingRef.current = true;
+        void handleSubmit();
+      }
+    };
 
+    syncRemaining();
+    const timer = setInterval(syncRemaining, 1000);
     return () => clearInterval(timer);
-  }, [timeLeft]);
+  }, [expiresAtMs, quiz]);
+
+  useEffect(() => {
+    if (!quiz || !quizId || !sessionUserId) return;
+    const snapshot: QuizProgressSnapshot = {
+      quizId,
+      userId: sessionUserId,
+      currentQuestionIndex,
+      answers,
+      questionOrder: questions.map((q) => String(q.id)),
+      startedAt: startedAt || new Date().toISOString(),
+      expiresAtMs,
+      violationCount,
+    };
+    try {
+      localStorage.setItem(getQuizProgressStorageKey(sessionUserId, quizId), JSON.stringify(snapshot));
+    } catch {
+      // Ignore storage write issues (private mode/quota).
+    }
+  }, [
+    quiz,
+    quizId,
+    sessionUserId,
+    currentQuestionIndex,
+    answers,
+    questions,
+    startedAt,
+    expiresAtMs,
+    violationCount,
+  ]);
+
+  const reportViolation = useCallback(async (type: ViolationType) => {
+    if (!quiz || !quizId || submitting) return;
+    const now = Date.now();
+    if (now - lastViolationAtRef.current < 900) return;
+    lastViolationAtRef.current = now;
+
+    let nextCount = 0;
+    setViolationCount((prev) => {
+      nextCount = prev + 1;
+      return nextCount;
+    });
+
+    toast.warning(`Academic integrity warning (${nextCount}/${QUIZ_VIOLATION_LIMIT}).`);
+
+    try {
+      await authFetch('/api/student/quiz-violation', {
+        method: 'POST',
+        body: JSON.stringify({
+          quizId,
+          type,
+          questionIndex: currentQuestionIndex,
+          remainingSeconds: timeLeft,
+          violationCount: nextCount,
+        }),
+      });
+    } catch {
+      // Notification is best-effort; quiz flow should continue.
+    }
+
+    if (nextCount >= QUIZ_VIOLATION_LIMIT && !autoSubmittingRef.current) {
+      autoSubmittingRef.current = true;
+      toast.error('Quiz auto-submitted after repeated violations.');
+      await handleSubmit();
+    }
+  }, [quiz, quizId, submitting, currentQuestionIndex, timeLeft]);
+
+  useEffect(() => {
+    if (!quiz || loadError || submitting) return;
+
+    const onCopy = (event: ClipboardEvent) => {
+      event.preventDefault();
+      void reportViolation('copy');
+    };
+    const onCut = (event: ClipboardEvent) => {
+      event.preventDefault();
+      void reportViolation('cut');
+    };
+    const onPaste = (event: ClipboardEvent) => {
+      event.preventDefault();
+      void reportViolation('paste');
+    };
+    const onVisibilityChange = () => {
+      if (document.hidden) {
+        void reportViolation('tab_switch');
+      }
+    };
+    const onBlur = () => {
+      void reportViolation('window_blur');
+    };
+
+    document.addEventListener('copy', onCopy, true);
+    document.addEventListener('cut', onCut, true);
+    document.addEventListener('paste', onPaste, true);
+    document.addEventListener('visibilitychange', onVisibilityChange);
+    window.addEventListener('blur', onBlur);
+
+    return () => {
+      document.removeEventListener('copy', onCopy, true);
+      document.removeEventListener('cut', onCut, true);
+      document.removeEventListener('paste', onPaste, true);
+      document.removeEventListener('visibilitychange', onVisibilityChange);
+      window.removeEventListener('blur', onBlur);
+    };
+  }, [quiz, loadError, submitting, reportViolation]);
 
   const handleAnswerChange = (questionId: string, answer: string) => {
     setAnswers(prev => ({ ...prev, [questionId]: answer }));
@@ -185,6 +432,7 @@ export default function QuizTaking() {
       const passingScore = ((Number.isFinite(passingPercent) ? passingPercent : 50) / 100) * totalPoints;
       const passed = score >= passingScore;
 
+      const startedAtIso = startedAt || new Date().toISOString();
       const attempt = await insertAttemptWithFallback(supabase, {
         quiz_id: quiz.id,
         student_id: session.user.id,
@@ -192,7 +440,7 @@ export default function QuizTaking() {
         score,
         total_points: totalPoints,
         passed,
-        started_at: new Date().toISOString(),
+        started_at: startedAtIso,
         completed_at: new Date().toISOString(),
         answers,
       });
@@ -206,6 +454,13 @@ export default function QuizTaking() {
       );
 
       toast.success('Quiz submitted successfully');
+      if (quizId) {
+        try {
+          localStorage.removeItem(getQuizProgressStorageKey(session.user.id, quizId));
+        } catch {
+          // ignore storage cleanup issues
+        }
+      }
       navigate(`/student/results/${attempt.id}`);
     } catch (error) {
       toast.error('Failed to submit quiz');
@@ -214,9 +469,35 @@ export default function QuizTaking() {
   };
 
   if (loading) return <QuizPageSkeleton />;
-  if (!quiz) return null;
+  if (loadError) {
+    return (
+      <QuizStateScreen
+        title="Quiz Unavailable"
+        description={loadError}
+        onBack={() => navigate('/student/quizzes')}
+      />
+    );
+  }
+  if (!quiz) {
+    return (
+      <QuizStateScreen
+        title="Quiz Unavailable"
+        description="We could not find this quiz."
+        onBack={() => navigate('/student/quizzes')}
+      />
+    );
+  }
 
-  const currentQuestion = questions[currentQuestionIndex];
+  const currentQuestion = questions[currentQuestionIndex] ?? null;
+  if (!currentQuestion) {
+    return (
+      <QuizStateScreen
+        title="Quiz Not Ready"
+        description="This quiz does not have any questions yet."
+        onBack={() => navigate('/student/quizzes')}
+      />
+    );
+  }
   const quizSettingsRaw = quiz.settings as Record<string, unknown> | undefined;
   const introMediaUrl =
     typeof quizSettingsRaw?.introMediaUrl === 'string' ? quizSettingsRaw.introMediaUrl.trim() : '';
