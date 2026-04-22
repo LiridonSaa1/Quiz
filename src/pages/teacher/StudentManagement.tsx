@@ -62,10 +62,12 @@ const STAT_CONFIG = [
 export default function StudentManagement() {
   const [students, setStudents] = useState<StudentWithCourses[]>([]);
   const [courses, setCourses] = useState<{ id: string; name: string; studentIds: string[] }[]>([]);
+  const [classes, setClasses] = useState<Array<{ id: string; name: string; studentIds: string[] }>>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
   const [courseFilter, setCourseFilter] = useState('all');
+  const [classFilter, setClassFilter] = useState('all');
   const [showAddModal, setShowAddModal] = useState(false);
 
   const fetchData = async () => {
@@ -77,6 +79,17 @@ export default function StudentManagement() {
       const studentsRes = await authFetch(
         `/api/teacher/students?userId=${encodeURIComponent(session.user.id)}`
       );
+      const classesRes = await authFetch('/api/teacher/classes');
+      if (classesRes.ok) {
+        const classesJson = await classesRes.json();
+        if (classesJson?.success && Array.isArray(classesJson.classes)) {
+          setClasses(classesJson.classes.map((c: any) => ({
+            id: String(c.id),
+            name: String(c.name || 'Untitled class'),
+            studentIds: Array.isArray(c.student_ids) ? c.student_ids.map((sid: unknown) => String(sid)) : [],
+          })));
+        }
+      }
       if (studentsRes.ok) {
         const json = await studentsRes.json();
         if (json?.success && Array.isArray(json.students) && Array.isArray(json.courses)) {
@@ -145,9 +158,14 @@ export default function StudentManagement() {
 
       const { data: classRows, error: clsErr } = await supabase
         .from('classes')
-        .select('course_id, student_ids')
+        .select('id, name, course_id, student_ids')
         .in('teacher_id', scopedIds);
       if (!clsErr && classRows?.length) {
+        setClasses(classRows.map((cl: any) => ({
+          id: String(cl.id),
+          name: String(cl.name || 'Untitled class'),
+          studentIds: Array.isArray(cl.student_ids) ? cl.student_ids.map((sid: unknown) => String(sid)) : [],
+        })));
         const byCourseId = new Map(coursesData.map(c => [c.id, c] as const));
         classRows.forEach((cl: { course_id?: string | null; student_ids?: unknown[] }) => {
           const cid = cl.course_id != null ? String(cl.course_id) : '';
@@ -288,8 +306,11 @@ export default function StudentManagement() {
     const matchCourse = courseFilter === 'all' || courses.some(
       c => c.id === courseFilter && c.studentIds.includes(s.uid)
     );
-    return matchSearch && matchStatus && matchCourse;
-  }), [students, search, statusFilter, courseFilter, courses]);
+    const matchClass = classFilter === 'all' || classes.some(
+      c => c.id === classFilter && c.studentIds.includes(s.uid)
+    );
+    return matchSearch && matchStatus && matchCourse && matchClass;
+  }), [students, search, statusFilter, courseFilter, classFilter, courses, classes]);
 
   const stats = [
     { ...STAT_CONFIG[0], value: students.length },
@@ -298,7 +319,7 @@ export default function StudentManagement() {
     { ...STAT_CONFIG[3], value: students.filter(s => s.enrolledCourses.length > 0).length },
   ];
 
-  const hasActiveFilters = search || statusFilter !== 'all' || courseFilter !== 'all';
+  const hasActiveFilters = search || statusFilter !== 'all' || courseFilter !== 'all' || classFilter !== 'all';
 
   return (
     <TeacherLayout>
@@ -347,10 +368,16 @@ export default function StudentManagement() {
                 {courses.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
               </select>
             )}
+            {classes.length > 0 && (
+              <select value={classFilter} onChange={e => setClassFilter(e.target.value)} className={ADMIN_LIST_SELECT}>
+                <option value="all">All classes</option>
+                {classes.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+              </select>
+            )}
             {hasActiveFilters && (
               <button
                 type="button"
-                onClick={() => { setSearch(''); setStatusFilter('all'); setCourseFilter('all'); }}
+                onClick={() => { setSearch(''); setStatusFilter('all'); setCourseFilter('all'); setClassFilter('all'); }}
                 className="flex items-center gap-1.5 px-3 py-2 rounded-full text-xs font-semibold text-slate-500 hover:text-slate-800 hover:bg-slate-100 transition-all"
               >
                 <X className="w-3.5 h-3.5" /> Clear

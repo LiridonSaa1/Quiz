@@ -17,6 +17,7 @@ import {
   Info, Zap, Send, FileText, Archive, Clock,
 } from 'lucide-react';
 import { cn } from '../../lib/utils';
+import { authFetch } from '../../lib/apiUrl';
 
 type Audience = 'all' | 'students' | 'teachers';
 type Priority  = 'normal' | 'important' | 'urgent';
@@ -62,6 +63,9 @@ const emptyForm = {
   expires_at: '',
 };
 
+interface ClassOption { id: string; name: string; student_ids: string[]; }
+interface UserOption { id: string; display_name: string; email: string; }
+
 export default function TeacherAnnouncements() {
   const [announcements, setAnnouncements] = useState<Announcement[]>([]);
   const [loading, setLoading] = useState(true);
@@ -73,10 +77,19 @@ export default function TeacherAnnouncements() {
   const [form, setForm] = useState(emptyForm);
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState<string | null>(null);
+  const [classes, setClasses] = useState<ClassOption[]>([]);
+  const [selectedClassIds, setSelectedClassIds] = useState<string[]>([]);
+  const [userSearch, setUserSearch] = useState('');
+  const [searchResults, setSearchResults] = useState<UserOption[]>([]);
+  const [selectedUsers, setSelectedUsers] = useState<UserOption[]>([]);
+  const [searching, setSearching] = useState(false);
 
   const set = (k: string, v: unknown) => setForm(p => ({ ...p, [k]: v }));
 
-  useEffect(() => { fetchAll(); }, []);
+  useEffect(() => {
+    fetchAll();
+    fetchClasses();
+  }, []);
 
   const fetchAll = async () => {
     setLoading(true);
@@ -89,7 +102,48 @@ export default function TeacherAnnouncements() {
     finally { setLoading(false); }
   };
 
-  const openCreate = () => { setEditing(null); setForm(emptyForm); setShowModal(true); };
+  const fetchClasses = async () => {
+    try {
+      const res = await authFetch('/api/teacher/classes');
+      const json = await res.json();
+      if (json.success) {
+        setClasses((json.classes || []).map((c: any) => ({
+          id: String(c.id),
+          name: String(c.name || 'Untitled class'),
+          student_ids: Array.isArray(c.student_ids) ? c.student_ids.map((sid: unknown) => String(sid)) : [],
+        })));
+      }
+    } catch {
+      // non-blocking
+    }
+  };
+
+  const searchUsers = async (q: string) => {
+    if (!q.trim()) { setSearchResults([]); return; }
+    setSearching(true);
+    try {
+      const res = await authFetch(`/api/teacher/users/search?q=${encodeURIComponent(q)}&role=student`);
+      const json = await res.json();
+      if (json.success) setSearchResults(json.users || []);
+    } finally {
+      setSearching(false);
+    }
+  };
+
+  useEffect(() => {
+    const t = setTimeout(() => { searchUsers(userSearch); }, 350);
+    return () => clearTimeout(t);
+  }, [userSearch]);
+
+  const openCreate = () => {
+    setEditing(null);
+    setForm(emptyForm);
+    setSelectedClassIds([]);
+    setSelectedUsers([]);
+    setUserSearch('');
+    setSearchResults([]);
+    setShowModal(true);
+  };
   const openEdit = (a: Announcement) => {
     setEditing(a);
     setForm({
@@ -97,6 +151,10 @@ export default function TeacherAnnouncements() {
       target_audience: a.target_audience, priority: a.priority, status: a.status,
       expires_at: a.expires_at ? a.expires_at.slice(0, 10) : '',
     });
+    setSelectedClassIds([]);
+    setSelectedUsers([]);
+    setUserSearch('');
+    setSearchResults([]);
     setShowModal(true);
   };
 
@@ -111,6 +169,8 @@ export default function TeacherAnnouncements() {
         status,
         author_id: form.author_id || null,
         expires_at: form.expires_at ? new Date(form.expires_at).toISOString() : null,
+        class_ids: selectedClassIds,
+        student_ids: selectedUsers.map((u) => u.id),
       };
       const url = editing ? `/api/admin/announcements/${editing.id}` : '/api/admin/announcements';
       const method = editing ? 'PATCH' : 'POST';
@@ -350,6 +410,84 @@ export default function TeacherAnnouncements() {
                   <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">Expires On</label>
                   <input type="date" value={form.expires_at} onChange={e => set('expires_at', e.target.value)}
                     className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500" />
+                </div>
+              </div>
+              <div className="border-t border-slate-100 pt-4 space-y-3">
+                <p className="text-xs font-bold text-slate-400 uppercase tracking-wider">Targeting (Optional)</p>
+                {classes.length > 0 && (
+                  <div>
+                    <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">Show for class(es)</label>
+                    <div className="space-y-1.5 border border-slate-200 rounded-xl p-3 bg-slate-50 max-h-36 overflow-y-auto">
+                      {classes.map((c) => {
+                        const checked = selectedClassIds.includes(c.id);
+                        return (
+                          <label key={c.id} className="flex items-center justify-between gap-3 px-2 py-1.5 rounded-lg hover:bg-white cursor-pointer">
+                            <span className="flex items-center gap-2 min-w-0">
+                              <input
+                                type="checkbox"
+                                checked={checked}
+                                onChange={(e) => {
+                                  setSelectedClassIds((prev) => (e.target.checked ? [...prev, c.id] : prev.filter((id) => id !== c.id)));
+                                }}
+                                className="rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
+                              />
+                              <span className="text-sm text-slate-700 truncate">{c.name}</span>
+                            </span>
+                            <span className="text-xs text-slate-400 shrink-0">{c.student_ids.length} students</span>
+                          </label>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+                <div>
+                  <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">Or specific students</label>
+                  <div className="relative">
+                    <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-indigo-400" />
+                    <input
+                      value={userSearch}
+                      onChange={(e) => setUserSearch(e.target.value)}
+                      placeholder="Search student by name or email..."
+                      className="w-full pl-11 pr-4 py-2.5 rounded-full text-sm border border-indigo-100 bg-white/80 focus:outline-none focus:ring-2 focus:ring-violet-400"
+                    />
+                    {searching && <Clock className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 animate-spin" />}
+                  </div>
+                  {searchResults.length > 0 && (
+                    <div className="mt-1 border border-slate-200 rounded-xl overflow-hidden shadow max-h-36 overflow-y-auto">
+                      {searchResults.map((u) => (
+                        <button
+                          key={u.id}
+                          type="button"
+                          onClick={() => {
+                            if (!selectedUsers.find((x) => x.id === u.id)) setSelectedUsers((prev) => [...prev, u]);
+                            setUserSearch('');
+                            setSearchResults([]);
+                          }}
+                          className="w-full text-left px-4 py-2.5 hover:bg-indigo-50 flex items-center gap-3 border-b border-slate-50 last:border-0"
+                        >
+                          <div className="w-8 h-8 rounded-full bg-indigo-100 flex items-center justify-center text-indigo-700 font-bold text-xs shrink-0">
+                            {u.display_name?.[0]?.toUpperCase() || '?'}
+                          </div>
+                          <div className="min-w-0">
+                            <p className="text-sm font-semibold text-slate-800 truncate">{u.display_name}</p>
+                            <p className="text-xs text-slate-400 truncate">{u.email}</p>
+                          </div>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                  {selectedUsers.length > 0 && (
+                    <div className="mt-2 flex flex-wrap gap-2">
+                      {selectedUsers.map((u) => (
+                        <span key={u.id} className="inline-flex items-center gap-1.5 pl-3 pr-2 py-1 bg-indigo-50 text-indigo-700 rounded-full text-xs font-semibold">
+                          {u.display_name}
+                          <button type="button" onClick={() => setSelectedUsers((prev) => prev.filter((s) => s.id !== u.id))}>
+                            <X className="w-3 h-3" />
+                          </button>
+                        </span>
+                      ))}
+                    </div>
+                  )}
                 </div>
               </div>
             </div>

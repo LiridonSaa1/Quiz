@@ -303,6 +303,9 @@ export default function StudentCourses() {
 
       const courseIds = rawCourses.map((c: any) => c.id);
       const teacherIds = [...new Set(rawCourses.map((c: any) => c.teacher_id).filter(Boolean))] as string[];
+      const countsRes = await authFetch(`/api/student/courses/content-counts?courseIds=${encodeURIComponent(courseIds.join(','))}`);
+      const countsJson = countsRes.ok ? await countsRes.json() : { counts: {} };
+      const contentCounts: Record<string, { lessons?: number; quizzes?: number }> = countsJson?.counts || {};
 
       const [modulesSnap, lessonsByCourseSnap, attemptsSnap, teachersSnap] = await Promise.all([
         supabase.from('modules').select('id, course_id').in('course_id', courseIds),
@@ -372,11 +375,11 @@ export default function StudentCourses() {
           description: c.description || c.short_description || '',
           level: c.level || '',
           language: c.language || '',
-          total_lessons: lessonsCountByCourse[c.id] ?? c.total_lessons ?? 0,
+          total_lessons: contentCounts[c.id]?.lessons ?? lessonsCountByCourse[c.id] ?? c.total_lessons ?? 0,
           total_students: c.total_students ?? 0,
           teacher_id: c.teacher_id,
           teacher_name: teacherMap[c.teacher_id] || 'Your Teacher',
-          quizCount: cQuizzes.length,
+          quizCount: contentCounts[c.id]?.quizzes ?? cQuizzes.length,
           attemptedQuizzes: attempted,
           status: c.status || 'published',
           isEnrolled: courseStudentIds.includes(uid),
@@ -398,7 +401,16 @@ export default function StudentCourses() {
       });
       const json = await res.json().catch(() => ({}));
       if (!res.ok || !json?.success) throw new Error(json?.error || 'Failed to enroll');
-      toast.success('Enrollment successful');
+      const assignment = String(json?.classAssignment || '');
+      if (assignment === 'assigned') {
+        toast.success('Enrollment successful. You were added to a class.');
+      } else if (assignment === 'already_assigned') {
+        toast.success('Enrollment successful. You are already in this class.');
+      } else if (assignment === 'no_class_available') {
+        toast.success('Enrollment successful. Class assignment will be added soon.');
+      } else {
+        toast.success('Enrollment successful');
+      }
 
       setCourses((prev) =>
         prev.map((course) =>

@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { supabase } from '../../supabase';
 import StudentLayout from '../../components/layout/StudentLayout';
-import { resolveTeacherIdCandidates } from '../../lib/teacherScope';
+import { authFetch } from '../../lib/apiUrl';
 import { BookOpen, CheckCircle2, Circle, Clock, ArrowLeft, Play } from 'lucide-react';
 import { cn } from '../../lib/utils';
 
@@ -62,103 +62,110 @@ export default function StudentCourseDetail() {
 
   useEffect(() => {
     const load = async () => {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (!session || !courseId) {
-        setLoading(false);
-        return;
-      }
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (!session || !courseId) {
+          setLoading(false);
+          return;
+        }
 
-      const uid = session.user.id;
-      setStudentId(uid);
+        const uid = session.user.id;
+        setStudentId(uid);
 
-      const { data: profile } = await supabase
-        .from('profiles')
-        .select('teacher_id')
-        .eq('id', uid)
-        .single();
+        const { data: foundCourse } = await supabase
+          .from('courses')
+          .select('*')
+          .eq('id', courseId)
+          .contains('student_ids', [uid])
+          .maybeSingle();
 
-      const linkedTeacherId = profile?.teacher_id ? String(profile.teacher_id) : '';
-      if (!linkedTeacherId) {
-        setLoading(false);
-        return;
-      }
+        if (!foundCourse) {
+          setLoading(false);
+          return;
+        }
+        if (String(foundCourse.status || '').toLowerCase() !== 'published') {
+          setLoading(false);
+          return;
+        }
 
-      const scopedTeacherIds = await resolveTeacherIdCandidates(linkedTeacherId);
-      const teacherScope = scopedTeacherIds.length > 0 ? scopedTeacherIds : [linkedTeacherId];
+        setCourse(foundCourse);
 
-      const { data: foundCourse } = await supabase
-        .from('courses')
-        .select('*')
-        .eq('id', courseId)
-        .maybeSingle();
+        const [modulesRes, lessonsRes] = await Promise.all([
+          supabase
+            .from('modules')
+            .select('id,title,order,course_id')
+            .eq('course_id', courseId)
+            .order('order', { ascending: true }),
+          authFetch(`/api/student/lessons?courseId=${encodeURIComponent(courseId)}`),
+        ]);
 
-      if (!foundCourse) {
-        setLoading(false);
-        return;
-      }
+        const moduleRows = (modulesRes.data || []) as ModuleRow[];
+        const moduleIdSet = new Set(moduleRows.map((m) => m.id));
 
-      const isPublished = String(foundCourse.status || '').toLowerCase() === 'published';
-      const enrolledIds = Array.isArray(foundCourse.student_ids)
-        ? foundCourse.student_ids.map((sid: unknown) => String(sid))
-        : [];
-      const isEnrolled = enrolledIds.includes(uid);
-      const teacherAllowed = teacherScope.includes(String(foundCourse.teacher_id || ''));
-      if (!isPublished || (!teacherAllowed && !isEnrolled)) {
-        setLoading(false);
-        return;
-      }
+        const lessonsJson = lessonsRes.ok ? await lessonsRes.json() : { lessons: [] };
+        const lessonRows = Array.isArray(lessonsJson?.lessons) ? lessonsJson.lessons : [];
+        const normalizedLessons: LessonRow[] = lessonRows.map((l: any) => ({
+          id: String(l.id),
+          title: String(l.title || 'Untitled lesson'),
+          order: Number(l.order || 0),
+          duration_minutes:
+            l.duration_minutes == null || l.duration_minutes === ''
+              ? null
+              : Number(l.duration_minutes),
+          module_id: l.module_id ? String(l.module_id) : '',
+        }));
 
-      setCourse(foundCourse);
+        const hasUngrouped = normalizedLessons.some((lesson) => !lesson.module_id || !moduleIdSet.has(lesson.module_id));
+        const nextModules = hasUngrouped
+          ? [
+              ...moduleRows,
+              {
+                id: '__ungrouped',
+                title: 'Ungrouped lessons',
+                order: Number.MAX_SAFE_INTEGER,
+                course_id: courseId,
+              },
+            ]
+          : moduleRows;
 
-      const { data: modRows } = await supabase
-        .from('modules')
-        .select('id,title,order,course_id')
-        .eq('course_id', courseId)
-        .order('order', { ascending: true });
-
-      const moduleRows = (modRows || []) as ModuleRow[];
-      setModules(moduleRows);
-      const moduleIds = moduleRows.map((m) => m.id);
-
-      if (moduleIds.length > 0) {
-        const { data: lessonRows } = await supabase
-          .from('lessons')
-          .select('id,title,order,duration_minutes,module_id')
-          .in('module_id', moduleIds)
-          .eq('status', 'published')
-          .order('order', { ascending: true });
-
-        const normalizedLessons = (lessonRows || []) as LessonRow[];
-        setLessons(normalizedLessons);
-      } else {
-        setLessons([]);
-      }
-
-      const existingProgress = readProgress(uid, courseId);
-      if (existingProgress) {
-        setStartedAt(existingProgress.startedAt);
-        setLastVisitedAt(new Date().toISOString());
-        setCompletedLessonIds(existingProgress.completedLessonIds);
-        setLastLessonId(existingProgress.lastLessonId);
-        saveProgress(uid, courseId, {
-          ...existingProgress,
-          lastVisitedAt: new Date().toISOString(),
+        const nextLessons = normalizedLessons.map((lesson) => {
+          if (!lesson.module_id || !moduleIdSet.has(lesson.module_id)) {
+            return { ...lesson, module_id: '__ungrouped' };
+          }
+          return lesson;
         });
-      } else {
-        const initial: ProgressState = {
-          startedAt: new Date().toISOString(),
-          lastVisitedAt: new Date().toISOString(),
-          completedLessonIds: [],
-          lastLessonId: null,
-        };
-        setStartedAt(initial.startedAt);
-        setLastVisitedAt(initial.lastVisitedAt);
-        setCompletedLessonIds([]);
-        setLastLessonId(null);
-        saveProgress(uid, courseId, initial);
-      }
 
-      setLoading(false);
+        setModules(nextModules);
+        setLessons(nextLessons);
+
+        const existingProgress = readProgress(uid, courseId);
+        if (existingProgress) {
+          setStartedAt(existingProgress.startedAt);
+          setLastVisitedAt(new Date().toISOString());
+          setCompletedLessonIds(existingProgress.completedLessonIds);
+          setLastLessonId(existingProgress.lastLessonId);
+          saveProgress(uid, courseId, {
+            ...existingProgress,
+            lastVisitedAt: new Date().toISOString(),
+          });
+        } else {
+          const initial: ProgressState = {
+            startedAt: new Date().toISOString(),
+            lastVisitedAt: new Date().toISOString(),
+            completedLessonIds: [],
+            lastLessonId: null,
+          };
+          setStartedAt(initial.startedAt);
+          setLastVisitedAt(initial.lastVisitedAt);
+          setCompletedLessonIds([]);
+          setLastLessonId(null);
+          saveProgress(uid, courseId, initial);
+        }
+
+        setLoading(false);
+      } catch {
+        setLoading(false);
+      }
     };
     load();
   }, [courseId]);
@@ -221,7 +228,7 @@ export default function StudentCourseDetail() {
                   <p className="text-sm text-slate-500 mt-1">{course.description || 'Continue your learning journey.'}</p>
                 </div>
                 <Link
-                  to="/student/lessons"
+                  to={`/student/lessons?courseId=${encodeURIComponent(courseId)}`}
                   className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-slate-900 text-white text-sm font-semibold hover:bg-slate-800"
                 >
                   <Play className="w-4 h-4" />

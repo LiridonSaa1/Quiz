@@ -21,6 +21,7 @@ import {
   UserCheck, ChevronUp,
 } from 'lucide-react';
 import { cn } from '../../lib/utils';
+import { useTeacherPermissions } from '../../lib/teacherPermissions';
 
 type SessionStatus = 'scheduled' | 'live' | 'ended' | 'cancelled';
 
@@ -86,6 +87,7 @@ export default function TeacherLiveSessions() {
   const [expandedAttendance, setExpandedAttendance] = useState<string | null>(null);
   const [attendanceMap, setAttendanceMap] = useState<Record<string, AttendanceEntry[]>>({});
   const [attendanceLoading, setAttendanceLoading] = useState<string | null>(null);
+  const { can } = useTeacherPermissions();
 
   const set = (k: string, v: unknown) => setForm(p => ({ ...p, [k]: v }));
 
@@ -257,7 +259,7 @@ export default function TeacherLiveSessions() {
         statsGridClassName="grid grid-cols-2 sm:grid-cols-4 gap-4"
         stats={statItems}
         action={
-          <motion.button
+          can('actions.teacher.live_sessions.manage') ? <motion.button
             type="button"
             onClick={openCreate}
             whileHover={{ scale: 1.04, y: -2 }}
@@ -269,7 +271,7 @@ export default function TeacherLiveSessions() {
             }}
           >
             <Plus className="w-4 h-4" /> Schedule Session
-          </motion.button>
+          </motion.button> : null
         }
         filterBar={
           <AdminListFilterBar>
@@ -363,7 +365,7 @@ export default function TeacherLiveSessions() {
                     </div>
 
                     <div className="mt-4 flex flex-wrap gap-2">
-                      {s.status === 'scheduled' && (
+                      {s.status === 'scheduled' && can('actions.teacher.live_sessions.manage') && (
                         <button
                           type="button"
                           onClick={() => handleStart(s.id)}
@@ -404,13 +406,13 @@ export default function TeacherLiveSessions() {
                           Attendance
                         </button>
                       )}
-                      <button type="button" onClick={() => openEdit(s)} className="p-2 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-xl transition-all border border-slate-100">
+                      {can('actions.teacher.live_sessions.manage') && <button type="button" onClick={() => openEdit(s)} className="p-2 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-xl transition-all border border-slate-100">
                         <Pencil className="w-4 h-4" />
-                      </button>
-                      <button type="button" onClick={() => handleDelete(s.id)} disabled={deleting === s.id}
+                      </button>}
+                      {can('actions.teacher.live_sessions.manage') && <button type="button" onClick={() => handleDelete(s.id)} disabled={deleting === s.id}
                         className="p-2 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-xl transition-all border border-slate-100 disabled:opacity-40">
                         {deleting === s.id ? <Loader2 className="w-4 h-4 animate-spin" /> : <Trash2 className="w-4 h-4" />}
-                      </button>
+                      </button>}
                     </div>
 
                     {s.status === 'ended' && expandedAttendance === s.id && (
@@ -460,7 +462,7 @@ export default function TeacherLiveSessions() {
       </AdminListPageShell>
 
       {/* Edit modal — teacher PATCH whitelist */}
-      {showModal && editing && (
+      {showModal && editing && can('actions.teacher.live_sessions.manage') && (
         <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4" onClick={() => setShowModal(false)}>
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
             <div className="flex items-center justify-between p-5 border-b border-slate-100">
@@ -534,7 +536,7 @@ export default function TeacherLiveSessions() {
       )}
 
       <AnimatePresence>
-        {showCreateModal && userId && (
+        {showCreateModal && userId && can('actions.teacher.live_sessions.manage') && (
           <NewSessionModal
             courses={courses}
             onClose={() => setShowCreateModal(false)}
@@ -575,6 +577,15 @@ function NewSessionModal({
   const [searchResults, setSearchResults] = useState<UserOption[]>([]);
   const [selectedUsers, setSelectedUsers] = useState<UserOption[]>([]);
   const [searching, setSearching] = useState(false);
+  const selectedClassStudentIds = Array.from(
+    new Set(
+      selectedClassIds.flatMap((classId) => {
+        const found = classes.find((c) => c.id === classId);
+        return Array.isArray(found?.student_ids) ? found.student_ids.map((sid) => String(sid)) : [];
+      }),
+    ),
+  );
+  const totalInviteIds = Array.from(new Set([...selectedUsers.map((u) => u.id), ...selectedClassStudentIds]));
 
   useEffect(() => {
     const fetchClasses = async () => {
@@ -622,7 +633,7 @@ function NewSessionModal({
           meeting_url: form.meeting_url || null,
           course_id: form.course_id || null,
           class_ids: selectedClassIds,
-          participant_ids: selectedUsers.map(u => u.id),
+          participant_ids: totalInviteIds,
         }),
       });
       const json = await res.json();
@@ -764,7 +775,7 @@ function NewSessionModal({
                 </div>
                 {selectedClassIds.length > 0 && (
                   <p className="mt-2 text-xs text-indigo-600 font-medium">
-                    {selectedClassIds.length} class{selectedClassIds.length > 1 ? 'es' : ''} selected
+                    {selectedClassIds.length} class{selectedClassIds.length > 1 ? 'es' : ''} selected · {selectedClassStudentIds.length} students from classes
                   </p>
                 )}
               </div>
@@ -821,6 +832,11 @@ function NewSessionModal({
             {selectedClassIds.length === 0 && selectedUsers.length === 0 && (
               <p className="text-xs text-amber-600 bg-amber-50 border border-amber-100 rounded-lg px-3 py-2">
                 Tip: Select at least one class or one student to send invitations.
+              </p>
+            )}
+            {totalInviteIds.length > 0 && (
+              <p className="text-xs text-emerald-700 bg-emerald-50 border border-emerald-100 rounded-lg px-3 py-2 font-medium">
+                Will invite {totalInviteIds.length} unique student{totalInviteIds.length !== 1 ? 's' : ''}.
               </p>
             )}
           </div>

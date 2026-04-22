@@ -11,9 +11,10 @@ import { cn } from '../../lib/utils';
 import { motion, AnimatePresence } from 'motion/react';
 import { toast } from 'sonner';
 import { resolveTeacherIdCandidates } from '../../lib/teacherScope';
-import { apiUrl } from '../../lib/apiUrl';
+import { apiUrl, authFetch } from '../../lib/apiUrl';
 import { AIPanel, AITriggerButton } from '../../components/AIPanel';
 import { generateCourseData } from '../../lib/gemini';
+import { useTeacherPermissions } from '../../lib/teacherPermissions';
 
 const GRADIENT_PALETTES = [
   'from-indigo-500 to-violet-600',
@@ -41,6 +42,7 @@ export default function TeacherCourses() {
   const [courseToDelete, setCourseToDelete] = useState<{ id: string; title: string } | null>(null);
   const [deleting, setDeleting] = useState(false);
   const [aiOpen, setAiOpen] = useState(false);
+  const { can } = useTeacherPermissions();
   const navigate = useNavigate();
 
   const handleAICreate = async (input: string) => {
@@ -200,12 +202,16 @@ export default function TeacherCourses() {
             <p className="text-slate-500 text-sm mt-1">Build and manage your educational courses.</p>
           </div>
           <div className="flex items-center gap-2">
-            <AITriggerButton onClick={() => setAiOpen(true)} label="AI Create" />
-            <Link to="/teacher/courses/new"
+            {can('actions.teacher.courses.create') && (
+              <AITriggerButton onClick={() => setAiOpen(true)} label="AI Create" />
+            )}
+            {can('actions.teacher.courses.create') && (
+              <Link to="/teacher/courses/new"
               className="inline-flex items-center gap-2 px-5 py-2.5 bg-slate-900 text-white rounded-xl font-semibold text-sm hover:bg-slate-800 transition-all shadow-lg shadow-slate-200 active:scale-[0.98]">
               <Plus className="w-4 h-4" />
               New Course
-            </Link>
+              </Link>
+            )}
           </div>
         </div>
 
@@ -285,10 +291,12 @@ export default function TeacherCourses() {
             </div>
             <h3 className="text-lg font-bold text-slate-700 mb-1">No courses yet</h3>
             <p className="text-slate-400 text-sm mb-6">{search ? `No results for "${search}"` : 'Create your first course to get started.'}</p>
-            <Link to="/teacher/courses/new"
+            {can('actions.teacher.courses.create') && (
+              <Link to="/teacher/courses/new"
               className="inline-flex items-center gap-2 px-5 py-2.5 bg-violet-600 text-white rounded-xl font-semibold text-sm hover:bg-violet-700 transition-all">
               <Plus className="w-4 h-4" /> Create Course
-            </Link>
+              </Link>
+            )}
           </div>
         ) : viewMode === 'grid' ? (
           <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-5">
@@ -302,6 +310,9 @@ export default function TeacherCourses() {
                   onEdit={() => navigate(`/teacher/courses/${course.id}/edit`)}
                   onDelete={() => requestDeleteCourse(course)}
                   onToggleStatus={() => toggleStatus(course)}
+                  canEdit={can('actions.teacher.courses.edit')}
+                  canDelete={can('actions.teacher.courses.delete')}
+                  canPublish={can('actions.teacher.courses.publish')}
                 />
               ))}
             </AnimatePresence>
@@ -347,11 +358,11 @@ export default function TeacherCourses() {
                       </td>
                       <td className="px-5 py-4 text-right">
                         <div className="flex items-center justify-end gap-1 opacity-0 group-hover:opacity-100 transition-all">
-                          <button onClick={() => toggleStatus(course)} className={`p-2 rounded-lg transition-all ${course.status === 'published' ? 'text-slate-400 hover:text-amber-600 hover:bg-amber-50' : 'text-slate-400 hover:text-emerald-600 hover:bg-emerald-50'}`}>
+                          {can('actions.teacher.courses.publish') && <button onClick={() => toggleStatus(course)} className={`p-2 rounded-lg transition-all ${course.status === 'published' ? 'text-slate-400 hover:text-amber-600 hover:bg-amber-50' : 'text-slate-400 hover:text-emerald-600 hover:bg-emerald-50'}`}>
                             {course.status === 'published' ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                          </button>
-                          <button onClick={() => navigate(`/teacher/courses/${course.id}/edit`)} className="p-2 rounded-lg text-slate-400 hover:text-violet-600 hover:bg-violet-50 transition-all"><Edit2 className="w-4 h-4" /></button>
-                          <button onClick={() => requestDeleteCourse(course)} className="p-2 rounded-lg text-slate-400 hover:text-red-600 hover:bg-red-50 transition-all"><Trash2 className="w-4 h-4" /></button>
+                          </button>}
+                          {can('actions.teacher.courses.edit') && <button onClick={() => navigate(`/teacher/courses/${course.id}/edit`)} className="p-2 rounded-lg text-slate-400 hover:text-violet-600 hover:bg-violet-50 transition-all"><Edit2 className="w-4 h-4" /></button>}
+                          {can('actions.teacher.courses.delete') && <button onClick={() => requestDeleteCourse(course)} className="p-2 rounded-lg text-slate-400 hover:text-red-600 hover:bg-red-50 transition-all"><Trash2 className="w-4 h-4" /></button>}
                         </div>
                       </td>
                     </tr>
@@ -436,7 +447,7 @@ function MiniAvatar({ seed, sizePx = 24 }: { seed: string; sizePx?: number }) {
   );
 }
 
-function TeacherCourseCard({ course, gradient, index, onEdit, onDelete, onToggleStatus }: any) {
+function TeacherCourseCard({ course, gradient, index, onEdit, onDelete, onToggleStatus, canEdit, canDelete, canPublish }: any) {
   const [menuOpen, setMenuOpen] = useState(false);
   const name = course.name || course.title || 'Untitled';
   const students = course.student_ids?.length || course.total_students || 0;
@@ -499,20 +510,20 @@ function TeacherCourseCard({ course, gradient, index, onEdit, onDelete, onToggle
                 transition={{ duration: 0.15 }}
                 className="absolute right-0 top-full mt-1.5 w-48 bg-white rounded-xl shadow-2xl border border-slate-100 z-50 py-1"
               >
-                <button onClick={() => { onToggleStatus(); setMenuOpen(false); }}
+                {canPublish && <button onClick={() => { onToggleStatus(); setMenuOpen(false); }}
                   className="w-full flex items-center gap-2.5 px-3.5 py-2.5 text-xs font-medium text-slate-700 hover:bg-slate-50 transition-colors">
                   {isPublished ? <EyeOff className="w-3.5 h-3.5 text-amber-500" /> : <Eye className="w-3.5 h-3.5 text-emerald-500" />}
                   {isPublished ? 'Set to Draft' : 'Publish'}
-                </button>
-                <button onClick={() => { onEdit(); setMenuOpen(false); }}
+                </button>}
+                {canEdit && <button onClick={() => { onEdit(); setMenuOpen(false); }}
                   className="w-full flex items-center gap-2.5 px-3.5 py-2.5 text-xs font-medium text-slate-700 hover:bg-slate-50 transition-colors">
                   <Edit2 className="w-3.5 h-3.5 text-violet-500" /> Edit Course
-                </button>
-                <div className="h-px bg-slate-100 mx-2 my-1" />
-                <button onClick={() => { onDelete(); setMenuOpen(false); }}
+                </button>}
+                {canDelete && <div className="h-px bg-slate-100 mx-2 my-1" />}
+                {canDelete && <button onClick={() => { onDelete(); setMenuOpen(false); }}
                   className="w-full flex items-center gap-2.5 px-3.5 py-2.5 text-xs font-medium text-red-600 hover:bg-red-50 transition-colors">
                   <Trash2 className="w-3.5 h-3.5" /> Delete Course
-                </button>
+                </button>}
               </motion.div>
             </>
           )}
@@ -564,12 +575,12 @@ function TeacherCourseCard({ course, gradient, index, onEdit, onDelete, onToggle
               </span>
             )}
           </div>
-          <button
+          {canEdit && <button
             onClick={onEdit}
             className="text-xs font-semibold text-violet-600 hover:text-violet-700 px-2.5 py-1.5 hover:bg-violet-50 rounded-lg transition-all active:scale-95"
           >
             Edit →
-          </button>
+          </button>}
         </div>
       </div>
     </motion.div>

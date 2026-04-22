@@ -36,6 +36,7 @@ interface ClassRecord {
   capacity: number;
   created_at: string;
   course?: { title: string } | null;
+  enrollment_count?: number;
 }
 
 interface Course { id: string; title: string; status?: string }
@@ -143,14 +144,23 @@ export default function TeacherClasses() {
       // Dropdown: draft + published (same as other teacher flows); cards still resolve archived titles below.
       const forSelect = allCourses.filter(c => c.status !== 'archived');
 
-      const courseMap: Record<string, { title: string }> = {};
-      allCourses.forEach(c => { courseMap[c.id] = { title: c.title }; });
+      const courseMap: Record<string, { title: string; studentIds: string[] }> = {};
+      allCourses.forEach((c: any) => {
+        courseMap[c.id] = {
+          title: c.title,
+          studentIds: Array.isArray(c.student_ids) ? c.student_ids.map((sid: unknown) => String(sid)) : [],
+        };
+      });
 
       const enriched = classesRows.map((cls: Record<string, unknown>) => {
         const row = normalizeClassRow(cls) as ClassRecord;
+        const classStudentIds = Array.isArray(row.student_ids) ? row.student_ids.map((sid: unknown) => String(sid)) : [];
+        const courseStudentIds = row.course_id ? (courseMap[String(row.course_id)]?.studentIds || []) : [];
+        const enrollmentCount = new Set([...classStudentIds, ...courseStudentIds]).size;
         return {
           ...row,
-          course: row.course_id ? (courseMap[String(row.course_id)] || null) : null,
+          course: row.course_id ? ({ title: courseMap[String(row.course_id)]?.title || 'Unknown Course' }) : null,
+          enrollment_count: enrollmentCount,
         };
       });
 
@@ -256,7 +266,7 @@ export default function TeacherClasses() {
   const stats = useMemo(() => ({
     total: classes.length,
     active: classes.filter(c => c.status === 'active').length,
-    students: classes.reduce((s, c) => s + (c.student_ids?.length || 0), 0),
+    students: classes.reduce((s, c) => s + ((c.enrollment_count ?? c.student_ids?.length) || 0), 0),
     completed: classes.filter(c => c.status === 'completed').length,
   }), [classes]);
 
@@ -354,7 +364,7 @@ export default function TeacherClasses() {
             <div className={ADMIN_LIST_CARD_GRID}>
               {filtered.map(cls => {
                 const sc = STATUS_CONFIG[cls.status];
-                const enrolledCount = cls.student_ids?.length || 0;
+                const enrolledCount = (cls.enrollment_count ?? cls.student_ids?.length) || 0;
                 const capacityPct = cls.capacity > 0 ? Math.round((enrolledCount / cls.capacity) * 100) : 0;
                 return (
                   <div key={cls.id} className={ADMIN_LIST_ITEM_CARD}>
@@ -630,7 +640,7 @@ export default function TeacherClasses() {
               <div className="grid grid-cols-2 gap-4">
                 {[
                   { icon: BookOpen, label: 'Course', value: viewClass.course?.title || 'Not assigned', color: 'text-indigo-500', bg: 'bg-indigo-50' },
-                  { icon: Users, label: 'Enrolled', value: `${viewClass.student_ids?.length || 0} / ${viewClass.capacity}`, color: 'text-emerald-500', bg: 'bg-emerald-50' },
+                  { icon: Users, label: 'Enrolled', value: `${((viewClass.enrollment_count ?? viewClass.student_ids?.length) || 0)} / ${viewClass.capacity}`, color: 'text-emerald-500', bg: 'bg-emerald-50' },
                   { icon: CalendarDays, label: 'Start Date', value: formatDate(viewClass.start_date), color: 'text-amber-500', bg: 'bg-amber-50' },
                   { icon: CalendarDays, label: 'End Date', value: formatDate(viewClass.end_date) || '—', color: 'text-violet-500', bg: 'bg-violet-50' },
                 ].map(item => (

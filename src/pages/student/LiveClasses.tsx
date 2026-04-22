@@ -2,6 +2,7 @@ import React, { useEffect, useState, useMemo } from 'react';
 import { supabase } from '../../supabase';
 import StudentLayout from '../../components/layout/StudentLayout';
 import { motion, AnimatePresence } from 'motion/react';
+import { authFetch } from '../../lib/apiUrl';
 import {
   Video, Search, Radio, CalendarDays, Clock, CheckCircle2,
   XCircle, Users, Link2, BookOpen, Wifi, Play
@@ -49,24 +50,29 @@ export default function StudentLiveClasses() {
   useEffect(() => {
     const load = async () => {
       const { data: { session } } = await supabase.auth.getSession();
-      if (!session) return;
-      const uid = session.user.id;
+      if (!session) { setLoading(false); return; }
 
-      const { data: courses } = await supabase.from('courses').select('id, title').contains('student_ids', [uid]);
-      if (!courses?.length) { setLoading(false); return; }
-      const courseIds = courses.map((c: any) => c.id);
+      const sessionsRes = await authFetch('/api/student/live-sessions');
+      const sessionsJson = sessionsRes.ok ? await sessionsRes.json() : { sessions: [] };
+      const rows = Array.isArray(sessionsJson?.sessions) ? sessionsJson.sessions : [];
+      if (!rows.length) { setLoading(false); return; }
+
+      const courseIds = [...new Set(rows.map((s: any) => String(s?.course_id || '')).filter(Boolean))];
       const courseMap: Record<string, string> = {};
-      courses.forEach((c: any) => { courseMap[c.id] = c.title; });
+      if (courseIds.length > 0) {
+        const { data: courseRows } = await supabase
+          .from('courses')
+          .select('id,title')
+          .in('id', courseIds);
+        (courseRows || []).forEach((c: any) => {
+          courseMap[String(c.id)] = String(c.title || 'Course');
+        });
+      }
 
-      const { data } = await supabase
-        .from('live_sessions')
-        .select('*, host:profiles(display_name)')
-        .in('course_id', courseIds)
-        .order('scheduled_at', { ascending: false });
-
-      setSessions((data || []).map((s: any) => ({
+      setSessions(rows.map((s: any) => ({
         ...s,
-        courseTitle: courseMap[s.course_id] || 'Course',
+        max_participants: Number(s?.max_participants || 100),
+        courseTitle: courseMap[String(s?.course_id || '')] || 'Course',
         hostName: s.host?.display_name || 'Instructor',
       })));
       setLoading(false);

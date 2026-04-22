@@ -1,13 +1,13 @@
 import React, { useEffect, useState, useMemo } from 'react';
-import { supabase } from '../../supabase';
 import StudentLayout from '../../components/layout/StudentLayout';
 import { motion, AnimatePresence } from 'motion/react';
 import {
   MessageSquare, Search, ThumbsUp, MessageCircle,
-  Pin, Globe, HelpCircle, BookMarked, Sparkles, Flame
+  Pin, Globe, HelpCircle, BookMarked, Sparkles, School
 } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { formatDistanceToNow } from 'date-fns';
+import { authFetch, readApiError } from '../../lib/apiUrl';
 
 type PostCategory = 'general' | 'q_and_a' | 'resources' | 'showcase';
 type PostStatus = 'active' | 'pinned' | 'archived';
@@ -17,12 +17,14 @@ interface Post {
   title: string;
   content: string | null;
   author_id: string | null;
+  class_id?: string | null;
   category: PostCategory;
   status: PostStatus;
   likes_count: number;
   replies_count: number;
   created_at: string;
   authorName: string;
+  class_target?: { id: string; name: string } | null;
 }
 
 const CATEGORY_CFG: Record<PostCategory, { label: string; bg: string; text: string; border: string; icon: React.ElementType; accentGrad: string }> = {
@@ -48,17 +50,20 @@ export default function StudentCommunity() {
 
   useEffect(() => {
     const load = async () => {
-      const { data } = await supabase
-        .from('community_posts')
-        .select('*, author:profiles(display_name)')
-        .neq('status', 'archived')
-        .order('status', { ascending: false })
-        .order('created_at', { ascending: false });
-
-      setPosts((data || []).map((p: any) => ({
-        ...p, authorName: p.author?.display_name || 'Anonymous',
-      })));
-      setLoading(false);
+      setLoading(true);
+      try {
+        const res = await authFetch('/api/student/community');
+        if (!res.ok) throw new Error(await readApiError(res));
+        const json = await res.json();
+        setPosts((json?.posts || []).map((p: any) => ({
+          ...p,
+          authorName: p.author?.display_name || 'Anonymous',
+        })));
+      } catch {
+        setPosts([]);
+      } finally {
+        setLoading(false);
+      }
     };
     load();
   }, []);
@@ -165,6 +170,13 @@ export default function StudentCommunity() {
                           </div>
                           <h3 className="text-sm font-bold text-slate-900 group-hover:text-fuchsia-600 transition-colors line-clamp-1">{post.title}</h3>
                           {post.content && <p className="text-xs text-slate-400 mt-1 line-clamp-2 leading-relaxed">{post.content}</p>}
+                          {post.class_target?.name && (
+                            <div className="mt-2">
+                              <span className="inline-flex items-center gap-1 text-[10px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200 px-2 py-0.5 rounded-lg">
+                                <School className="w-2.5 h-2.5" /> {post.class_target.name}
+                              </span>
+                            </div>
+                          )}
                           <div className="flex items-center gap-4 mt-3">
                             <span className="text-xs text-slate-400 font-medium">by {post.authorName}</span>
                             <span className="text-xs text-slate-400">{formatDistanceToNow(new Date(post.created_at), { addSuffix: true })}</span>

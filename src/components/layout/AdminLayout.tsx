@@ -3,6 +3,8 @@ import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { supabase } from '../../supabase';
 import { cn } from '../../lib/utils';
 import NotificationCenter from '../NotificationCenter';
+import { authFetch } from '../../lib/apiUrl';
+import { defaultFeatureFlags, extractFeatureFlags, FeatureFlags } from '../../lib/platformFeatures';
 import { 
   LayoutDashboard, 
   BookOpen, 
@@ -24,7 +26,6 @@ import {
   Receipt, 
   Settings, 
   Palette, 
-  Globe, 
   Lock, 
   User, 
   Shield, 
@@ -88,7 +89,6 @@ const adminNavSections = [
     items: [
       { icon: Settings, label: 'Settings', path: '/admin/settings' },
       { icon: Palette, label: 'Branding', path: '/admin/branding' },
-      { icon: Globe, label: 'Domain', path: '/admin/domain' },
       { icon: Lock, label: 'Roles & Permissions', path: '/admin/roles' },
     ]
   },
@@ -104,21 +104,33 @@ const adminNavSections = [
 export default function AdminLayout({ children }: { children: React.ReactNode }) {
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [brandLogoUrl, setBrandLogoUrl] = useState<string | null>(null);
+  const [features, setFeatures] = useState<FeatureFlags>(defaultFeatureFlags);
   const location = useLocation();
   const navigate = useNavigate();
 
   useEffect(() => {
     let mounted = true;
-    (async () => {
+    const loadConfig = async () => {
       try {
-        const res = await fetch('/api/admin/config/branding');
+        const [brandingRes, settingsRes] = await Promise.all([
+          authFetch('/api/admin/config/branding'),
+          authFetch('/api/admin/config/settings'),
+        ]);
+        const res = brandingRes;
         const json = await res.json();
         if (!mounted || !res.ok || !json?.success || !json?.value) return;
         const url = typeof json.value?.logoUrl === 'string' ? json.value.logoUrl : null;
         setBrandLogoUrl(url);
+        const settingsJson = await settingsRes.json();
+        if (settingsRes.ok && settingsJson?.success) {
+          setFeatures(extractFeatureFlags(settingsJson.value));
+        }
       } catch {
         // keep default logo
       }
+    };
+    (async () => {
+      await loadConfig();
     })();
 
     const onBrandUpdated = (event: Event) => {
@@ -127,11 +139,16 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
         setBrandLogoUrl(custom.detail.logoUrl || null);
       }
     };
+    const onSettingsUpdated = () => {
+      loadConfig();
+    };
 
     window.addEventListener('branding-updated', onBrandUpdated);
+    window.addEventListener('settings-updated', onSettingsUpdated);
     return () => {
       mounted = false;
       window.removeEventListener('branding-updated', onBrandUpdated);
+      window.removeEventListener('settings-updated', onSettingsUpdated);
     };
   }, []);
 
@@ -139,6 +156,19 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
     await supabase.auth.signOut();
     navigate('/login');
   };
+
+  const visibleSections = adminNavSections
+    .map((section) => ({
+      ...section,
+      items: section.items.filter((item) => {
+        if (!features.liveSessionsEnabled && item.path === '/admin/live-sessions') return false;
+        if (!features.communityEnabled && item.path === '/admin/community') return false;
+        if (!features.announcementsEnabled && item.path === '/admin/announcements') return false;
+        if (!features.paymentsEnabled && (item.path === '/admin/payments' || item.path === '/admin/invoices')) return false;
+        return true;
+      }),
+    }))
+    .filter((section) => section.items.length > 0);
 
   const NavItem = ({ item, onClick }: { item: any; key?: React.Key; onClick?: () => void }) => (
     <Link
@@ -174,7 +204,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
         </div>
       </div>
       <nav className="flex-1 min-h-0 px-3 py-4 space-y-5 overflow-y-auto scrollbar-none">
-        {adminNavSections.map((section) => (
+        {visibleSections.map((section) => (
           <div key={section.title} className="space-y-0.5">
             <h3 className="px-3 text-[9px] font-bold text-slate-500 uppercase tracking-widest mb-1.5">
               {section.title}
@@ -208,7 +238,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
       <header className="hidden lg:flex fixed top-0 right-0 left-60 h-14 bg-white border-b border-slate-200 items-center justify-between px-6 z-20">
         <div className="flex items-center gap-2">
           <span className="text-sm font-semibold text-slate-500">
-            {adminNavSections.flatMap(s => s.items).find(i => i.path === location.pathname)?.label || 'Dashboard'}
+            {visibleSections.flatMap(s => s.items).find(i => i.path === location.pathname)?.label || 'Dashboard'}
           </span>
         </div>
         <NotificationCenter />

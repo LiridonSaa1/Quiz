@@ -10,6 +10,9 @@ import {
 import { cn } from '../../lib/utils';
 import { useNavigate } from 'react-router-dom';
 import { selectPublishedQuizzesCompat } from '../../lib/quizzesCompat';
+import { authFetch } from '../../lib/apiUrl';
+import { resolveTeacherIdCandidates } from '../../lib/teacherScope';
+import { fetchAttemptRowsByStudentId } from '../../lib/quizAttempts';
 
 interface ExamEntry {
   id: string;
@@ -44,24 +47,53 @@ export default function StudentExams() {
   useEffect(() => {
     const fetchData = async () => {
       const { data: { session } } = await supabase.auth.getSession();
-      if (!session) return;
+      if (!session) {
+        setLoading(false);
+        return;
+      }
+      const uid = session.user.id;
 
-      const { data: profile } = await supabase.from('profiles').select('*').eq('id', session.user.id).single();
+      const profileSnap = await supabase
+        .from('profiles')
+        .select('teacher_id')
+        .eq('id', uid)
+        .single();
+      const linkedTeacherId = String(profileSnap.data?.teacher_id || '').trim();
+      if (!linkedTeacherId) {
+        setLoading(false);
+        return;
+      }
 
-      const { data: enrollments } = await supabase
-        .from('enrollments')
-        .select('course_id')
-        .eq('student_id', session.user.id);
-      const courseIds = (enrollments || []).map((e: any) => e.course_id);
+      const teacherIdCandidates = await resolveTeacherIdCandidates(linkedTeacherId);
+      const scopedTeacherIds = teacherIdCandidates.length > 0 ? teacherIdCandidates : [linkedTeacherId];
+
+      const coursesRes = await authFetch(`/api/teacher/courses?userId=${encodeURIComponent(linkedTeacherId)}`);
+      const coursesJson = coursesRes.ok ? await coursesRes.json() : { courses: [] };
+      const coursesData = Array.isArray(coursesJson?.courses)
+        ? coursesJson.courses.filter((c: any) => {
+            const isPublished = String(c?.status || '').toLowerCase() === 'published';
+            const isTeacherScoped = scopedTeacherIds.includes(String(c?.teacher_id || ''));
+            const studentIds = Array.isArray(c?.student_ids) ? c.student_ids.map((sid: unknown) => String(sid)) : [];
+            const isEnrolled = studentIds.includes(uid);
+            return isPublished && isTeacherScoped && isEnrolled;
+          })
+        : [];
+
+      if (!coursesData.length) {
+        setLoading(false);
+        return;
+      }
+
+      const { data: coursesFallback } = await supabase
+        .from('courses')
+        .select('id, title')
+        .in('id', coursesData.map((c: any) => c.id));
+      const courseIds = (coursesFallback || coursesData || []).map((c: any) => c.id);
 
       if (!courseIds.length) { setLoading(false); return; }
 
-      const { data: coursesData } = await supabase
-        .from('courses')
-        .select('id, title')
-        .in('id', courseIds);
       const courseMap: Record<string, string> = {};
-      (coursesData || []).forEach((c: any) => { courseMap[c.id] = c.title; });
+      (coursesFallback || coursesData || []).forEach((c: any) => { courseMap[c.id] = c.title; });
 
       const quizRows = await selectPublishedQuizzesCompat(supabase, courseIds, '*');
       const quizzesData = (quizRows || []).filter((q: any) => String(q?.type || '') === 'exam');
@@ -76,12 +108,9 @@ export default function StudentExams() {
       const qCount: Record<string, number> = {};
       (questionsData || []).forEach((q: any) => { qCount[q.quiz_id] = (qCount[q.quiz_id] || 0) + 1; });
 
-      const { data: attemptsData } = await supabase
-        .from('quiz_attempts')
-        .select('*')
-        .eq('student_id', session.user.id)
-        .in('quiz_id', quizIds)
-        .order('created_at', { ascending: false });
+      const attemptsData = (await fetchAttemptRowsByStudentId(supabase, uid))
+        .filter((a: any) => quizIds.includes(a.quiz_id))
+        .sort((a: any, b: any) => new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime());
 
       const attMap: Record<string, { id: string; score: number; passed: boolean; completedAt: string }[]> = {};
       (attemptsData || []).forEach((a: any) => {
@@ -142,6 +171,7 @@ export default function StudentExams() {
       ? Math.round(exams.filter(e => e.bestScore !== null).reduce((s, e) => s + (e.bestScore ?? 0), 0) / exams.filter(e => e.bestScore !== null).length)
       : 0,
   };
+  const hasActiveFilters = activeFilter !== 'all';
 
   return (
     <StudentLayout>
@@ -215,7 +245,7 @@ export default function StudentExams() {
           </div>
           <h3 className="text-slate-700 font-bold text-lg mb-1">No exams here</h3>
           <p className="text-slate-400 text-sm">
-            {activeFilter === 'all' ? "No exams published for your courses yet." : "No exams in this category."}
+            {hasActiveFilters ? 'No results for current filter.' : 'No enrolled content yet.'}
           </p>
         </motion.div>
       ) : (
@@ -227,6 +257,8 @@ export default function StudentExams() {
                 : !exam.canAttempt && exam.attemptsUsed > 0
                   ? 'from-rose-500 to-red-500'
                   : 'from-fuchsia-500 to-violet-500';
+              const latestAttemptId = exam.attempts[0]?.id ? String(exam.attempts[0].id) : null;
+              const stateLabel = exam.passed ? 'Passed' : !exam.canAttempt && exam.attemptsUsed > 0 ? 'No attempts left' : 'Can attempt';
 
               return (
                 <motion.div key={exam.id}
@@ -252,6 +284,18 @@ export default function StudentExams() {
                         <div className="flex items-center gap-1.5 mt-1">
                           <BookOpen className="w-3 h-3 text-slate-400" />
                           <span className="text-xs text-slate-400 truncate">{exam.courseName}</span>
+                        </div>
+                        <div className="mt-2">
+                          <span className={cn(
+                            'inline-flex items-center gap-1 text-[10px] font-bold px-2 py-1 rounded-full border',
+                            exam.passed
+                              ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                              : !exam.canAttempt && exam.attemptsUsed > 0
+                                ? 'bg-rose-50 text-rose-700 border-rose-200'
+                                : 'bg-blue-50 text-blue-700 border-blue-200'
+                          )}>
+                            {stateLabel}
+                          </span>
                         </div>
                         {exam.description && (
                           <p className="text-xs text-slate-500 mt-1.5 line-clamp-2">{exam.description}</p>
@@ -317,9 +361,18 @@ export default function StudentExams() {
 
                     {/* CTA */}
                     {exam.passed ? (
-                      <div className="flex items-center justify-center gap-2 bg-emerald-50 border border-emerald-200 text-emerald-700 py-2.5 rounded-xl text-sm font-bold">
-                        <Trophy className="w-4 h-4" /> Exam Passed!
-                      </div>
+                      latestAttemptId ? (
+                        <button
+                          onClick={() => navigate(`/student/results/${latestAttemptId}`)}
+                          className="w-full flex items-center justify-center gap-2 bg-emerald-50 border border-emerald-200 text-emerald-700 py-2.5 rounded-xl text-sm font-bold hover:bg-emerald-100 transition-all"
+                        >
+                          <Trophy className="w-4 h-4" /> View Result
+                        </button>
+                      ) : (
+                        <div className="flex items-center justify-center gap-2 bg-emerald-50 border border-emerald-200 text-emerald-700 py-2.5 rounded-xl text-sm font-bold">
+                          <Trophy className="w-4 h-4" /> Passed
+                        </div>
+                      )
                     ) : !exam.canAttempt ? (
                       <div className="flex items-center justify-center gap-2 bg-slate-50 border border-slate-200 text-slate-400 py-2.5 rounded-xl text-sm font-bold">
                         <Lock className="w-4 h-4" /> No Attempts Remaining
@@ -328,7 +381,7 @@ export default function StudentExams() {
                       <button onClick={() => navigate(`/student/quiz/${exam.id}`)}
                         className="w-full flex items-center justify-center gap-2 bg-gradient-to-r from-fuchsia-600 to-violet-600 hover:from-fuchsia-700 hover:to-violet-700 text-white py-2.5 rounded-xl text-sm font-bold transition-all shadow-lg shadow-fuchsia-500/20 group-hover:shadow-fuchsia-500/30">
                         <Zap className="w-4 h-4" />
-                        {exam.attemptsUsed > 0 ? 'Retake Exam' : 'Enter Exam Room'}
+                        {exam.attemptsUsed > 0 ? 'Retake' : 'Start'}
                         <ChevronRight className="w-4 h-4" />
                       </button>
                     )}

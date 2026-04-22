@@ -41,14 +41,17 @@ export default function StudentDashboard() {
         if (linkedTeacherId) {
           const coursesRes = await authFetch(`/api/teacher/courses?userId=${encodeURIComponent(String(linkedTeacherId))}`);
           const coursesJson = coursesRes.ok ? await coursesRes.json() : { courses: [] };
-          courses = Array.isArray(coursesJson?.courses)
-            ? coursesJson.courses.filter((c: any) => String(c?.status || '').toLowerCase() === 'published')
-            : [];
+          courses = Array.isArray(coursesJson?.courses) ? coursesJson.courses : [];
         }
-        setEnrolledCourses(courses);
+        const enrolledCourses = courses.filter((c: any) => {
+          if (String(c?.status || '').toLowerCase() !== 'published') return false;
+          if (!Array.isArray(c?.student_ids)) return false;
+          return c.student_ids.map((sid: unknown) => String(sid)).includes(studentId);
+        });
+        setEnrolledCourses(enrolledCourses);
 
-        if (courses.length > 0) {
-          const courseIds = courses.map((c: any) => c.id);
+        if (enrolledCourses.length > 0) {
+          const courseIds = enrolledCourses.map((c: any) => c.id);
           const quizRows = await selectPublishedQuizzesCompat(supabase, courseIds, '*');
           quizzes = (quizRows as any) || [];
         }

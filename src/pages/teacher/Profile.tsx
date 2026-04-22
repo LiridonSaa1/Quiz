@@ -13,6 +13,7 @@ import { toast } from 'sonner';
 import { cn } from '../../lib/utils';
 import { fetchAttemptRowsByQuizIds } from '../../lib/quizAttempts';
 import { resolveTeacherIdCandidates } from '../../lib/teacherScope';
+import { useTeacherPermissions } from '../../lib/teacherPermissions';
 
 interface ProfileData {
   displayName: string;
@@ -55,8 +56,10 @@ export default function TeacherProfile() {
   const [passwords, setPasswords] = useState({ next: '', confirm: '' });
   const [showPass, setShowPass] = useState({ next: false, confirm: false });
   const [changingPass, setChangingPass] = useState(false);
+  const { can } = useTeacherPermissions();
 
   const updateField = (key: keyof ProfileData, val: string) => {
+    if (!can('actions.teacher.profile.edit')) return;
     setProfile((p) => ({ ...p, [key]: val }));
     setDirty(true);
   };
@@ -122,6 +125,10 @@ export default function TeacherProfile() {
   }, [loadAll]);
 
   const handleSave = async () => {
+    if (!can('actions.teacher.profile.edit')) {
+      toast.error('You do not have permission to edit profile');
+      return;
+    }
     const { data: { session } } = await supabase.auth.getSession();
     if (!session?.user?.id) {
       toast.error('Not signed in');
@@ -177,6 +184,10 @@ export default function TeacherProfile() {
   };
 
   const handlePasswordChange = async () => {
+    if (!can('actions.teacher.profile.edit')) {
+      toast.error('You do not have permission to change password');
+      return;
+    }
     if (passwords.next !== passwords.confirm) {
       toast.error('Passwords do not match');
       return;

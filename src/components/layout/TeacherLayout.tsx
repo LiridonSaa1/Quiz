@@ -9,6 +9,9 @@ import {
 } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import NotificationCenter from '../NotificationCenter';
+import { authFetch } from '../../lib/apiUrl';
+import { defaultFeatureFlags, extractFeatureFlags, FeatureFlags } from '../../lib/platformFeatures';
+import { getTeacherPagePermission, useTeacherPermissions } from '../../lib/teacherPermissions';
 
 const NAV_SECTIONS = [
   {
@@ -116,12 +119,14 @@ function NavItem({
 
 function SidebarContent({
   activePath, collapsed, onCollapse, onLinkClick, onLogout,
+  sections,
 }: {
   activePath: string;
   collapsed: boolean;
   onCollapse: () => void;
   onLinkClick?: () => void;
   onLogout: () => void;
+  sections: typeof NAV_SECTIONS;
 }) {
   const [userEmail, setUserEmail] = useState('');
   const [displayName, setDisplayName] = useState('');
@@ -165,7 +170,7 @@ function SidebarContent({
 
       {/* Nav */}
       <nav className="flex-1 px-2 py-4 overflow-y-auto space-y-4 scrollbar-none">
-        {NAV_SECTIONS.map((section) => (
+        {sections.map((section) => (
           <div key={section.title} className="space-y-0.5">
             {!collapsed ? (
               <p className="px-3 mb-2 mt-1 text-[9px] font-bold tracking-[0.2em] uppercase text-slate-500/70">
@@ -241,16 +246,56 @@ function SidebarContent({
 export default function TeacherLayout({ children }: { children: React.ReactNode }) {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [collapsed, setCollapsed] = useState(false);
+  const [features, setFeatures] = useState<FeatureFlags>(defaultFeatureFlags);
+  const { can } = useTeacherPermissions();
   const location = useLocation();
   const navigate = useNavigate();
+
+  useEffect(() => {
+    let mounted = true;
+    const loadSettings = async () => {
+      try {
+        const res = await authFetch('/api/admin/config/settings');
+        const json = await res.json();
+        if (!mounted || !res.ok || !json?.success) return;
+        setFeatures(extractFeatureFlags(json.value));
+      } catch {
+        // keep defaults
+      }
+    };
+    loadSettings();
+    const onSettingsUpdated = () => loadSettings();
+    window.addEventListener('settings-updated', onSettingsUpdated);
+    return () => {
+      mounted = false;
+      window.removeEventListener('settings-updated', onSettingsUpdated);
+    };
+  }, []);
 
   const handleLogout = async () => {
     await supabase.auth.signOut();
     navigate('/login');
   };
 
+  const visibleSections = NAV_SECTIONS
+    .map((section) => ({
+      ...section,
+      items: section.items.filter((item) => {
+        const permission = getTeacherPagePermission(item.path);
+        if (permission && !can(permission, true)) return false;
+        if (!features.liveSessionsEnabled && item.path === '/teacher/live-sessions') return false;
+        if (!features.communityEnabled && item.path === '/teacher/community') return false;
+        if (!features.announcementsEnabled && item.path === '/teacher/announcements') return false;
+        return true;
+      }),
+    }))
+    .filter((section) => section.items.length > 0);
+
   const currentLabel =
-    NAV_SECTIONS.flatMap((s) => s.items).find((i) => i.path === location.pathname)?.label || 'Dashboard';
+    visibleSections.flatMap((s) => s.items).find((i) => i.path === location.pathname)?.label || 'Dashboard';
+
+  const currentPagePermission = getTeacherPagePermission(location.pathname);
+  const canAccessCurrentPage = !currentPagePermission || can(currentPagePermission, true);
 
   const sidebarW = collapsed ? 'w-16' : 'w-60';
   const mainML  = collapsed ? 'lg:ml-16' : 'lg:ml-60';
@@ -270,6 +315,7 @@ export default function TeacherLayout({ children }: { children: React.ReactNode 
           collapsed={collapsed}
           onCollapse={() => setCollapsed((c) => !c)}
           onLogout={handleLogout}
+          sections={visibleSections}
         />
       </aside>
 
@@ -324,6 +370,7 @@ export default function TeacherLayout({ children }: { children: React.ReactNode 
               onCollapse={() => {}}
               onLinkClick={() => setSidebarOpen(false)}
               onLogout={handleLogout}
+              sections={visibleSections}
             />
           </aside>
         </div>
@@ -332,7 +379,16 @@ export default function TeacherLayout({ children }: { children: React.ReactNode 
       {/* Main */}
       <main className={cn('flex-1 pt-14 min-h-screen transition-all duration-300 ease-in-out', mainML)}>
         <div className="px-4 sm:px-6 lg:px-8 py-7">
-          {children}
+          {canAccessCurrentPage ? (
+            children
+          ) : (
+            <div className="min-h-[60vh] flex items-center justify-center">
+              <div className="max-w-md text-center space-y-3">
+                <h2 className="text-2xl font-bold text-slate-900">Access denied</h2>
+                <p className="text-slate-500 text-sm">You do not have permission to access this page.</p>
+              </div>
+            </div>
+          )}
         </div>
       </main>
     </div>

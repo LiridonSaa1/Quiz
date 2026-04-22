@@ -10,7 +10,7 @@ import { toast } from 'sonner';
 import { FormPageSkeleton } from '../../components/ui/Skeleton';
 import StyledSelect from '../../components/ui/StyledSelect';
 import { resolveTeacherIdCandidates } from '../../lib/teacherScope';
-import { apiUrl } from '../../lib/apiUrl';
+import { apiUrl, authFetch } from '../../lib/apiUrl';
 import { AIPanel, AITriggerButton } from '../../components/AIPanel';
 import { generateCourseData } from '../../lib/gemini';
 
@@ -44,6 +44,12 @@ const initialForm = {
   tags: [] as string[],
 };
 
+interface TeacherClassOption {
+  id: string;
+  name: string;
+  student_ids?: string[];
+}
+
 export default function TeacherCourseForm() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
@@ -56,6 +62,8 @@ export default function TeacherCourseForm() {
   const [activeTab, setActiveTab] = useState('basic');
   const [tagInput, setTagInput] = useState('');
   const [aiOpen, setAiOpen] = useState(false);
+  const [classes, setClasses] = useState<TeacherClassOption[]>([]);
+  const [selectedClassId, setSelectedClassId] = useState('');
 
   const set = (key: string, value: any) => setForm(prev => ({ ...prev, [key]: value }));
 
@@ -157,6 +165,28 @@ export default function TeacherCourseForm() {
     fetchCourse();
   }, [id, navigate]);
 
+  useEffect(() => {
+    const loadClasses = async () => {
+      if (isEditing) return;
+      try {
+        const res = await authFetch('/api/teacher/classes');
+        if (!res.ok) return;
+        const json = await res.json();
+        const rows = Array.isArray(json?.classes) ? json.classes : [];
+        setClasses(
+          rows.map((cls: any) => ({
+            id: String(cls.id || ''),
+            name: String(cls.name || 'Untitled Class'),
+            student_ids: Array.isArray(cls.student_ids) ? cls.student_ids : [],
+          })).filter((cls: TeacherClassOption) => cls.id),
+        );
+      } catch {
+        // keep form usable even if classes endpoint is unavailable
+      }
+    };
+    loadClasses();
+  }, [isEditing]);
+
   const handleSave = async (publishNow = false) => {
     if (!form.name.trim()) { toast.error('Course title is required'); setActiveTab('basic'); return; }
     setSaving(true);
@@ -188,7 +218,11 @@ export default function TeacherCourseForm() {
         const res = await fetch(apiUrl('/api/admin/create-course'), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ ...payload, teacher_id: session.user.id }),
+          body: JSON.stringify({
+            ...payload,
+            teacher_id: session.user.id,
+            class_id: selectedClassId || null,
+          }),
         });
         const json = await res.json();
         if (!res.ok) throw new Error(json.error || 'Failed to create course');
@@ -318,6 +352,27 @@ export default function TeacherCourseForm() {
                         {CATEGORIES.map(c => <option key={c}>{c}</option>)}
                       </StyledSelect>
                     </div>
+                    {!isEditing && (
+                      <div>
+                        <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">Class Visibility</label>
+                        <StyledSelect
+                          value={selectedClassId}
+                          onChange={e => setSelectedClassId(e.target.value)}
+                          wrapperClassName="w-full"
+                          className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:ring-violet-500/30"
+                        >
+                          <option value="">All my students</option>
+                          {classes.map((cls) => (
+                            <option key={cls.id} value={cls.id}>
+                              {cls.name}
+                            </option>
+                          ))}
+                        </StyledSelect>
+                        <p className="text-[11px] text-slate-400 mt-1.5">
+                          If you select a class, this course will be pre-assigned only to students from that class.
+                        </p>
+                      </div>
+                    )}
                     <div>
                       <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-3">Pricing</label>
                       <div className="flex gap-4 mb-4">

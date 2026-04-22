@@ -2,17 +2,19 @@ import React, { useEffect, useState, useMemo } from 'react';
 import { supabase } from '../../supabase';
 import StudentLayout from '../../components/layout/StudentLayout';
 import { Link } from 'react-router-dom';
+import { useSearchParams } from 'react-router-dom';
 import { motion, AnimatePresence } from 'motion/react';
 import {
   HelpCircle, Search, Clock, Play, CheckCircle2,
   BookOpen, Sparkles, Trophy, Filter, ChevronRight, Zap
 } from 'lucide-react';
 import { cn } from '../../lib/utils';
-import { selectPublishedQuizzesCompat } from '../../lib/quizzesCompat';
 import { fetchAttemptRowsByStudentId } from '../../lib/quizAttempts';
+import { authFetch } from '../../lib/apiUrl';
 
 interface QuizItem {
   id: string;
+  courseId: string;
   title: string;
   description: string;
   timeLimit: number;
@@ -23,6 +25,7 @@ interface QuizItem {
   bestScore: number | null;
   bestTotal: number | null;
   passed: boolean | null;
+  latestAttemptId: string | null;
 }
 
 const COURSE_COLORS = [
@@ -39,6 +42,8 @@ export default function StudentQuizzes() {
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [filter, setFilter] = useState<'all' | 'new' | 'attempted' | 'passed'>('all');
+  const [searchParams] = useSearchParams();
+  const selectedCourseId = (searchParams.get('courseId') || '').trim();
 
   useEffect(() => {
     const load = async () => {
@@ -46,28 +51,38 @@ export default function StudentQuizzes() {
       if (!session) return;
       const uid = session.user.id;
 
-      const { data: courses } = await supabase
-        .from('courses').select('id, title').contains('student_ids', [uid]);
-      if (!courses?.length) { setLoading(false); return; }
-
-      const courseIds = courses.map((c: any) => c.id);
-      const courseMap: Record<string, string> = {};
-      courses.forEach((c: any) => { courseMap[c.id] = c.title; });
-
       const courseColorMap: Record<string, string> = {};
-      courses.forEach((c: any, i: number) => { courseColorMap[c.id] = COURSE_COLORS[i % COURSE_COLORS.length]; });
-
-      const [quizRows, attemptsSnap] = await Promise.all([
-        selectPublishedQuizzesCompat(supabase, courseIds, '*'),
+      const [quizzesRes, attemptsSnap] = await Promise.all([
+        authFetch(
+          selectedCourseId
+            ? `/api/student/quizzes?courseId=${encodeURIComponent(selectedCourseId)}`
+            : '/api/student/quizzes'
+        ),
         fetchAttemptRowsByStudentId(supabase, uid),
       ]);
+      const quizzesJson = quizzesRes.ok ? await quizzesRes.json() : { quizzes: [] };
+      const quizRows = Array.isArray(quizzesJson?.quizzes) ? quizzesJson.quizzes : [];
+      if (!quizRows.length) { setQuizzes([]); setLoading(false); return; }
+
+      const seenCourseIds: string[] = [];
+      quizRows.forEach((q: any) => {
+        const cid = String(q?.course_id || '');
+        if (cid && !seenCourseIds.includes(cid)) seenCourseIds.push(cid);
+      });
+      seenCourseIds.forEach((courseId, i) => {
+        courseColorMap[courseId] = COURSE_COLORS[i % COURSE_COLORS.length];
+      });
 
       const attemptMap: Record<string, { score: number; total: number; passed: boolean }> = {};
+      const latestAttemptMap: Record<string, string> = {};
       (attemptsSnap || []).forEach((a: any) => {
         const prev = attemptMap[a.quiz_id];
         const pct = a.total_points > 0 ? a.score / a.total_points : 0;
         if (!prev || pct > (prev.score / prev.total)) {
           attemptMap[a.quiz_id] = { score: a.score, total: a.total_points, passed: a.passed ?? (pct >= 0.5) };
+        }
+        if (!latestAttemptMap[a.quiz_id]) {
+          latestAttemptMap[a.quiz_id] = String(a.id);
         }
       });
 
@@ -80,11 +95,13 @@ export default function StudentQuizzes() {
           timeLimit: q.timeLimit ?? q.time_limit ?? 0,
           totalMarks: q.totalMarks ?? q.total_marks ?? 0,
           passMark: q.passMark ?? q.pass_mark ?? 0,
-          courseTitle: courseMap[q.course_id] || 'Course',
+          courseTitle: q.course_title || 'Course',
           attempted: !!att,
           bestScore: att?.score ?? null,
           bestTotal: att?.total ?? null,
           passed: att?.passed ?? null,
+          latestAttemptId: latestAttemptMap[q.id] ?? null,
+          courseId: String(q.course_id || ''),
         };
       });
 
@@ -92,22 +109,24 @@ export default function StudentQuizzes() {
       setLoading(false);
     };
     load();
-  }, []);
+  }, [selectedCourseId]);
 
   const filtered = useMemo(() => {
     let list = quizzes;
     if (search) list = list.filter(q => q.title.toLowerCase().includes(search.toLowerCase()) || q.courseTitle.toLowerCase().includes(search.toLowerCase()));
+    if (selectedCourseId) list = list.filter((q: any) => q.courseId === selectedCourseId);
     if (filter === 'new') list = list.filter(q => !q.attempted);
     if (filter === 'attempted') list = list.filter(q => q.attempted);
     if (filter === 'passed') list = list.filter(q => q.passed);
     return list;
-  }, [quizzes, search, filter]);
+  }, [quizzes, search, filter, selectedCourseId]);
 
   const stats = {
     total: quizzes.length,
     attempted: quizzes.filter(q => q.attempted).length,
     passed: quizzes.filter(q => q.passed).length,
   };
+  const hasActiveFilters = search.trim() !== '' || filter !== 'all';
 
   const FILTERS = [
     { key: 'all', label: 'All' },
@@ -194,13 +213,16 @@ export default function StudentQuizzes() {
               <HelpCircle className="w-8 h-8 text-violet-400" />
             </motion.div>
             <p className="text-slate-600 font-bold">No quizzes found</p>
-            <p className="text-slate-400 text-sm mt-1">Try adjusting your search or filter.</p>
+            <p className="text-slate-400 text-sm mt-1">
+              {hasActiveFilters ? 'No results for current filter.' : 'No enrolled content yet.'}
+            </p>
           </motion.div>
         ) : (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
             <AnimatePresence>
               {filtered.map((quiz, i) => {
                 const pct = quiz.bestScore != null && quiz.bestTotal ? Math.round((quiz.bestScore / quiz.bestTotal) * 100) : null;
+                const stateLabel = quiz.passed ? 'Passed' : quiz.attempted ? 'Attempted' : 'New';
                 return (
                   <motion.div key={quiz.id}
                     initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, scale: 0.95 }}
@@ -228,25 +250,40 @@ export default function StudentQuizzes() {
                           <span className="flex items-center gap-1 bg-slate-50 border border-slate-100 text-slate-500 text-[11px] font-semibold px-2 py-1 rounded-lg">
                             <Clock className="w-3 h-3" /> {quiz.timeLimit} min
                           </span>
-                          {quiz.attempted ? (
-                            <span className="flex items-center gap-1 bg-emerald-50 border border-emerald-100 text-emerald-700 text-[11px] font-semibold px-2 py-1 rounded-lg">
-                              <CheckCircle2 className="w-3 h-3" /> Attempted
-                            </span>
-                          ) : (
-                            <span className="flex items-center gap-1 bg-blue-50 border border-blue-100 text-blue-700 text-[11px] font-semibold px-2 py-1 rounded-lg">
-                              <Sparkles className="w-3 h-3" /> New
-                            </span>
-                          )}
+                          <span className={cn(
+                            'flex items-center gap-1 border text-[11px] font-semibold px-2 py-1 rounded-lg',
+                            quiz.passed
+                              ? 'bg-emerald-50 border-emerald-100 text-emerald-700'
+                              : quiz.attempted
+                                ? 'bg-blue-50 border-blue-100 text-blue-700'
+                                : 'bg-violet-50 border-violet-100 text-violet-700'
+                          )}>
+                            {quiz.passed ? <Trophy className="w-3 h-3" /> : quiz.attempted ? <CheckCircle2 className="w-3 h-3" /> : <Sparkles className="w-3 h-3" />}
+                            {stateLabel}
+                          </span>
                         </div>
                       </div>
-                      <Link to={`/student/quiz/${quiz.id}`}
+                      <Link to={quiz.passed && quiz.latestAttemptId ? `/student/results/${quiz.latestAttemptId}` : `/student/quiz/${quiz.id}`}
                         className={cn('flex items-center justify-center gap-2 w-full py-2.5 rounded-2xl text-sm font-bold transition-all',
                           quiz.attempted
                             ? 'bg-slate-900 text-white hover:bg-slate-800 shadow-lg shadow-slate-200'
                             : 'bg-gradient-to-r from-violet-500 to-purple-500 text-white hover:opacity-90 shadow-lg shadow-violet-200/60')}>
-                        {quiz.attempted ? <><Zap className="w-4 h-4" /> Retake</> : <><Play className="w-4 h-4" /> Start Quiz</>}
+                        {quiz.passed
+                          ? <><CheckCircle2 className="w-4 h-4" /> View Result</>
+                          : quiz.attempted
+                            ? <><Zap className="w-4 h-4" /> Retake</>
+                            : <><Play className="w-4 h-4" /> Start Quiz</>}
                         <ChevronRight className="w-4 h-4 ml-auto" />
                       </Link>
+                      {quiz.attempted && !quiz.passed && quiz.latestAttemptId && (
+                        <Link
+                          to={`/student/results/${quiz.latestAttemptId}`}
+                          className="mt-2 inline-flex items-center justify-center gap-2 w-full py-2.5 rounded-2xl text-xs font-bold transition-all bg-slate-100 text-slate-600 hover:bg-slate-200"
+                        >
+                          <CheckCircle2 className="w-3.5 h-3.5" />
+                          View Result
+                        </Link>
+                      )}
                     </div>
                   </motion.div>
                 );

@@ -43,11 +43,13 @@ const getDateForSort = (attempt: { completed_at?: string | null; created_at?: st
   attempt.completed_at || attempt.created_at || attempt.started_at || '';
 
 const isAttemptsTableMissing = (error: any) => {
-  const haystack = `${error?.message || ''} ${error?.details || ''}`.toLowerCase();
+  const haystack = `${error?.message || ''} ${error?.details || ''} ${error?.hint || ''}`.toLowerCase();
   return (
     (error?.code === 'PGRST205' && haystack.includes('public.attempts')) ||
     (error?.code === '42P01' && haystack.includes('attempts')) ||
-    haystack.includes("could not find the table 'public.attempts'")
+    haystack.includes("could not find the table 'public.attempts'") ||
+    (haystack.includes('public.attempts') && haystack.includes('schema cache')) ||
+    (haystack.includes('perhaps you meant') && haystack.includes('quiz_attempts'))
   );
 };
 
@@ -91,42 +93,38 @@ export const normalizeAttempts = (rows: any[], passingScoreByQuiz: Record<string
 export const fetchAttemptRowsByQuizIds = async (supabase: SupabaseClient, quizIds: string[]) => {
   if (!quizIds.length) return [];
 
-  const legacy = await supabase.from('attempts').select('*').in('quiz_id', quizIds);
-  if (!legacy.error) return legacy.data || [];
-  if (!isAttemptsTableMissing(legacy.error)) throw legacy.error;
-
   const modern = await supabase.from('quiz_attempts').select('*').in('quiz_id', quizIds);
-  if (modern.error) throw modern.error;
-  return modern.data || [];
+  if (!modern.error) return modern.data || [];
+  if (!isAttemptsTableMissing(modern.error)) throw modern.error;
+
+  const legacy = await supabase.from('attempts').select('*').in('quiz_id', quizIds);
+  if (legacy.error) throw legacy.error;
+  return legacy.data || [];
 };
 
 export const fetchAttemptRowsByStudentId = async (supabase: SupabaseClient, studentId: string) => {
-  const legacy = await supabase.from('attempts').select('*').eq('student_id', studentId);
-  if (!legacy.error) return legacy.data || [];
-  if (!isAttemptsTableMissing(legacy.error)) throw legacy.error;
-
   const modern = await supabase.from('quiz_attempts').select('*').eq('student_id', studentId);
   if (modern.error) throw modern.error;
   return modern.data || [];
 };
 
 export const deleteAttemptRowsByQuizId = async (supabase: SupabaseClient, quizId: string) => {
-  const legacy = await supabase.from('attempts').delete().eq('quiz_id', quizId);
-  if (!legacy.error) return;
-  if (!isAttemptsTableMissing(legacy.error)) throw legacy.error;
-
   const modern = await supabase.from('quiz_attempts').delete().eq('quiz_id', quizId);
-  if (modern.error) throw modern.error;
+  if (!modern.error) return;
+  if (!isAttemptsTableMissing(modern.error)) throw modern.error;
+
+  const legacy = await supabase.from('attempts').delete().eq('quiz_id', quizId);
+  if (legacy.error) throw legacy.error;
 };
 
 export const fetchAttemptRowById = async (supabase: SupabaseClient, attemptId: string) => {
-  const legacy = await supabase.from('attempts').select('*').eq('id', attemptId).maybeSingle();
-  if (!legacy.error) return legacy.data || null;
-  if (!isAttemptsTableMissing(legacy.error)) throw legacy.error;
-
   const modern = await supabase.from('quiz_attempts').select('*').eq('id', attemptId).maybeSingle();
-  if (modern.error) throw modern.error;
-  return modern.data || null;
+  if (!modern.error) return modern.data || null;
+  if (!isAttemptsTableMissing(modern.error)) throw modern.error;
+
+  const legacy = await supabase.from('attempts').select('*').eq('id', attemptId).maybeSingle();
+  if (legacy.error) throw legacy.error;
+  return legacy.data || null;
 };
 
 export const insertAttemptWithFallback = async (
@@ -143,10 +141,6 @@ export const insertAttemptWithFallback = async (
     answers: Record<string, any>;
   },
 ) => {
-  const legacy = await supabase.from('attempts').insert(payload).select().single();
-  if (!legacy.error) return legacy.data;
-  if (!isAttemptsTableMissing(legacy.error)) throw legacy.error;
-
   const modernPayloadExtended = {
     quiz_id: payload.quiz_id,
     student_id: payload.student_id,
@@ -160,18 +154,26 @@ export const insertAttemptWithFallback = async (
 
   const modernExtended = await supabase.from('quiz_attempts').insert(modernPayloadExtended).select().single();
   if (!modernExtended.error) return modernExtended.data;
-  if (!isMissingColumnError(modernExtended.error)) throw modernExtended.error;
+  if (!isMissingColumnError(modernExtended.error) && !isAttemptsTableMissing(modernExtended.error)) {
+    throw modernExtended.error;
+  }
 
-  const modernMinimal = await supabase
-    .from('quiz_attempts')
-    .insert({
-      quiz_id: payload.quiz_id,
-      student_id: payload.student_id,
-      score: payload.score,
-    })
-    .select()
-    .single();
+  if (isMissingColumnError(modernExtended.error)) {
+    const modernMinimal = await supabase
+      .from('quiz_attempts')
+      .insert({
+        quiz_id: payload.quiz_id,
+        student_id: payload.student_id,
+        score: payload.score,
+      })
+      .select()
+      .single();
 
-  if (modernMinimal.error) throw modernMinimal.error;
-  return modernMinimal.data;
+    if (!modernMinimal.error) return modernMinimal.data;
+    if (!isAttemptsTableMissing(modernMinimal.error)) throw modernMinimal.error;
+  }
+
+  const legacy = await supabase.from('attempts').insert(payload).select().single();
+  if (legacy.error) throw legacy.error;
+  return legacy.data;
 };

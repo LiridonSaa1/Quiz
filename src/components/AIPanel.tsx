@@ -1,12 +1,18 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Sparkles, X, Send, Loader2, AlertCircle, Paperclip } from 'lucide-react';
+import { Sparkles, X, Send, Loader2, AlertCircle, Paperclip, Image as ImageIcon } from 'lucide-react';
+
+export interface AIPanelAttachment {
+  kind: 'image';
+  file: File;
+}
 
 interface AIPanelProps {
   placeholder?: string;
   label?: string;
   description?: string;
   buttonLabel?: string;
-  onSubmit: (input: string) => Promise<void>;
+  loadingLabel?: string;
+  onSubmit: (input: string, attachments?: AIPanelAttachment[]) => Promise<void>;
   open: boolean;
   onClose: () => void;
   allowTextFileUpload?: boolean;
@@ -14,15 +20,22 @@ interface AIPanelProps {
   fileUploadLabel?: string;
   fileUploadHint?: string;
   maxTextFileChars?: number;
+  allowImageUpload?: boolean;
+  acceptedImageTypes?: string;
+  imageUploadLabel?: string;
+  imageUploadHint?: string;
+  maxImageFiles?: number;
 }
 
 const DEFAULT_TEXT_FILE_TYPES = '.txt,.md,.srt,.vtt,.json,.csv,text/plain,text/vtt,application/json,text/csv';
+const DEFAULT_IMAGE_TYPES = 'image/*';
 
 export function AIPanel({
   placeholder = 'Describe what you want to create...',
   label = 'AI Assistant',
   description,
   buttonLabel = 'Generate',
+  loadingLabel = 'Generating...',
   onSubmit,
   open,
   onClose,
@@ -31,11 +44,17 @@ export function AIPanel({
   fileUploadLabel = 'Attach transcript/text file',
   fileUploadHint = 'Supported: .txt, .md, .srt, .vtt, .json, .csv',
   maxTextFileChars = 20000,
+  allowImageUpload = false,
+  acceptedImageTypes = DEFAULT_IMAGE_TYPES,
+  imageUploadLabel = 'Attach image or screenshot',
+  imageUploadHint = 'Supported: JPG, PNG, WEBP, GIF, BMP, TIFF',
+  maxImageFiles = 4,
 }: AIPanelProps) {
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [attachedFile, setAttachedFile] = useState<string>('');
+  const [attachedImages, setAttachedImages] = useState<File[]>([]);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   useEffect(() => {
@@ -43,6 +62,7 @@ export function AIPanel({
       setInput('');
       setError(null);
       setAttachedFile('');
+      setAttachedImages([]);
       setTimeout(() => textareaRef.current?.focus(), 80);
     }
   }, [open]);
@@ -73,14 +93,33 @@ export function AIPanel({
     }
   };
 
+  const handleImagePick = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const picked = Array.from(e.target.files || []) as File[];
+    e.target.value = '';
+    if (!picked.length || loading) return;
+
+    const validImages = picked.filter((file) => file.type.startsWith('image/'));
+    if (!validImages.length) {
+      setError('Please upload an image file such as JPG or PNG.');
+      return;
+    }
+
+    setAttachedImages((prev) => [...prev, ...validImages].slice(0, Math.max(1, maxImageFiles)));
+    setError(null);
+  };
+
   const handleSubmit = async () => {
-    if (!input.trim() || loading) return;
+    if ((!input.trim() && attachedImages.length === 0) || loading) return;
     setLoading(true);
     setError(null);
     try {
-      await onSubmit(input.trim());
+      await onSubmit(
+        input.trim(),
+        attachedImages.map((file) => ({ kind: 'image' as const, file })),
+      );
       setInput('');
       setAttachedFile('');
+      setAttachedImages([]);
       onClose();
     } catch (e: any) {
       setError(e?.message || 'Something went wrong. Check your AI key/configuration.');
@@ -157,6 +196,54 @@ export function AIPanel({
             </div>
           )}
 
+          {allowImageUpload && (
+            <div className="rounded-xl border border-white/[0.08] bg-white/[0.03] p-3">
+              <div className="flex items-center justify-between gap-3">
+                <label className="flex items-center gap-2 text-xs font-semibold text-slate-200 cursor-pointer">
+                  <ImageIcon className="w-3.5 h-3.5 text-violet-400" />
+                  {imageUploadLabel}
+                  <input
+                    type="file"
+                    accept={acceptedImageTypes}
+                    multiple={maxImageFiles > 1}
+                    className="hidden"
+                    onChange={handleImagePick}
+                    disabled={loading}
+                  />
+                </label>
+                <div className="flex items-center gap-2">
+                  {attachedImages.length > 0 && (
+                    <button
+                      type="button"
+                      onClick={() => setAttachedImages([])}
+                      disabled={loading}
+                      className="text-[11px] font-semibold text-slate-400 hover:text-slate-200 transition-colors"
+                    >
+                      Clear
+                    </button>
+                  )}
+                  <label className="text-[11px] font-semibold text-violet-300 px-2.5 py-1 rounded-lg bg-violet-500/10 border border-violet-500/20 cursor-pointer">
+                    Upload
+                    <input
+                      type="file"
+                      accept={acceptedImageTypes}
+                      multiple={maxImageFiles > 1}
+                      className="hidden"
+                      onChange={handleImagePick}
+                      disabled={loading}
+                    />
+                  </label>
+                </div>
+              </div>
+              <p className="text-[11px] text-slate-500 mt-2">{imageUploadHint}</p>
+              {attachedImages.length > 0 && (
+                <p className="text-[11px] text-emerald-300 mt-1.5">
+                  Attached images: {attachedImages.map((file) => file.name).join(', ')}
+                </p>
+              )}
+            </div>
+          )}
+
           {error && (
             <div className="flex items-start gap-2.5 p-3 bg-red-500/10 border border-red-500/20 rounded-xl">
               <AlertCircle className="w-4 h-4 text-red-400 shrink-0 mt-0.5" />
@@ -176,12 +263,12 @@ export function AIPanel({
               </button>
               <button
                 onClick={handleSubmit}
-                disabled={!input.trim() || loading}
+                disabled={(!input.trim() && attachedImages.length === 0) || loading}
                 className="flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-semibold text-white bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-500 hover:to-indigo-500 transition-all shadow-lg shadow-violet-900/40 disabled:opacity-40 disabled:cursor-not-allowed"
               >
                 {loading ? (
                   <>
-                    <Loader2 className="w-3.5 h-3.5 animate-spin" /> Generating...
+                    <Loader2 className="w-3.5 h-3.5 animate-spin" /> {loadingLabel}
                   </>
                 ) : (
                   <>

@@ -11,11 +11,12 @@ import {
 import { toast } from 'sonner';
 import { Quiz } from '../../types';
 import { cn } from '../../lib/utils';
-import { authFetch, readApiError } from '../../lib/apiUrl';
+import { apiUrl, authFetch, readApiError } from '../../lib/apiUrl';
 import { resolveTeacherIdCandidates } from '../../lib/teacherScope';
 import { fetchTeacherQuizzesFromSupabase, missingQuizzesPublishedColumn } from '../../lib/fetchTeacherQuizzes';
 import { Link, useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence, useMotionValue, useSpring, useTransform } from 'motion/react';
+import { useTeacherPermissions } from '../../lib/teacherPermissions';
 
 function AnimatedCount({ value }: { value: number }) {
   const motionVal = useMotionValue(0);
@@ -62,10 +63,13 @@ export default function QuizManagement() {
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [courseFilter, setCourseFilter] = useState('all');
+  const [classFilter, setClassFilter] = useState('all');
   const [statusFilter, setStatusFilter] = useState('all');
   const [courseOptions, setCourseOptions] = useState<{ id: string; name: string }[]>([]);
+  const [classOptions, setClassOptions] = useState<Array<{ id: string; name: string; course_id: string | null }>>([]);
   const [quizToDelete, setQuizToDelete] = useState<{ id: string; title: string } | null>(null);
   const [deleting, setDeleting] = useState(false);
+  const { can } = useTeacherPermissions();
   const navigate = useNavigate();
 
   const fetchData = async () => {
@@ -74,6 +78,7 @@ export default function QuizManagement() {
     if (!session) return;
     try {
       let courseRows: { id: string; title: string | null }[] | null = null;
+      let classRows: Array<{ id: string; name: string; course_id: string | null }> = [];
       const backendRes = await authFetch(
         `/api/teacher/courses?userId=${encodeURIComponent(session.user.id)}`
       );
@@ -96,6 +101,18 @@ export default function QuizManagement() {
           courseRows = [];
         } else {
           courseRows = coursesData ?? [];
+        }
+      }
+
+      const classesRes = await fetch(apiUrl(`/api/teacher/classes?userId=${encodeURIComponent(session.user.id)}`));
+      if (classesRes.ok) {
+        const classesJson = await classesRes.json();
+        if (classesJson?.success && Array.isArray(classesJson.classes)) {
+          classRows = classesJson.classes.map((c: any) => ({
+            id: String(c.id),
+            name: String(c.name || 'Untitled class'),
+            course_id: c.course_id ? String(c.course_id) : null,
+          }));
         }
       }
 
@@ -125,6 +142,7 @@ export default function QuizManagement() {
         options.push({ id: c.id, name: c.title || 'Untitled' });
       });
       setCourseOptions(options);
+      setClassOptions(classRows.filter((c) => !!c.course_id && options.some((o) => o.id === c.course_id)));
 
       const questionCountMap: Record<string, number> = {};
       const countRes = await authFetch(
@@ -239,10 +257,12 @@ export default function QuizManagement() {
     const matchSearch = q.title.toLowerCase().includes(search.toLowerCase()) ||
       (q.description || '').toLowerCase().includes(search.toLowerCase());
     const matchCourse = courseFilter === 'all' || q.courseId === courseFilter;
+    const selectedClass = classOptions.find((c) => c.id === classFilter);
+    const matchClass = classFilter === 'all' || (selectedClass?.course_id ? q.courseId === selectedClass.course_id : false);
     const matchStatus = statusFilter === 'all'
       ? true
       : statusFilter === 'published' ? q.published : !q.published;
-    return matchSearch && matchCourse && matchStatus;
+    return matchSearch && matchCourse && matchClass && matchStatus;
   });
 
   const totalQuestions = quizzes.reduce((a, q) => a + q.questionCount, 0);
@@ -254,7 +274,7 @@ export default function QuizManagement() {
     { ...STAT_CONFIG[3], value: totalQuestions },
   ];
 
-  const hasActiveFilters = search || courseFilter !== 'all' || statusFilter !== 'all';
+  const hasActiveFilters = search || courseFilter !== 'all' || classFilter !== 'all' || statusFilter !== 'all';
 
   const passLabel = (q: QuizWithCount) => {
     const s = q.settings?.passingScore;
@@ -305,7 +325,7 @@ export default function QuizManagement() {
                   </p>
                 </div>
                 <motion.div whileHover={{ scale: 1.04, y: -2 }} whileTap={{ scale: 0.97 }}>
-                  <Link
+                  {can('actions.teacher.quizzes.create') && <Link
                     to="/teacher/quizzes/new"
                     className="inline-flex items-center gap-2 px-6 py-3 rounded-2xl font-bold text-sm text-white shrink-0 transition-all"
                     style={{
@@ -315,7 +335,7 @@ export default function QuizManagement() {
                   >
                     <Plus className="w-4 h-4" />
                     Create Quiz
-                  </Link>
+                  </Link>}
                 </motion.div>
               </div>
             </div>
@@ -399,12 +419,22 @@ export default function QuizManagement() {
               </div>
               <select
                 value={courseFilter}
-                onChange={e => setCourseFilter(e.target.value)}
+                onChange={e => { setCourseFilter(e.target.value); setClassFilter('all'); }}
                 className="px-4 py-2.5 rounded-full text-sm border border-indigo-100 bg-white/80 focus:outline-none focus:ring-2 focus:ring-violet-400 focus:border-transparent transition-all shadow-sm text-slate-700"
               >
                 <option value="all">All Courses</option>
                 {courseOptions.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
               </select>
+              {classOptions.length > 0 && (
+                <select
+                  value={classFilter}
+                  onChange={e => setClassFilter(e.target.value)}
+                  className="px-4 py-2.5 rounded-full text-sm border border-indigo-100 bg-white/80 focus:outline-none focus:ring-2 focus:ring-violet-400 focus:border-transparent transition-all shadow-sm text-slate-700"
+                >
+                  <option value="all">All Classes</option>
+                  {classOptions.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                </select>
+              )}
               <select
                 value={statusFilter}
                 onChange={e => setStatusFilter(e.target.value)}
@@ -417,7 +447,7 @@ export default function QuizManagement() {
               {hasActiveFilters && (
                 <button
                   type="button"
-                  onClick={() => { setSearch(''); setCourseFilter('all'); setStatusFilter('all'); }}
+                  onClick={() => { setSearch(''); setCourseFilter('all'); setClassFilter('all'); setStatusFilter('all'); }}
                   className="flex items-center gap-1.5 px-3 py-2 rounded-full text-xs font-semibold text-slate-500 hover:text-slate-800 hover:bg-slate-100 transition-all"
                 >
                   <X className="w-3.5 h-3.5" /> Clear
@@ -447,7 +477,7 @@ export default function QuizManagement() {
                     ? 'Try adjusting your search or filters.'
                     : 'Create your first quiz to start assessing students.'}
                 </p>
-                {courseOptions.length > 0 && !hasActiveFilters && (
+                {courseOptions.length > 0 && !hasActiveFilters && can('actions.teacher.quizzes.create') && (
                   <motion.div whileHover={{ scale: 1.04, y: -2 }} whileTap={{ scale: 0.97 }}>
                     <Link
                       to="/teacher/quizzes/new"
@@ -480,6 +510,9 @@ export default function QuizManagement() {
                     onEdit={() => navigate(`/teacher/quizzes/edit/${quiz.id}`)}
                     onDelete={() => requestDelete(quiz)}
                     onTogglePublish={() => void togglePublish(quiz)}
+                    canEdit={can('actions.teacher.quizzes.edit')}
+                    canDelete={can('actions.teacher.quizzes.delete')}
+                    canPublish={can('actions.teacher.quizzes.publish')}
                   />
                 ))}
               </motion.div>
@@ -548,12 +581,18 @@ function QuizLessonStyleCard({
   onEdit,
   onDelete,
   onTogglePublish,
+  canEdit,
+  canDelete,
+  canPublish,
 }: {
   quiz: QuizWithCount;
   passLabel: string;
   onEdit: () => void;
   onDelete: () => void;
   onTogglePublish: () => void;
+  canEdit: boolean;
+  canDelete: boolean;
+  canPublish: boolean;
 }) {
   const published = !!quiz.published;
 
@@ -583,7 +622,7 @@ function QuizLessonStyleCard({
           >
             <FileText className="w-5 h-5 text-indigo-500" />
           </div>
-          <button
+          {canPublish && <button
             type="button"
             onClick={onTogglePublish}
             className={cn(
@@ -595,7 +634,7 @@ function QuizLessonStyleCard({
           >
             <span className={cn('w-1.5 h-1.5 rounded-full', published ? 'bg-emerald-500' : 'bg-amber-500')} />
             {published ? 'Published' : 'Draft'}
-          </button>
+          </button>}
         </div>
 
         <h3 className="text-sm font-bold text-slate-900 line-clamp-2 mb-1 leading-snug">{quiz.title}</h3>
@@ -642,20 +681,20 @@ function QuizLessonStyleCard({
         </div>
 
         <div className="flex items-center gap-2 pt-3 sm:opacity-0 sm:group-hover:opacity-100 opacity-100 transition-all duration-200 sm:translate-y-1 sm:group-hover:translate-y-0">
-          <button
+          {canEdit && <button
             type="button"
             onClick={onEdit}
             className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-xl text-xs font-semibold text-indigo-600 bg-indigo-50 hover:bg-indigo-100 transition-all"
           >
             <Edit2 className="w-3.5 h-3.5" /> Edit
-          </button>
-          <button
+          </button>}
+          {canDelete && <button
             type="button"
             onClick={onDelete}
             className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-xl text-xs font-semibold text-red-500 bg-red-50 hover:bg-red-100 transition-all"
           >
             <Trash2 className="w-3.5 h-3.5" /> Delete
-          </button>
+          </button>}
         </div>
       </div>
     </motion.div>

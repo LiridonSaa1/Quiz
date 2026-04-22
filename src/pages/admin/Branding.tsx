@@ -2,6 +2,7 @@ import React, { useEffect, useState, useRef } from 'react';
 import AdminLayout from '../../components/layout/AdminLayout';
 import { cn } from '../../lib/utils';
 import { toast } from 'sonner';
+import { authFetch } from '../../lib/apiUrl';
 import {
   Palette, Upload, Save, RefreshCw, Eye,
   Type, Image, Monitor, Smartphone, Sun, Moon
@@ -83,7 +84,7 @@ export default function AdminBranding() {
   const handleSave = async () => {
     try {
       setSaving(true);
-      const res = await fetch('/api/admin/config/branding', {
+      const res = await authFetch('/api/admin/config/branding', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -106,7 +107,7 @@ export default function AdminBranding() {
   useEffect(() => {
     (async () => {
       try {
-        const res = await fetch('/api/admin/config/branding');
+        const res = await authFetch('/api/admin/config/branding');
         const json = await res.json();
         if (!res.ok || !json?.success || !json?.value) return;
         const v = json.value as any;

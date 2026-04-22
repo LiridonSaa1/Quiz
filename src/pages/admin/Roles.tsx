@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import AdminLayout from '../../components/layout/AdminLayout';
 import { cn } from '../../lib/utils';
 import { toast } from 'sonner';
+import { authFetch } from '../../lib/apiUrl';
 import {
   ShieldCheck, Users, GraduationCap, Crown,
   Check, X, Save, Info, Lock, Unlock
@@ -22,7 +23,7 @@ interface RolePermissions {
   student: Record<string, boolean>;
 }
 
-const PERMISSIONS: Permission[] = [
+const FEATURE_PERMISSIONS: Permission[] = [
   // Courses
   { id: 'courses.view',    group: 'Courses',     label: 'View Courses',        description: 'Browse and view published courses' },
   { id: 'courses.create',  group: 'Courses',     label: 'Create Courses',      description: 'Create new courses' },
@@ -59,16 +60,131 @@ const PERMISSIONS: Permission[] = [
   { id: 'certs.revoke',    group: 'Certificates',label: 'Revoke Certificates', description: 'Cancel issued certificates' },
 ];
 
+const ADMIN_PAGES: Array<[string, string, string]> = [
+  ['dashboard', 'Dashboard', '/admin'],
+  ['students', 'Students', '/admin/students'],
+  ['teachers', 'Teachers', '/admin/teachers'],
+  ['courses', 'Courses', '/admin/courses'],
+  ['courses_form', 'Course Form', '/admin/courses/new and /admin/courses/:id/edit'],
+  ['modules', 'Modules', '/admin/modules'],
+  ['lessons', 'Lessons', '/admin/lessons'],
+  ['quizzes', 'Quizzes', '/admin/quizzes'],
+  ['classes', 'Classes', '/admin/classes'],
+  ['assignments', 'Assignments', '/admin/assignments'],
+  ['attendance', 'Attendance', '/admin/attendance'],
+  ['certificates', 'Certificates', '/admin/certificates'],
+  ['live_sessions', 'Live Sessions', '/admin/live-sessions'],
+  ['live_session_room', 'Live Session Room', '/admin/live-sessions/:id/room'],
+  ['community', 'Community', '/admin/community'],
+  ['announcements', 'Announcements', '/admin/announcements'],
+  ['analytics', 'Analytics', '/admin/analytics'],
+  ['reports', 'Reports', '/admin/reports'],
+  ['payments', 'Payments', '/admin/payments'],
+  ['invoices', 'Invoices', '/admin/invoices'],
+  ['settings', 'Settings', '/admin/settings'],
+  ['branding', 'Branding', '/admin/branding'],
+  ['domain', 'Domain', '/admin/domain'],
+  ['roles', 'Roles & Permissions', '/admin/roles'],
+  ['profile', 'Profile', '/admin/profile'],
+  ['security', 'Security', '/admin/security'],
+];
+
+const TEACHER_PAGES: Array<[string, string, string]> = [
+  ['dashboard', 'Dashboard', '/teacher'],
+  ['classes', 'Classes', '/teacher/classes'],
+  ['courses', 'Courses', '/teacher/courses'],
+  ['courses_form', 'Course Form', '/teacher/courses/new and /teacher/courses/:id/edit'],
+  ['students', 'Student Management', '/teacher/students'],
+  ['quizzes', 'Quizzes', '/teacher/quizzes'],
+  ['quiz_builder', 'Quiz Builder', '/teacher/quizzes/new and /teacher/quizzes/edit/:quizId'],
+  ['exams', 'Exams', '/teacher/exams'],
+  ['results', 'Results', '/teacher/results'],
+  ['modules', 'Modules', '/teacher/modules'],
+  ['lessons', 'Lessons', '/teacher/lessons'],
+  ['assignments', 'Assignments', '/teacher/assignments'],
+  ['attendance', 'Attendance', '/teacher/attendance'],
+  ['certificates', 'Certificates', '/teacher/certificates'],
+  ['live_sessions', 'Live Sessions', '/teacher/live-sessions'],
+  ['live_session_room', 'Live Session Room', '/teacher/live-sessions/:id/room'],
+  ['community', 'Community', '/teacher/community'],
+  ['announcements', 'Announcements', '/teacher/announcements'],
+  ['progress', 'Progress', '/teacher/progress'],
+  ['profile', 'Profile', '/teacher/profile'],
+];
+
+const STUDENT_PAGES: Array<[string, string, string]> = [
+  ['dashboard', 'Dashboard', '/student'],
+  ['courses', 'Courses', '/student/courses'],
+  ['course_detail', 'Course Detail', '/student/courses/:courseId'],
+  ['continue', 'Continue Learning', '/student/continue'],
+  ['lessons', 'Lessons', '/student/lessons'],
+  ['quizzes', 'Quizzes', '/student/quizzes'],
+  ['quiz_taking', 'Quiz Taking', '/student/quiz/:quizId'],
+  ['assignments', 'Assignments', '/student/assignments'],
+  ['progress', 'Progress', '/student/progress'],
+  ['results', 'Results', '/student/results'],
+  ['result_detail', 'Result Detail', '/student/results/:attemptId'],
+  ['certificates', 'Certificates', '/student/certificates'],
+  ['community', 'Community', '/student/community'],
+  ['live_classes', 'Live Classes', '/student/live-classes'],
+  ['live_sessions', 'Live Sessions', '/student/live-sessions'],
+  ['live_session_join', 'Live Session Join', '/student/live-sessions/:id'],
+  ['exams', 'Exams', '/student/exams'],
+  ['profile', 'Profile', '/student/profile'],
+];
+
+const buildPagePermissions = (
+  group: string,
+  prefix: string,
+  pages: Array<[string, string, string]>,
+): Permission[] =>
+  pages.map(([key, label, route]) => ({
+    id: `${prefix}.${key}`,
+    group,
+    label,
+    description: `Access ${label} page (${route})`,
+  }));
+
+const PAGE_PERMISSIONS: Permission[] = [
+  ...buildPagePermissions('Page Access - Admin', 'pages.admin', ADMIN_PAGES),
+  ...buildPagePermissions('Page Access - Teacher', 'pages.teacher', TEACHER_PAGES),
+  ...buildPagePermissions('Page Access - Student', 'pages.student', STUDENT_PAGES),
+];
+
+const TEACHER_ACTION_PERMISSIONS: Permission[] = [
+  { id: 'actions.teacher.courses.create', group: 'Teacher Actions', label: 'Create Course', description: 'Use create/new buttons in teacher courses' },
+  { id: 'actions.teacher.courses.edit', group: 'Teacher Actions', label: 'Edit Course', description: 'Use edit buttons in teacher courses' },
+  { id: 'actions.teacher.courses.delete', group: 'Teacher Actions', label: 'Delete Course', description: 'Use delete buttons in teacher courses' },
+  { id: 'actions.teacher.courses.publish', group: 'Teacher Actions', label: 'Publish/Draft Course', description: 'Toggle course publish status' },
+  { id: 'actions.teacher.quizzes.create', group: 'Teacher Actions', label: 'Create Quiz', description: 'Use create quiz actions' },
+  { id: 'actions.teacher.quizzes.edit', group: 'Teacher Actions', label: 'Edit Quiz', description: 'Use edit quiz actions' },
+  { id: 'actions.teacher.quizzes.delete', group: 'Teacher Actions', label: 'Delete Quiz', description: 'Use delete quiz actions' },
+  { id: 'actions.teacher.quizzes.publish', group: 'Teacher Actions', label: 'Publish/Unpublish Quiz', description: 'Toggle quiz published state' },
+  { id: 'actions.teacher.modules.manage', group: 'Teacher Actions', label: 'Manage Modules', description: 'Create/edit/delete/activate modules' },
+  { id: 'actions.teacher.lessons.manage', group: 'Teacher Actions', label: 'Manage Lessons', description: 'Create/edit/delete/publish lessons' },
+  { id: 'actions.teacher.live_sessions.manage', group: 'Teacher Actions', label: 'Manage Live Sessions', description: 'Create/edit/delete/start sessions' },
+  { id: 'actions.teacher.profile.edit', group: 'Teacher Actions', label: 'Edit Profile', description: 'Save profile changes in teacher profile page' },
+];
+
+const PERMISSIONS: Permission[] = [...FEATURE_PERMISSIONS, ...PAGE_PERMISSIONS, ...TEACHER_ACTION_PERMISSIONS];
+
+const teacherDefaultPermissionIds = new Set<string>([
+  'courses.view', 'courses.create', 'courses.edit', 'courses.publish',
+  'quizzes.view', 'quizzes.create', 'quizzes.edit', 'quizzes.results',
+  'users.view', 'analytics.view', 'certs.view', 'certs.issue',
+  ...TEACHER_PAGES.map(([key]) => `pages.teacher.${key}`),
+  ...TEACHER_ACTION_PERMISSIONS.map((p) => p.id),
+]);
+
+const studentDefaultPermissionIds = new Set<string>([
+  'courses.view', 'quizzes.view', 'quizzes.take', 'certs.view',
+  ...STUDENT_PAGES.map(([key]) => `pages.student.${key}`),
+]);
+
 const defaultPermissions: RolePermissions = {
   admin: Object.fromEntries(PERMISSIONS.map(p => [p.id, true])),
-  teacher: Object.fromEntries(PERMISSIONS.map(p => [p.id,
-    ['courses.view','courses.create','courses.edit','courses.publish',
-     'quizzes.view','quizzes.create','quizzes.edit','quizzes.results',
-     'users.view','analytics.view','certs.view','certs.issue'].includes(p.id)
-  ])),
-  student: Object.fromEntries(PERMISSIONS.map(p => [p.id,
-    ['courses.view','quizzes.view','quizzes.take','certs.view'].includes(p.id)
-  ])),
+  teacher: Object.fromEntries(PERMISSIONS.map(p => [p.id, teacherDefaultPermissionIds.has(p.id)])),
+  student: Object.fromEntries(PERMISSIONS.map(p => [p.id, studentDefaultPermissionIds.has(p.id)])),
 };
 
 const ROLE_META: Record<Role, { label: string; icon: React.ElementType; color: string; bg: string; desc: string; locked?: boolean }> = {
@@ -113,13 +229,14 @@ export default function AdminRoles() {
   const handleSave = async () => {
     try {
       setSaving(true);
-      const res = await fetch('/api/admin/config/roles', {
+      const res = await authFetch('/api/admin/config/roles', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ value: { perms } }),
       });
       const json = await res.json();
       if (!res.ok || !json?.success) throw new Error(json?.error || 'Failed to save roles');
+      window.dispatchEvent(new CustomEvent('roles-updated'));
       toast.success('Role permissions saved.');
     } catch (e: any) {
       toast.error(e?.message || 'Failed to save role permissions');
@@ -131,7 +248,7 @@ export default function AdminRoles() {
   useEffect(() => {
     (async () => {
       try {
-        const res = await fetch('/api/admin/config/roles');
+        const res = await authFetch('/api/admin/config/roles');
         const json = await res.json();
         if (!res.ok || !json?.success || !json?.value?.perms) return;
         setPerms((prev) => ({

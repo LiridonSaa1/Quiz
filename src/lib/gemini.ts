@@ -1,6 +1,7 @@
 import { GoogleGenAI } from '@google/genai';
 
 const QUIZ_PROMPT_MAX_CHARS = 16000;
+const IMAGE_IMPORT_NOTE_MAX_CHARS = 4000;
 
 const getApiKey = (): string => {
   const processKey = (process.env.GEMINI_API_KEY as string | undefined) || '';
@@ -364,6 +365,333 @@ function toBuilderQuestion(q: QuizJsonQuestion): AIQuestion {
     explanation: '',
     points: 1,
   };
+}
+
+export interface ImportedQuizQuestion {
+  type: 'multiple-choice' | 'true-false' | 'open-text' | 'instruction';
+  text: string;
+  options?: string[];
+  correctAnswer?: string;
+  explanation?: string;
+  points?: number;
+}
+
+interface ParsedStructuredQuestion extends ImportedQuizQuestion {
+  signal: {
+    optionCount: number;
+    hasAnswerLine: boolean;
+  };
+}
+
+function normalizeMultilineText(input: string): string {
+  return input.replace(/\r\n?/g, '\n').replace(/\u0000/g, '').trim();
+}
+
+function normalizeLine(input: string): string {
+  return input.replace(/\u00a0/g, ' ').replace(/[ \t]+/g, ' ').trim();
+}
+
+function stripQuestionNumber(line: string): string {
+  return line.replace(/^\s*(?:question\s*)?\d+[\).:-]?\s*/i, '').trim();
+}
+
+function stripOptionPrefix(line: string): string {
+  return line.replace(/^\s*(?:option|choice)?\s*([A-H]|\d+)[\).:-]\s*/i, '').trim();
+}
+
+function isAnswerLine(line: string): boolean {
+  return /^(?:correct\s*answer|correct|answer|ans)\s*[:\-]/i.test(line);
+}
+
+function extractAnswerValue(line: string): string {
+  const raw = line.replace(/^(?:correct\s*answer|correct|answer|ans)\s*[:\-]\s*/i, '').trim();
+  const withoutQuotes = raw.replace(/^["'`]+|["'`]+$/g, '').trim();
+  const withoutChoiceWord = withoutQuotes.replace(/^(?:option|choice)\s+/i, '').trim();
+  if (/^[A-H]$/i.test(withoutChoiceWord)) return withoutChoiceWord.toUpperCase();
+  if (/^\d+$/.test(withoutChoiceWord)) return withoutChoiceWord;
+  const labeled = withoutChoiceWord.match(/^\(?([A-H]|\d+)\)?[\).:-]\s*(.+)$/i);
+  if (labeled) return labeled[2].trim() || labeled[1].toUpperCase();
+  return withoutChoiceWord;
+}
+
+function hasStructuredSignals(block: string): boolean {
+  const lines = normalizeMultilineText(block)
+    .split('\n')
+    .map(normalizeLine)
+    .filter(Boolean);
+
+  const letterOptions = lines.filter((line) => /^\s*(?:option|choice)?\s*[A-H][\).:-]\s*\S/i.test(line)).length;
+  if (letterOptions >= 2) return true;
+
+  const numericOptions = lines
+    .slice(1)
+    .filter((line) => /^\s*(?:option|choice)?\s*[1-8][\).:-]\s*\S/i.test(line)).length;
+  if (numericOptions >= 2) return true;
+
+  return lines.some(isAnswerLine);
+}
+
+function splitStructuredQuestionBlocks(content: string): string[] {
+  const normalized = normalizeMultilineText(content);
+  if (!normalized) return [];
+
+  const blankLineBlocks = normalized
+    .split(/\n\s*\n+/)
+    .map((block) => block.trim())
+    .filter(Boolean);
+
+  if (blankLineBlocks.length >= 2) return blankLineBlocks;
+
+  const lines = normalized.split('\n');
+  const blocks: string[] = [];
+  let current: string[] = [];
+
+  for (const rawLine of lines) {
+    const line = rawLine.trim();
+    if (!line) continue;
+
+    const startsQuestion = /^(?:question\s*)?\d+[\).:-]\s*\S/i.test(line);
+    if (startsQuestion && current.length && hasStructuredSignals(current.join('\n'))) {
+      blocks.push(current.join('\n').trim());
+      current = [rawLine];
+      continue;
+    }
+
+    current.push(rawLine);
+  }
+
+  if (current.length) blocks.push(current.join('\n').trim());
+
+  return blocks;
+}
+
+function parseStructuredQuestionBlock(block: string): ParsedStructuredQuestion | null {
+  const lines = normalizeMultilineText(block)
+    .split('\n')
+    .map(normalizeLine)
+    .filter(Boolean);
+
+  if (!lines.length) return null;
+
+  const answerIndex = lines.findIndex(isAnswerLine);
+  const letterOptionIndexes = lines.reduce<number[]>((acc, line, index) => {
+    if (/^\s*(?:option|choice)?\s*[A-H][\).:-]\s*\S/i.test(line)) acc.push(index);
+    return acc;
+  }, []);
+  const numericOptionIndexes = lines.reduce<number[]>((acc, line, index) => {
+    if (index > 0 && /^\s*(?:option|choice)?\s*[1-8][\).:-]\s*\S/i.test(line)) acc.push(index);
+    return acc;
+  }, []);
+
+  const optionIndexes =
+    letterOptionIndexes.length >= 2
+      ? letterOptionIndexes
+      : numericOptionIndexes.length >= 2
+        ? numericOptionIndexes
+        : [];
+
+  const optionSet = new Set(optionIndexes);
+  const optionTexts = optionIndexes.map((index) => stripOptionPrefix(lines[index])).filter(Boolean);
+  const textLines = lines
+    .filter((_, index) => !optionSet.has(index) && index !== answerIndex)
+    .map((line, index) => (index === 0 ? stripQuestionNumber(line) : line))
+    .filter(Boolean);
+
+  const text = textLines.join('\n').trim();
+  const correctAnswer = answerIndex >= 0 ? extractAnswerValue(lines[answerIndex]) : undefined;
+
+  if (!text && optionTexts.length === 0) return null;
+
+  const isTrueFalse =
+    optionTexts.length === 2 &&
+    optionTexts.every((option) => /^(true|false)$/i.test(option));
+
+  return {
+    type: optionTexts.length >= 2 ? (isTrueFalse ? 'true-false' : 'multiple-choice') : 'open-text',
+    text,
+    options: optionTexts.length ? optionTexts : undefined,
+    correctAnswer,
+    points: optionTexts.length === 0 ? 1 : undefined,
+    signal: {
+      optionCount: optionTexts.length,
+      hasAnswerLine: answerIndex >= 0,
+    },
+  };
+}
+
+export function importQuizQuestionsFromText(content: string): ImportedQuizQuestion[] {
+  const blocks = splitStructuredQuestionBlocks(content);
+  if (!blocks.length) return [];
+
+  const parsed = blocks
+    .map(parseStructuredQuestionBlock)
+    .filter((item): item is ParsedStructuredQuestion => Boolean(item));
+
+  const strongMatches = parsed.filter((item) => item.signal.optionCount >= 2 || item.signal.hasAnswerLine);
+  if (!strongMatches.length) return [];
+
+  return strongMatches.map(({ signal, ...question }) => question);
+}
+
+function normalizeImportedQuestionType(rawType: unknown, options: string[]): ImportedQuizQuestion['type'] {
+  const type = String(rawType || '').trim().toLowerCase();
+  if (type === 'multiple-choice' || type === 'multiple choice' || type === 'mcq') return 'multiple-choice';
+  if (type === 'true-false' || type === 'true/false' || type === 'boolean') return 'true-false';
+  if (type === 'instruction' || type === 'text' || type === 'passage') return 'instruction';
+  if (type === 'open-text' || type === 'open text' || type === 'short-answer' || type === 'short answer') return 'open-text';
+  if (options.length === 2 && options.every((option) => /^(true|false)$/i.test(option))) return 'true-false';
+  if (options.length >= 2) return 'multiple-choice';
+  return 'open-text';
+}
+
+function normalizeImportedQuestion(raw: any): ImportedQuizQuestion | null {
+  const rawOptions = Array.isArray(raw?.options)
+    ? raw.options
+    : Array.isArray(raw?.choices)
+      ? raw.choices
+      : [];
+
+  const options = uniqueStrings(
+    rawOptions.map((option) => {
+      if (typeof option === 'string') return option;
+      if (option && typeof option === 'object' && 'text' in (option as Record<string, unknown>)) {
+        return String((option as { text?: unknown }).text ?? '');
+      }
+      return '';
+    }),
+  );
+
+  const type = normalizeImportedQuestionType(raw?.type, options);
+  const text = String(raw?.text ?? raw?.question ?? raw?.prompt ?? raw?.instruction ?? '').trim();
+  const explanation = String(raw?.explanation ?? '').trim();
+  const correctAnswer = String(raw?.correct_answer ?? raw?.correctAnswer ?? raw?.answer ?? '').trim();
+  const points = Number(raw?.points);
+
+  if (!text) return null;
+
+  if (type === 'instruction') {
+    return {
+      type,
+      text,
+      explanation,
+      points: 0,
+    };
+  }
+
+  if (type === 'true-false') {
+    return {
+      type,
+      text,
+      options: ['True', 'False'],
+      correctAnswer,
+      explanation,
+      points: Number.isFinite(points) ? Math.max(1, Math.round(points)) : 1,
+    };
+  }
+
+  if (type === 'multiple-choice') {
+    const finalOptions = options.length >= 2 ? options : [];
+    if (finalOptions.length < 2) return null;
+    return {
+      type,
+      text,
+      options: finalOptions,
+      correctAnswer,
+      explanation,
+      points: Number.isFinite(points) ? Math.max(1, Math.round(points)) : 1,
+    };
+  }
+
+  return {
+    type: 'open-text',
+    text,
+    correctAnswer,
+    explanation,
+    points: Number.isFinite(points) ? Math.max(1, Math.round(points)) : 1,
+  };
+}
+
+function normalizeImportedQuestionArray(raw: unknown): ImportedQuizQuestion[] {
+  const rawArray = Array.isArray(raw)
+    ? raw
+    : raw && typeof raw === 'object' && Array.isArray((raw as { questions?: unknown[] }).questions)
+      ? (raw as { questions: unknown[] }).questions
+      : raw && typeof raw === 'object'
+        ? [raw]
+        : [];
+
+  const out: ImportedQuizQuestion[] = [];
+  const used = new Set<string>();
+
+  for (const item of rawArray) {
+    const normalized = normalizeImportedQuestion(item);
+    if (!normalized) continue;
+    const key = `${normalized.type}::${normalized.text.toLowerCase()}`;
+    if (used.has(key)) continue;
+    used.add(key);
+    out.push(normalized);
+  }
+
+  return out;
+}
+
+function toImportedQuestionFromAIQuestion(question: AIQuestion): ImportedQuizQuestion {
+  const optionTexts = Array.isArray(question.options)
+    ? question.options.map((option) => String(option?.text || '').trim()).filter(Boolean)
+    : [];
+
+  const correctText =
+    question.options.find((option) => option.id === question.correctAnswer)?.text
+      || optionTexts[0]
+      || '';
+
+  return {
+    type: 'multiple-choice',
+    text: question.text,
+    options: optionTexts,
+    correctAnswer: correctText,
+    explanation: question.explanation,
+    points: question.points,
+  };
+}
+
+export async function importQuizQuestionsFromImages(files: File[], teacherNote = ''): Promise<ImportedQuizQuestion[]> {
+  if (!files.length) throw new Error('Please upload at least one image.');
+
+  const { default: Tesseract } = await import('tesseract.js');
+
+  const extractedChunks: string[] = [];
+  for (const file of files) {
+    let text = '';
+    try {
+      const result = await Tesseract.recognize(file, 'eng');
+      text = normalizeMultilineText(result?.data?.text || '');
+    } catch {
+      throw new Error(`Could not read "${file.name}". Try a clearer screenshot or crop the page first.`);
+    }
+    if (text) {
+      extractedChunks.push(text);
+    }
+  }
+
+  const extractedText = extractedChunks.join('\n\n');
+  if (!extractedText) {
+    throw new Error('Could not read text from the uploaded image. Try a clearer screenshot.');
+  }
+
+  const importedFromText = importQuizQuestionsFromText(extractedText);
+  if (importedFromText.length) {
+    return importedFromText;
+  }
+
+  const note = collapseWhitespace(teacherNote).slice(0, IMAGE_IMPORT_NOTE_MAX_CHARS);
+  const sourceText = note ? `${note}\n\n${extractedText}` : extractedText;
+  const generated = await generateQuizQuestions(sourceText);
+  if (!generated.length) {
+    throw new Error('Text was detected, but no questions could be created from the image.');
+  }
+
+  return generated.map(toImportedQuestionFromAIQuestion);
 }
 
 /* Course fill */

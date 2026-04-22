@@ -14,7 +14,7 @@ import { formatDistanceToNow } from 'date-fns';
 import {
   MessageSquare, Plus, Search, Trash2, Pencil, X,
   ThumbsUp, MessageCircle, Pin, Archive,
-  HelpCircle, BookMarked, Sparkles, Globe,
+  HelpCircle, BookMarked, Sparkles, Globe, School,
 } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { supabase } from '../../supabase';
@@ -28,12 +28,20 @@ interface Post {
   title: string;
   content: string | null;
   author_id: string | null;
+  class_id?: string | null;
   category: PostCategory;
   status: PostStatus;
   likes_count: number;
   replies_count: number;
   created_at: string;
   author?: { id: string; display_name: string; email: string } | null;
+  class_target?: { id: string; name: string } | null;
+}
+
+interface ClassOption {
+  id: string;
+  name: string;
+  student_ids?: string[];
 }
 
 const CATEGORY_CFG: Record<PostCategory, { label: string; bg: string; text: string; icon: React.ElementType; iconBg: string; ring: string; grad: string }> = {
@@ -67,16 +75,18 @@ const avatarColor = (s: string) => {
 };
 
 const emptyForm = {
-  title: '', content: '', author_id: '', category: 'general' as PostCategory, status: 'active' as PostStatus,
+  title: '', content: '', author_id: '', class_id: '', category: 'general' as PostCategory, status: 'active' as PostStatus,
 };
 
 export default function TeacherCommunity() {
   const [posts, setPosts] = useState<Post[]>([]);
   const [members, setMembers] = useState<{ id: string; displayName: string; email: string }[]>([]);
+  const [classes, setClasses] = useState<ClassOption[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [categoryFilter, setCategoryFilter] = useState('all');
   const [statusFilter, setStatusFilter] = useState('all');
+  const [classFilter, setClassFilter] = useState('all');
   const [showModal, setShowModal] = useState(false);
   const [editing, setEditing] = useState<Post | null>(null);
   const [form, setForm] = useState(emptyForm);
@@ -85,7 +95,7 @@ export default function TeacherCommunity() {
 
   const set = (k: string, v: any) => setForm(p => ({ ...p, [k]: v }));
 
-  useEffect(() => { fetchAll(); fetchMembers(); }, []);
+  useEffect(() => { fetchAll(); fetchMembers(); fetchClasses(); }, []);
 
   const fetchAll = async () => {
     setLoading(true);
@@ -130,10 +140,41 @@ export default function TeacherCommunity() {
     }
   };
 
+  const fetchClasses = async () => {
+    try {
+      const res = await authFetch('/api/teacher/classes');
+      if (!res.ok) {
+        setClasses([]);
+        return;
+      }
+      const json = await res.json().catch(() => null);
+      if (json?.success && Array.isArray(json.classes)) {
+        setClasses(
+          json.classes.map((row: any) => ({
+            id: String(row?.id || ''),
+            name: String(row?.name || 'Unnamed class'),
+            student_ids: Array.isArray(row?.student_ids) ? row.student_ids.map((sid: unknown) => String(sid)) : [],
+          })).filter((row: ClassOption) => row.id),
+        );
+      } else {
+        setClasses([]);
+      }
+    } catch {
+      setClasses([]);
+    }
+  };
+
   const openCreate = () => { setEditing(null); setForm(emptyForm); setShowModal(true); };
   const openEdit = (p: Post) => {
     setEditing(p);
-    setForm({ title: p.title, content: p.content || '', author_id: p.author_id || '', category: p.category, status: p.status });
+    setForm({
+      title: p.title,
+      content: p.content || '',
+      author_id: p.author_id || '',
+      class_id: p.class_id || '',
+      category: p.category,
+      status: p.status,
+    });
     setShowModal(true);
   };
 
@@ -141,7 +182,12 @@ export default function TeacherCommunity() {
     if (!form.title.trim()) { toast.error('Title is required'); return; }
     setSaving(true);
     try {
-      const payload = { ...form, author_id: form.author_id || null, content: form.content || null };
+      const payload = {
+        ...form,
+        author_id: form.author_id || null,
+        class_id: form.class_id || null,
+        content: form.content || null,
+      };
       const url = editing ? `/api/admin/community/${editing.id}` : '/api/admin/community';
       const method = editing ? 'PATCH' : 'POST';
       const res = await fetch(url, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
@@ -172,7 +218,8 @@ export default function TeacherCommunity() {
     const matchQ = p.title.toLowerCase().includes(q) || (p.author?.display_name || '').toLowerCase().includes(q);
     const matchC = categoryFilter === 'all' || p.category === categoryFilter;
     const matchS = statusFilter === 'all' || p.status === statusFilter;
-    return matchQ && matchC && matchS;
+    const matchClass = classFilter === 'all' || (p.class_id || '') === classFilter;
+    return matchQ && matchC && matchS && matchClass;
   });
 
   const statItems = (Object.keys(CATEGORY_CFG) as PostCategory[]).map((k) => {
@@ -230,6 +277,12 @@ export default function TeacherCommunity() {
               <option value="all">All Status</option>
               {Object.entries(STATUS_CFG).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
             </select>
+            {classes.length > 0 && (
+              <select value={classFilter} onChange={e => setClassFilter(e.target.value)} className={ADMIN_LIST_SELECT}>
+                <option value="all">All Classes</option>
+                {classes.map(cls => <option key={cls.id} value={cls.id}>{cls.name}</option>)}
+              </select>
+            )}
           </AdminListFilterBar>
         }
       >
@@ -270,6 +323,11 @@ export default function TeacherCommunity() {
                             <span className={cn('inline-flex items-center gap-1 text-xs font-medium', statCfg.color)}>
                               <StatIcon className="w-3 h-3" />{statCfg.label}
                             </span>
+                            {post.class_target?.name && (
+                              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold bg-emerald-50 text-emerald-700">
+                                <School className="w-3 h-3" />{post.class_target.name}
+                              </span>
+                            )}
                           </div>
                           <div className="flex items-center gap-1.5 shrink-0">
                             <button onClick={() => openEdit(post)} className="p-1.5 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-all">
@@ -325,6 +383,19 @@ export default function TeacherCommunity() {
                   className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 resize-none leading-relaxed"
                   placeholder="Share more details, questions, or resources..." />
               </div>
+              {classes.length > 0 && (
+                <div>
+                  <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">Visible To Class</label>
+                  <select value={form.class_id} onChange={e => set('class_id', e.target.value)}
+                    className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500">
+                    <option value="">All my students</option>
+                    {classes.map(cls => <option key={cls.id} value={cls.id}>{cls.name}</option>)}
+                  </select>
+                  <p className="text-[11px] text-slate-400 mt-1.5">
+                    If you choose a class, only students enrolled in that class will see this post.
+                  </p>
+                </div>
+              )}
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">Category</label>

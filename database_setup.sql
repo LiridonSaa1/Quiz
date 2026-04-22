@@ -558,6 +558,7 @@ CREATE TABLE IF NOT EXISTS community_posts (
   title         TEXT NOT NULL,
   content       TEXT,
   author_id     UUID REFERENCES profiles(id) ON DELETE SET NULL,
+  class_id      UUID REFERENCES classes(id) ON DELETE SET NULL,
   category      TEXT NOT NULL DEFAULT 'general' CHECK (category IN ('general','q_and_a','resources','showcase')),
   status        TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active','pinned','archived')),
   likes_count   INTEGER NOT NULL DEFAULT 0,
@@ -565,6 +566,7 @@ CREATE TABLE IF NOT EXISTS community_posts (
   created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+CREATE INDEX IF NOT EXISTS idx_community_posts_class_id ON community_posts(class_id);
 ALTER TABLE community_posts ENABLE ROW LEVEL SECURITY;
 CREATE POLICY "community_read"  ON community_posts FOR SELECT USING (auth.role() = 'authenticated');
 CREATE POLICY "community_write" ON community_posts FOR ALL USING (auth.role() = 'authenticated');

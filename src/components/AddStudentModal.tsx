@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   X, User, Mail, Phone, Calendar, Globe, BarChart3,
   Eye, EyeOff, Copy, RotateCcw, ChevronRight, ChevronLeft,
@@ -7,6 +7,7 @@ import {
 import { toast } from 'sonner';
 import { supabase } from '../supabase';
 import { cn } from '../lib/utils';
+import { authFetch } from '../lib/apiUrl';
 
 interface FormData {
   name: string;
@@ -17,6 +18,7 @@ interface FormData {
   gender: string;
   preferredLanguage: string;
   currentLevel: string;
+  classId: string;
 }
 
 interface Props {
@@ -49,7 +51,9 @@ export default function AddStudentModal({ onClose, onSuccess, accentColor = 'vio
     gender: '',
     preferredLanguage: '',
     currentLevel: '',
+    classId: '',
   });
+  const [classes, setClasses] = useState<Array<{ id: string; name: string }>>([]);
 
   const accent = {
     ring: accentColor === 'violet' ? 'focus:ring-violet-500' : 'focus:ring-emerald-500',
@@ -67,8 +71,27 @@ export default function AddStudentModal({ onClose, onSuccess, accentColor = 'vio
 
   const canGoNext = () => {
     if (step === 0) return form.name.trim() !== '' && form.email.trim() !== '' && form.password.trim() !== '';
+    if (step === 2 && classes.length > 0) return form.classId.trim() !== '';
     return true;
   };
+
+  useEffect(() => {
+    const loadClasses = async () => {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) return;
+      const res = await authFetch('/api/teacher/classes');
+      if (!res.ok) return;
+      const json = await res.json().catch(() => ({}));
+      if (!json?.success || !Array.isArray(json.classes)) return;
+      setClasses(
+        json.classes.map((c: any) => ({
+          id: String(c.id),
+          name: String(c.name || 'Untitled class'),
+        }))
+      );
+    };
+    void loadClasses();
+  }, []);
 
   const handleSubmit = async () => {
     if (!form.name || !form.email || !form.password) {
@@ -94,6 +117,7 @@ export default function AddStudentModal({ onClose, onSuccess, accentColor = 'vio
           gender: form.gender || undefined,
           preferredLanguage: form.preferredLanguage || undefined,
           currentLevel: form.currentLevel || undefined,
+          classId: form.classId || undefined,
         }),
       });
       const json = await res.json();
@@ -289,6 +313,19 @@ export default function AddStudentModal({ onClose, onSuccess, accentColor = 'vio
                   </select>
                 </div>
               </div>
+              <div className="col-span-2">
+                <label className={labelCls}>
+                  Class {classes.length > 0 ? <span className="text-red-400 normal-case font-normal">*</span> : <span className="text-slate-300 normal-case font-normal">(optional)</span>}
+                </label>
+                <select
+                  value={form.classId}
+                  onChange={e => set('classId', e.target.value)}
+                  className={inputCls}
+                >
+                  <option value="">{classes.length > 0 ? 'Select class' : 'No class available'}</option>
+                  {classes.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                </select>
+              </div>
 
               {/* Summary preview */}
               <div className="col-span-2 mt-2 bg-slate-50 rounded-xl p-4 border border-slate-100">
@@ -306,6 +343,7 @@ export default function AddStudentModal({ onClose, onSuccess, accentColor = 'vio
                   {form.gender && <div className="flex gap-2"><span className="text-slate-400 w-28 shrink-0">Gender</span><span className="font-semibold text-slate-800">{form.gender}</span></div>}
                   {form.preferredLanguage && <div className="flex gap-2"><span className="text-slate-400 w-28 shrink-0">Language</span><span className="font-semibold text-slate-800">{form.preferredLanguage}</span></div>}
                   {form.currentLevel && <div className="flex gap-2"><span className="text-slate-400 w-28 shrink-0">Level</span><span className="font-semibold text-slate-800">{form.currentLevel}</span></div>}
+                  {form.classId && <div className="flex gap-2"><span className="text-slate-400 w-28 shrink-0">Class</span><span className="font-semibold text-slate-800">{classes.find(c => c.id === form.classId)?.name || form.classId}</span></div>}
                 </div>
               </div>
             </div>

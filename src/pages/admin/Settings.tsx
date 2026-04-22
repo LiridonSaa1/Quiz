@@ -2,6 +2,8 @@ import React, { useEffect, useState } from 'react';
 import AdminLayout from '../../components/layout/AdminLayout';
 import { cn } from '../../lib/utils';
 import { toast } from 'sonner';
+import { authFetch } from '../../lib/apiUrl';
+import { defaultFeatureFlags, FeatureFlags } from '../../lib/platformFeatures';
 import {
   Settings, Globe, Bell, Shield, Database, Mail,
   Clock, Languages, Save, ToggleLeft, ToggleRight,
@@ -48,6 +50,11 @@ export default function AdminSettings() {
   const [registrationOpen, setRegistrationOpen] = useState(true);
   const [requireEmailVerify, setRequireEmailVerify] = useState(true);
   const [twoFactor, setTwoFactor] = useState(false);
+  const [strongPasswords, setStrongPasswords] = useState(true);
+  const [autoLogout, setAutoLogout] = useState(true);
+  const [sessionTimeoutMinutes, setSessionTimeoutMinutes] = useState(30);
+  const [maxLoginAttempts, setMaxLoginAttempts] = useState(5);
+  const [features, setFeatures] = useState<FeatureFlags>(defaultFeatureFlags);
 
   const [general, setGeneral] = useState<GeneralForm>({
     school_name: 'QuizMaster Academy',
@@ -83,7 +90,7 @@ export default function AdminSettings() {
   const handleSave = async () => {
     try {
       setSaving(true);
-      const res = await fetch('/api/admin/config/settings', {
+      const res = await authFetch('/api/admin/config/settings', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -91,13 +98,15 @@ export default function AdminSettings() {
             general,
             notifications: notifs,
             email: emailSettings,
-            security: { twoFactor, requireEmailVerify, registrationOpen },
+            security: { twoFactor, requireEmailVerify, registrationOpen, strongPasswords, autoLogout, sessionTimeoutMinutes, maxLoginAttempts },
             advanced: { maintenance },
+            features,
           },
         }),
       });
       const json = await res.json();
       if (!res.ok || !json?.success) throw new Error(json?.error || 'Failed to save settings');
+      window.dispatchEvent(new CustomEvent('settings-updated'));
       toast.success('Settings saved successfully.');
     } catch (e: any) {
       toast.error(e?.message || 'Failed to save settings');
@@ -109,7 +118,7 @@ export default function AdminSettings() {
   useEffect(() => {
     (async () => {
       try {
-        const res = await fetch('/api/admin/config/settings');
+        const res = await authFetch('/api/admin/config/settings');
         const json = await res.json();
         if (!res.ok || !json?.success || !json?.value) return;
         const v = json.value as any;
@@ -120,8 +129,20 @@ export default function AdminSettings() {
           if (typeof v.security.twoFactor === 'boolean') setTwoFactor(v.security.twoFactor);
           if (typeof v.security.requireEmailVerify === 'boolean') setRequireEmailVerify(v.security.requireEmailVerify);
           if (typeof v.security.registrationOpen === 'boolean') setRegistrationOpen(v.security.registrationOpen);
+          if (typeof v.security.strongPasswords === 'boolean') setStrongPasswords(v.security.strongPasswords);
+          if (typeof v.security.autoLogout === 'boolean') setAutoLogout(v.security.autoLogout);
+          if (Number.isFinite(Number(v.security.sessionTimeoutMinutes))) setSessionTimeoutMinutes(Number(v.security.sessionTimeoutMinutes));
+          if (Number.isFinite(Number(v.security.maxLoginAttempts))) setMaxLoginAttempts(Number(v.security.maxLoginAttempts));
         }
         if (v.advanced && typeof v.advanced.maintenance === 'boolean') setMaintenance(v.advanced.maintenance);
+        if (v.features) {
+          setFeatures({
+            communityEnabled: typeof v.features.communityEnabled === 'boolean' ? v.features.communityEnabled : true,
+            liveSessionsEnabled: typeof v.features.liveSessionsEnabled === 'boolean' ? v.features.liveSessionsEnabled : true,
+            announcementsEnabled: typeof v.features.announcementsEnabled === 'boolean' ? v.features.announcementsEnabled : true,
+            paymentsEnabled: typeof v.features.paymentsEnabled === 'boolean' ? v.features.paymentsEnabled : true,
+          });
+        }
       } catch {
         // keep local defaults when config table is missing or unavailable
       }
@@ -298,23 +319,23 @@ export default function AdminSettings() {
                   <Toggle
                     label="Require Strong Passwords"
                     description="Enforce minimum 8 characters, uppercase, number, and symbol"
-                    value={true}
-                    onChange={() => {}}
+                    value={strongPasswords}
+                    onChange={setStrongPasswords}
                   />
                   <Toggle
                     label="Auto Logout on Inactivity"
                     description="Automatically log out users after 30 minutes of inactivity"
-                    value={true}
-                    onChange={() => {}}
+                    value={autoLogout}
+                    onChange={setAutoLogout}
                   />
                 </Section>
                 <Section title="Session Settings" subtitle="Control active session behaviour">
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <Field label="Session Timeout (minutes)">
-                      <input type="number" defaultValue={30} className={inputCls} />
+                      <input type="number" value={sessionTimeoutMinutes} onChange={e => setSessionTimeoutMinutes(Number(e.target.value) || 30)} className={inputCls} />
                     </Field>
                     <Field label="Max Login Attempts">
-                      <input type="number" defaultValue={5} className={inputCls} />
+                      <input type="number" value={maxLoginAttempts} onChange={e => setMaxLoginAttempts(Number(e.target.value) || 5)} className={inputCls} />
                     </Field>
                   </div>
                 </Section>
@@ -339,6 +360,32 @@ export default function AdminSettings() {
                       </div>
                     )}
                   </div>
+                </Section>
+                <Section title="Feature Toggles" subtitle="Enable or disable important modules across the platform">
+                  <Toggle
+                    label="Community"
+                    description="Show community pages for students, teachers, and admins"
+                    value={features.communityEnabled}
+                    onChange={v => setFeatures(p => ({ ...p, communityEnabled: v }))}
+                  />
+                  <Toggle
+                    label="Live Sessions"
+                    description="Enable live sessions and live classes navigation and routes"
+                    value={features.liveSessionsEnabled}
+                    onChange={v => setFeatures(p => ({ ...p, liveSessionsEnabled: v }))}
+                  />
+                  <Toggle
+                    label="Announcements"
+                    description="Enable announcement pages for admins and teachers"
+                    value={features.announcementsEnabled}
+                    onChange={v => setFeatures(p => ({ ...p, announcementsEnabled: v }))}
+                  />
+                  <Toggle
+                    label="Payments & Invoices"
+                    description="Enable business pages and payment/invoice management"
+                    value={features.paymentsEnabled}
+                    onChange={v => setFeatures(p => ({ ...p, paymentsEnabled: v }))}
+                  />
                 </Section>
                 <Section title="Data & Storage" subtitle="Manage platform data settings">
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">

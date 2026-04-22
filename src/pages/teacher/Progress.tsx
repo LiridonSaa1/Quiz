@@ -12,7 +12,7 @@ import {
 import { BarChart3, Search, Users, BookOpen, FileText, TrendingUp, CheckCircle2 } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { fetchAttemptRowsByQuizIds, normalizeAttempts } from '../../lib/quizAttempts';
-import { resolveTeacherIdCandidates } from '../../lib/teacherScope';
+import { authFetch } from '../../lib/apiUrl';
 
 interface StudentProgressRow {
   studentId: string;
@@ -62,18 +62,18 @@ export default function TeacherProgress() {
         const { data: { session } } = await supabase.auth.getSession();
         if (!session?.user?.id) return;
         const teacherId = session.user.id;
-        const scopedIds = await resolveTeacherIdCandidates(teacherId);
 
-        const [studentsRes, coursesRes] = await Promise.all([
-          supabase.from('profiles').select('id,display_name,email').eq('role', 'student').eq('teacher_id', teacherId),
-          supabase.from('courses').select('id').in('teacher_id', scopedIds),
+        const [studentsHttp, coursesHttp] = await Promise.all([
+          authFetch(`/api/teacher/students?userId=${encodeURIComponent(teacherId)}`),
+          authFetch(`/api/teacher/courses?userId=${encodeURIComponent(teacherId)}`),
         ]);
+        const studentsJson = studentsHttp.ok ? await studentsHttp.json() : { students: [] };
+        const coursesJson = coursesHttp.ok ? await coursesHttp.json() : { courses: [] };
+        const studentRows = Array.isArray(studentsJson?.students) ? studentsJson.students : [];
+        const courseRows = Array.isArray(coursesJson?.courses) ? coursesJson.courses : [];
 
-        if (studentsRes.error) throw studentsRes.error;
-        if (coursesRes.error) throw coursesRes.error;
-
-        setCoursesCount((coursesRes.data || []).length);
-        const teacherCourseIds = (coursesRes.data || []).map((course: { id: string }) => course.id);
+        setCoursesCount(courseRows.length);
+        const teacherCourseIds = courseRows.map((course: { id: string }) => String(course.id)).filter(Boolean);
 
         /** Scope quizzes by teacher's courses only — avoids `quizzes.teacher_id` when that column is missing. */
         let quizRows: Record<string, unknown>[] = [];
@@ -97,11 +97,20 @@ export default function TeacherProgress() {
         }, {});
 
         const attemptsRows = await fetchAttemptRowsByQuizIds(supabase, quizIds);
-        const attempts = normalizeAttempts(attemptsRows, passingScoreByQuiz);
+        const allowedStudentIds = new Set(
+          studentRows.map((s: { id?: string }) => String(s?.id || '')).filter(Boolean),
+        );
+        const attempts = normalizeAttempts(attemptsRows, passingScoreByQuiz)
+          .filter((a) => allowedStudentIds.size === 0 || allowedStudentIds.has(a.student_id));
 
         const studentMap: Record<string, { id: string; display_name: string; email: string }> = {};
-        (studentsRes.data || []).forEach((student: { id: string; display_name: string; email: string }) => {
-          studentMap[student.id] = student;
+        studentRows.forEach((student: { id: string; display_name: string; email: string }) => {
+          if (!student?.id) return;
+          studentMap[String(student.id)] = {
+            id: String(student.id),
+            display_name: String(student.display_name || 'Unknown Student'),
+            email: String(student.email || ''),
+          };
         });
 
         const missingStudentIds = [...new Set(attempts.map((a) => a.student_id).filter((sid) => sid && !studentMap[sid]))];

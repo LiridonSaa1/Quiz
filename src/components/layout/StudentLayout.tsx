@@ -4,6 +4,7 @@ import { supabase } from '../../supabase';
 import { authFetch } from '../../lib/apiUrl';
 import { cn } from '../../lib/utils';
 import NotificationCenter from '../NotificationCenter';
+import { defaultFeatureFlags, extractFeatureFlags, FeatureFlags } from '../../lib/platformFeatures';
 import { 
   LayoutDashboard, 
   BookOpen, 
@@ -71,11 +72,37 @@ interface NavItemDef { icon: React.ElementType; label: string; path: string; }
 export default function StudentLayout({ children }: { children: React.ReactNode }) {
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [liveSessionCount, setLiveSessionCount] = useState(0);
+  const [features, setFeatures] = useState<FeatureFlags>(defaultFeatureFlags);
   const location = useLocation();
   const navigate = useNavigate();
 
+  useEffect(() => {
+    let mounted = true;
+    const loadSettings = async () => {
+      try {
+        const res = await authFetch('/api/admin/config/settings');
+        const json = await res.json();
+        if (!mounted || !res.ok || !json?.success) return;
+        setFeatures(extractFeatureFlags(json.value));
+      } catch {
+        // keep defaults
+      }
+    };
+    loadSettings();
+    const onSettingsUpdated = () => loadSettings();
+    window.addEventListener('settings-updated', onSettingsUpdated);
+    return () => {
+      mounted = false;
+      window.removeEventListener('settings-updated', onSettingsUpdated);
+    };
+  }, [features.liveSessionsEnabled]);
+
   // Poll for live sessions to display badge
   useEffect(() => {
+    if (!features.liveSessionsEnabled) {
+      setLiveSessionCount(0);
+      return;
+    }
     const check = async () => {
       const { data: { session: authSession } } = await supabase.auth.getSession();
       if (!authSession) return;
@@ -94,6 +121,17 @@ export default function StudentLayout({ children }: { children: React.ReactNode 
     await supabase.auth.signOut();
     navigate('/login');
   };
+
+  const visibleSections = studentNavSections
+    .map((section) => ({
+      ...section,
+      items: section.items.filter((item) => {
+        if (!features.communityEnabled && item.path === '/student/community') return false;
+        if (!features.liveSessionsEnabled && (item.path === '/student/live-sessions' || item.path === '/student/live-classes')) return false;
+        return true;
+      }),
+    }))
+    .filter((section) => section.items.length > 0);
 
   const NavItem = ({ item, onClick }: { item: NavItemDef; onClick?: () => void }) => {
     const isLiveSessions = item.path === '/student/live-sessions';
@@ -134,7 +172,7 @@ export default function StudentLayout({ children }: { children: React.ReactNode 
         </div>
       </div>
       <nav className="flex-1 px-3 py-4 space-y-5 overflow-y-auto">
-        {studentNavSections.map((section) => (
+        {visibleSections.map((section) => (
           <div key={section.title} className="space-y-0.5">
             <h3 className="px-3 text-[9px] font-bold text-slate-500 uppercase tracking-widest mb-1.5">
               {section.title}
@@ -168,7 +206,7 @@ export default function StudentLayout({ children }: { children: React.ReactNode 
       <header className="hidden lg:flex fixed top-0 right-0 left-60 h-14 bg-white border-b border-slate-200 items-center justify-between px-6 z-20">
         <div className="flex items-center gap-2">
           <span className="text-sm font-semibold text-slate-500">
-            {studentNavSections.flatMap(s => s.items).find(i => i.path === location.pathname)?.label || 'Dashboard'}
+            {visibleSections.flatMap(s => s.items).find(i => i.path === location.pathname)?.label || 'Dashboard'}
           </span>
         </div>
         <NotificationCenter />

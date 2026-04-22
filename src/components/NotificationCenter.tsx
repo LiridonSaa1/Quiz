@@ -8,6 +8,7 @@ import {
 } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { formatDistanceToNow } from 'date-fns';
+import { useNavigate } from 'react-router-dom';
 
 const TYPE_CFG = {
   info:    { icon: Info,          bg: 'bg-blue-50',    text: 'text-blue-600',   ring: 'ring-blue-200',   dot: 'bg-blue-500',    pill: 'bg-blue-50 text-blue-700 border-blue-200'    },
@@ -116,15 +117,27 @@ function NotifItem({
 }
 
 export default function NotificationCenter() {
+  const navigate = useNavigate();
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [isOpen, setIsOpen] = useState(false);
   const [shaking, setShaking] = useState(false);
   const [filter, setFilter] = useState<'all' | NotifType>('all');
+  const [userRole, setUserRole] = useState<string>('');
   const prevUnread = useRef(0);
   const channelRef = useRef<any>(null);
   const panelRef = useRef<HTMLDivElement>(null);
 
   const unreadCount = notifications.filter(n => !n.read).length;
+
+  const isNotificationRelevantForRole = useCallback((n: Notification, role: string) => {
+    if (!role) return true;
+    const actionUrl = String(n.actionUrl || '').trim().toLowerCase();
+    if (!actionUrl) return true;
+    if (actionUrl.startsWith('/student/')) return role === 'student';
+    if (actionUrl.startsWith('/teacher/')) return role === 'teacher';
+    if (actionUrl.startsWith('/admin/')) return role === 'admin';
+    return true;
+  }, []);
 
   const fetchNotifications = useCallback(async (userId: string) => {
     const { data, error } = await supabase
@@ -134,16 +147,19 @@ export default function NotificationCenter() {
       .order('created_at', { ascending: false })
       .limit(30);
     if (error) return;
-    setNotifications(data.map((d: any) => ({
+    const mapped = data.map((d: any) => ({
       id: d.id,
       userId: d.user_id,
       title: d.title,
       message: d.message,
       type: d.type,
       read: d.read,
+      actionUrl: d.action_url || '',
       createdAt: d.created_at,
-    } as Notification)));
-  }, []);
+    } as Notification));
+    const currentRole = userRole || '';
+    setNotifications(mapped.filter((n) => isNotificationRelevantForRole(n, currentRole)));
+  }, [isNotificationRelevantForRole, userRole]);
 
   useEffect(() => {
     let active = true;
@@ -151,6 +167,13 @@ export default function NotificationCenter() {
       const { data: { session } } = await supabase.auth.getSession();
       if (!session || !active) return;
       const uid = session.user.id;
+      const profile = await supabase
+        .from('profiles')
+        .select('role')
+        .eq('id', uid)
+        .maybeSingle();
+      const role = String(profile.data?.role || '').toLowerCase();
+      if (role) setUserRole(role);
       await fetchNotifications(uid);
       if (!active) return;
 
@@ -161,7 +184,7 @@ export default function NotificationCenter() {
 
       const ch = supabase
         .channel(`notifications:${uid}`)
-        .on('postgres_changes', { event: '*', schema: 'public', table: 'notifications', filter: `user_id=eq.${uid}` }, () => {
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'notifications', filter: `user_id=eq.${uid}` }, () => {
           if (active) fetchNotifications(uid);
         })
         .subscribe();
@@ -191,7 +214,9 @@ export default function NotificationCenter() {
 
   const markAsRead = async (id: string) => {
     await supabase.from('notifications').update({ read: true }).eq('id', id);
+    const target = notifications.find((n) => n.id === id);
     setNotifications(prev => prev.map(n => n.id === id ? { ...n, read: true } : n));
+    if (target?.actionUrl) navigate(target.actionUrl);
   };
 
   const markAllAsRead = async () => {
@@ -228,6 +253,7 @@ export default function NotificationCenter() {
       {/* Bell button */}
       <button
         onClick={() => setIsOpen(o => !o)}
+        onMouseEnter={() => setIsOpen(true)}
         className={cn(
           'relative p-2 rounded-xl transition-all',
           isOpen

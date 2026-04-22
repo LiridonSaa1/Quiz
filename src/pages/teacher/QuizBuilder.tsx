@@ -35,7 +35,13 @@ import { updateCompatibleQuiz } from '../../lib/fetchTeacherQuizzes';
 import { useNavigate, useParams } from 'react-router-dom';
 import { FormPageSkeleton } from '../../components/ui/Skeleton';
 import { AIPanel, AITriggerButton } from '../../components/AIPanel';
-import { generateQuizQuestions } from '../../lib/gemini';
+import type { AIPanelAttachment } from '../../components/AIPanel';
+import {
+  generateQuizQuestions,
+  importQuizQuestionsFromImages,
+  importQuizQuestionsFromText,
+} from '../../lib/gemini';
+import type { ImportedQuizQuestion } from '../../lib/gemini';
 import { motion } from 'motion/react';
 import { isDirectVideoFileUrl, isLikelyVideoLink, toEmbedVideoUrl } from '../../lib/quizMedia';
 import { questionBodyFromRow } from '../../lib/questionText';
@@ -131,6 +137,52 @@ function toDbQuestionType(t: string | undefined): string {
   ]);
   if (allowed.has(x)) return x;
   return 'open-text';
+}
+
+function resolveImportedCorrectAnswerId(
+  options: Array<{ id: string; text: string }>,
+  rawCorrectAnswer?: string,
+): string | undefined {
+  const raw = String(rawCorrectAnswer || '').trim();
+  if (!raw) return undefined;
+
+  const cleaned = raw.replace(/^["'`]+|["'`]+$/g, '').trim();
+  const withoutChoiceWord = cleaned.replace(/^(?:option|choice)\s+/i, '').trim();
+  if (withoutChoiceWord !== cleaned) {
+    return resolveImportedCorrectAnswerId(options, withoutChoiceWord);
+  }
+  if (/^[A-H]$/i.test(cleaned)) {
+    const index = cleaned.toUpperCase().charCodeAt(0) - 65;
+    return options[index]?.id;
+  }
+  if (/^\d+$/.test(cleaned)) {
+    return options[Number(cleaned) - 1]?.id;
+  }
+  if (/^(t|true)$/i.test(cleaned)) {
+    return options.find((option) => option.text.trim().toLowerCase() === 'true')?.id;
+  }
+  if (/^(f|false)$/i.test(cleaned)) {
+    return options.find((option) => option.text.trim().toLowerCase() === 'false')?.id;
+  }
+
+  const labeled = cleaned.match(/^\(?([A-H]|\d+)\)?[\).:-]\s*(.+)$/i);
+  if (labeled) {
+    const fromLabel = resolveImportedCorrectAnswerId(options, labeled[1]);
+    if (fromLabel) return fromLabel;
+    const byText = options.find((option) => option.text.trim().toLowerCase() === labeled[2].trim().toLowerCase());
+    if (byText) return byText.id;
+  }
+
+  const exact = options.find((option) => option.text.trim().toLowerCase() === cleaned.toLowerCase());
+  if (exact) return exact.id;
+
+  const partial = options.find((option) => {
+    const optionText = option.text.trim().toLowerCase();
+    const answerText = cleaned.toLowerCase();
+    return optionText.includes(answerText) || answerText.includes(optionText);
+  });
+
+  return partial?.id;
 }
 
 export default function QuizBuilder() {
@@ -278,7 +330,99 @@ export default function QuizBuilder() {
     fetchData();
   }, [quizId]);
 
-  const handleAIGenerateQuestions = async (input: string) => {
+  const appendImportedQuestions = useCallback((incoming: ImportedQuizQuestion[], sourceLabel: string) => {
+    const existingTexts = new Set(
+      questions
+        .map((q) => String(q.text || '').trim().toLowerCase())
+        .filter(Boolean),
+    );
+
+    const mapped: Partial<Question>[] = [];
+
+    for (const incomingQuestion of incoming) {
+      const text = String(incomingQuestion.text || '').trim();
+      if (!text) continue;
+
+      const key = text.toLowerCase();
+      if (existingTexts.has(key)) continue;
+      existingTexts.add(key);
+
+      if (incomingQuestion.type === 'instruction') {
+        mapped.push({
+          type: 'instruction',
+          text,
+          explanation: typeof incomingQuestion.explanation === 'string' ? incomingQuestion.explanation : '',
+          points: 0,
+        });
+        continue;
+      }
+
+      if (incomingQuestion.type === 'open-text') {
+        mapped.push({
+          type: 'open-text',
+          text,
+          correctAnswer: String(incomingQuestion.correctAnswer || '').trim(),
+          explanation: typeof incomingQuestion.explanation === 'string' ? incomingQuestion.explanation : '',
+          points: Number.isFinite(incomingQuestion.points)
+            ? Math.max(1, Number(incomingQuestion.points))
+            : 1,
+        });
+        continue;
+      }
+
+      const optionTexts =
+        incomingQuestion.type === 'true-false'
+          ? ['True', 'False']
+          : Array.isArray(incomingQuestion.options)
+            ? incomingQuestion.options
+                .map((option) => String(option || '').trim())
+                .filter(Boolean)
+            : [];
+
+      if (optionTexts.length < 2) continue;
+
+      const options = optionTexts.map((optionText, idx) => ({
+        id: String(idx + 1),
+        text: optionText,
+      }));
+
+      mapped.push({
+        type: incomingQuestion.type,
+        text,
+        options,
+        correctAnswer: resolveImportedCorrectAnswerId(options, incomingQuestion.correctAnswer),
+        explanation: typeof incomingQuestion.explanation === 'string' ? incomingQuestion.explanation : '',
+        points: Number.isFinite(incomingQuestion.points)
+          ? Math.max(1, Number(incomingQuestion.points))
+          : 1,
+      });
+    }
+
+    if (!mapped.length) {
+      throw new Error(`No new questions were imported from ${sourceLabel}.`);
+    }
+
+    setQuestions((prev) => [...prev, ...mapped]);
+    toast.success(`Added ${mapped.length} question${mapped.length === 1 ? '' : 's'} from ${sourceLabel}.`);
+  }, [questions]);
+
+  const handleQuestionIntake = async (input: string, attachments: AIPanelAttachment[] = []) => {
+    const imageFiles = attachments
+      .filter((attachment) => attachment.kind === 'image')
+      .map((attachment) => attachment.file);
+
+    if (imageFiles.length) {
+      const importedFromImages = await importQuizQuestionsFromImages(imageFiles, input);
+      appendImportedQuestions(importedFromImages, imageFiles.length === 1 ? 'the image' : 'the uploaded images');
+      return;
+    }
+
+    const importedFromText = importQuizQuestionsFromText(input);
+    if (importedFromText.length) {
+      appendImportedQuestions(importedFromText, 'the uploaded text');
+      return;
+    }
+
     const generated = await generateQuizQuestions(input);
     if (!generated.length) {
       throw new Error('No questions could be generated from this content. Please add more source text.');
@@ -572,7 +716,7 @@ export default function QuizBuilder() {
                   </div>
                 </div>
                 <div className="flex flex-wrap items-center gap-3 shrink-0">
-                  <AITriggerButton onClick={() => setAiOpen(true)} label="AI Questions" />
+                  <AITriggerButton onClick={() => setAiOpen(true)} label="AI / Import" />
                   <motion.button
                     type="button"
                     onClick={() => void handleSave()}
@@ -596,14 +740,18 @@ export default function QuizBuilder() {
             <AIPanel
               open={aiOpen}
               onClose={() => setAiOpen(false)}
-              label="AI Question Generator"
-              description="Paste lesson text/transcript or upload a transcript file. AI will auto-decide how many MCQ to generate."
-              placeholder='Paste source content here (lesson text, audio/video transcript, notes)...'
-              buttonLabel="Generate Questions"
+              label="AI + Question Import"
+              description="Paste lesson text, upload a quiz .txt, or attach screenshots. Text and image import now work without an API key."
+              placeholder='Paste lesson text, transcript, or fully written quiz questions here...'
+              buttonLabel="Process Questions"
+              loadingLabel="Processing..."
               allowTextFileUpload
-              fileUploadLabel="Upload transcript/text file"
+              fileUploadLabel="Upload quiz/text file"
               fileUploadHint="Supported: .txt, .md, .srt, .vtt, .json, .csv"
-              onSubmit={handleAIGenerateQuestions}
+              allowImageUpload
+              imageUploadLabel="Upload screenshot/photo"
+              imageUploadHint="Use screenshots of question sheets, worksheets, or textbook pages. OCR runs locally, no API key needed."
+              onSubmit={handleQuestionIntake}
             />
 
             <div className="max-w-6xl mx-auto grid grid-cols-1 lg:grid-cols-3 gap-8">

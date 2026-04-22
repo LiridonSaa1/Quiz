@@ -3,6 +3,7 @@ import AdminLayout from '../../components/layout/AdminLayout';
 import { cn } from '../../lib/utils';
 import { toast } from 'sonner';
 import { supabase } from '../../supabase';
+import { authFetch } from '../../lib/apiUrl';
 import {
   User, Mail, Phone, MapPin, Calendar, Camera,
   Save, Briefcase, Globe, Twitter, Linkedin, Github,
@@ -61,12 +62,15 @@ export default function AdminProfile() {
         const user = authData.session?.user;
         if (!user?.id) return;
 
-        const [profileRes, analyticsRes] = await Promise.all([
-          supabase.from('profiles').select('*').eq('id', user.id).single(),
-          fetch('/api/admin/analytics').then((r) => r.json()).catch(() => null),
+        const [profileApiRes, analyticsRes] = await Promise.all([
+          authFetch('/api/admin/profile'),
+          authFetch('/api/admin/analytics').then((r) => r.json()).catch(() => null),
         ]);
-        if (profileRes.error) throw profileRes.error;
-        const p: any = profileRes.data || {};
+        const profileApi = await profileApiRes.json();
+        if (!profileApiRes.ok || !profileApi?.success) {
+          throw new Error(profileApi?.error || 'Failed to load profile');
+        }
+        const p: any = profileApi.profile || {};
         setForm((prev) => ({
           ...prev,
           display_name: p.display_name || '',
@@ -143,18 +147,26 @@ export default function AdminProfile() {
       const userId = authData.session?.user?.id;
       if (!userId) throw new Error('You are not authenticated.');
 
-      const { error } = await supabase
-        .from('profiles')
-        .update({
+      const res = await authFetch('/api/admin/profile', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
           display_name: form.display_name,
           email: form.email,
           phone: form.phone || null,
+          location: form.location || null,
           website: form.website || null,
           bio: form.bio || null,
           avatar_url: avatarUrl || null,
-        })
-        .eq('id', userId);
-      if (error) throw error;
+          title: form.title || null,
+          department: form.department || null,
+          twitter: form.twitter || null,
+          linkedin: form.linkedin || null,
+          github: form.github || null,
+        }),
+      });
+      const json = await res.json();
+      if (!res.ok || !json?.success) throw new Error(json?.error || 'Failed to save profile');
       toast.success('Profile saved successfully.');
     } catch (e: any) {
       toast.error(e?.message || 'Failed to save profile');

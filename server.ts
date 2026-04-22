@@ -225,6 +225,54 @@ export async function createApp(options: CreateAppOptions = {}) {
 
   const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
 
+  const ADMIN_PROFILE_MUTABLE_KEYS = new Set([
+    "display_name",
+    "email",
+    "phone",
+    "location",
+    "website",
+    "bio",
+    "avatar_url",
+    "title",
+    "department",
+    "twitter",
+    "linkedin",
+    "github",
+  ]);
+
+  const sanitizeAdminProfilePayload = (payload: any) => {
+    const out: Record<string, any> = {};
+    if (!payload || typeof payload !== "object") return out;
+    Object.keys(payload).forEach((key) => {
+      if (ADMIN_PROFILE_MUTABLE_KEYS.has(key)) out[key] = payload[key];
+    });
+    return out;
+  };
+
+  const saveAdminProfileWithFallback = async (userId: string, payload: Record<string, any>) => {
+    const fullUpdate = await supabaseAdmin.from("profiles").update(payload).eq("id", userId);
+    if (!fullUpdate.error) return;
+    if (!isRecoverableSchemaColumnError(fullUpdate.error)) throw fullUpdate.error;
+
+    const midPayload = Object.fromEntries(
+      Object.entries(payload).filter(([key]) =>
+        ["display_name", "email", "phone", "location", "website", "bio", "avatar_url"].includes(key),
+      ),
+    );
+    if (Object.keys(midPayload).length) {
+      const midUpdate = await supabaseAdmin.from("profiles").update(midPayload).eq("id", userId);
+      if (!midUpdate.error) return;
+      if (!isRecoverableSchemaColumnError(midUpdate.error)) throw midUpdate.error;
+    }
+
+    const minPayload = Object.fromEntries(
+      Object.entries(payload).filter(([key]) => ["display_name", "email", "avatar_url"].includes(key)),
+    );
+    if (!Object.keys(minPayload).length) throw fullUpdate.error;
+    const minUpdate = await supabaseAdmin.from("profiles").update(minPayload).eq("id", userId);
+    if (minUpdate.error) throw minUpdate.error;
+  };
+
   const toAttemptPercent = (scoreValue: unknown, totalPointsValue: unknown) => {
     const score = toFiniteNumber(scoreValue, 0);
     const totalPoints = toFiniteNumber(totalPointsValue, 0);
@@ -234,11 +282,13 @@ export async function createApp(options: CreateAppOptions = {}) {
   };
 
   const isAttemptsTableMissing = (error: any) => {
-    const haystack = `${error?.message || ""} ${error?.details || ""}`.toLowerCase();
+    const haystack = `${error?.message || ""} ${error?.details || ""} ${error?.hint || ""}`.toLowerCase();
     return (
       (error?.code === "PGRST205" && haystack.includes("public.attempts")) ||
       (error?.code === "42P01" && haystack.includes("attempts")) ||
-      haystack.includes("could not find the table 'public.attempts'")
+      haystack.includes("could not find the table 'public.attempts'") ||
+      (haystack.includes("public.attempts") && haystack.includes("schema cache")) ||
+      (haystack.includes("perhaps you meant") && haystack.includes("quiz_attempts"))
     );
   };
 
@@ -248,6 +298,15 @@ export async function createApp(options: CreateAppOptions = {}) {
       (error?.code === "PGRST205" && haystack.includes("public.session_participants")) ||
       (error?.code === "42P01" && haystack.includes("session_participants")) ||
       haystack.includes("could not find the table 'public.session_participants'")
+    );
+  };
+
+  const isClassesTableMissing = (error: any) => {
+    const haystack = `${error?.message || ""} ${error?.details || ""} ${error?.hint || ""}`.toLowerCase();
+    return (
+      (error?.code === "PGRST205" && haystack.includes("public.classes")) ||
+      (error?.code === "42P01" && haystack.includes("classes")) ||
+      haystack.includes("could not find the table 'public.classes'")
     );
   };
 
@@ -279,21 +338,24 @@ export async function createApp(options: CreateAppOptions = {}) {
   };
 
   const fetchAllAttemptRows = async () => {
-    const legacy = await supabaseAdmin.from("attempts").select("*");
-    if (!legacy.error) return legacy.data || [];
-    if (!isAttemptsTableMissing(legacy.error)) throw legacy.error;
-
     const modern = await supabaseAdmin.from("quiz_attempts").select("*");
-    if (modern.error) throw modern.error;
-    return modern.data || [];
+    if (!modern.error) return modern.data || [];
+    if (!isAttemptsTableMissing(modern.error)) throw modern.error;
+
+    const legacy = await supabaseAdmin.from("attempts").select("*");
+    if (legacy.error) throw legacy.error;
+    return legacy.data || [];
   };
 
   /** Missing-column errors from Postgres/PostgREST; retry with a narrower select. */
   const isRecoverableSchemaColumnError = (error: any) => {
     if (!error) return false;
     if (error.code === "42703" || error.code === 42703) return true;
+    if (error.code === "PGRST204") return true;
     const hay = `${error.message || ""} ${error.details || ""} ${error.hint || ""}`.toLowerCase();
-    return hay.includes("does not exist") && hay.includes("column");
+    if (hay.includes("does not exist") && hay.includes("column")) return true;
+    if (hay.includes("schema cache") && hay.includes("column")) return true;
+    return hay.includes("could not find") && hay.includes("column");
   };
 
   /** Older DBs may omit columns referenced in the select list. */
@@ -600,6 +662,49 @@ export async function createApp(options: CreateAppOptions = {}) {
     }
   });
 
+  app.get("/api/admin/profile", async (req, res) => {
+    try {
+      const caller = await getAuthUser(req);
+      if (!caller) return res.status(401).json({ error: "Unauthorized" });
+      if (caller.role !== "admin") return res.status(403).json({ error: "Forbidden: admin role required" });
+
+      const { data, error } = await supabaseAdmin
+        .from("profiles")
+        .select("*")
+        .eq("id", caller.userId)
+        .maybeSingle();
+      if (error) throw error;
+      res.json({ success: true, profile: data || null });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message || "Failed to load profile" });
+    }
+  });
+
+  app.put("/api/admin/profile", async (req, res) => {
+    try {
+      const caller = await getAuthUser(req);
+      if (!caller) return res.status(401).json({ error: "Unauthorized" });
+      if (caller.role !== "admin") return res.status(403).json({ error: "Forbidden: admin role required" });
+
+      const payload = sanitizeAdminProfilePayload(req.body || {});
+      if (!Object.keys(payload).length) {
+        return res.status(400).json({ error: "No updatable profile fields provided" });
+      }
+
+      await saveAdminProfileWithFallback(caller.userId, payload);
+
+      const { data, error } = await supabaseAdmin
+        .from("profiles")
+        .select("*")
+        .eq("id", caller.userId)
+        .maybeSingle();
+      if (error) throw error;
+      res.json({ success: true, profile: data || null });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message || "Failed to save profile" });
+    }
+  });
+
   // Route to fetch all students (bypasses RLS using service role) — admin only
   app.get("/api/admin/students", async (req, res) => {
     try {
@@ -861,6 +966,39 @@ export async function createApp(options: CreateAppOptions = {}) {
         throw new Error("Could not create course for the selected teacher.");
       }
 
+      const selectedClassId = typeof req.body?.class_id === "string" ? req.body.class_id.trim() : "";
+      if (selectedClassId) {
+        const { data: classRow, error: classErr } = await supabaseAdmin
+          .from("classes")
+          .select("id, teacher_id, student_ids")
+          .eq("id", selectedClassId)
+          .maybeSingle();
+        if (classErr) throw classErr;
+        if (!classRow) {
+          return res.status(400).json({ error: "Selected class was not found." });
+        }
+        const classTeacherId = String((classRow as any).teacher_id || "");
+        if (!teacherIdCandidates.includes(classTeacherId)) {
+          return res.status(403).json({ error: "Selected class is not owned by this teacher." });
+        }
+        const classStudentIds = Array.isArray((classRow as any).student_ids)
+          ? (classRow as any).student_ids.map((sid: unknown) => String(sid)).filter(Boolean)
+          : [];
+        const uniqueStudentIds = Array.from(new Set(classStudentIds));
+        const { data: updatedCourse, error: visibilityErr } = await supabaseAdmin
+          .from("courses")
+          .update({
+            student_ids: uniqueStudentIds,
+            total_students: uniqueStudentIds.length,
+            updated_at: new Date().toISOString(),
+          })
+          .eq("id", createdCourse.id)
+          .select()
+          .single();
+        if (visibilityErr) throw visibilityErr;
+        createdCourse = updatedCourse || createdCourse;
+      }
+
       res.json({ success: true, course: createdCourse });
     } catch (error: any) {
       console.error('Error creating course:', error);
@@ -1024,7 +1162,7 @@ export async function createApp(options: CreateAppOptions = {}) {
   app.post("/api/admin/create-student", async (req, res) => {
     const {
       name, email, password, teacherId,
-      phone, dateOfBirth, gender, preferredLanguage, currentLevel, notes
+      phone, dateOfBirth, gender, preferredLanguage, currentLevel, notes, classId
     } = req.body;
     
     try {
@@ -1119,6 +1257,57 @@ export async function createApp(options: CreateAppOptions = {}) {
         .upsert(studentPayload);
 
       if (studentError) throw studentError;
+
+      // 4. Optional class assignment (and keep related course enrollment in sync).
+      const normalizedClassId = typeof classId === 'string' ? classId.trim() : '';
+      if (normalizedClassId) {
+        const teacherIdCandidates = await getTeacherIdCandidates(resolvedTeacherId);
+        const scopedTeacherIds = teacherIdCandidates.length > 0 ? teacherIdCandidates : [resolvedTeacherId];
+        const classSnap = await supabaseAdmin
+          .from('classes')
+          .select('id, teacher_id, student_ids, course_id')
+          .eq('id', normalizedClassId)
+          .maybeSingle();
+        if (classSnap.error) throw classSnap.error;
+        const cls = classSnap.data as any;
+        if (!cls) throw new Error('Selected class was not found.');
+        const classTeacherId = String(cls.teacher_id || '').trim();
+        if (classTeacherId && !scopedTeacherIds.includes(classTeacherId)) {
+          throw new Error('You cannot assign this student to the selected class.');
+        }
+
+        const classStudentIds = Array.isArray(cls.student_ids) ? cls.student_ids.map((sid: unknown) => String(sid)) : [];
+        if (!classStudentIds.includes(userId)) {
+          const nextClassStudentIds = [...new Set([...classStudentIds, userId])];
+          const classUpdate = await supabaseAdmin
+            .from('classes')
+            .update({ student_ids: nextClassStudentIds })
+            .eq('id', normalizedClassId);
+          if (classUpdate.error) throw classUpdate.error;
+        }
+
+        const classCourseId = String(cls.course_id || '').trim();
+        if (classCourseId) {
+          const courseSnap = await supabaseAdmin
+            .from('courses')
+            .select('id, student_ids, total_students')
+            .eq('id', classCourseId)
+            .maybeSingle();
+          if (!courseSnap.error && courseSnap.data) {
+            const course = courseSnap.data as any;
+            const courseStudentIds = Array.isArray(course.student_ids) ? course.student_ids.map((sid: unknown) => String(sid)) : [];
+            if (!courseStudentIds.includes(userId)) {
+              const nextCourseStudentIds = [...new Set([...courseStudentIds, userId])];
+              const nextTotalStudents = Math.max(nextCourseStudentIds.length, Number(course.total_students || 0));
+              const courseUpdate = await supabaseAdmin
+                .from('courses')
+                .update({ student_ids: nextCourseStudentIds, total_students: nextTotalStudents })
+                .eq('id', classCourseId);
+              if (courseUpdate.error) throw courseUpdate.error;
+            }
+          }
+        }
+      }
 
       res.json({ success: true, uid: userId });
     } catch (error: any) {
@@ -1487,13 +1676,30 @@ export async function createApp(options: CreateAppOptions = {}) {
         });
 
         if (lessonIds.length > 0) {
-          const { data: quizRows, error: quizErr } = await supabaseAdmin
-            .from("quizzes")
-            .select("id,lesson_id")
-            .in("lesson_id", lessonIds);
-          if (quizErr) throw quizErr;
+          const fetchQuizRows = async () => {
+            const withAvailability = await supabaseAdmin
+              .from("quizzes")
+              .select("id,lesson_id,published,status")
+              .in("lesson_id", lessonIds);
+            if (!withAvailability.error) return withAvailability.data || [];
+            const fallback = await supabaseAdmin
+              .from("quizzes")
+              .select("id,lesson_id")
+              .in("lesson_id", lessonIds);
+            if (fallback.error) throw fallback.error;
+            return fallback.data || [];
+          };
+
+          const quizRows = await fetchQuizRows();
+          const isAvailable = (q: any) => {
+            if (typeof q?.published === "boolean") return q.published;
+            const status = String(q?.status || "").toLowerCase();
+            if (status) return status === "published" || status === "active";
+            return true;
+          };
 
           (quizRows || []).forEach((q: any) => {
+            if (!isAvailable(q)) return;
             const lessonId = String(q?.lesson_id || "");
             const moduleId = moduleByLessonId[lessonId];
             if (!moduleId) return;
@@ -2849,17 +3055,6 @@ export async function createApp(options: CreateAppOptions = {}) {
       const { error: qDelErr } = await supabaseAdmin.from("questions").delete().eq("quiz_id", quizId);
       if (qDelErr) throw qDelErr;
 
-      const attRes = await supabaseAdmin.from("attempts").delete().eq("quiz_id", quizId);
-      if (attRes.error) {
-        const code = String((attRes.error as { code?: string }).code || "");
-        const msg = String(attRes.error.message || "");
-        const missingTable =
-          code === "42P01" ||
-          code === "PGRST205" ||
-          /does not exist|could not find the table/i.test(msg);
-        if (!missingTable) throw attRes.error;
-      }
-
       const qaRes = await supabaseAdmin.from("quiz_attempts").delete().eq("quiz_id", quizId);
       if (qaRes.error) {
         const msg = String(qaRes.error.message || "");
@@ -2869,6 +3064,17 @@ export async function createApp(options: CreateAppOptions = {}) {
           code === "PGRST205" ||
           /could not find the table|does not exist/i.test(msg);
         if (!missingTable) throw qaRes.error;
+      }
+
+      const attRes = await supabaseAdmin.from("attempts").delete().eq("quiz_id", quizId);
+      if (attRes.error) {
+        const code = String((attRes.error as { code?: string }).code || "");
+        const msg = String(attRes.error.message || "");
+        const missingTable =
+          code === "42P01" ||
+          code === "PGRST205" ||
+          /does not exist|could not find the table/i.test(msg);
+        if (!missingTable) throw attRes.error;
       }
 
       const { data: deleted, error: dErr } = await supabaseAdmin
@@ -3826,26 +4032,406 @@ export async function createApp(options: CreateAppOptions = {}) {
       const studentIds = Array.isArray(course.student_ids)
         ? course.student_ids.map((sid: unknown) => String(sid))
         : [];
-      if (studentIds.includes(caller.userId)) {
-        return res.json({ success: true, alreadyEnrolled: true });
+      const alreadyEnrolled = studentIds.includes(caller.userId);
+
+      if (!alreadyEnrolled) {
+        const nextStudentIds = [...studentIds, caller.userId];
+        const nextTotalStudents = Math.max(nextStudentIds.length, Number(course.total_students || 0) + 1);
+
+        const { error: updErr } = await supabaseAdmin
+          .from('courses')
+          .update({
+            student_ids: nextStudentIds,
+            total_students: nextTotalStudents,
+            updated_at: new Date().toISOString(),
+          })
+          .eq('id', courseId);
+        if (updErr) throw updErr;
       }
 
-      const nextStudentIds = [...studentIds, caller.userId];
-      const nextTotalStudents = Math.max(nextStudentIds.length, Number(course.total_students || 0) + 1);
+      const classIds: string[] = [];
+      let classAssignment: 'assigned' | 'already_assigned' | 'no_class_available' | 'skipped' = 'skipped';
 
-      const { error: updErr } = await supabaseAdmin
-        .from('courses')
-        .update({
-          student_ids: nextStudentIds,
-          total_students: nextTotalStudents,
-          updated_at: new Date().toISOString(),
-        })
-        .eq('id', courseId);
-      if (updErr) throw updErr;
+      const loadCourseClasses = async () => {
+        let classRes = await supabaseAdmin
+          .from('classes')
+          .select('id,status,student_ids,capacity,start_date,created_at')
+          .eq('course_id', courseId);
+        if (classRes.error && isRecoverableSchemaColumnError(classRes.error)) {
+          classRes = await supabaseAdmin
+            .from('classes')
+            .select('id,status,student_ids,capacity,created_at')
+            .eq('course_id', courseId);
+        }
+        if (classRes.error && isRecoverableSchemaColumnError(classRes.error)) {
+          classRes = await supabaseAdmin
+            .from('classes')
+            .select('id,student_ids,created_at')
+            .eq('course_id', courseId);
+        }
+        if (classRes.error) throw classRes.error;
+        return classRes.data || [];
+      };
 
-      return res.json({ success: true, enrolled: true });
+      try {
+        const classRows = await loadCourseClasses();
+        if (classRows.length > 0) {
+          const statusWeight = (status: unknown) => {
+            const normalized = String(status || '').toLowerCase();
+            if (normalized === 'active') return 0;
+            if (normalized === 'upcoming') return 1;
+            if (normalized === 'completed') return 2;
+            if (normalized === 'archived') return 3;
+            return 4;
+          };
+          const classCandidates = (classRows || []).map((row: any) => {
+            const ids = Array.isArray(row?.student_ids)
+              ? row.student_ids.map((sid: unknown) => String(sid))
+              : [];
+            const capacity = Number(row?.capacity);
+            const hasCapacity = !Number.isFinite(capacity) || capacity <= 0 || ids.length < capacity;
+            return {
+              id: String(row?.id || ''),
+              status: String(row?.status || ''),
+              startDate: row?.start_date ? String(row.start_date) : '',
+              createdAt: row?.created_at ? String(row.created_at) : '',
+              studentIds: ids,
+              hasCapacity,
+            };
+          }).filter((row: any) => row.id);
+
+          const existingClasses = classCandidates.filter((row: any) => row.studentIds.includes(caller.userId));
+          if (existingClasses.length > 0) {
+            existingClasses.forEach((row: any) => classIds.push(row.id));
+            classAssignment = 'already_assigned';
+          } else {
+            classCandidates.sort((a: any, b: any) => {
+              const statusDelta = statusWeight(a.status) - statusWeight(b.status);
+              if (statusDelta !== 0) return statusDelta;
+              const startA = a.startDate ? Date.parse(a.startDate) : Number.POSITIVE_INFINITY;
+              const startB = b.startDate ? Date.parse(b.startDate) : Number.POSITIVE_INFINITY;
+              if (startA !== startB) return startA - startB;
+              const createdA = a.createdAt ? Date.parse(a.createdAt) : 0;
+              const createdB = b.createdAt ? Date.parse(b.createdAt) : 0;
+              return createdA - createdB;
+            });
+
+            const targetClass = classCandidates.find((row: any) => row.hasCapacity);
+            if (targetClass) {
+              const nextClassStudentIds = Array.from(new Set([...targetClass.studentIds, caller.userId]));
+              const { error: classUpdateErr } = await supabaseAdmin
+                .from('classes')
+                .update({ student_ids: nextClassStudentIds })
+                .eq('id', targetClass.id);
+              if (classUpdateErr) throw classUpdateErr;
+              classIds.push(targetClass.id);
+              classAssignment = 'assigned';
+            } else {
+              classAssignment = 'no_class_available';
+            }
+          }
+        }
+      } catch (classError: any) {
+        if (!isClassesTableMissing(classError)) throw classError;
+      }
+
+      return res.json({
+        success: true,
+        enrolled: !alreadyEnrolled,
+        alreadyEnrolled,
+        classAssignment,
+        classIds,
+      });
     } catch (e: any) {
       return res.status(500).json({ error: e?.message || 'Failed to enroll in course' });
+    }
+  });
+
+  // Student course content counts (service-role): returns lessons/quizzes per course.
+  app.get('/api/student/courses/content-counts', async (req, res) => {
+    try {
+      const caller = await assertAuthenticated(req, res);
+      if (!caller) return;
+      if (caller.role !== 'student' && caller.role !== 'admin') {
+        return res.status(403).json({ error: 'Forbidden: student or admin role required' });
+      }
+
+      const raw = typeof req.query.courseIds === 'string' ? req.query.courseIds : '';
+      const courseIds = raw
+        .split(',')
+        .map((x) => x.trim())
+        .filter(Boolean);
+      if (courseIds.length === 0) return res.json({ success: true, counts: {} });
+
+      let quizRowsByCourse: any[] = [];
+      const [{ data: modules }, { data: lessonsDirect }] = await Promise.all([
+        supabaseAdmin.from('modules').select('id,course_id').in('course_id', courseIds),
+        supabaseAdmin.from('lessons').select('id,course_id,module_id').in('course_id', courseIds),
+      ]);
+      let quizRes = await supabaseAdmin
+        .from('quizzes')
+        .select('id, course_id, lesson_id')
+        .in('course_id', courseIds)
+        .eq('published', true);
+      if (quizRes.error && missingQuizzesPublishedColumn(quizRes.error)) {
+        quizRes = await supabaseAdmin
+          .from('quizzes')
+          .select('id, course_id, lesson_id')
+          .in('course_id', courseIds);
+      }
+      if (quizRes.error) throw quizRes.error;
+      quizRowsByCourse = quizRes.data || [];
+
+      const moduleToCourse: Record<string, string> = {};
+      (modules || []).forEach((m: any) => {
+        const mid = String(m?.id || '');
+        const cid = String(m?.course_id || '');
+        if (mid && cid) moduleToCourse[mid] = cid;
+      });
+
+      const lessonCountByCourse: Record<string, number> = {};
+      const lessonToCourse: Record<string, string> = {};
+      (lessonsDirect || []).forEach((l: any) => {
+        const lid = String(l?.id || '');
+        const directCourseId = String(l?.course_id || '');
+        const mappedCourseId = directCourseId || moduleToCourse[String(l?.module_id || '')] || '';
+        if (!lid || !mappedCourseId) return;
+        lessonToCourse[lid] = mappedCourseId;
+        lessonCountByCourse[mappedCourseId] = (lessonCountByCourse[mappedCourseId] || 0) + 1;
+      });
+
+      const lessonIds = Object.keys(lessonToCourse);
+      const quizRowsByLesson = lessonIds.length > 0
+        ? await supabaseAdmin.from('quizzes').select('id,lesson_id').in('lesson_id', lessonIds)
+        : { data: [] as any[] };
+
+      const quizSetByCourse: Record<string, Set<string>> = {};
+      (quizRowsByCourse || []).forEach((q: any) => {
+        const cid = String(q?.course_id || '');
+        const qid = String(q?.id || '');
+        if (!cid || !qid) return;
+        if (!quizSetByCourse[cid]) quizSetByCourse[cid] = new Set<string>();
+        quizSetByCourse[cid].add(qid);
+      });
+      (quizRowsByLesson.data || []).forEach((q: any) => {
+        const lid = String(q?.lesson_id || '');
+        const qid = String(q?.id || '');
+        const cid = lessonToCourse[lid];
+        if (!cid || !qid) return;
+        if (!quizSetByCourse[cid]) quizSetByCourse[cid] = new Set<string>();
+        quizSetByCourse[cid].add(qid);
+      });
+
+      const counts: Record<string, { lessons: number; quizzes: number }> = {};
+      courseIds.forEach((cid) => {
+        counts[cid] = {
+          lessons: lessonCountByCourse[cid] || 0,
+          quizzes: quizSetByCourse[cid] ? quizSetByCourse[cid].size : 0,
+        };
+      });
+      return res.json({ success: true, counts });
+    } catch (e: any) {
+      return res.status(500).json({ error: e?.message || 'Failed to load course content counts' });
+    }
+  });
+
+  // Student quizzes: only published quizzes from courses where the student is enrolled.
+  app.get('/api/student/quizzes', async (req, res) => {
+    try {
+      const caller = await assertAuthenticated(req, res);
+      if (!caller) return;
+      if (caller.role !== 'student' && caller.role !== 'admin') {
+        return res.status(403).json({ error: 'Forbidden: student or admin role required' });
+      }
+
+      const requestedCourseId = typeof req.query.courseId === 'string' ? req.query.courseId.trim() : '';
+
+      const { data: enrolledCourses, error: ecErr } = await supabaseAdmin
+        .from('courses')
+        .select('id,title')
+        .contains('student_ids', [caller.userId]);
+      if (ecErr) throw ecErr;
+
+      const enrolledCourseIds = (enrolledCourses || []).map((c: any) => String(c.id)).filter(Boolean);
+      if (enrolledCourseIds.length === 0) return res.json({ success: true, quizzes: [] });
+      const courseIds = requestedCourseId
+        ? enrolledCourseIds.includes(requestedCourseId) ? [requestedCourseId] : []
+        : enrolledCourseIds;
+      if (courseIds.length === 0) return res.json({ success: true, quizzes: [] });
+
+      const courseTitleById: Record<string, string> = {};
+      (enrolledCourses || []).forEach((course: any) => {
+        courseTitleById[String(course.id)] = String(course.title || 'Course');
+      });
+
+      const { data: modules, error: modulesErr } = await supabaseAdmin
+        .from('modules')
+        .select('id,course_id')
+        .in('course_id', courseIds);
+      if (modulesErr) throw modulesErr;
+
+      const moduleToCourse: Record<string, string> = {};
+      (modules || []).forEach((m: any) => {
+        const mid = String(m?.id || '');
+        const cid = String(m?.course_id || '');
+        if (mid && cid) moduleToCourse[mid] = cid;
+      });
+
+      const moduleIds = Object.keys(moduleToCourse);
+      const { data: lessonsByCourse } = await supabaseAdmin
+        .from('lessons')
+        .select('id,course_id,module_id')
+        .in('course_id', courseIds);
+      const lessonsByModule = moduleIds.length > 0
+        ? await supabaseAdmin.from('lessons').select('id,module_id').in('module_id', moduleIds)
+        : { data: [] as any[], error: null as any };
+      if (lessonsByModule.error && !isRecoverableSchemaColumnError(lessonsByModule.error)) throw lessonsByModule.error;
+
+      const lessonToCourse: Record<string, string> = {};
+      (lessonsByCourse || []).forEach((l: any) => {
+        const lid = String(l?.id || '');
+        const cid = String(l?.course_id || '') || moduleToCourse[String(l?.module_id || '')] || '';
+        if (lid && cid) lessonToCourse[lid] = cid;
+      });
+      ((lessonsByModule.data as any[]) || []).forEach((l: any) => {
+        const lid = String(l?.id || '');
+        const cid = moduleToCourse[String(l?.module_id || '')] || '';
+        if (lid && cid && !lessonToCourse[lid]) lessonToCourse[lid] = cid;
+      });
+      const lessonIds = Object.keys(lessonToCourse);
+
+      let quizByCourseRes = await supabaseAdmin
+        .from('quizzes')
+        .select('*')
+        .in('course_id', courseIds);
+      if (quizByCourseRes.error && isRecoverableSchemaColumnError(quizByCourseRes.error)) {
+        quizByCourseRes = await supabaseAdmin.from('quizzes').select('*').in('course_id', courseIds);
+      }
+      if (quizByCourseRes.error) throw quizByCourseRes.error;
+
+      const quizByLessonRes = lessonIds.length > 0
+        ? await supabaseAdmin.from('quizzes').select('*').in('lesson_id', lessonIds)
+        : { data: [] as any[], error: null as any };
+      if (quizByLessonRes.error && !isRecoverableSchemaColumnError(quizByLessonRes.error)) throw quizByLessonRes.error;
+
+      const combined = [...(quizByCourseRes.data || []), ...((quizByLessonRes.data as any[]) || [])];
+      const deduped: Record<string, any> = {};
+      combined.forEach((row: any) => {
+        const qid = String(row?.id || '');
+        if (!qid) return;
+        if (!deduped[qid]) deduped[qid] = row;
+      });
+
+      const quizzes = Object.values(deduped).filter((row: any) => {
+        const status = String(row?.status || '').toLowerCase();
+        if (status) return status === 'published' || status === 'active';
+        const hasPublishedFlag = typeof row?.published === 'boolean';
+        if (hasPublishedFlag) return row.published;
+        return true;
+      }).map((row: any) => ({
+        ...row,
+        course_id: String(row?.course_id || '') || lessonToCourse[String(row?.lesson_id || '')] || '',
+        course_title: courseTitleById[String(row?.course_id || '') || lessonToCourse[String(row?.lesson_id || '')] || ''] || 'Course',
+      }));
+
+      return res.json({ success: true, quizzes });
+    } catch (e: any) {
+      return res.status(500).json({ error: e?.message || 'Failed to load student quizzes' });
+    }
+  });
+
+  // Student lessons: only from enrolled courses (optionally one specific course).
+  app.get('/api/student/lessons', async (req, res) => {
+    try {
+      const caller = await assertAuthenticated(req, res);
+      if (!caller) return;
+      if (caller.role !== 'student' && caller.role !== 'admin') {
+        return res.status(403).json({ error: 'Forbidden: student or admin role required' });
+      }
+
+      const requestedCourseId = typeof req.query.courseId === 'string' ? req.query.courseId.trim() : '';
+
+      const { data: enrolledCourses, error: ecErr } = await supabaseAdmin
+        .from('courses')
+        .select('id,title')
+        .contains('student_ids', [caller.userId]);
+      if (ecErr) throw ecErr;
+
+      const enrolledCourseIds = (enrolledCourses || []).map((c: any) => String(c.id));
+      if (enrolledCourseIds.length === 0) return res.json({ success: true, lessons: [] });
+
+      const scopedCourseIds = requestedCourseId
+        ? enrolledCourseIds.includes(requestedCourseId) ? [requestedCourseId] : []
+        : enrolledCourseIds;
+      if (scopedCourseIds.length === 0) return res.json({ success: true, lessons: [] });
+
+      const { data: modules, error: modErr } = await supabaseAdmin
+        .from('modules')
+        .select('id,title,course_id')
+        .in('course_id', scopedCourseIds);
+      if (modErr) throw modErr;
+
+      let lessonsRes = await supabaseAdmin
+        .from('lessons')
+        .select('*')
+        .in('course_id', scopedCourseIds)
+        .eq('status', 'published')
+        .order('order', { ascending: true });
+      if (lessonsRes.error && isRecoverableSchemaColumnError(lessonsRes.error)) {
+        lessonsRes = await supabaseAdmin
+          .from('lessons')
+          .select('*')
+          .in('course_id', scopedCourseIds)
+          .order('order', { ascending: true });
+      }
+      if (lessonsRes.error) throw lessonsRes.error;
+
+      let lessonRows = lessonsRes.data || [];
+      if (lessonRows.length === 0) {
+        const moduleIds = (modules || []).map((m: any) => String(m.id)).filter(Boolean);
+        if (moduleIds.length > 0) {
+          let byModuleRes = await supabaseAdmin
+            .from('lessons')
+            .select('*')
+            .in('module_id', moduleIds)
+            .eq('status', 'published')
+            .order('order', { ascending: true });
+          if (byModuleRes.error && isRecoverableSchemaColumnError(byModuleRes.error)) {
+            byModuleRes = await supabaseAdmin
+              .from('lessons')
+              .select('*')
+              .in('module_id', moduleIds)
+              .order('order', { ascending: true });
+          }
+          if (byModuleRes.error) throw byModuleRes.error;
+          lessonRows = byModuleRes.data || [];
+        }
+      }
+
+      const moduleMap: Record<string, { title: string; courseId: string }> = {};
+      (modules || []).forEach((m: any) => {
+        moduleMap[String(m.id)] = { title: String(m.title || ''), courseId: String(m.course_id || '') };
+      });
+      const courseMap: Record<string, string> = {};
+      (enrolledCourses || []).forEach((c: any) => {
+        courseMap[String(c.id)] = String(c.title || 'Course');
+      });
+      const allowedCourseIds = new Set(scopedCourseIds);
+
+      const lessons = (lessonRows || []).map((l: any) => {
+        const mod = moduleMap[String(l.module_id)] || { title: '', courseId: '' };
+        const resolvedCourseId = String(l.course_id || mod.courseId || '');
+        return {
+          ...l,
+          module_title: mod.title,
+          course_id: resolvedCourseId,
+          course_title: courseMap[resolvedCourseId] || 'Course',
+        };
+      }).filter((l: any) => allowedCourseIds.has(String(l.course_id || '')));
+
+      return res.json({ success: true, lessons });
+    } catch (e: any) {
+      return res.status(500).json({ error: e?.message || 'Failed to load student lessons' });
     }
   });
 
@@ -3889,7 +4475,7 @@ export async function createApp(options: CreateAppOptions = {}) {
 
       let query = supabaseAdmin
         .from('live_sessions')
-        .select('id, title, status, scheduled_at, duration_minutes, recording_url, host:profiles!host_id(id,display_name)')
+        .select('id, title, status, scheduled_at, duration_minutes, meeting_url, recording_url, max_participants, course_id, host:profiles!host_id(id,display_name)')
         .in('id', allSessionIds)
         .order('scheduled_at', { ascending: false });
 
@@ -3906,7 +4492,7 @@ export async function createApp(options: CreateAppOptions = {}) {
         // Fallback: retry without relation joins in case stale relationship cache still references class_id.
         let fallbackQuery = supabaseAdmin
           .from('live_sessions')
-          .select('id, title, status, scheduled_at, duration_minutes, recording_url, host_id')
+          .select('id, title, status, scheduled_at, duration_minutes, meeting_url, recording_url, max_participants, course_id, host_id')
           .in('id', allSessionIds)
           .order('scheduled_at', { ascending: false });
         if (status) fallbackQuery = fallbackQuery.eq('status', status as string);
@@ -4003,12 +4589,103 @@ export async function createApp(options: CreateAppOptions = {}) {
   });
 
   // ── COMMUNITY POSTS ─────────────────────────────────────────
+  const missingCommunityPostsClassIdColumn = (error: any) => {
+    const hay = `${error?.message || ''} ${error?.details || ''} ${error?.hint || ''}`.toLowerCase();
+    if (!hay.includes('class_id')) return false;
+    return /schema cache|could not find|does not exist|42703|undefined column|column/i.test(hay);
+  };
+
+  const sortCommunityPosts = (rows: any[]) => {
+    return [...(rows || [])].sort((a, b) => {
+      const aPinned = String(a?.status || '') === 'pinned' ? 1 : 0;
+      const bPinned = String(b?.status || '') === 'pinned' ? 1 : 0;
+      if (aPinned !== bPinned) return bPinned - aPinned;
+      const aTime = new Date(String(a?.created_at || 0)).getTime();
+      const bTime = new Date(String(b?.created_at || 0)).getTime();
+      return bTime - aTime;
+    });
+  };
+
+  const selectCommunityPostsCompat = async () => {
+    const withClass = await supabaseAdmin
+      .from('community_posts')
+      .select('*, author:profiles!author_id(id,display_name,email), class_target:classes!class_id(id,name)')
+      .order('created_at', { ascending: false });
+
+    if (!withClass.error) {
+      return { data: sortCommunityPosts(withClass.data || []), error: null };
+    }
+
+    if (!missingCommunityPostsClassIdColumn(withClass.error)) {
+      return { data: null, error: withClass.error };
+    }
+
+    const fallback = await supabaseAdmin
+      .from('community_posts')
+      .select('*, author:profiles!author_id(id,display_name,email)')
+      .order('created_at', { ascending: false });
+
+    if (fallback.error) return { data: null, error: fallback.error };
+
+    const normalized = (fallback.data || []).map((row: any) => ({
+      ...row,
+      class_id: null,
+      class_target: null,
+    }));
+    return { data: sortCommunityPosts(normalized), error: null };
+  };
+
+  const insertCommunityPostCompat = async (payload: Record<string, unknown>) => {
+    let current = { ...payload, created_at: new Date().toISOString(), updated_at: new Date().toISOString() };
+
+    for (let i = 0; i < 4; i += 1) {
+      const res = await supabaseAdmin.from('community_posts').insert(current).select().single();
+      if (!res.error) return res;
+      if (missingCommunityPostsClassIdColumn(res.error) && 'class_id' in current) {
+        if (current.class_id) {
+          return {
+            data: null,
+            error: new Error("Community class targeting needs the SQL in sql/add_community_post_class_id.sql."),
+          };
+        }
+        const next = { ...current };
+        delete next.class_id;
+        current = next;
+        continue;
+      }
+      return res;
+    }
+
+    return { data: null, error: new Error('Community insert: compatibility retries exhausted') };
+  };
+
+  const updateCommunityPostCompat = async (id: string, payload: Record<string, unknown>) => {
+    let current = { ...payload, updated_at: new Date().toISOString() };
+
+    for (let i = 0; i < 4; i += 1) {
+      const res = await supabaseAdmin.from('community_posts').update(current).eq('id', id).select().single();
+      if (!res.error) return res;
+      if (missingCommunityPostsClassIdColumn(res.error) && 'class_id' in current) {
+        if (current.class_id) {
+          return {
+            data: null,
+            error: new Error("Community class targeting needs the SQL in sql/add_community_post_class_id.sql."),
+          };
+        }
+        const next = { ...current };
+        delete next.class_id;
+        current = next;
+        continue;
+      }
+      return res;
+    }
+
+    return { data: null, error: new Error('Community update: compatibility retries exhausted') };
+  };
+
   app.get('/api/admin/community', async (req, res) => {
     try {
-      const { data, error } = await supabaseAdmin
-        .from('community_posts')
-        .select('*, author:profiles!author_id(id,display_name,email)')
-        .order('created_at', { ascending: false });
+      const { data, error } = await selectCommunityPostsCompat();
       if (error) throw error;
       res.json({ success: true, posts: data });
     } catch (e: any) { res.status(500).json({ error: e.message }); }
@@ -4016,8 +4693,7 @@ export async function createApp(options: CreateAppOptions = {}) {
 
   app.post('/api/admin/community', async (req, res) => {
     try {
-      const { data, error } = await supabaseAdmin
-        .from('community_posts').insert({ ...req.body, created_at: new Date().toISOString(), updated_at: new Date().toISOString() }).select().single();
+      const { data, error } = await insertCommunityPostCompat(req.body || {});
       if (error) throw error;
       res.json({ success: true, post: data });
     } catch (e: any) { res.status(500).json({ error: e.message }); }
@@ -4025,8 +4701,7 @@ export async function createApp(options: CreateAppOptions = {}) {
 
   app.patch('/api/admin/community/:id', async (req, res) => {
     try {
-      const { data, error } = await supabaseAdmin
-        .from('community_posts').update({ ...req.body, updated_at: new Date().toISOString() }).eq('id', req.params.id).select().single();
+      const { data, error } = await updateCommunityPostCompat(req.params.id, req.body || {});
       if (error) throw error;
       res.json({ success: true, post: data });
     } catch (e: any) { res.status(500).json({ error: e.message }); }
@@ -4041,6 +4716,48 @@ export async function createApp(options: CreateAppOptions = {}) {
   });
 
   // ── MODULES (ADMIN) ───────────────────────────────────────────
+  // Student-visible community feed (global posts + class-targeted posts for enrolled classes).
+  app.get('/api/student/community', async (req, res) => {
+    try {
+      const caller = await assertAuthenticated(req, res);
+      if (!caller) return;
+      if (caller.role !== 'student') {
+        return res.status(403).json({ error: 'Forbidden: student role required' });
+      }
+
+      const { data: visibleClasses, error: classErr } = await supabaseAdmin
+        .from('classes')
+        .select('id')
+        .contains('student_ids', [caller.userId]);
+
+      const classErrHay = `${(classErr as any)?.message || ''} ${(classErr as any)?.details || ''} ${(classErr as any)?.hint || ''}`.toLowerCase();
+      const missingClassStudentIds =
+        classErrHay.includes('student_ids') &&
+        /schema cache|could not find|does not exist|42703|undefined column|column/i.test(classErrHay);
+
+      if (classErr && !isClassesTableMissing(classErr) && !missingClassStudentIds) throw classErr;
+
+      const classIds = Array.isArray(visibleClasses)
+        ? visibleClasses.map((row: any) => String(row?.id || '')).filter(Boolean)
+        : [];
+
+      const { data, error } = await selectCommunityPostsCompat();
+      if (error) throw error;
+
+      const visiblePosts = (data || [])
+        .filter((post: any) => String(post?.status || '') !== 'archived')
+        .filter((post: any) => {
+          const classId = typeof post?.class_id === 'string' ? post.class_id.trim() : '';
+          return !classId || classIds.includes(classId);
+        });
+
+      res.json({ success: true, posts: visiblePosts, classIds });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  // â”€â”€ MODULES (ADMIN) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   app.get('/api/admin/modules', async (req, res) => {
     try {
       const [modulesSnap, coursesSnap, teachersSnap] = await Promise.all([
@@ -4199,27 +4916,81 @@ export async function createApp(options: CreateAppOptions = {}) {
 
   app.post('/api/admin/announcements', async (req, res) => {
     try {
+      const { class_ids, student_ids, ...body } = req.body || {};
       const payload = {
-        ...req.body,
-        published_at: req.body.status === 'published' ? new Date().toISOString() : null,
+        ...body,
+        published_at: body.status === 'published' ? new Date().toISOString() : null,
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
       };
       const { data, error } = await supabaseAdmin.from('announcements').insert(payload).select().single();
       if (error) throw error;
+
+      if (body.status === 'published') {
+        const inviteIds = new Set<string>();
+        const classIds: string[] = Array.isArray(class_ids) ? class_ids.map((x: unknown) => String(x || '').trim()).filter(Boolean) : [];
+        const studentIds: string[] = Array.isArray(student_ids) ? student_ids.map((x: unknown) => String(x || '').trim()).filter(Boolean) : [];
+        studentIds.forEach((sid) => inviteIds.add(sid));
+        for (const cid of classIds) {
+          const { data: classRow } = await supabaseAdmin
+            .from('classes')
+            .select('student_ids')
+            .eq('id', cid)
+            .maybeSingle();
+          ((classRow?.student_ids as string[]) || []).forEach((uid: string) => inviteIds.add(String(uid)));
+        }
+        if (inviteIds.size > 0) {
+          const notifRows = [...inviteIds].map((uid) => ({
+            user_id: uid,
+            title: `Announcement: ${String(body.title || 'New announcement')}`,
+            message: String(body.content || '').slice(0, 240),
+            type: body.priority === 'urgent' ? 'warning' : body.priority === 'important' ? 'info' : 'info',
+            action_url: '/student',
+            created_at: new Date().toISOString(),
+          }));
+          await supabaseAdmin.from('notifications').insert(notifRows);
+        }
+      }
       res.json({ success: true, announcement: data });
     } catch (e: any) { res.status(500).json({ error: e.message }); }
   });
 
   app.patch('/api/admin/announcements/:id', async (req, res) => {
     try {
+      const { class_ids, student_ids, ...body } = req.body || {};
       const payload = {
-        ...req.body,
+        ...body,
         updated_at: new Date().toISOString(),
-        ...(req.body.status === 'published' ? { published_at: new Date().toISOString() } : {}),
+        ...(body.status === 'published' ? { published_at: new Date().toISOString() } : {}),
       };
       const { data, error } = await supabaseAdmin.from('announcements').update(payload).eq('id', req.params.id).select().single();
       if (error) throw error;
+
+      if (body.status === 'published') {
+        const inviteIds = new Set<string>();
+        const classIds: string[] = Array.isArray(class_ids) ? class_ids.map((x: unknown) => String(x || '').trim()).filter(Boolean) : [];
+        const studentIds: string[] = Array.isArray(student_ids) ? student_ids.map((x: unknown) => String(x || '').trim()).filter(Boolean) : [];
+        studentIds.forEach((sid) => inviteIds.add(sid));
+        for (const cid of classIds) {
+          const { data: classRow } = await supabaseAdmin
+            .from('classes')
+            .select('student_ids')
+            .eq('id', cid)
+            .maybeSingle();
+          ((classRow?.student_ids as string[]) || []).forEach((uid: string) => inviteIds.add(String(uid)));
+        }
+        if (inviteIds.size > 0) {
+          const notifRows = [...inviteIds].map((uid) => ({
+            user_id: uid,
+            title: `Announcement: ${String((body.title ?? data?.title) || 'New announcement')}`,
+            message: String((body.content ?? data?.content) || '').slice(0, 240),
+            type: (body.priority ?? data?.priority) === 'urgent' ? 'warning' : (body.priority ?? data?.priority) === 'important' ? 'info' : 'info',
+            action_url: '/student',
+            created_at: new Date().toISOString(),
+          }));
+          await supabaseAdmin.from('notifications').insert(notifRows);
+        }
+      }
       res.json({ success: true, announcement: data });
     } catch (e: any) { res.status(500).json({ error: e.message }); }
   });

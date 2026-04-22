@@ -2,9 +2,12 @@ import React, { useEffect, useState, useMemo } from 'react';
 import { supabase } from '../../supabase';
 import StudentLayout from '../../components/layout/StudentLayout';
 import { motion, AnimatePresence } from 'motion/react';
-import { ClipboardList, Search, Calendar, BookOpen, AlertCircle, CheckCircle2, Archive, FileText } from 'lucide-react';
+import { ClipboardList, Search, Calendar, BookOpen, AlertCircle, CheckCircle2, Archive, FileText, ArrowRight, Play } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { format, isPast, isToday } from 'date-fns';
+import { authFetch } from '../../lib/apiUrl';
+import { resolveTeacherIdCandidates } from '../../lib/teacherScope';
+import { Link } from 'react-router-dom';
 
 type AssignmentStatus = 'draft' | 'published' | 'closed';
 type AssignmentType = 'homework' | 'project' | 'essay' | 'quiz' | 'lab' | 'other';
@@ -45,11 +48,37 @@ export default function StudentAssignments() {
   useEffect(() => {
     const load = async () => {
       const { data: { session } } = await supabase.auth.getSession();
-      if (!session) return;
+      if (!session) {
+        setLoading(false);
+        return;
+      }
       const uid = session.user.id;
 
-      const { data: courses } = await supabase.from('courses').select('id, title').contains('student_ids', [uid]);
-      if (!courses?.length) { setLoading(false); return; }
+      const profileSnap = await supabase
+        .from('profiles')
+        .select('teacher_id')
+        .eq('id', uid)
+        .single();
+      const linkedTeacherId = String(profileSnap.data?.teacher_id || '').trim();
+      if (!linkedTeacherId) { setLoading(false); return; }
+
+      const teacherIdCandidates = await resolveTeacherIdCandidates(linkedTeacherId);
+      const scopedTeacherIds = teacherIdCandidates.length > 0 ? teacherIdCandidates : [linkedTeacherId];
+
+      const coursesRes = await authFetch(`/api/teacher/courses?userId=${encodeURIComponent(linkedTeacherId)}`);
+      const coursesJson = coursesRes.ok ? await coursesRes.json() : { courses: [] };
+      const courses = Array.isArray(coursesJson?.courses)
+        ? coursesJson.courses
+            .filter((c: any) => {
+              const isPublished = String(c?.status || '').toLowerCase() === 'published';
+              const isTeacherScoped = scopedTeacherIds.includes(String(c?.teacher_id || ''));
+              const studentIds = Array.isArray(c?.student_ids) ? c.student_ids.map((sid: unknown) => String(sid)) : [];
+              const isEnrolled = studentIds.includes(uid);
+              return isPublished && isTeacherScoped && isEnrolled;
+            })
+            .map((c: any) => ({ id: c.id, title: c.title || 'Course' }))
+        : [];
+      if (!courses.length) { setLoading(false); return; }
       const courseIds = courses.map((c: any) => c.id);
       const courseMap: Record<string, string> = {};
       courses.forEach((c: any) => { courseMap[c.id] = c.title; });
@@ -74,6 +103,7 @@ export default function StudentAssignments() {
   }, [assignments, search, statusFilter]);
 
   const overdue = assignments.filter(a => a.due_date && isPast(new Date(a.due_date)) && a.status !== 'closed').length;
+  const hasActiveFilters = search.trim() !== '' || statusFilter !== 'all';
 
   return (
     <StudentLayout>
@@ -130,7 +160,9 @@ export default function StudentAssignments() {
               <ClipboardList className="w-8 h-8 text-teal-400" />
             </motion.div>
             <p className="text-slate-600 font-bold">No assignments found</p>
-            <p className="text-slate-400 text-sm mt-1">You're all caught up!</p>
+            <p className="text-slate-400 text-sm mt-1">
+              {hasActiveFilters ? 'No results for current filter.' : 'No enrolled content yet.'}
+            </p>
           </motion.div>
         ) : (
           <div className="space-y-3">
@@ -141,6 +173,7 @@ export default function StudentAssignments() {
                 const StatusIcon = statusCfg.icon;
                 const isOverdue = a.due_date && isPast(new Date(a.due_date)) && a.status !== 'closed';
                 const dueToday = a.due_date && isToday(new Date(a.due_date));
+                const dueStateLabel = isOverdue ? 'Overdue' : dueToday ? 'Due today' : a.status === 'closed' ? 'Closed' : 'Open';
                 return (
                   <motion.div key={a.id}
                     initial={{ opacity: 0, x: -16 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0 }}
@@ -157,8 +190,18 @@ export default function StudentAssignments() {
                           <span className={cn('text-[10px] font-bold px-2 py-0.5 rounded-lg flex items-center gap-1', statusCfg.bg, statusCfg.text)}>
                             <StatusIcon className="w-3 h-3" /> {statusCfg.label}
                           </span>
-                          {isOverdue && <span className="text-[10px] font-bold bg-rose-50 text-rose-600 px-2 py-0.5 rounded-lg">Overdue</span>}
-                          {dueToday && !isOverdue && <span className="text-[10px] font-bold bg-amber-50 text-amber-600 px-2 py-0.5 rounded-lg">Due Today</span>}
+                          <span className={cn(
+                            'text-[10px] font-bold px-2 py-0.5 rounded-lg',
+                            isOverdue
+                              ? 'bg-rose-50 text-rose-600'
+                              : dueToday
+                                ? 'bg-amber-50 text-amber-600'
+                                : a.status === 'closed'
+                                  ? 'bg-slate-100 text-slate-600'
+                                  : 'bg-blue-50 text-blue-700'
+                          )}>
+                            {dueStateLabel}
+                          </span>
                         </div>
                         <h3 className="text-sm font-bold text-slate-900 group-hover:text-teal-600 transition-colors">{a.title}</h3>
                         <div className="flex flex-wrap items-center gap-3 mt-1.5">
@@ -171,6 +214,22 @@ export default function StudentAssignments() {
                           <span className="text-xs text-slate-400 font-medium">Max: {a.max_score} pts</span>
                         </div>
                         {a.description && <p className="text-xs text-slate-400 mt-1.5 line-clamp-1">{a.description}</p>}
+                        <div className="mt-3 flex flex-wrap items-center gap-2">
+                          <Link
+                            to={`/student/assignments/${a.id}`}
+                            className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg bg-teal-600 text-white text-xs font-semibold hover:bg-teal-700 transition-all"
+                          >
+                            <Play className="w-3.5 h-3.5" />
+                            View Details
+                            <ArrowRight className="w-3.5 h-3.5" />
+                          </Link>
+                          <Link
+                            to="/student/courses"
+                            className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg bg-slate-100 text-slate-600 text-xs font-semibold hover:bg-slate-200 transition-all"
+                          >
+                            Open Course
+                          </Link>
+                        </div>
                       </div>
                     </div>
                   </motion.div>

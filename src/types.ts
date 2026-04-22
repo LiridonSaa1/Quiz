@@ -230,5 +230,6 @@ export interface Notification {
   message: string;
   read: boolean;
   readAt?: string;
+  actionUrl?: string;
   createdAt: string;
 }

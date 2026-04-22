@@ -61,8 +61,10 @@ import StudentCourses from './pages/student/Courses';
 import StudentCourseDetail from './pages/student/CourseDetail';
 import ContinueLearning from './pages/student/ContinueLearning';
 import StudentLessons from './pages/student/Lessons';
+import StudentLessonDetail from './pages/student/LessonDetail';
 import StudentQuizzes from './pages/student/Quizzes';
 import StudentAssignments from './pages/student/Assignments';
+import StudentAssignmentDetail from './pages/student/AssignmentDetail';
 import StudentProgress from './pages/student/Progress';
 import StudentResults from './pages/student/Results';
 import StudentCertificates from './pages/student/Certificates';
@@ -75,10 +77,13 @@ import NotFound from './pages/NotFound';
 import { apiUrl } from './lib/apiUrl';
 import { isProfileAccessAllowed } from './lib/profileAccess';
 import { normalizeUserRole } from './lib/userRole';
+import { defaultFeatureFlags, extractFeatureFlags, FeatureFlags } from './lib/platformFeatures';
 
 export default function App() {
   const [user, setUser] = useState<UserProfile | null>(null);
   const [loading, setLoading] = useState(true);
+  const [features, setFeatures] = useState<FeatureFlags>(defaultFeatureFlags);
+  const [maintenanceMode, setMaintenanceMode] = useState(false);
 
   useEffect(() => {
     const checkBackend = async () => {
@@ -107,7 +112,10 @@ export default function App() {
     };
 
     checkBackend();
+    void loadPlatformRuntimeConfig();
     initSession();
+    const onSettingsUpdated = () => { void loadPlatformRuntimeConfig(); };
+    window.addEventListener('settings-updated', onSettingsUpdated);
 
     let subscription: any;
     try {
@@ -124,8 +132,43 @@ export default function App() {
       console.error('Auth state change listener failed:', error);
     }
 
-    return () => { if (subscription) subscription.unsubscribe(); };
+    return () => {
+      if (subscription) subscription.unsubscribe();
+      window.removeEventListener('settings-updated', onSettingsUpdated);
+    };
   }, []);
+
+  const loadPlatformRuntimeConfig = async () => {
+    try {
+      const [settingsRes, brandingRes] = await Promise.all([
+        fetch(apiUrl('/api/admin/config/settings')),
+        fetch(apiUrl('/api/admin/config/branding')),
+      ]);
+      const settingsJson = await settingsRes.json();
+      if (settingsRes.ok && settingsJson?.success) {
+        const nextFeatures = extractFeatureFlags(settingsJson.value);
+        setFeatures(nextFeatures);
+        setMaintenanceMode(Boolean(settingsJson.value?.advanced?.maintenance));
+        const schoolName = String(settingsJson.value?.general?.school_name || 'QuizMaster').trim();
+        if (schoolName) document.title = schoolName;
+      }
+      const brandingJson = await brandingRes.json();
+      if (brandingRes.ok && brandingJson?.success) {
+        const faviconUrl = brandingJson?.value?.faviconUrl;
+        if (typeof faviconUrl === 'string' && faviconUrl.trim()) {
+          let link = document.querySelector("link[rel~='icon']") as HTMLLinkElement | null;
+          if (!link) {
+            link = document.createElement('link');
+            link.rel = 'icon';
+            document.head.appendChild(link);
+          }
+          link.href = faviconUrl;
+        }
+      }
+    } catch {
+      // keep defaults when config table is unavailable
+    }
+  };
 
   const fetchProfile = async (userId: string) => {
     try {
@@ -185,6 +228,17 @@ export default function App() {
     return <AppBootSkeleton />;
   }
 
+  if (maintenanceMode && user && user.role !== 'admin') {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-slate-950 text-slate-100 p-6">
+        <div className="max-w-lg text-center space-y-3">
+          <h1 className="text-3xl font-bold">Platform Under Maintenance</h1>
+          <p className="text-slate-300">The LMS is temporarily unavailable. Please try again later.</p>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <Router>
       <Toaster position="top-right" richColors />
@@ -198,16 +252,16 @@ export default function App() {
             <Navigate to="/student" />
           ) : <Navigate to="/login" />
         } />
-        <Route path="/admin/*" element={user?.role === 'admin' ? <AdminRoutes /> : <Navigate to="/login" />} />
-        <Route path="/teacher/*" element={user?.role === 'teacher' ? <TeacherRoutes /> : <Navigate to="/login" />} />
-        <Route path="/student/*" element={user?.role === 'student' ? <StudentRoutes /> : <Navigate to="/login" />} />
+        <Route path="/admin/*" element={user?.role === 'admin' ? <AdminRoutes features={features} /> : <Navigate to="/login" />} />
+        <Route path="/teacher/*" element={user?.role === 'teacher' ? <TeacherRoutes features={features} /> : <Navigate to="/login" />} />
+        <Route path="/student/*" element={user?.role === 'student' ? <StudentRoutes features={features} /> : <Navigate to="/login" />} />
         <Route path="*" element={<Navigate to="/not-found" replace />} />
       </Routes>
     </Router>
   );
 }
 
-function AdminRoutes() {
+function AdminRoutes({ features }: { features: FeatureFlags }) {
   return (
     <Routes>
       <Route path="/" element={<AdminDashboard />} />
@@ -223,14 +277,14 @@ function AdminRoutes() {
       <Route path="/assignments" element={<AdminAssignments />} />
       <Route path="/attendance" element={<AdminAttendance />} />
       <Route path="/certificates" element={<AdminCertificates />} />
-      <Route path="/live-sessions" element={<AdminLiveSessions />} />
-      <Route path="/live-sessions/:id/room" element={<AdminLiveSessionRoom />} />
-      <Route path="/community" element={<AdminCommunity />} />
-      <Route path="/announcements" element={<AdminAnnouncements />} />
+      <Route path="/live-sessions" element={features.liveSessionsEnabled ? <AdminLiveSessions /> : <Navigate to="/not-found" replace />} />
+      <Route path="/live-sessions/:id/room" element={features.liveSessionsEnabled ? <AdminLiveSessionRoom /> : <Navigate to="/not-found" replace />} />
+      <Route path="/community" element={features.communityEnabled ? <AdminCommunity /> : <Navigate to="/not-found" replace />} />
+      <Route path="/announcements" element={features.announcementsEnabled ? <AdminAnnouncements /> : <Navigate to="/not-found" replace />} />
       <Route path="/analytics" element={<AdminAnalytics />} />
       <Route path="/reports" element={<AdminReports />} />
-      <Route path="/payments" element={<AdminPayments />} />
-      <Route path="/invoices" element={<AdminInvoices />} />
+      <Route path="/payments" element={features.paymentsEnabled ? <AdminPayments /> : <Navigate to="/not-found" replace />} />
+      <Route path="/invoices" element={features.paymentsEnabled ? <AdminInvoices /> : <Navigate to="/not-found" replace />} />
       <Route path="/settings" element={<AdminSettings />} />
       <Route path="/branding" element={<AdminBranding />} />
       <Route path="/domain" element={<AdminDomain />} />
@@ -242,7 +296,7 @@ function AdminRoutes() {
   );
 }
 
-function TeacherRoutes() {
+function TeacherRoutes({ features }: { features: FeatureFlags }) {
   return (
     <Routes>
       <Route path="/" element={<TeacherDashboard />} />
@@ -261,10 +315,10 @@ function TeacherRoutes() {
       <Route path="/assignments" element={<TeacherAssignments />} />
       <Route path="/attendance" element={<TeacherAttendance />} />
       <Route path="/certificates" element={<TeacherCertificates />} />
-      <Route path="/live-sessions" element={<TeacherLiveSessions />} />
-      <Route path="/live-sessions/:id/room" element={<TeacherLiveSessionRoom />} />
-      <Route path="/community" element={<TeacherCommunity />} />
-      <Route path="/announcements" element={<TeacherAnnouncements />} />
+      <Route path="/live-sessions" element={features.liveSessionsEnabled ? <TeacherLiveSessions /> : <Navigate to="/not-found" replace />} />
+      <Route path="/live-sessions/:id/room" element={features.liveSessionsEnabled ? <TeacherLiveSessionRoom /> : <Navigate to="/not-found" replace />} />
+      <Route path="/community" element={features.communityEnabled ? <TeacherCommunity /> : <Navigate to="/not-found" replace />} />
+      <Route path="/announcements" element={features.announcementsEnabled ? <TeacherAnnouncements /> : <Navigate to="/not-found" replace />} />
       <Route path="/progress" element={<TeacherProgress />} />
       <Route path="/profile" element={<TeacherProfilePage />} />
       <Route path="*" element={<Navigate to="/not-found" replace />} />
@@ -272,7 +326,7 @@ function TeacherRoutes() {
   );
 }
 
-function StudentRoutes() {
+function StudentRoutes({ features }: { features: FeatureFlags }) {
   return (
     <Routes>
       <Route path="/" element={<StudentDashboard />} />
@@ -280,15 +334,17 @@ function StudentRoutes() {
       <Route path="/courses/:courseId" element={<StudentCourseDetail />} />
       <Route path="/continue" element={<ContinueLearning />} />
       <Route path="/lessons" element={<StudentLessons />} />
+      <Route path="/lessons/:lessonId" element={<StudentLessonDetail />} />
       <Route path="/quizzes" element={<StudentQuizzes />} />
       <Route path="/assignments" element={<StudentAssignments />} />
+      <Route path="/assignments/:assignmentId" element={<StudentAssignmentDetail />} />
       <Route path="/progress" element={<StudentProgress />} />
       <Route path="/results" element={<StudentResults />} />
       <Route path="/certificates" element={<StudentCertificates />} />
-      <Route path="/community" element={<StudentCommunity />} />
-      <Route path="/live-classes" element={<StudentLiveClasses />} />
-      <Route path="/live-sessions" element={<StudentLiveSessionsList />} />
-      <Route path="/live-sessions/:id" element={<StudentLiveSessionJoin />} />
+      <Route path="/community" element={features.communityEnabled ? <StudentCommunity /> : <Navigate to="/not-found" replace />} />
+      <Route path="/live-classes" element={features.liveSessionsEnabled ? <StudentLiveClasses /> : <Navigate to="/not-found" replace />} />
+      <Route path="/live-sessions" element={features.liveSessionsEnabled ? <StudentLiveSessionsList /> : <Navigate to="/not-found" replace />} />
+      <Route path="/live-sessions/:id" element={features.liveSessionsEnabled ? <StudentLiveSessionJoin /> : <Navigate to="/not-found" replace />} />
       <Route path="/exams" element={<StudentExams />} />
       <Route path="/quiz/:quizId" element={<QuizTaking />} />
       <Route path="/results/:attemptId" element={<QuizResults />} />

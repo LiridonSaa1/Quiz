@@ -24,6 +24,7 @@ import { format } from 'date-fns';
 import { cn } from '../../lib/utils';
 import { fetchAttemptRowsByQuizIds, normalizeAttempts } from '../../lib/quizAttempts';
 import { resolveTeacherIdCandidates } from '../../lib/teacherScope';
+import { authFetch } from '../../lib/apiUrl';
 
 type TabFilter = 'all' | 'passed' | 'failed';
 type SortField = 'student' | 'quiz' | 'score' | 'date' | 'duration';
@@ -87,8 +88,13 @@ export default function TeacherResults() {
       const teacherId = session.user.id;
       const scopedIds = await resolveTeacherIdCandidates(teacherId);
 
-      const coursesSnap = await supabase.from('courses').select('id').in('teacher_id', scopedIds);
+      const [studentsHttp, coursesSnap] = await Promise.all([
+        authFetch(`/api/teacher/students?userId=${encodeURIComponent(teacherId)}`),
+        supabase.from('courses').select('id').in('teacher_id', scopedIds),
+      ]);
       if (coursesSnap.error) throw coursesSnap.error;
+      const studentsJson = studentsHttp.ok ? await studentsHttp.json() : { students: [] };
+      const studentRows = Array.isArray(studentsJson?.students) ? studentsJson.students : [];
       const teacherCourseIds = (coursesSnap.data || []).map((c: { id: string }) => c.id);
 
       let quizRows: Record<string, unknown>[] = [];
@@ -112,8 +118,13 @@ export default function TeacherResults() {
 
       const attemptsRows = await fetchAttemptRowsByQuizIds(supabase, quizIds);
       const normalized = normalizeAttempts(attemptsRows, passingScoreByQuiz);
+      const allowedStudentIds = new Set(
+        studentRows.map((s: { id?: string }) => String(s?.id || '')).filter(Boolean),
+      );
 
-      const attemptsData: UiAttempt[] = normalized.map((a) => ({
+      const attemptsData: UiAttempt[] = normalized
+        .filter((a) => allowedStudentIds.size === 0 || allowedStudentIds.has(a.student_id))
+        .map((a) => ({
         id: a.id,
         quizId: a.quiz_id,
         studentId: a.student_id,
@@ -131,13 +142,12 @@ export default function TeacherResults() {
       const studentIds = [...new Set(attemptsData.map((x) => x.studentId).filter(Boolean))];
       const studentsMap: Record<string, { name: string; email: string }> = {};
 
-      const { data: roster } = await supabase
-        .from('profiles')
-        .select('id, display_name, email')
-        .eq('role', 'student')
-        .eq('teacher_id', teacherId);
-      (roster || []).forEach((p: { id: string; display_name: string; email: string }) => {
-        studentsMap[p.id] = { name: p.display_name || 'Unknown', email: p.email || '' };
+      studentRows.forEach((p: { id: string; display_name: string; email: string }) => {
+        if (!p?.id) return;
+        studentsMap[String(p.id)] = {
+          name: p.display_name || 'Unknown',
+          email: p.email || '',
+        };
       });
 
       const missing = studentIds.filter((id) => !studentsMap[id]);

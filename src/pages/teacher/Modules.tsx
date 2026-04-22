@@ -11,6 +11,7 @@ import { cn } from '../../lib/utils';
 import { apiUrl, readApiError } from '../../lib/apiUrl';
 import { resolveTeacherIdCandidates } from '../../lib/teacherScope';
 import { motion, AnimatePresence, useMotionValue, useSpring, useTransform } from 'motion/react';
+import { useTeacherPermissions } from '../../lib/teacherPermissions';
 
 function AnimatedCount({ value }: { value: number }) {
   const motionVal = useMotionValue(0);
@@ -83,14 +84,17 @@ function EmptyIllustration() {
 export default function TeacherModules() {
   const [modules, setModules] = useState<Module[]>([]);
   const [courses, setCourses] = useState<Course[]>([]);
+  const [classes, setClasses] = useState<Array<{ id: string; name: string; course_id: string | null }>>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [courseFilter, setCourseFilter] = useState('all');
+  const [classFilter, setClassFilter] = useState('all');
   const [showModal, setShowModal] = useState(false);
   const [editing, setEditing] = useState<Module | null>(null);
   const [form, setForm] = useState(emptyForm);
   const [formCourseId, setFormCourseId] = useState('');
   const [saving, setSaving] = useState(false);
+  const { can } = useTeacherPermissions();
 
   const fetchData = async () => {
     setLoading(true);
@@ -98,6 +102,7 @@ export default function TeacherModules() {
     if (!session) return;
     try {
       let courseRows: any[] = [];
+      let classRows: Array<{ id: string; name: string; course_id: string | null }> = [];
 
       const backendRes = await fetch(apiUrl(`/api/teacher/courses?userId=${encodeURIComponent(session.user.id)}`));
       if (backendRes.ok) {
@@ -118,6 +123,18 @@ export default function TeacherModules() {
         courseRows = coursesData || [];
       }
 
+      const classesRes = await fetch(apiUrl(`/api/teacher/classes?userId=${encodeURIComponent(session.user.id)}`));
+      if (classesRes.ok) {
+        const classesJson = await classesRes.json();
+        if (classesJson?.success && Array.isArray(classesJson.classes)) {
+          classRows = classesJson.classes.map((c: any) => ({
+            id: String(c.id),
+            name: String(c.name || 'Untitled class'),
+            course_id: c.course_id ? String(c.course_id) : null,
+          }));
+        }
+      }
+
       const courseList = courseRows.map((c: any) => ({
         ...c,
         id: c.id,
@@ -125,6 +142,7 @@ export default function TeacherModules() {
         name: c.name || c.title,
       }));
       setCourses(courseList as Course[]);
+      setClasses(classRows.filter((c) => !!c.course_id && courseList.some((co: any) => co.id === c.course_id)));
 
       if (courseList.length === 0) {
         setModules([]);
@@ -177,13 +195,31 @@ export default function TeacherModules() {
         });
 
         if (lessonIds.length > 0) {
-          const { data: quizRows, error: quizErr } = await supabase
+          const withAvailability = await supabase
             .from('quizzes')
-            .select('id, lesson_id')
+            .select('id, lesson_id, published, status')
             .in('lesson_id', lessonIds);
-          if (quizErr) throw quizErr;
+          let quizRows: any[] = [];
+          if (withAvailability.error) {
+            const fallback = await supabase
+              .from('quizzes')
+              .select('id, lesson_id')
+              .in('lesson_id', lessonIds);
+            if (fallback.error) throw fallback.error;
+            quizRows = fallback.data || [];
+          } else {
+            quizRows = withAvailability.data || [];
+          }
+
+          const isAvailable = (q: any) => {
+            if (typeof q?.published === 'boolean') return q.published;
+            const status = String(q?.status || '').toLowerCase();
+            if (status) return status === 'published' || status === 'active';
+            return true;
+          };
 
           (quizRows || []).forEach((q: any) => {
+            if (!isAvailable(q)) return;
             const lessonId = String(q?.lesson_id || '');
             const moduleId = moduleByLessonId[lessonId];
             if (!moduleId) return;
@@ -341,7 +377,9 @@ export default function TeacherModules() {
     const matchSearch = m.title.toLowerCase().includes(search.toLowerCase()) ||
       (m.description || '').toLowerCase().includes(search.toLowerCase());
     const matchCourse = courseFilter === 'all' || m.courseId === courseFilter;
-    return matchSearch && matchCourse;
+    const selectedClass = classes.find((c) => c.id === classFilter);
+    const matchClass = classFilter === 'all' || (selectedClass?.course_id ? m.courseId === selectedClass.course_id : false);
+    return matchSearch && matchCourse && matchClass;
   });
 
   const getCourseTitle = (courseId: string) =>
@@ -400,7 +438,7 @@ export default function TeacherModules() {
                     Organize your courses into structured, sequential modules that guide your students through the material.
                   </p>
                 </div>
-                <motion.button
+                {can('actions.teacher.modules.manage') && <motion.button
                   onClick={openCreate}
                   disabled={courses.length === 0}
                   whileHover={{ scale: 1.04, y: -2 }}
@@ -413,7 +451,7 @@ export default function TeacherModules() {
                 >
                   <Plus className="w-4 h-4" />
                   Create Module
-                </motion.button>
+                </motion.button>}
               </div>
             </div>
           </div>
@@ -509,9 +547,21 @@ export default function TeacherModules() {
                   <option key={c.id} value={c.id}>{c.name || c.title}</option>
                 ))}
               </select>
-              {(search || courseFilter !== 'all') && (
+              {classes.length > 0 && (
+                <select
+                  value={classFilter}
+                  onChange={e => setClassFilter(e.target.value)}
+                  className="px-4 py-2.5 rounded-full text-sm border border-indigo-100 bg-white/80 focus:outline-none focus:ring-2 focus:ring-violet-400 focus:border-transparent transition-all shadow-sm text-slate-700"
+                >
+                  <option value="all">All Classes</option>
+                  {classes.map(c => (
+                    <option key={c.id} value={c.id}>{c.name}</option>
+                  ))}
+                </select>
+              )}
+              {(search || courseFilter !== 'all' || classFilter !== 'all') && (
                 <button
-                  onClick={() => { setSearch(''); setCourseFilter('all'); }}
+                  onClick={() => { setSearch(''); setCourseFilter('all'); setClassFilter('all'); }}
                   className="flex items-center gap-1.5 px-3 py-2 rounded-full text-xs font-semibold text-slate-500 hover:text-slate-800 hover:bg-slate-100 transition-all"
                 >
                   <X className="w-3.5 h-3.5" /> Clear
@@ -542,7 +592,7 @@ export default function TeacherModules() {
                     ? "Try adjusting your search or filter to find what you're looking for."
                     : 'Create your first module to start organizing your course content into structured lessons.'}
                 </p>
-                {courses.length > 0 && !(search || courseFilter !== 'all') && (
+                {courses.length > 0 && !(search || courseFilter !== 'all') && can('actions.teacher.modules.manage') && (
                   <motion.button
                     onClick={openCreate}
                     whileHover={{ scale: 1.04, y: -2 }}
@@ -597,7 +647,7 @@ export default function TeacherModules() {
                           >
                             <Layers className="w-5 h-5 text-indigo-500" />
                           </div>
-                          <button
+                          {can('actions.teacher.modules.manage') && <button
                             onClick={() => handleToggleStatus(mod)}
                             className={cn(
                               'inline-flex items-center gap-1.5 text-[11px] font-bold px-2.5 py-1 rounded-full transition-all',
@@ -608,7 +658,7 @@ export default function TeacherModules() {
                           >
                             <span className={cn('w-1.5 h-1.5 rounded-full', isActive ? 'bg-emerald-500' : 'bg-amber-500')} />
                             {isActive ? 'Active' : 'Inactive'}
-                          </button>
+                          </button>}
                         </div>
 
                         {/* Title & Description */}
@@ -630,7 +680,7 @@ export default function TeacherModules() {
                             </span>
                           </div>
                           <div className="flex items-center justify-between">
-                            <span className="text-[11px] text-slate-400">Quiz count</span>
+                            <span className="text-[11px] text-slate-400">Available quizzes</span>
                             <span className="inline-flex items-center gap-1 text-xs text-slate-500">
                               <HelpCircle className="w-3.5 h-3.5 text-slate-300" />
                               {mod.totalQuizzes || 0} quiz{(mod.totalQuizzes || 0) !== 1 ? 'zes' : ''}
@@ -646,18 +696,18 @@ export default function TeacherModules() {
 
                         {/* Actions — always visible on mobile touch, hover-revealed on desktop */}
                         <div className="flex items-center gap-2 pt-3 sm:opacity-0 sm:group-hover:opacity-100 opacity-100 transition-all duration-200 sm:translate-y-1 sm:group-hover:translate-y-0">
-                          <button
+                          {can('actions.teacher.modules.manage') && <button
                             onClick={() => openEdit(mod)}
                             className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-xl text-xs font-semibold text-indigo-600 bg-indigo-50 hover:bg-indigo-100 transition-all"
                           >
                             <Edit2 className="w-3.5 h-3.5" /> Edit
-                          </button>
-                          <button
+                          </button>}
+                          {can('actions.teacher.modules.manage') && <button
                             onClick={() => handleDelete(mod.id)}
                             className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-xl text-xs font-semibold text-red-500 bg-red-50 hover:bg-red-100 transition-all"
                           >
                             <Trash2 className="w-3.5 h-3.5" /> Delete
-                          </button>
+                          </button>}
                         </div>
                       </div>
                     </motion.div>
@@ -771,13 +821,13 @@ export default function TeacherModules() {
 
               {/* Modal Footer */}
               <div className="px-6 pb-6 flex items-center justify-end gap-3">
-                <button
+                {can('actions.teacher.modules.manage') && <button
                   onClick={closeModal}
                   className="px-4 py-2.5 text-sm font-semibold text-slate-600 hover:bg-slate-100 rounded-xl transition-all"
                 >
                   Cancel
-                </button>
-                <button
+                </button>}
+                {can('actions.teacher.modules.manage') && <button
                   onClick={handleSave}
                   disabled={saving}
                   className="inline-flex items-center gap-2 px-5 py-2.5 text-white rounded-xl font-semibold text-sm transition-all disabled:opacity-60"
@@ -785,7 +835,7 @@ export default function TeacherModules() {
                 >
                   <Save className="w-4 h-4" />
                   {saving ? 'Saving...' : editing ? 'Save Changes' : 'Create Module'}
-                </button>
+                </button>}
               </div>
             </motion.div>
           </motion.div>

@@ -196,7 +196,7 @@ function CourseCard({ course, index }: { course: CourseProgress; index: number }
         </div>
 
         <Link
-          to="/student/quizzes"
+          to={`/student/quizzes?courseId=${encodeURIComponent(course.id)}`}
           className={cn(
             'flex items-center justify-center gap-2 w-full py-2.5 rounded-2xl text-sm font-bold transition-all group/btn',
             isCompleted
@@ -398,7 +398,7 @@ export default function ContinueLearning() {
                   transition={{ duration: 0.5, delay: 0.3 }}
                 >
                   <Link
-                    to="/student/quizzes"
+                    to={`/student/quizzes?courseId=${encodeURIComponent(inProgressCourses[0].id)}`}
                     className="inline-flex items-center gap-2.5 bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-400 hover:to-teal-400 text-white font-bold px-6 py-3 rounded-2xl shadow-lg shadow-emerald-900/40 transition-all hover:scale-105 active:scale-95"
                   >
                     <Play className="w-4 h-4" />
