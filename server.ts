@@ -115,10 +115,17 @@ async function sendTelegramErrorAlert(params: {
   fingerprintSource: string;
   details?: string;
   fixUrl?: string;
+  /** When set, must match the fingerprint used for persist (same hash as fingerprintSource). */
+  fingerprint?: string;
 }): Promise<string | null> {
-  if (!ERROR_ALERTS_ENABLED) return null;
-
-  const fingerprint = stableHash(params.fingerprintSource);
+  const fingerprint = params.fingerprint ?? stableHash(params.fingerprintSource);
+  if (!ERROR_ALERTS_ENABLED) {
+    console.warn(
+      "[alerts] Telegram disabled (missing TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID); skip send. fingerprint=",
+      fingerprint,
+    );
+    return fingerprint;
+  }
   const now = Date.now();
   const lastSentAt = recentErrorAlerts.get(fingerprint) || 0;
   if (now - lastSentAt < TELEGRAM_ALERT_COOLDOWN_MS) return fingerprint;
@@ -180,6 +187,7 @@ async function sendTelegramErrorAlert(params: {
     }
   } catch (error) {
     console.warn("[alerts] Telegram request failed:", error);
+    console.warn("[alerts] Run GET /api/telegram/diagnostics on this server to verify Telegram connectivity.");
     void enqueueFailedTelegramAlert({
       type: "error",
       payload,
@@ -346,6 +354,37 @@ function detectErrorLayer(input: string, fallback: ErrorLayer = "BACKEND"): Erro
   return fallback;
 }
 
+/** 5xx response logger: persists fingerprint for Fix button without duplicating full logSystemError() when routes already log. */
+async function recordApi5xxAlertForFix(
+  req: Request,
+  statusCode: number,
+  durationMs: number,
+  requestId: string,
+): Promise<void> {
+  const layer: ErrorLayer = "BACKEND";
+  const message = `${req.method} ${req.path} -> ${statusCode} in ${durationMs}ms`;
+  const fingerprintSource = `${layer}:${message}::${req.originalUrl}`;
+  const fingerprint = stableHash(fingerprintSource);
+  const ctx: StoredErrorContext = {
+    layer,
+    message,
+    stack: `request_id=${requestId}`,
+    url: req.originalUrl,
+    userAgent: req.headers["user-agent"] as string | undefined,
+    source: "middleware.api-5xx",
+    timestamp: new Date().toISOString(),
+  };
+  recentLoggedErrors.set(fingerprint, ctx);
+  void persistErrorAlertContext(fingerprint, ctx);
+  await sendTelegramErrorAlert({
+    title: "API 5xx Error",
+    summary: message,
+    fingerprintSource,
+    fingerprint,
+    details: `request_id=${requestId}`,
+  });
+}
+
 async function logSystemError(event: {
   layer?: ErrorLayer;
   message: string;
@@ -360,6 +399,8 @@ async function logSystemError(event: {
 }) {
   const timestamp = event.timestamp || new Date().toISOString();
   const layer = event.layer || detectErrorLayer(`${event.message}\n${event.stack || ""}`);
+  const fingerprintSource = `${layer}:${event.message}:${event.file || ""}:${event.line || ""}:${event.url || ""}`;
+  const fingerprint = stableHash(fingerprintSource);
   const details = [
     `Layer: ${layer}`,
     `Message: ${event.message}`,
@@ -376,36 +417,36 @@ async function logSystemError(event: {
     .filter(Boolean)
     .join("\n");
 
+  console.error(`[alerts] logSystemError fingerprint=${fingerprint} layer=${layer} source=${event.source || "n/a"}`);
   console.error(`[${layer}] ${event.message}`);
   if (event.stack) console.error(event.stack);
 
-  const fingerprint = await sendTelegramErrorAlert({
+  const ctx: StoredErrorContext = {
+    layer,
+    message: event.message,
+    stack: event.stack,
+    file: event.file,
+    line: event.line,
+    url: event.url,
+    userAgent: event.userAgent,
+    source: event.source,
+    userId: event.userId,
+    timestamp,
+  };
+  recentLoggedErrors.set(fingerprint, ctx);
+  void persistErrorAlertContext(fingerprint, ctx);
+  if (recentLoggedErrors.size > 300) {
+    const first = recentLoggedErrors.keys().next().value;
+    if (first) recentLoggedErrors.delete(first);
+  }
+
+  await sendTelegramErrorAlert({
     title: "ERROR ALERT",
     summary: `Layer: ${layer} | ${event.message}`,
-    fingerprintSource: `${layer}:${event.message}:${event.file || ""}:${event.line || ""}:${event.url || ""}`,
+    fingerprintSource,
+    fingerprint,
     details: details.slice(0, 2000),
   });
-
-  if (fingerprint) {
-    const ctx: StoredErrorContext = {
-      layer,
-      message: event.message,
-      stack: event.stack,
-      file: event.file,
-      line: event.line,
-      url: event.url,
-      userAgent: event.userAgent,
-      source: event.source,
-      userId: event.userId,
-      timestamp,
-    };
-    recentLoggedErrors.set(fingerprint, ctx);
-    void persistErrorAlertContext(fingerprint, ctx);
-    if (recentLoggedErrors.size > 300) {
-      const first = recentLoggedErrors.keys().next().value;
-      if (first) recentLoggedErrors.delete(first);
-    }
-  }
 }
 
 function guessLikelyReason(layer: ErrorLayer, message: string, stack?: string): string {
@@ -467,9 +508,18 @@ async function persistErrorAlertContext(fingerprint: string, ctx: StoredErrorCon
       },
       { onConflict: "fingerprint" },
     );
-    if (error) console.warn("[alerts] persist error_alert_context:", error.message);
+    if (error) {
+      console.warn(
+        "[alerts] persist error_alert_context failed:",
+        error.message,
+        error.code || "",
+        "| Run migrations (error_alert_context) in Supabase if table is missing.",
+      );
+    } else {
+      console.log("[alerts] persisted error_alert_context fingerprint=", fingerprint);
+    }
   } catch (e: any) {
-    console.warn("[alerts] persist error_alert_context failed:", e?.message || e);
+    console.warn("[alerts] persist error_alert_context exception:", e?.message || e);
   }
 }
 
@@ -480,11 +530,95 @@ async function loadErrorAlertContext(fingerprint: string): Promise<StoredErrorCo
       .select("payload")
       .eq("fingerprint", fingerprint)
       .maybeSingle();
-    if (error || !data?.payload) return null;
+    if (error) {
+      console.warn("[alerts] load error_alert_context:", error.message, error.code || "");
+      return null;
+    }
+    if (!data?.payload) return null;
     return data.payload as StoredErrorContext;
-  } catch {
+  } catch (e: any) {
+    console.warn("[alerts] load error_alert_context exception:", e?.message || e);
     return null;
   }
+}
+
+function buildFallbackErrorContext(fingerprint: string): StoredErrorContext {
+  const ts = new Date().toISOString();
+  return {
+    layer: "BACKEND",
+    message: [
+      `No stored error context for fingerprint ${fingerprint}.`,
+      "Typical causes: table public.error_alert_context missing (run migration), Supabase write failed,",
+      "or this alert was sent from a code path before persistence was enabled (e.g. API 5xx middleware only).",
+      "An AI analysis will still run using this limited information.",
+    ].join(" "),
+    stack: undefined,
+    file: undefined,
+    line: undefined,
+    url: undefined,
+    userAgent: undefined,
+    source: "fix.fallback-missing-context",
+    userId: undefined,
+    timestamp: ts,
+  };
+}
+
+type FixSuggestionPayload = Awaited<ReturnType<typeof generateFixSuggestion>>;
+
+async function triggerFixSuggestionForFingerprint(
+  fingerprint: string,
+  opts?: { messageHint?: string },
+): Promise<{ ctx: StoredErrorContext; suggestion: FixSuggestionPayload; usedFallback: boolean }> {
+  const fp = String(fingerprint || "").trim();
+  if (!fp) {
+    const err: any = new Error("fingerprint is required");
+    err.status = 400;
+    throw err;
+  }
+  let ctx =
+    (await loadErrorAlertContext(fp)) || recentLoggedErrors.get(fp) || null;
+  let usedFallback = false;
+  if (!ctx) {
+    console.warn("[alerts] triggerFix: no row/memory for fingerprint=", fp, "- using fallback context");
+    ctx = buildFallbackErrorContext(fp);
+    if (opts?.messageHint) {
+      ctx = {
+        ...ctx,
+        message: `${ctx.message}\nExtra hint: ${opts.messageHint}`,
+      };
+    }
+    usedFallback = true;
+    void persistErrorAlertContext(fp, ctx);
+  }
+  const suggestion = await generateFixSuggestion({
+    message: ctx.message,
+    stack: ctx.stack,
+    fileName: ctx.file,
+    lineNumber: ctx.line,
+    currentUrl: ctx.url,
+    rawLog: `Layer=${ctx.layer}; Source=${ctx.source || "n/a"}; UserAgent=${ctx.userAgent || "n/a"}; User=${ctx.userId || "n/a"}; usedFallback=${usedFallback}`,
+  });
+  await sendTelegramTextMessage(
+    [
+      `🤖 FIX RESULT`,
+      `Fingerprint: ${fp}`,
+      `Layer: ${ctx.layer}`,
+      usedFallback ? "(limited context — see analysis)" : "",
+      "",
+      suggestion.formatted,
+    ]
+      .filter(Boolean)
+      .join("\n"),
+  );
+  return { ctx, suggestion, usedFallback };
+}
+
+function escapeHtmlBasic(value: string): string {
+  return String(value || "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
 }
 
 function addDaysToYmd(ymd: string, days: number): string {
@@ -603,45 +737,115 @@ export async function createApp(options: CreateAppOptions = {}) {
     }
   });
 
+  app.get("/api/telegram/diagnostics", async (_req: Request, res: Response) => {
+    if (!ERROR_ALERTS_ENABLED) {
+      return res.json({
+        ok: false,
+        configured: false,
+        telegramReachable: false,
+        hint: "Set TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID in .env, then restart the server.",
+      });
+    }
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 12000);
+    try {
+      const response = await fetch(
+        `https://api.telegram.org/bot${encodeURIComponent(TELEGRAM_BOT_TOKEN)}/getMe`,
+        { signal: controller.signal },
+      );
+      const json = (await response.json().catch(() => ({}))) as any;
+      clearTimeout(timer);
+      const reachable = response.ok && json?.ok === true;
+      return res.json({
+        ok: reachable,
+        configured: true,
+        telegramReachable: reachable,
+        botUsername: json?.result?.username,
+        hint: reachable
+          ? "This machine can reach Telegram; alerts should work if the server process is the one sending them."
+          : `Telegram API responded but not OK: ${JSON.stringify(json).slice(0, 300)}`,
+      });
+    } catch (error: any) {
+      clearTimeout(timer);
+      return res.json({
+        ok: false,
+        configured: true,
+        telegramReachable: false,
+        error: String(error?.message || error),
+        hint:
+          "Cannot reach https://api.telegram.org from this PC (firewall, ISP block, or corporate network). " +
+          "Error alerts will not arrive in Telegram until outbound HTTPS to Telegram works (try another network or VPN). " +
+          "Queued alerts are still written to logs/telegram-failed.log when sends fail.",
+      });
+    }
+  });
+
   app.get("/api/fix-now", async (req: Request, res: Response) => {
     try {
       const fingerprint = String(req.query.fingerprint || "").trim();
-      if (!fingerprint) return res.status(400).json({ error: "fingerprint is required" });
-      const ctx =
-        (await loadErrorAlertContext(fingerprint)) || recentLoggedErrors.get(fingerprint) || null;
-      if (!ctx) {
-        return res.status(404).json({
-          error:
-            "No stored error found for this fingerprint. Run migration 006_error_alert_context.sql in Supabase, trigger the error again, then retry.",
-        });
-      }
-
-      const suggestion = await generateFixSuggestion({
-        message: ctx.message,
-        stack: ctx.stack,
-        fileName: ctx.file,
-        lineNumber: ctx.line,
-        currentUrl: ctx.url,
-        rawLog: `Layer=${ctx.layer}; Source=${ctx.source || "n/a"}; UserAgent=${ctx.userAgent || "n/a"}`,
+      const hint =
+        typeof req.query.hint === "string" && req.query.hint.trim() ? req.query.hint.trim() : undefined;
+      const { ctx, suggestion, usedFallback } = await triggerFixSuggestionForFingerprint(fingerprint, {
+        messageHint: hint,
       });
-
-      await sendTelegramTextMessage(
-        [
-          `🤖 FIX RESULT`,
-          `Fingerprint: ${fingerprint}`,
-          `Layer: ${ctx.layer}`,
-          "",
-          suggestion.formatted,
-        ].join("\n"),
-      );
-
       return res.json({
         success: true,
         fingerprint,
         note: "Fix suggestion generated and sent to Telegram.",
         result: suggestion,
+        layer: ctx.layer,
+        usedFallback,
       });
     } catch (error: any) {
+      const status = Number(error?.status) || 500;
+      if (status >= 400 && status < 500) {
+        return res.status(status).json({ error: error?.message || "Bad request" });
+      }
+      return res.status(500).json({ error: error?.message || "Failed to generate fix suggestion" });
+    }
+  });
+
+  /**
+   * Public HTTPS URL for Telegram "Fix now" link button (TELEGRAM_ALERT_FIX_URL).
+   * Example: https://YOUR_DOMAIN.vercel.app/api/alerts/trigger-fix
+   * Telegram appends ?fingerprint=...
+   */
+  app.get("/api/alerts/trigger-fix", async (req: Request, res: Response) => {
+    try {
+      const fingerprint = String(req.query.fingerprint || "").trim();
+      const hint =
+        typeof req.query.hint === "string" && req.query.hint.trim() ? req.query.hint.trim() : undefined;
+      const wantHtml =
+        String(req.query.format || "").toLowerCase() === "html" ||
+        String(req.get("accept") || "").includes("text/html");
+      const { ctx, suggestion, usedFallback } = await triggerFixSuggestionForFingerprint(fingerprint, {
+        messageHint: hint,
+      });
+      if (wantHtml) {
+        res.setHeader("Content-Type", "text/html; charset=utf-8");
+        return res.status(200).send(
+          `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width, initial-scale=1"/><title>Fix triggered</title></head><body style="font-family:system-ui;padding:24px;max-width:640px">` +
+            `<h1>Fix suggestion sent</h1>` +
+            `<p>A detailed AI analysis was sent to your Telegram chat.</p>` +
+            `<p><strong>Layer:</strong> ${escapeHtmlBasic(ctx.layer)}</p>` +
+            `<p><strong>Fingerprint:</strong> <code>${escapeHtmlBasic(fingerprint)}</code></p>` +
+            `<p style="color:#555;font-size:14px">You can close this tab.</p>` +
+            `</body></html>`,
+        );
+      }
+      return res.json({
+        success: true,
+        fingerprint,
+        note: "Fix suggestion generated and sent to Telegram.",
+        result: suggestion,
+        layer: ctx.layer,
+        usedFallback,
+      });
+    } catch (error: any) {
+      const status = Number(error?.status) || 500;
+      if (status >= 400 && status < 500) {
+        return res.status(status).json({ error: error?.message || "Bad request" });
+      }
       return res.status(500).json({ error: error?.message || "Failed to generate fix suggestion" });
     }
   });
@@ -702,40 +906,32 @@ export async function createApp(options: CreateAppOptions = {}) {
         }
         if (callbackData.startsWith("fix:")) {
           const fingerprint = callbackData.slice(4).trim();
-          const ctx =
-            (await loadErrorAlertContext(fingerprint)) || recentLoggedErrors.get(fingerprint) || null;
-          if (!ctx) {
-            await callTelegramApi("sendMessage", {
-              chat_id: chatId,
-              text: `No stored error found for fingerprint ${fingerprint}. Run DB migration error_alert_context in Supabase, trigger error again, then retry.`,
-            });
-            return res.json({ success: true, handled: "callback.no-context" });
-          }
           await callTelegramApi("sendMessage", {
             chat_id: chatId,
-            text: `Codex-style AI is now analyzing and preparing a fix for fingerprint ${fingerprint}. I will notify you when done.`,
+            text: `AI fix analysis started for ${fingerprint}. You will get another message when finished.`,
           });
-
           void (async () => {
-            const suggestion = await generateFixSuggestion({
-              message: ctx.message,
-              stack: ctx.stack,
-              fileName: ctx.file,
-              lineNumber: ctx.line,
-              currentUrl: ctx.url,
-              rawLog: `Layer=${ctx.layer}; Source=${ctx.source || "n/a"}; User=${ctx.userId || "n/a"}`,
-            });
-            await callTelegramApi("sendMessage", {
-              chat_id: chatId,
-              text: [
-                `Fix analysis completed for ${fingerprint}.`,
-                `File: ${ctx.file || "N/A"}`,
-                `User: ${ctx.userId || "N/A"}`,
-                `Time: ${ctx.timestamp}`,
-                "",
-                suggestion.formatted,
-              ].join("\n").slice(0, 3900),
-            });
+            try {
+              const { suggestion, usedFallback } = await triggerFixSuggestionForFingerprint(fingerprint);
+              await callTelegramApi("sendMessage", {
+                chat_id: chatId,
+                text: [
+                  `Fix analysis completed for ${fingerprint}.`,
+                  usedFallback ? "(used limited context — ensure error_alert_context migration on Supabase)" : "",
+                  "",
+                  suggestion.formatted,
+                ]
+                  .filter(Boolean)
+                  .join("\n")
+                  .slice(0, 3900),
+              });
+            } catch (err: any) {
+              console.error("[alerts] callback fix pipeline failed:", err);
+              await callTelegramApi("sendMessage", {
+                chat_id: chatId,
+                text: `Fix pipeline failed for ${fingerprint}: ${String(err?.message || err).slice(0, 500)}`,
+              });
+            }
           })();
           return res.json({ success: true, handled: "callback.fix-started", fingerprint });
         }
@@ -768,12 +964,7 @@ export async function createApp(options: CreateAppOptions = {}) {
     res.on("finish", () => {
       if (res.statusCode < 500 || !req.path.startsWith("/api")) return;
       const durationMs = Date.now() - startedAt;
-      void sendTelegramErrorAlert({
-        title: "API 5xx Error",
-        summary: `${req.method} ${req.path} -> ${res.statusCode} in ${durationMs}ms`,
-        fingerprintSource: `${req.method}:${req.path}:${res.statusCode}`,
-        details: `request_id=${requestId}`,
-      });
+      void recordApi5xxAlertForFix(req, res.statusCode, durationMs, requestId);
     });
     next();
   });

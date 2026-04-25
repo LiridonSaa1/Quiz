@@ -1,4 +1,4 @@
-import type { FixSuggestionResult } from "./types";
+import type { FixSuggestionResult } from "./types.js";
 
 export function formatFixSuggestion(result: {
   analysis: string;

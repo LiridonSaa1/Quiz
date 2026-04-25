@@ -1,6 +1,6 @@
-import { resolveErrorCodeContext } from "./errorContextResolver";
-import { withFormattedOutput } from "./formatFixSuggestion";
-import type { ErrorData, FixSuggestionResult } from "./types";
+import { resolveErrorCodeContext } from "./errorContextResolver.js";
+import { withFormattedOutput } from "./formatFixSuggestion.js";
+import type { ErrorData, FixSuggestionResult } from "./types.js";
 
 const DEFAULT_MODEL = process.env.OPENAI_MODEL || "gpt-5";
 const OPENAI_API_URL = "https://api.openai.com/v1/responses";

@@ -10,7 +10,8 @@ export default defineConfig(({mode}) => {
   // with VITE_API_PROXY_TARGET if your API listens elsewhere.
   // Default: API on 5000 (tsx server.ts). Vite dev server uses a different port so /api can proxy to Express
   // without binding the same port twice when you run `vite` and `tsx server.ts` in two terminals.
-  const apiProxyTarget = (env.VITE_API_PROXY_TARGET || 'http://127.0.0.1:5000').replace(/\/$/, '');
+  // Default 5001: `npm run dev` often falls back from 5000 (EACCES/EADDRINUSE). Override with VITE_API_PROXY_TARGET in .env.
+  const apiProxyTarget = (env.VITE_API_PROXY_TARGET || 'http://127.0.0.1:5001').replace(/\/$/, '');
   const devPort = Number(env.VITE_DEV_PORT) || 5173;
   const disableHmr = process.env.DISABLE_HMR === 'true';
   const hmrHost = env.VITE_HMR_HOST || undefined;

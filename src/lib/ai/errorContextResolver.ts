@@ -1,6 +1,6 @@
 import { readFile } from "fs/promises";
 import path from "path";
-import type { ErrorData, ResolvedCodeContext } from "./types";
+import type { ErrorData, ResolvedCodeContext } from "./types.js";
 
 const MAX_SNIPPET_LINES = 80;
 const DEFAULT_RADIUS = 12;
