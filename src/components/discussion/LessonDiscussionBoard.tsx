@@ -26,6 +26,7 @@ type Props = {
 
 export default function LessonDiscussionBoard({ lessonId, canModerate = false, title = 'Lesson Discussion' }: Props) {
   const [loading, setLoading] = useState(true);
+  const [discussionDisabled, setDiscussionDisabled] = useState(false);
   const [questions, setQuestions] = useState<QuestionRow[]>([]);
   const [activeQuestionId, setActiveQuestionId] = useState<string>('');
   const [answers, setAnswers] = useState<any[]>([]);
@@ -45,6 +46,15 @@ export default function LessonDiscussionBoard({ lessonId, canModerate = false, t
     try {
       setLoading(!append);
       const json = await listLessonQuestions(lessonId, { q, sort, cursor: append ? cursor || undefined : undefined, limit: 20 });
+      const disabled = Boolean(json?.disabled);
+      setDiscussionDisabled(disabled);
+      if (disabled) {
+        setQuestions([]);
+        setHasMore(false);
+        setCursor(null);
+        if (!append) setActiveQuestionId('');
+        return;
+      }
       const incoming = Array.isArray(json?.questions) ? json.questions : [];
       setQuestions((prev) => (append ? [...prev, ...incoming] : incoming));
       setHasMore(Boolean(json?.hasMore));
@@ -88,6 +98,7 @@ export default function LessonDiscussionBoard({ lessonId, canModerate = false, t
   }, [activeQuestionId]);
 
   useEffect(() => {
+    if (discussionDisabled) return;
     const channel = supabase
       .channel(`lesson-discussions-${lessonId}`)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'lesson_discussion_questions', filter: `lesson_id=eq.${lessonId}` }, () => {
@@ -97,7 +108,7 @@ export default function LessonDiscussionBoard({ lessonId, canModerate = false, t
     return () => {
       void supabase.removeChannel(channel);
     };
-  }, [lessonId, q, sort]);
+  }, [lessonId, q, sort, discussionDisabled]);
 
   const activeQuestion = useMemo(() => questions.find((row) => String(row.id) === activeQuestionId) || null, [questions, activeQuestionId]);
 
@@ -185,7 +196,11 @@ export default function LessonDiscussionBoard({ lessonId, canModerate = false, t
             </button>
           </div>
 
-          {!activeQuestion ? (
+          {discussionDisabled ? (
+            <div className="rounded-2xl border border-dashed border-amber-300 bg-amber-50 p-8 text-sm text-amber-700 text-center">
+              Lesson discussion is not configured yet on this database. Please run the SQL setup script in Supabase.
+            </div>
+          ) : !activeQuestion ? (
             <div className="rounded-2xl border border-dashed border-slate-300 p-8 text-sm text-slate-500 text-center">Select a question to view replies.</div>
           ) : (
             <div className="space-y-3">

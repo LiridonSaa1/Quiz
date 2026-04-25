@@ -1,6 +1,30 @@
--- Lesson-only discussion system (questions, answers, replies, reactions, moderation, reputation)
+-- Minimal, focused setup for lesson discussions.
+-- Run this file in Supabase SQL Editor when full bootstrap script fails early.
 
-create extension if not exists pgcrypto;
+create extension if not exists "pgcrypto";
+
+do $$
+begin
+  if to_regclass('public.profiles') is null then
+    raise exception 'Missing required table: public.profiles';
+  end if;
+end $$;
+
+create table if not exists public.lessons (
+  id uuid primary key default gen_random_uuid(),
+  title text not null default '',
+  short_description text null,
+  course_id uuid null,
+  module_id uuid null,
+  type text not null default 'video',
+  duration_minutes integer not null default 0,
+  status text not null default 'published',
+  is_free_preview boolean not null default false,
+  slug text null,
+  "order" integer not null default 1,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
 
 create table if not exists public.lesson_discussion_questions (
   id uuid primary key default gen_random_uuid(),
@@ -55,7 +79,7 @@ create table if not exists public.lesson_discussion_reactions (
   target_id uuid not null,
   reaction_type text not null check (reaction_type in ('like', 'helpful')),
   created_at timestamptz not null default now(),
-  unique(user_id, target_type, target_id, reaction_type)
+  unique (user_id, target_type, target_id, reaction_type)
 );
 
 create table if not exists public.lesson_discussion_reports (
@@ -117,9 +141,6 @@ create index if not exists idx_lda_question on public.lesson_discussion_answers 
 create index if not exists idx_ldr_answer on public.lesson_discussion_replies (answer_id, created_at asc);
 create index if not exists idx_reports_status on public.lesson_discussion_reports (status, created_at desc);
 
-alter table public.lesson_discussion_questions
-  add column if not exists best_answer_id uuid null;
-
 do $$
 begin
   if not exists (
@@ -141,3 +162,7 @@ values
   ('helpful_contributor', 'Helpful Contributor', 'Received helpful reactions', 10),
   ('mentor', 'Mentor', 'Got multiple best answers', 5)
 on conflict (key) do nothing;
+
+notify pgrst, 'reload schema';
+
+select to_regclass('public.lesson_discussion_questions') as discussion_table;

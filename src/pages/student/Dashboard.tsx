@@ -8,6 +8,8 @@ import { Quiz } from '../../types';
 import { cn } from '../../lib/utils';
 import { fetchAttemptRowsByStudentId, normalizeAttempts } from '../../lib/quizAttempts';
 import { selectPublishedQuizzesCompat } from '../../lib/quizzesCompat';
+import { AreaChart, Area, XAxis, YAxis, CartesianGrid, ResponsiveContainer, Tooltip } from 'recharts';
+import { format, subDays } from 'date-fns';
 
 interface LiveSessionBanner {
   id: string;
@@ -65,6 +67,9 @@ export default function StudentDashboard() {
           total_points: a.total_points,
           score_percent: a.score_percent,
           completed_at: a.completed_at,
+          created_at: a.created_at,
+          started_at: a.started_at,
+          status: a.status,
         }));
         setRecentAttempts(attempts);
 
@@ -93,6 +98,36 @@ export default function StudentDashboard() {
       ? Math.round(recentAttempts.reduce((acc, curr) => acc + curr.score_percent, 0) / recentAttempts.length)
       : 0
   };
+
+  const getAttemptPercent = (attempt: any) => {
+    const scorePercent = Number(attempt?.score_percent);
+    if (Number.isFinite(scorePercent) && scorePercent >= 0) {
+      return Math.max(0, Math.min(100, Math.round(scorePercent)));
+    }
+    const total = Number(attempt?.total_points || 0);
+    const score = Number(attempt?.score || 0);
+    if (total > 0) return Math.max(0, Math.min(100, Math.round((score / total) * 100)));
+    if (score >= 0 && score <= 1) return Math.max(0, Math.min(100, Math.round(score * 100)));
+    return Math.max(0, Math.min(100, Math.round(score)));
+  };
+
+  const completedAttempts = recentAttempts.filter((a) => {
+    const status = String(a?.status || '').toLowerCase();
+    return status === 'completed' || Boolean(a?.completed_at || a?.created_at);
+  });
+
+  const dashboardTrend = Array.from({ length: 7 }, (_, i) => {
+    const day = subDays(new Date(), 6 - i);
+    const dayStr = format(day, 'yyyy-MM-dd');
+    const dayAttempts = completedAttempts.filter((a) => {
+      const key = String(a?.completed_at || a?.created_at || a?.started_at || '').slice(0, 10);
+      return key === dayStr;
+    });
+    const avg = dayAttempts.length > 0
+      ? Math.round(dayAttempts.reduce((sum, a) => sum + getAttemptPercent(a), 0) / dayAttempts.length)
+      : null;
+    return { day: format(day, 'EEE'), score: avg };
+  });
 
   const statCards = [
     { label: 'Enrolled Courses', value: stats.courses, icon: BookOpen, gradient: 'from-indigo-500 to-violet-500', light: 'bg-indigo-50', text: 'text-indigo-600' },
@@ -159,6 +194,33 @@ export default function StudentDashboard() {
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          <div className="lg:col-span-3 bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
+            <div className="h-1 bg-gradient-to-r from-indigo-500 to-violet-500" />
+            <div className="p-5">
+              <div className="flex items-center justify-between mb-4">
+                <h2 className="text-base font-bold text-slate-900">Score Trend (Last 7 Days)</h2>
+                <Link to="/student/progress" className="text-xs font-semibold text-emerald-600 hover:text-emerald-700 flex items-center gap-1">
+                  Open full analytics <ArrowRight className="w-3.5 h-3.5" />
+                </Link>
+              </div>
+              <ResponsiveContainer width="100%" height={180}>
+                <AreaChart data={dashboardTrend}>
+                  <defs>
+                    <linearGradient id="dashboardTrendGrad" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="5%" stopColor="#6366f1" stopOpacity={0.25} />
+                      <stop offset="95%" stopColor="#6366f1" stopOpacity={0} />
+                    </linearGradient>
+                  </defs>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
+                  <XAxis dataKey="day" tick={{ fontSize: 10, fill: '#94a3b8' }} tickLine={false} axisLine={false} />
+                  <YAxis domain={[0, 100]} tick={{ fontSize: 10, fill: '#94a3b8' }} tickLine={false} axisLine={false} tickFormatter={(v) => `${v}%`} />
+                  <Tooltip formatter={(v: any) => [`${v ?? '—'}%`, 'Avg score']} contentStyle={{ borderRadius: 10, border: '1px solid #e2e8f0', fontSize: 12 }} />
+                  <Area type="monotone" dataKey="score" stroke="#6366f1" strokeWidth={2} fill="url(#dashboardTrendGrad)" connectNulls />
+                </AreaChart>
+              </ResponsiveContainer>
+            </div>
+          </div>
+
           {/* Available Quizzes */}
           <div className="lg:col-span-2 space-y-4">
             <div className="flex items-center justify-between">

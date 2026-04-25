@@ -8,6 +8,102 @@ import { createClient } from '@supabase/supabase-js';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
+const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN?.trim() || "";
+const TELEGRAM_CHAT_ID = process.env.TELEGRAM_CHAT_ID?.trim() || "";
+const TELEGRAM_ALERT_FIX_URL = process.env.TELEGRAM_ALERT_FIX_URL?.trim() || "";
+const TELEGRAM_ALERT_COOLDOWN_MS = Math.max(
+  Number(process.env.TELEGRAM_ALERT_COOLDOWN_MS || 120000),
+  10000,
+);
+const ERROR_ALERTS_ENABLED = Boolean(TELEGRAM_BOT_TOKEN && TELEGRAM_CHAT_ID);
+const recentErrorAlerts = new Map<string, number>();
+
+function escapeTelegramText(value: string): string {
+  return value.replace(/[_*[\]()~`>#+\-=|{}.!]/g, "\\$&");
+}
+
+function stableHash(input: string): string {
+  let hash = 2166136261;
+  for (let i = 0; i < input.length; i++) {
+    hash ^= input.charCodeAt(i);
+    hash +=
+      (hash << 1) + (hash << 4) + (hash << 7) + (hash << 8) + (hash << 24);
+  }
+  return (hash >>> 0).toString(16);
+}
+
+function serializeUnknownError(error: unknown): string {
+  if (error instanceof Error) {
+    return `${error.name}: ${error.message}\n${error.stack || ""}`.trim();
+  }
+  if (typeof error === "string") return error;
+  try {
+    return JSON.stringify(error);
+  } catch {
+    return String(error);
+  }
+}
+
+async function sendTelegramErrorAlert(params: {
+  title: string;
+  summary: string;
+  fingerprintSource: string;
+  details?: string;
+  fixUrl?: string;
+}) {
+  if (!ERROR_ALERTS_ENABLED) return;
+
+  const fingerprint = stableHash(params.fingerprintSource);
+  const now = Date.now();
+  const lastSentAt = recentErrorAlerts.get(fingerprint) || 0;
+  if (now - lastSentAt < TELEGRAM_ALERT_COOLDOWN_MS) return;
+  recentErrorAlerts.set(fingerprint, now);
+
+  const escapedTitle = escapeTelegramText(params.title);
+  const escapedSummary = escapeTelegramText(params.summary);
+  const escapedDetails = params.details
+    ? `\n\n${escapeTelegramText(params.details.slice(0, 1200))}`
+    : "";
+  const body =
+    `🚨 *${escapedTitle}*\n` +
+    `${escapedSummary}\n` +
+    `fingerprint: \`${escapeTelegramText(fingerprint)}\`${escapedDetails}`;
+
+  const buttonUrlBase = params.fixUrl || TELEGRAM_ALERT_FIX_URL;
+  const buttonUrl = buttonUrlBase
+    ? `${buttonUrlBase}${buttonUrlBase.includes("?") ? "&" : "?"}fingerprint=${encodeURIComponent(fingerprint)}`
+    : "";
+
+  try {
+    const response = await fetch(
+      `https://api.telegram.org/bot${encodeURIComponent(TELEGRAM_BOT_TOKEN)}/sendMessage`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          chat_id: TELEGRAM_CHAT_ID,
+          text: body,
+          parse_mode: "MarkdownV2",
+          disable_web_page_preview: true,
+          ...(buttonUrl
+            ? {
+                reply_markup: {
+                  inline_keyboard: [[{ text: "Fix now", url: buttonUrl }]],
+                },
+              }
+            : {}),
+        }),
+      },
+    );
+    if (!response.ok) {
+      const responseText = await response.text();
+      console.warn("[alerts] Telegram send failed:", response.status, responseText);
+    }
+  } catch (error) {
+    console.warn("[alerts] Telegram request failed:", error);
+  }
+}
+
 let supabaseAdminInstance: any = null;
 
 const getSupabaseAdmin = () => {
@@ -105,6 +201,25 @@ export async function createApp(options: CreateAppOptions = {}) {
   const app = express();
 
   app.use(express.json());
+  app.use((req: Request, res: Response, next) => {
+    const startedAt = Date.now();
+    const requestId = stableHash(
+      `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}-${req.method}-${req.path}`,
+    );
+
+    res.setHeader("X-Request-Id", requestId);
+    res.on("finish", () => {
+      if (res.statusCode < 500 || !req.path.startsWith("/api")) return;
+      const durationMs = Date.now() - startedAt;
+      void sendTelegramErrorAlert({
+        title: "API 5xx Error",
+        summary: `${req.method} ${req.path} -> ${res.statusCode} in ${durationMs}ms`,
+        fingerprintSource: `${req.method}:${req.path}:${res.statusCode}`,
+        details: `request_id=${requestId}`,
+      });
+    });
+    next();
+  });
 
   // Allow SPA + API on different origins (Authorization header + preflight).
   app.use((req: Request, res: Response, next) => {
@@ -2099,6 +2214,32 @@ export async function createApp(options: CreateAppOptions = {}) {
     );
   };
 
+  /** PostgREST schema cache not yet refreshed after ALTER TABLE (common right after migrations). */
+  const getStaleLessonContentsColumn = (error: any): string | null => {
+    if (error?.code !== 'PGRST204') return null;
+    const msg = `${error?.message || ''} ${error?.details || ''}`;
+    if (!/schema cache/i.test(msg) || !/lesson_contents/i.test(msg)) return null;
+    const m = msg.match(/Could not find the '([^']+)' column of 'lesson_contents'/i);
+    return m?.[1] ? String(m[1]) : null;
+  };
+
+  const fetchLessonContentsWithFallbackOrder = async (lessonId: string) => {
+    let contentsRes = await supabaseAdmin
+      .from('lesson_contents')
+      .select('*')
+      .eq('lesson_id', lessonId)
+      .order('position', { ascending: true });
+    const staleColumn = contentsRes.error ? getStaleLessonContentsColumn(contentsRes.error) : null;
+    if (staleColumn === 'position') {
+      contentsRes = await supabaseAdmin
+        .from('lesson_contents')
+        .select('*')
+        .eq('lesson_id', lessonId)
+        .order('created_at', { ascending: true });
+    }
+    return contentsRes;
+  };
+
   const isLessonProgressTableMissing = (error: any) => {
     const hay = `${error?.message || ''} ${error?.details || ''} ${error?.hint || ''}`.toLowerCase();
     return (
@@ -2235,11 +2376,7 @@ export async function createApp(options: CreateAppOptions = {}) {
       const gate = await assertTeacherOwnsCourse(userId, String((lesson as any).course_id || ''));
       if (!gate.ok) return res.status(403).json({ error: 'Forbidden: no access to this lesson' });
 
-      const contentsRes = await supabaseAdmin
-        .from('lesson_contents')
-        .select('*')
-        .eq('lesson_id', lessonId)
-        .order('position', { ascending: true });
+      const contentsRes = await fetchLessonContentsWithFallbackOrder(lessonId);
       if (contentsRes.error) {
         if (isLessonContentsTableMissing(contentsRes.error)) {
           return res.json({ success: true, contents: [], storage: 'table_missing' });
@@ -2284,7 +2421,15 @@ export async function createApp(options: CreateAppOptions = {}) {
         updated_at: new Date().toISOString(),
       };
 
-      const ins = await supabaseAdmin.from('lesson_contents').insert(payload).select('*').single();
+      let insPayload = { ...payload };
+      let ins = await supabaseAdmin.from('lesson_contents').insert(insPayload).select('*').single();
+      for (let attempts = 0; ins.error && attempts < 4; attempts += 1) {
+        const staleColumn = getStaleLessonContentsColumn(ins.error);
+        if (!staleColumn || !Object.prototype.hasOwnProperty.call(insPayload, staleColumn)) break;
+        const { [staleColumn]: _omit, ...nextPayload } = insPayload;
+        insPayload = nextPayload;
+        ins = await supabaseAdmin.from('lesson_contents').insert(insPayload).select('*').single();
+      }
       if (ins.error) {
         if (isLessonContentsTableMissing(ins.error)) {
           return res.status(501).json({ error: 'lesson_contents table is not available in this database yet.' });
@@ -2327,13 +2472,27 @@ export async function createApp(options: CreateAppOptions = {}) {
       if (req.body?.duration_seconds !== undefined) updates.duration_seconds = Number.isFinite(Number(req.body.duration_seconds)) ? Math.max(0, Number(req.body.duration_seconds)) : null;
       if (req.body?.position !== undefined) updates.position = Number.isFinite(Number(req.body.position)) ? Math.max(1, Number(req.body.position)) : 1;
 
-      const upd = await supabaseAdmin
+      let updPayload = { ...updates };
+      let upd = await supabaseAdmin
         .from('lesson_contents')
-        .update(updates)
+        .update(updPayload)
         .eq('id', contentId)
         .eq('lesson_id', lessonId)
         .select('*')
         .single();
+      for (let attempts = 0; upd.error && attempts < 4; attempts += 1) {
+        const staleColumn = getStaleLessonContentsColumn(upd.error);
+        if (!staleColumn || !Object.prototype.hasOwnProperty.call(updPayload, staleColumn)) break;
+        const { [staleColumn]: _omit, ...nextPayload } = updPayload;
+        updPayload = nextPayload;
+        upd = await supabaseAdmin
+          .from('lesson_contents')
+          .update(updPayload)
+          .eq('id', contentId)
+          .eq('lesson_id', lessonId)
+          .select('*')
+          .single();
+      }
       if (upd.error) {
         if (isLessonContentsTableMissing(upd.error)) {
           return res.status(501).json({ error: 'lesson_contents table is not available in this database yet.' });
@@ -5291,11 +5450,7 @@ export async function createApp(options: CreateAppOptions = {}) {
         .select('id,title')
         .eq('id', (lesson as any).module_id)
         .maybeSingle();
-      const contentsRes = await supabaseAdmin
-        .from('lesson_contents')
-        .select('*')
-        .eq('lesson_id', lessonId)
-        .order('position', { ascending: true });
+      const contentsRes = await fetchLessonContentsWithFallbackOrder(lessonId);
       if (contentsRes.error && !isLessonContentsTableMissing(contentsRes.error)) throw contentsRes.error;
 
       const progressRes = await fetchLessonProgressSingle(caller.userId, lessonId);
@@ -5736,6 +5891,14 @@ export async function createApp(options: CreateAppOptions = {}) {
     return { col: 'created_at', asc: false };
   };
 
+  const missingLessonDiscussionTable = (error: any) => {
+    const hay = `${error?.message || ''} ${error?.details || ''} ${error?.hint || ''}`.toLowerCase();
+    if (!hay.includes('lesson_discussion_questions')) return false;
+    return /schema cache|could not find|does not exist|42p01|relation/i.test(hay);
+  };
+  const discussionSetupError =
+    'Lesson discussion tables are not installed yet. Run sql/run_in_supabase_editor.sql in Supabase SQL Editor.';
+
   app.get('/api/student/community', async (_req, res) => {
     res.json({ success: true, posts: [], deprecated: true, message: 'Use lesson discussion endpoints.' });
   });
@@ -5771,6 +5934,9 @@ export async function createApp(options: CreateAppOptions = {}) {
       const nextCursor = hasMore ? String(pageRows[pageRows.length - 1]?.[order.col] || '') : null;
       res.json({ success: true, questions: pageRows, hasMore, nextCursor });
     } catch (e: any) {
+      if (missingLessonDiscussionTable(e)) {
+        return res.json({ success: true, questions: [], hasMore: false, nextCursor: null, disabled: true });
+      }
       res.status(500).json({ error: e.message || 'Failed to load lesson discussions' });
     }
   });
@@ -5801,6 +5967,9 @@ export async function createApp(options: CreateAppOptions = {}) {
       if (error) throw error;
       res.json({ success: true, question: data });
     } catch (e: any) {
+      if (missingLessonDiscussionTable(e)) {
+        return res.status(503).json({ error: 'Lesson discussion tables are not installed yet. Run sql/run_in_supabase_editor.sql in Supabase SQL Editor.' });
+      }
       res.status(500).json({ error: e.message || 'Failed to create question' });
     }
   });
@@ -5823,6 +5992,9 @@ export async function createApp(options: CreateAppOptions = {}) {
       if (rErr) throw rErr;
       res.json({ success: true, question, answers: answers || [], replies: replies || [] });
     } catch (e: any) {
+      if (missingLessonDiscussionTable(e)) {
+        return res.json({ success: true, question: null, answers: [], replies: [], disabled: true });
+      }
       res.status(500).json({ error: e.message || 'Failed to load thread' });
     }
   });
@@ -5845,6 +6017,9 @@ export async function createApp(options: CreateAppOptions = {}) {
       if (error) throw error;
       res.json({ success: true, question: data });
     } catch (e: any) {
+      if (missingLessonDiscussionTable(e)) {
+        return res.status(503).json({ error: discussionSetupError });
+      }
       res.status(500).json({ error: e.message || 'Failed to update question' });
     }
   });
@@ -5864,6 +6039,9 @@ export async function createApp(options: CreateAppOptions = {}) {
       if (error) throw error;
       res.json({ success: true });
     } catch (e: any) {
+      if (missingLessonDiscussionTable(e)) {
+        return res.status(503).json({ error: discussionSetupError });
+      }
       res.status(500).json({ error: e.message || 'Failed to delete question' });
     }
   });
@@ -5903,6 +6081,9 @@ export async function createApp(options: CreateAppOptions = {}) {
       await awardDiscussionBadges(caller.userId);
       res.json({ success: true, answer: data });
     } catch (e: any) {
+      if (missingLessonDiscussionTable(e)) {
+        return res.status(503).json({ error: discussionSetupError });
+      }
       res.status(500).json({ error: e.message || 'Failed to add answer' });
     }
   });
@@ -5972,6 +6153,9 @@ export async function createApp(options: CreateAppOptions = {}) {
       }
       res.json({ success: true, question: data });
     } catch (e: any) {
+      if (missingLessonDiscussionTable(e)) {
+        return res.status(503).json({ error: discussionSetupError });
+      }
       res.status(500).json({ error: e.message || 'Failed to mark best answer' });
     }
   });
@@ -5987,6 +6171,9 @@ export async function createApp(options: CreateAppOptions = {}) {
       if (error) throw error;
       res.json({ success: true, question: data });
     } catch (e: any) {
+      if (missingLessonDiscussionTable(e)) {
+        return res.status(503).json({ error: discussionSetupError });
+      }
       res.status(500).json({ error: e.message || 'Failed to pin question' });
     }
   });
@@ -6100,6 +6287,9 @@ export async function createApp(options: CreateAppOptions = {}) {
       });
       res.json({ success: true });
     } catch (e: any) {
+      if (missingLessonDiscussionTable(e)) {
+        return res.status(503).json({ error: discussionSetupError });
+      }
       res.status(500).json({ error: e.message || 'Failed to moderate content' });
     }
   });
@@ -6522,6 +6712,30 @@ async function startServer() {
   throw new Error(
     `Unable to start server after trying ports ${preferredPort}-${preferredPort + maxPortAttempts - 1}. Last error: ${lastRecoverableError?.code ?? "unknown"}`,
   );
+}
+
+if (!process.env.VERCEL) {
+  process.on("unhandledRejection", (reason) => {
+    const details = serializeUnknownError(reason);
+    console.error("[runtime] unhandledRejection:", details);
+    void sendTelegramErrorAlert({
+      title: "Unhandled Promise Rejection",
+      summary: "Server observed an unhandled async error.",
+      fingerprintSource: `unhandledRejection:${details.slice(0, 300)}`,
+      details,
+    });
+  });
+
+  process.on("uncaughtException", (error) => {
+    const details = serializeUnknownError(error);
+    console.error("[runtime] uncaughtException:", details);
+    void sendTelegramErrorAlert({
+      title: "Uncaught Exception",
+      summary: "Server crashed on a non-caught exception.",
+      fingerprintSource: `uncaughtException:${details.slice(0, 300)}`,
+      details,
+    });
+  });
 }
 
 if (!process.env.VERCEL) {

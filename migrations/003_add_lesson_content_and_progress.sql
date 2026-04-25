@@ -1,4 +1,22 @@
 -- Lesson content and progress foundation tables
+create extension if not exists pgcrypto;
+
+create table if not exists public.lessons (
+  id uuid primary key default gen_random_uuid(),
+  title text not null default '',
+  short_description text null,
+  course_id uuid null,
+  module_id uuid null,
+  type text not null default 'video',
+  duration_minutes integer not null default 0,
+  status text not null default 'published',
+  is_free_preview boolean not null default false,
+  slug text null,
+  "order" integer not null default 1,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
 create table if not exists public.lesson_contents (
   id uuid primary key default gen_random_uuid(),
   lesson_id uuid not null references public.lessons(id) on delete cascade,

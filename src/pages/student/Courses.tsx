@@ -26,9 +26,33 @@ interface CourseData {
   teacher_name: string;
   quizCount: number;
   attemptedQuizzes: number;
+  totalLessonsProgress: number;
+  completedLessonsProgress: number;
   status: string;
   isEnrolled: boolean;
 }
+
+const getCourseProgressPct = (course: CourseData) => {
+  if (course.totalLessonsProgress > 0) {
+    return Math.round((course.completedLessonsProgress / course.totalLessonsProgress) * 100);
+  }
+  if (course.quizCount > 0) {
+    return Math.round((course.attemptedQuizzes / course.quizCount) * 100);
+  }
+  return 0;
+};
+
+const readLocalCompletedLessonIds = (studentId: string, courseId: string): string[] => {
+  try {
+    const raw = localStorage.getItem(`course_progress:${studentId}:${courseId}`);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw) as { completedLessonIds?: unknown };
+    if (!Array.isArray(parsed?.completedLessonIds)) return [];
+    return parsed.completedLessonIds.map((id) => String(id)).filter(Boolean);
+  } catch {
+    return [];
+  }
+};
 
 type FilterTab = 'all' | 'inprogress' | 'completed' | 'notstarted';
 
@@ -86,9 +110,12 @@ function CourseCard({
   key?: React.Key;
 }) {
   const meta = getMeta(course.level, index);
-  const pct = course.quizCount > 0
-    ? Math.round((course.attemptedQuizzes / course.quizCount) * 100)
-    : 0;
+  const hasLessonProgress = course.totalLessonsProgress > 0;
+  const pct = hasLessonProgress
+    ? Math.round((course.completedLessonsProgress / course.totalLessonsProgress) * 100)
+    : course.quizCount > 0
+      ? Math.round((course.attemptedQuizzes / course.quizCount) * 100)
+      : 0;
   const isCompleted = pct === 100;
   const isStarted = pct > 0;
   const initials = course.teacher_name
@@ -186,8 +213,14 @@ function CourseCard({
         {/* Progress bar */}
         <div className="mb-4">
           <div className="flex items-center justify-between mb-1">
-            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wide">Quiz Progress</span>
-            <span className="text-[10px] font-bold text-slate-500">{course.attemptedQuizzes}/{course.quizCount}</span>
+            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wide">
+              {hasLessonProgress ? 'Lesson Progress' : 'Quiz Progress'}
+            </span>
+            <span className="text-[10px] font-bold text-slate-500">
+              {hasLessonProgress
+                ? `${course.completedLessonsProgress}/${course.totalLessonsProgress}`
+                : `${course.attemptedQuizzes}/${course.quizCount}`}
+            </span>
           </div>
           <div className="h-1.5 bg-slate-100 rounded-full overflow-hidden">
             <div
@@ -324,7 +357,17 @@ export default function StudentCourses() {
         if (mid && cid) moduleToCourse[mid] = cid;
       });
 
-      const lessonsByCourse = lessonsByCourseSnap.data || [];
+      const moduleIds = modules
+        .map((m: any) => String(m?.id || ''))
+        .filter(Boolean);
+      const lessonsByModuleSnap = moduleIds.length > 0
+        ? await supabase.from('lessons').select('id, course_id, module_id').in('module_id', moduleIds)
+        : { data: [] as any[] };
+
+      const lessonsByCourse = [
+        ...(lessonsByCourseSnap.data || []),
+        ...(lessonsByModuleSnap.data || []),
+      ];
       const lessonsCountByCourse: Record<string, number> = {};
       const lessonIdsByCourse: Record<string, string[]> = {};
       (lessonsByCourse || []).forEach((l: any) => {
@@ -332,15 +375,24 @@ export default function StudentCourses() {
         const directCourseId = String(l?.course_id || '');
         const mappedCourseId = directCourseId || moduleToCourse[String(l?.module_id || '')] || '';
         if (!lid || !mappedCourseId) return;
-        lessonsCountByCourse[mappedCourseId] = (lessonsCountByCourse[mappedCourseId] || 0) + 1;
         if (!lessonIdsByCourse[mappedCourseId]) lessonIdsByCourse[mappedCourseId] = [];
-        lessonIdsByCourse[mappedCourseId].push(lid);
+        if (!lessonIdsByCourse[mappedCourseId].includes(lid)) {
+          lessonIdsByCourse[mappedCourseId].push(lid);
+          lessonsCountByCourse[mappedCourseId] = (lessonsCountByCourse[mappedCourseId] || 0) + 1;
+        }
       });
 
       const quizRowsByCourse = await selectPublishedQuizzesCompat(supabase, courseIds, 'id, course_id, lesson_id');
       const allLessonIds = Object.values(lessonIdsByCourse).flat();
       const quizRowsByLesson = allLessonIds.length > 0
         ? await supabase.from('quizzes').select('id, lesson_id').in('lesson_id', allLessonIds)
+        : { data: [] as any[] };
+      const lessonProgressRows = allLessonIds.length > 0
+        ? await supabase
+            .from('lesson_progress')
+            .select('lesson_id, completed, progress_percent, status')
+            .eq('student_id', uid)
+            .in('lesson_id', allLessonIds)
         : { data: [] as any[] };
 
       const quizzesByCourse: Record<string, string[]> = {};
@@ -362,12 +414,32 @@ export default function StudentCourses() {
       });
 
       const attemptedQuizIds = new Set((attemptsSnap || []).map((a: any) => a.quiz_id));
+      const completedLessonIds = new Set<string>();
+      if (!lessonProgressRows.error) {
+        (lessonProgressRows.data || []).forEach((row: any) => {
+          const lid = String(row?.lesson_id || '');
+          if (!lid) return;
+          const progressPercent = Number(row?.progress_percent);
+          const status = String(row?.status || '').toLowerCase();
+          const done = Boolean(row?.completed) || status === 'completed' || (Number.isFinite(progressPercent) && progressPercent >= 100);
+          if (done) completedLessonIds.add(lid);
+        });
+      }
       const teacherMap: Record<string, string> = {};
       (teachersSnap.data || []).forEach((t: any) => { teacherMap[t.id] = t.display_name || 'Unknown'; });
 
       const mapped: CourseData[] = rawCourses.map((c: any) => {
         const cQuizzes = quizzesByCourse[c.id] || [];
         const attempted = cQuizzes.filter(qid => attemptedQuizIds.has(qid)).length;
+        const cLessonIds = lessonIdsByCourse[c.id] || [];
+        const localCompletedLessonIds = readLocalCompletedLessonIds(uid, String(c.id));
+        const totalLessonsForProgress = cLessonIds.length > 0
+          ? cLessonIds.length
+          : Number(contentCounts[c.id]?.lessons ?? lessonsCountByCourse[c.id] ?? c.total_lessons ?? 0);
+        const completedFromDb = cLessonIds.filter((lid) => completedLessonIds.has(lid)).length;
+        const completedLessons = completedFromDb > 0
+          ? completedFromDb
+          : Math.min(localCompletedLessonIds.length, Math.max(0, totalLessonsForProgress));
         const courseStudentIds = Array.isArray(c.student_ids) ? c.student_ids.map((sid: unknown) => String(sid)) : [];
         return {
           id: c.id,
@@ -381,6 +453,8 @@ export default function StudentCourses() {
           teacher_name: teacherMap[c.teacher_id] || 'Your Teacher',
           quizCount: contentCounts[c.id]?.quizzes ?? cQuizzes.length,
           attemptedQuizzes: attempted,
+          totalLessonsProgress: Math.max(0, totalLessonsForProgress),
+          completedLessonsProgress: completedLessons,
           status: c.status || 'published',
           isEnrolled: courseStudentIds.includes(uid),
         };
@@ -438,21 +512,27 @@ export default function StudentCourses() {
       const q = search.toLowerCase();
       list = list.filter(c => c.title.toLowerCase().includes(q) || c.description.toLowerCase().includes(q));
     }
-    if (filterTab === 'inprogress') list = list.filter(c => c.attemptedQuizzes > 0 && c.attemptedQuizzes < c.quizCount);
-    if (filterTab === 'completed')  list = list.filter(c => c.quizCount > 0 && c.attemptedQuizzes === c.quizCount);
-    if (filterTab === 'notstarted') list = list.filter(c => c.attemptedQuizzes === 0);
+    if (filterTab === 'inprogress') list = list.filter(c => {
+      const pct = getCourseProgressPct(c);
+      return pct > 0 && pct < 100;
+    });
+    if (filterTab === 'completed')  list = list.filter(c => getCourseProgressPct(c) === 100);
+    if (filterTab === 'notstarted') list = list.filter(c => getCourseProgressPct(c) === 0);
     return list;
   }, [courses, search, filterTab]);
 
   const counts = useMemo(() => ({
     all: courses.length,
-    inprogress: courses.filter(c => c.attemptedQuizzes > 0 && c.attemptedQuizzes < c.quizCount).length,
-    completed:  courses.filter(c => c.quizCount > 0 && c.attemptedQuizzes === c.quizCount).length,
-    notstarted: courses.filter(c => c.attemptedQuizzes === 0).length,
+    inprogress: courses.filter(c => {
+      const pct = getCourseProgressPct(c);
+      return pct > 0 && pct < 100;
+    }).length,
+    completed:  courses.filter(c => getCourseProgressPct(c) === 100).length,
+    notstarted: courses.filter(c => getCourseProgressPct(c) === 0).length,
   }), [courses]);
 
   const totalPct = courses.length > 0
-    ? Math.round(courses.reduce((a, c) => a + (c.quizCount > 0 ? (c.attemptedQuizzes / c.quizCount) * 100 : 0), 0) / courses.length)
+    ? Math.round(courses.reduce((a, c) => a + getCourseProgressPct(c), 0) / courses.length)
     : 0;
 
   const TABS: { id: FilterTab; label: string; icon: React.ElementType }[] = [

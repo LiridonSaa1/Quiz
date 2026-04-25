@@ -20,6 +20,8 @@ interface CourseProgress {
   level: string;
   quizCount: number;
   attemptedQuizzes: number;
+  totalLessonsProgress: number;
+  completedLessonsProgress: number;
   teacher_name: string;
   gradient: string;
   icon: string;
@@ -105,9 +107,32 @@ function FloatingOrb({ className }: { className?: string }) {
   );
 }
 
+function getCourseProgressPct(course: CourseProgress) {
+  if (course.totalLessonsProgress > 0) {
+    return Math.round((course.completedLessonsProgress / course.totalLessonsProgress) * 100);
+  }
+  if (course.quizCount > 0) {
+    return Math.round((course.attemptedQuizzes / course.quizCount) * 100);
+  }
+  return 0;
+}
+
+function readLocalCompletedLessonIds(studentId: string, courseId: string): string[] {
+  try {
+    const raw = localStorage.getItem(`course_progress:${studentId}:${courseId}`);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw) as { completedLessonIds?: unknown };
+    if (!Array.isArray(parsed?.completedLessonIds)) return [];
+    return parsed.completedLessonIds.map((id) => String(id)).filter(Boolean);
+  } catch {
+    return [];
+  }
+}
+
 function CourseCard({ course, index }: { course: CourseProgress; index: number }) {
   const meta = getMeta(course.level, index);
-  const pct = course.quizCount > 0 ? Math.round((course.attemptedQuizzes / course.quizCount) * 100) : 0;
+  const hasLessonProgress = course.totalLessonsProgress > 0;
+  const pct = getCourseProgressPct(course);
   const isCompleted = pct === 100;
   const isStarted = pct > 0 && !isCompleted;
 
@@ -182,8 +207,14 @@ function CourseCard({ course, index }: { course: CourseProgress; index: number }
         {/* Progress bar */}
         <div className="mb-4">
           <div className="flex justify-between mb-1.5">
-            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wide">Quiz Progress</span>
-            <span className="text-[10px] font-bold text-slate-500">{course.attemptedQuizzes}/{course.quizCount}</span>
+            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wide">
+              {hasLessonProgress ? 'Lesson Progress' : 'Quiz Progress'}
+            </span>
+            <span className="text-[10px] font-bold text-slate-500">
+              {hasLessonProgress
+                ? `${course.completedLessonsProgress}/${course.totalLessonsProgress}`
+                : `${course.attemptedQuizzes}/${course.quizCount}`}
+            </span>
           </div>
           <div className="h-1.5 bg-slate-100 rounded-full overflow-hidden">
             <motion.div
@@ -255,12 +286,17 @@ export default function ContinueLearning() {
 
       const courseIds = enrolledOnly.map((c: any) => c.id);
       const teacherIds = [...new Set(enrolledOnly.map((c: any) => c.teacher_id).filter(Boolean))] as string[];
+      const countsRes = await authFetch(`/api/student/courses/content-counts?courseIds=${encodeURIComponent(courseIds.join(','))}`);
+      const countsJson = countsRes.ok ? await countsRes.json() : { counts: {} };
+      const contentCounts: Record<string, { lessons?: number; quizzes?: number }> = countsJson?.counts || {};
 
-      const [quizRows, teachersSnap] = await Promise.all([
+      const [quizRows, teachersSnap, modulesSnap, lessonsByCourseSnap] = await Promise.all([
         selectPublishedQuizzesCompat(supabase, courseIds, 'id, course_id'),
         teacherIds.length > 0
           ? supabase.from('profiles').select('id, display_name').in('id', teacherIds)
           : Promise.resolve({ data: [] }),
+        supabase.from('modules').select('id, course_id').in('course_id', courseIds),
+        supabase.from('lessons').select('id, course_id, module_id').in('course_id', courseIds),
       ]);
 
       const quizzesByCourse: Record<string, string[]> = {};
@@ -270,11 +306,62 @@ export default function ContinueLearning() {
       });
 
       const attemptedSet = new Set(attemptsData.map(a => a.quiz_id));
+      const modules = modulesSnap.data || [];
+      const moduleToCourse: Record<string, string> = {};
+      modules.forEach((m: any) => {
+        const mid = String(m?.id || '');
+        const cid = String(m?.course_id || '');
+        if (mid && cid) moduleToCourse[mid] = cid;
+      });
+      const moduleIds = modules.map((m: any) => String(m?.id || '')).filter(Boolean);
+      const lessonsByModuleSnap = moduleIds.length > 0
+        ? await supabase.from('lessons').select('id, course_id, module_id').in('module_id', moduleIds)
+        : { data: [] as any[] };
+      const lessonsByCourse = [
+        ...(lessonsByCourseSnap.data || []),
+        ...(lessonsByModuleSnap.data || []),
+      ];
+      const lessonIdsByCourse: Record<string, string[]> = {};
+      lessonsByCourse.forEach((l: any) => {
+        const lid = String(l?.id || '');
+        const directCourseId = String(l?.course_id || '');
+        const mappedCourseId = directCourseId || moduleToCourse[String(l?.module_id || '')] || '';
+        if (!lid || !mappedCourseId) return;
+        if (!lessonIdsByCourse[mappedCourseId]) lessonIdsByCourse[mappedCourseId] = [];
+        if (!lessonIdsByCourse[mappedCourseId].includes(lid)) {
+          lessonIdsByCourse[mappedCourseId].push(lid);
+        }
+      });
+      const allLessonIds = Object.values(lessonIdsByCourse).flat();
+      const lessonProgressRows = allLessonIds.length > 0
+        ? await supabase
+            .from('lesson_progress')
+            .select('lesson_id, completed, progress_percent, status')
+            .eq('student_id', uid)
+            .in('lesson_id', allLessonIds)
+        : { data: [] as any[] };
+      const completedLessonIds = new Set<string>();
+      if (!lessonProgressRows.error) {
+        (lessonProgressRows.data || []).forEach((row: any) => {
+          const lid = String(row?.lesson_id || '');
+          if (!lid) return;
+          const progressPercent = Number(row?.progress_percent);
+          const status = String(row?.status || '').toLowerCase();
+          const done = Boolean(row?.completed) || status === 'completed' || (Number.isFinite(progressPercent) && progressPercent >= 100);
+          if (done) completedLessonIds.add(lid);
+        });
+      }
       const teacherMap: Record<string, string> = {};
       (teachersSnap.data || []).forEach((t: any) => { teacherMap[t.id] = t.display_name || ''; });
 
       const mapped: CourseProgress[] = enrolledOnly.map((c: any, i: number) => {
         const cq = quizzesByCourse[c.id] || [];
+        const cLessonIds = lessonIdsByCourse[c.id] || [];
+        const localCompletedLessonIds = readLocalCompletedLessonIds(uid, String(c.id));
+        const totalLessonsForProgress = cLessonIds.length > 0
+          ? cLessonIds.length
+          : Number(contentCounts[c.id]?.lessons ?? c.total_lessons ?? 0);
+        const completedFromDb = cLessonIds.filter((lid) => completedLessonIds.has(lid)).length;
         const meta = getMeta(c.level, i);
         return {
           id: c.id,
@@ -283,6 +370,10 @@ export default function ContinueLearning() {
           level: c.level || '',
           quizCount: cq.length,
           attemptedQuizzes: cq.filter(qid => attemptedSet.has(qid)).length,
+          totalLessonsProgress: Math.max(0, totalLessonsForProgress),
+          completedLessonsProgress: completedFromDb > 0
+            ? completedFromDb
+            : Math.min(localCompletedLessonIds.length, Math.max(0, totalLessonsForProgress)),
           teacher_name: teacherMap[c.teacher_id] || '',
           gradient: meta.gradient,
           icon: meta.icon,
@@ -291,8 +382,8 @@ export default function ContinueLearning() {
 
       // sort: in-progress first, then not-started, then completed
       mapped.sort((a, b) => {
-        const pA = a.quizCount > 0 ? a.attemptedQuizzes / a.quizCount : 0;
-        const pB = b.quizCount > 0 ? b.attemptedQuizzes / b.quizCount : 0;
+        const pA = getCourseProgressPct(a) / 100;
+        const pB = getCourseProgressPct(b) / 100;
         if (pA === 1 && pB !== 1) return 1;
         if (pB === 1 && pA !== 1) return -1;
         if (pA > 0 && pB === 0) return -1;
@@ -306,9 +397,12 @@ export default function ContinueLearning() {
     load();
   }, []);
 
-  const completedCourses = courses.filter(c => c.quizCount > 0 && c.attemptedQuizzes === c.quizCount);
-  const inProgressCourses = courses.filter(c => c.attemptedQuizzes > 0 && c.attemptedQuizzes < c.quizCount);
-  const notStarted = courses.filter(c => c.attemptedQuizzes === 0);
+  const completedCourses = courses.filter(c => getCourseProgressPct(c) === 100);
+  const inProgressCourses = courses.filter(c => {
+    const pct = getCourseProgressPct(c);
+    return pct > 0 && pct < 100;
+  });
+  const notStarted = courses.filter(c => getCourseProgressPct(c) === 0);
 
   const avgScore = attempts.length > 0
     ? Math.round(attempts.reduce((acc, a) => acc + (a.total_points > 0 ? (a.score / a.total_points) * 100 : 0), 0) / attempts.length)

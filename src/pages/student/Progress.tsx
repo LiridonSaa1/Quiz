@@ -6,7 +6,7 @@ import { TrendingUp, Target, Trophy, CheckCircle2, BookOpen, Zap, BarChart2, Sta
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, BarChart, Bar, Cell } from 'recharts';
 import { cn } from '../../lib/utils';
 import { format, subDays } from 'date-fns';
-import { fetchAttemptRowsByStudentId } from '../../lib/quizAttempts';
+import { fetchAttemptRowsByStudentId, normalizeAttempts } from '../../lib/quizAttempts';
 
 function AnimatedCounter({ value, suffix = '' }: { value: number; suffix?: string }) {
   const [count, setCount] = useState(0);
@@ -47,34 +47,97 @@ export default function StudentProgress() {
       const coursesData = coursesSnap.data || [];
       setCourses(coursesData);
       const courseIds = coursesData.map((c: any) => c.id);
+      const normalizedAttempts = normalizeAttempts(attemptRows || []);
 
       let qMap: Record<string, { title: string; courseId: string }> = {};
       if (courseIds.length > 0) {
-        const { data: quizzes } = await supabase.from('quizzes').select('id, title, course_id').in('course_id', courseIds);
-        (quizzes || []).forEach((q: any) => { qMap[q.id] = { title: q.title, courseId: q.course_id }; });
+        const [modulesSnap, lessonsByCourseSnap] = await Promise.all([
+          supabase.from('modules').select('id, course_id').in('course_id', courseIds),
+          supabase.from('lessons').select('id, course_id, module_id').in('course_id', courseIds),
+        ]);
+
+        const modules = modulesSnap.data || [];
+        const moduleToCourse: Record<string, string> = {};
+        modules.forEach((m: any) => {
+          const mid = String(m?.id || '');
+          const cid = String(m?.course_id || '');
+          if (mid && cid) moduleToCourse[mid] = cid;
+        });
+        const moduleIds = modules.map((m: any) => String(m?.id || '')).filter(Boolean);
+        const lessonsByModuleSnap = moduleIds.length > 0
+          ? await supabase.from('lessons').select('id, course_id, module_id').in('module_id', moduleIds)
+          : { data: [] as any[] };
+        const allLessons = [
+          ...(lessonsByCourseSnap.data || []),
+          ...(lessonsByModuleSnap.data || []),
+        ];
+        const lessonToCourse: Record<string, string> = {};
+        allLessons.forEach((l: any) => {
+          const lid = String(l?.id || '');
+          const directCourseId = String(l?.course_id || '');
+          const mappedCourseId = directCourseId || moduleToCourse[String(l?.module_id || '')] || '';
+          if (lid && mappedCourseId) lessonToCourse[lid] = mappedCourseId;
+        });
+
+        const lessonIds = Object.keys(lessonToCourse);
+        const [quizzesByCourseSnap, quizzesByLessonSnap] = await Promise.all([
+          supabase.from('quizzes').select('id, title, course_id').in('course_id', courseIds),
+          lessonIds.length > 0
+            ? supabase.from('quizzes').select('id, title, course_id, lesson_id').in('lesson_id', lessonIds)
+            : Promise.resolve({ data: [] as any[] }),
+        ]);
+
+        (quizzesByCourseSnap.data || []).forEach((q: any) => {
+          const qid = String(q?.id || '');
+          const courseId = String(q?.course_id || '');
+          if (!qid || !courseId) return;
+          qMap[qid] = { title: String(q?.title || 'Quiz'), courseId };
+        });
+        (quizzesByLessonSnap.data || []).forEach((q: any) => {
+          const qid = String(q?.id || '');
+          if (!qid) return;
+          const directCourseId = String(q?.course_id || '');
+          const mappedCourseId = directCourseId || lessonToCourse[String(q?.lesson_id || '')] || '';
+          if (!mappedCourseId) return;
+          qMap[qid] = { title: String(q?.title || 'Quiz'), courseId: mappedCourseId };
+        });
       }
       setQuizMap(qMap);
-      setAttempts(attemptRows || []);
+      setAttempts(normalizedAttempts);
       setLoading(false);
     };
     load();
   }, []);
 
-  const completed = attempts.filter(a => a.status === 'completed' || a.completed_at);
+  const getAttemptPercent = (attempt: any) => {
+    const total = Number(attempt?.total_points || 0);
+    const score = Number(attempt?.score || 0);
+    if (total > 0) return Math.max(0, Math.min(100, Math.round((score / total) * 100)));
+    if (score >= 0 && score <= 1) return Math.max(0, Math.min(100, Math.round(score * 100)));
+    return Math.max(0, Math.min(100, Math.round(score)));
+  };
+
+  const completed = attempts.filter((a) => {
+    const status = String(a?.status || '').toLowerCase();
+    return status === 'completed' || Boolean(a?.completed_at || a?.created_at);
+  });
   const avgScore = completed.length > 0
-    ? Math.round(completed.reduce((s, a) => s + (a.total_points > 0 ? (a.score / a.total_points) * 100 : 0), 0) / completed.length)
+    ? Math.round(completed.reduce((s, a) => s + getAttemptPercent(a), 0) / completed.length)
     : 0;
-  const passed = completed.filter(a => a.total_points > 0 && (a.score / a.total_points) >= 0.5).length;
+  const passed = completed.filter((a) => getAttemptPercent(a) >= 50).length;
   const passRate = completed.length > 0 ? Math.round((passed / completed.length) * 100) : 0;
-  const best = completed.length > 0 ? Math.round(Math.max(...completed.map(a => a.total_points > 0 ? (a.score / a.total_points) * 100 : 0))) : 0;
+  const best = completed.length > 0 ? Math.round(Math.max(...completed.map((a) => getAttemptPercent(a)))) : 0;
 
   // Last 14 days trend
   const trendData = Array.from({ length: 14 }, (_, i) => {
     const day = subDays(new Date(), 13 - i);
     const dayStr = format(day, 'yyyy-MM-dd');
-    const dayAttempts = completed.filter(a => a.completed_at?.slice(0, 10) === dayStr);
+    const dayAttempts = completed.filter((a) => {
+      const dayKey = String(a.completed_at || a.created_at || a.started_at || '').slice(0, 10);
+      return dayKey === dayStr;
+    });
     const avg = dayAttempts.length > 0
-      ? Math.round(dayAttempts.reduce((s, a) => s + (a.total_points > 0 ? (a.score / a.total_points) * 100 : 0), 0) / dayAttempts.length)
+      ? Math.round(dayAttempts.reduce((s, a) => s + getAttemptPercent(a), 0) / dayAttempts.length)
       : null;
     return { date: format(day, 'MMM d'), score: avg, count: dayAttempts.length };
   });
@@ -84,7 +147,7 @@ export default function StudentProgress() {
     const cQuizIds = Object.entries(quizMap).filter(([, v]) => v.courseId === c.id).map(([k]) => k);
     const cAttempts = completed.filter(a => cQuizIds.includes(a.quiz_id));
     const avg = cAttempts.length > 0
-      ? Math.round(cAttempts.reduce((s, a) => s + (a.total_points > 0 ? (a.score / a.total_points) * 100 : 0), 0) / cAttempts.length)
+      ? Math.round(cAttempts.reduce((s, a) => s + getAttemptPercent(a), 0) / cAttempts.length)
       : 0;
     return { name: c.title, avg, attempts: cAttempts.length, color: CHART_COLORS[i % CHART_COLORS.length] };
   });

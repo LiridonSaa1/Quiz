@@ -4,6 +4,7 @@
 -- =============================================================================
 
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
+CREATE EXTENSION IF NOT EXISTS "pgcrypto";
 
 -- ── Courses (app expects these on older DBs) ─────────────────────────────────
 ALTER TABLE public.courses ADD COLUMN IF NOT EXISTS gradient TEXT DEFAULT 'from-indigo-500 to-violet-600';
@@ -97,8 +98,69 @@ CREATE TABLE IF NOT EXISTS public.quiz_runtime_state (
 CREATE INDEX IF NOT EXISTS idx_quiz_runtime_state_student ON public.quiz_runtime_state(student_id);
 CREATE INDEX IF NOT EXISTS idx_quiz_runtime_state_quiz ON public.quiz_runtime_state(quiz_id);
 
--- Refresh PostgREST so the API sees new columns (Supabase).
-NOTIFY pgrst, 'reload schema';
+-- ── Lessons (some older DBs miss this table) ──────────────────────────────────
+CREATE TABLE IF NOT EXISTS public.lessons (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  title TEXT NOT NULL DEFAULT '',
+  short_description TEXT,
+  course_id UUID,
+  module_id UUID,
+  type TEXT NOT NULL DEFAULT 'video',
+  duration_minutes INTEGER NOT NULL DEFAULT 0,
+  status TEXT NOT NULL DEFAULT 'published',
+  is_free_preview BOOLEAN NOT NULL DEFAULT FALSE,
+  slug TEXT,
+  "order" INTEGER NOT NULL DEFAULT 1,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+ALTER TABLE public.lessons ADD COLUMN IF NOT EXISTS title TEXT NOT NULL DEFAULT '';
+ALTER TABLE public.lessons ADD COLUMN IF NOT EXISTS short_description TEXT;
+ALTER TABLE public.lessons ADD COLUMN IF NOT EXISTS course_id UUID;
+ALTER TABLE public.lessons ADD COLUMN IF NOT EXISTS module_id UUID;
+ALTER TABLE public.lessons ADD COLUMN IF NOT EXISTS type TEXT NOT NULL DEFAULT 'video';
+ALTER TABLE public.lessons ADD COLUMN IF NOT EXISTS duration_minutes INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE public.lessons ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'published';
+ALTER TABLE public.lessons ADD COLUMN IF NOT EXISTS is_free_preview BOOLEAN NOT NULL DEFAULT FALSE;
+ALTER TABLE public.lessons ADD COLUMN IF NOT EXISTS slug TEXT;
+ALTER TABLE public.lessons ADD COLUMN IF NOT EXISTS "order" INTEGER NOT NULL DEFAULT 1;
+ALTER TABLE public.lessons ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ NOT NULL DEFAULT NOW();
+ALTER TABLE public.lessons ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW();
+CREATE INDEX IF NOT EXISTS idx_lessons_course_id ON public.lessons(course_id);
+CREATE INDEX IF NOT EXISTS idx_lessons_module_id ON public.lessons(module_id);
+
+-- ── lesson_contents (per-lesson video/audio/pdf/text) ──
+-- If you get 42P01 "relation lesson_contents does not exist", you ran ALTER-only snippets.
+-- Always run CREATE TABLE IF NOT EXISTS below first (or paste sql/create_lesson_contents_table.sql).
+CREATE TABLE IF NOT EXISTS public.lesson_contents (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  lesson_id UUID NOT NULL REFERENCES public.lessons(id) ON DELETE CASCADE,
+  type TEXT NOT NULL DEFAULT 'text',
+  title TEXT,
+  description TEXT,
+  storage_path TEXT,
+  mime_type TEXT,
+  size_bytes BIGINT,
+  text_content TEXT,
+  pdf_page INTEGER,
+  duration_seconds INTEGER,
+  position INTEGER NOT NULL DEFAULT 1,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+ALTER TABLE public.lesson_contents ADD COLUMN IF NOT EXISTS title TEXT;
+ALTER TABLE public.lesson_contents ADD COLUMN IF NOT EXISTS description TEXT;
+ALTER TABLE public.lesson_contents ADD COLUMN IF NOT EXISTS storage_path TEXT;
+ALTER TABLE public.lesson_contents ADD COLUMN IF NOT EXISTS mime_type TEXT;
+ALTER TABLE public.lesson_contents ADD COLUMN IF NOT EXISTS size_bytes BIGINT;
+ALTER TABLE public.lesson_contents ADD COLUMN IF NOT EXISTS text_content TEXT;
+ALTER TABLE public.lesson_contents ADD COLUMN IF NOT EXISTS pdf_page INTEGER;
+ALTER TABLE public.lesson_contents ADD COLUMN IF NOT EXISTS duration_seconds INTEGER;
+ALTER TABLE public.lesson_contents ADD COLUMN IF NOT EXISTS position INTEGER;
+ALTER TABLE public.lesson_contents ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ;
+ALTER TABLE public.lesson_contents ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ;
+CREATE INDEX IF NOT EXISTS idx_lesson_contents_lesson_id ON public.lesson_contents (lesson_id);
+CREATE INDEX IF NOT EXISTS idx_lesson_contents_position ON public.lesson_contents (lesson_id, position);
 
 -- ── Lesson discussion system (lesson-only community replacement) ─────────────
 CREATE TABLE IF NOT EXISTS public.lesson_discussion_questions (
