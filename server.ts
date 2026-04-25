@@ -1,6 +1,8 @@
 import "dotenv/config";
 import { isMissingCoursesStudentIdsError } from "./src/lib/schemaErrors.js";
+import { generateFixSuggestion } from "./src/lib/ai/generateFixSuggestion.js";
 import express, { Request, Response } from "express";
+import { appendFile, mkdir, readFile as readFileFs, writeFile } from "fs/promises";
 import path from "path";
 import { fileURLToPath } from "url";
 import { createClient } from '@supabase/supabase-js';
@@ -15,8 +17,44 @@ const TELEGRAM_ALERT_COOLDOWN_MS = Math.max(
   Number(process.env.TELEGRAM_ALERT_COOLDOWN_MS || 120000),
   10000,
 );
+const TELEGRAM_RETRY_INTERVAL_MS = Math.max(
+  Number(process.env.TELEGRAM_RETRY_INTERVAL_MS || 30000),
+  5000,
+);
 const ERROR_ALERTS_ENABLED = Boolean(TELEGRAM_BOT_TOKEN && TELEGRAM_CHAT_ID);
 const recentErrorAlerts = new Map<string, number>();
+const recentLoggedErrors = new Map<
+  string,
+  {
+    message: string;
+    stack?: string;
+    file?: string;
+    line?: number;
+    url?: string;
+    userAgent?: string;
+    source?: string;
+    userId?: string;
+    timestamp: string;
+    layer: ErrorLayer;
+  }
+>();
+type ErrorLayer = "FRONTEND" | "BACKEND" | "DATABASE";
+type TelegramPayload = {
+  chat_id: string;
+  text: string;
+  parse_mode?: string;
+  disable_web_page_preview?: boolean;
+  reply_markup?: any;
+};
+type QueuedTelegramAlert = {
+  type: "error" | "text";
+  payload: TelegramPayload;
+  fingerprint?: string;
+  createdAt: string;
+  attempts: number;
+};
+const TELEGRAM_QUEUE_PATH = path.join(process.cwd(), "logs", "telegram-failed.log");
+let flushingTelegramQueue = false;
 
 function escapeTelegramText(value: string): string {
   return value.replace(/[_*[\]()~`>#+\-=|{}.!]/g, "\\$&");
@@ -50,13 +88,13 @@ async function sendTelegramErrorAlert(params: {
   fingerprintSource: string;
   details?: string;
   fixUrl?: string;
-}) {
-  if (!ERROR_ALERTS_ENABLED) return;
+}): Promise<string | null> {
+  if (!ERROR_ALERTS_ENABLED) return null;
 
   const fingerprint = stableHash(params.fingerprintSource);
   const now = Date.now();
   const lastSentAt = recentErrorAlerts.get(fingerprint) || 0;
-  if (now - lastSentAt < TELEGRAM_ALERT_COOLDOWN_MS) return;
+  if (now - lastSentAt < TELEGRAM_ALERT_COOLDOWN_MS) return fingerprint;
   recentErrorAlerts.set(fingerprint, now);
 
   const escapedTitle = escapeTelegramText(params.title);
@@ -73,6 +111,25 @@ async function sendTelegramErrorAlert(params: {
   const buttonUrl = buttonUrlBase
     ? `${buttonUrlBase}${buttonUrlBase.includes("?") ? "&" : "?"}fingerprint=${encodeURIComponent(fingerprint)}`
     : "";
+  const payload: TelegramPayload = {
+    chat_id: TELEGRAM_CHAT_ID,
+    text: body,
+    parse_mode: "MarkdownV2",
+    disable_web_page_preview: true,
+    ...(!buttonUrl
+      ? {
+          reply_markup: {
+            inline_keyboard: [[{ text: "Fix now", callback_data: `fix:${fingerprint}` }]],
+          },
+        }
+      : buttonUrl
+      ? {
+          reply_markup: {
+            inline_keyboard: [[{ text: "Fix now", url: buttonUrl }]],
+          },
+        }
+      : {}),
+  };
 
   try {
     const response = await fetch(
@@ -80,28 +137,263 @@ async function sendTelegramErrorAlert(params: {
       {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          chat_id: TELEGRAM_CHAT_ID,
-          text: body,
-          parse_mode: "MarkdownV2",
-          disable_web_page_preview: true,
-          ...(buttonUrl
-            ? {
-                reply_markup: {
-                  inline_keyboard: [[{ text: "Fix now", url: buttonUrl }]],
-                },
-              }
-            : {}),
-        }),
+        body: JSON.stringify(payload),
       },
     );
     if (!response.ok) {
       const responseText = await response.text();
       console.warn("[alerts] Telegram send failed:", response.status, responseText);
+      void enqueueFailedTelegramAlert({
+        type: "error",
+        payload,
+        fingerprint,
+        createdAt: new Date().toISOString(),
+        attempts: 1,
+      });
     }
   } catch (error) {
     console.warn("[alerts] Telegram request failed:", error);
+    void enqueueFailedTelegramAlert({
+      type: "error",
+      payload,
+      fingerprint,
+      createdAt: new Date().toISOString(),
+      attempts: 1,
+    });
   }
+  return fingerprint;
+}
+
+async function sendTelegramTextMessage(text: string): Promise<void> {
+  if (!ERROR_ALERTS_ENABLED) return;
+  const payload: TelegramPayload = {
+    chat_id: TELEGRAM_CHAT_ID,
+    text: text.slice(0, 3900),
+    disable_web_page_preview: true,
+  };
+  try {
+    const response = await fetch(
+      `https://api.telegram.org/bot${encodeURIComponent(TELEGRAM_BOT_TOKEN)}/sendMessage`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      },
+    );
+    if (!response.ok) {
+      const responseText = await response.text();
+      console.warn("[alerts] Telegram text send failed:", response.status, responseText);
+      void enqueueFailedTelegramAlert({
+        type: "text",
+        payload,
+        createdAt: new Date().toISOString(),
+        attempts: 1,
+      });
+    }
+  } catch (error) {
+    console.warn("[alerts] Telegram text request failed:", error);
+    void enqueueFailedTelegramAlert({
+      type: "text",
+      payload,
+      createdAt: new Date().toISOString(),
+      attempts: 1,
+    });
+  }
+}
+
+async function callTelegramApi(method: string, payload: Record<string, unknown>): Promise<void> {
+  if (!ERROR_ALERTS_ENABLED) return;
+  try {
+    const response = await fetch(
+      `https://api.telegram.org/bot${encodeURIComponent(TELEGRAM_BOT_TOKEN)}/${method}`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      },
+    );
+    if (!response.ok) {
+      const txt = await response.text();
+      console.warn(`[alerts] Telegram API ${method} failed:`, response.status, txt);
+    }
+  } catch (error) {
+    console.warn(`[alerts] Telegram API ${method} request failed:`, error);
+  }
+}
+
+async function ensureTelegramQueueDir(): Promise<void> {
+  const dir = path.dirname(TELEGRAM_QUEUE_PATH);
+  await mkdir(dir, { recursive: true });
+}
+
+async function enqueueFailedTelegramAlert(item: QueuedTelegramAlert): Promise<void> {
+  try {
+    await ensureTelegramQueueDir();
+    await appendFile(TELEGRAM_QUEUE_PATH, `${JSON.stringify(item)}\n`, "utf8");
+  } catch (error) {
+    console.warn("[alerts] Failed to enqueue telegram alert:", error);
+  }
+}
+
+async function readQueuedTelegramAlerts(): Promise<QueuedTelegramAlert[]> {
+  try {
+    const raw = await readFileFs(TELEGRAM_QUEUE_PATH, "utf8");
+    if (!raw.trim()) return [];
+    return raw
+      .split(/\r?\n/)
+      .filter(Boolean)
+      .map((line) => {
+        try {
+          return JSON.parse(line) as QueuedTelegramAlert;
+        } catch {
+          return null;
+        }
+      })
+      .filter((x): x is QueuedTelegramAlert => Boolean(x));
+  } catch {
+    return [];
+  }
+}
+
+async function overwriteQueuedTelegramAlerts(items: QueuedTelegramAlert[]): Promise<void> {
+  await ensureTelegramQueueDir();
+  const content = items.length ? `${items.map((x) => JSON.stringify(x)).join("\n")}\n` : "";
+  await writeFile(TELEGRAM_QUEUE_PATH, content, "utf8");
+}
+
+async function sendTelegramPayload(payload: TelegramPayload): Promise<boolean> {
+  try {
+    const response = await fetch(
+      `https://api.telegram.org/bot${encodeURIComponent(TELEGRAM_BOT_TOKEN)}/sendMessage`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      },
+    );
+    if (!response.ok) {
+      const responseText = await response.text();
+      console.warn("[alerts] Retry telegram send failed:", response.status, responseText);
+      return false;
+    }
+    return true;
+  } catch (error) {
+    console.warn("[alerts] Retry telegram request failed:", error);
+    return false;
+  }
+}
+
+async function flushFailedTelegramAlerts(): Promise<void> {
+  if (!ERROR_ALERTS_ENABLED || flushingTelegramQueue) return;
+  flushingTelegramQueue = true;
+  try {
+    const queued = await readQueuedTelegramAlerts();
+    if (!queued.length) return;
+    const pending: QueuedTelegramAlert[] = [];
+    for (const item of queued) {
+      const sent = await sendTelegramPayload(item.payload);
+      if (!sent) pending.push({ ...item, attempts: item.attempts + 1 });
+    }
+    await overwriteQueuedTelegramAlerts(pending);
+    if (pending.length < queued.length) {
+      console.log(
+        `[alerts] Flushed ${queued.length - pending.length}/${queued.length} queued Telegram alert(s).`,
+      );
+    }
+  } catch (error) {
+    console.warn("[alerts] Failed to flush queued Telegram alerts:", error);
+  } finally {
+    flushingTelegramQueue = false;
+  }
+}
+
+function detectErrorLayer(input: string, fallback: ErrorLayer = "BACKEND"): ErrorLayer {
+  const hay = String(input || "").toLowerCase();
+  if (
+    /sql|postgres|postgrest|supabase|migration|relation|column|table|constraint|42p|pgrst|query/i.test(
+      hay,
+    )
+  ) {
+    return "DATABASE";
+  }
+  return fallback;
+}
+
+async function logSystemError(event: {
+  layer?: ErrorLayer;
+  message: string;
+  stack?: string;
+  file?: string;
+  line?: number;
+  url?: string;
+  userAgent?: string;
+  source?: string;
+  userId?: string;
+  timestamp?: string;
+}) {
+  const timestamp = event.timestamp || new Date().toISOString();
+  const layer = event.layer || detectErrorLayer(`${event.message}\n${event.stack || ""}`);
+  const details = [
+    `Layer: ${layer}`,
+    `Message: ${event.message}`,
+    `File: ${event.file || "N/A"}`,
+    `Line: ${Number.isFinite(Number(event.line)) ? String(event.line) : "N/A"}`,
+    `URL: ${event.url || "N/A"}`,
+    `Time: ${timestamp}`,
+    `UserAgent: ${event.userAgent || "N/A"}`,
+    `User: ${event.userId || "N/A"}`,
+    event.stack ? `Stack: ${event.stack}` : "Stack: N/A",
+    event.source ? `Source: ${event.source}` : "",
+    `LikelyReason: ${guessLikelyReason(layer, event.message, event.stack)}`,
+  ]
+    .filter(Boolean)
+    .join("\n");
+
+  console.error(`[${layer}] ${event.message}`);
+  if (event.stack) console.error(event.stack);
+
+  const fingerprint = await sendTelegramErrorAlert({
+    title: "ERROR ALERT",
+    summary: `Layer: ${layer} | ${event.message}`,
+    fingerprintSource: `${layer}:${event.message}:${event.file || ""}:${event.line || ""}:${event.url || ""}`,
+    details: details.slice(0, 2000),
+  });
+
+  if (fingerprint) {
+    recentLoggedErrors.set(fingerprint, {
+      layer,
+      message: event.message,
+      stack: event.stack,
+      file: event.file,
+      line: event.line,
+      url: event.url,
+      userAgent: event.userAgent,
+      source: event.source,
+      userId: event.userId,
+      timestamp,
+    });
+    if (recentLoggedErrors.size > 300) {
+      const first = recentLoggedErrors.keys().next().value;
+      if (first) recentLoggedErrors.delete(first);
+    }
+  }
+}
+
+function guessLikelyReason(layer: ErrorLayer, message: string, stack?: string): string {
+  const hay = `${message}\n${stack || ""}`.toLowerCase();
+  if (layer === "DATABASE") {
+    if (hay.includes("column")) return "Schema mismatch (missing/renamed column) or stale schema cache.";
+    if (hay.includes("relation") || hay.includes("table"))
+      return "Missing table/relation or migration not applied.";
+    return "Query or migration issue in database layer.";
+  }
+  if (hay.includes("unauthorized") || hay.includes("forbidden"))
+    return "Authentication or role/permission mismatch.";
+  if (hay.includes("network") || hay.includes("timeout"))
+    return "Network connectivity issue or downstream service timeout.";
+  if (hay.includes("undefined") || hay.includes("null"))
+    return "Unexpected null/undefined value in runtime path.";
+  return "Unhandled edge-case in current execution path.";
 }
 
 let supabaseAdminInstance: any = null;
@@ -201,6 +493,211 @@ export async function createApp(options: CreateAppOptions = {}) {
   const app = express();
 
   app.use(express.json());
+  app.post("/api/log-error", async (req: Request, res: Response) => {
+    try {
+      const body = (req.body || {}) as any;
+      const message = String(body.message || "").trim();
+      if (!message) return res.status(400).json({ error: "message is required" });
+
+      const inferredLayer = body.layer === "FRONTEND" || body.layer === "BACKEND" || body.layer === "DATABASE"
+        ? (body.layer as ErrorLayer)
+        : detectErrorLayer(`${message}\n${String(body.stack || "")}`, "FRONTEND");
+
+      void logSystemError({
+        layer: inferredLayer,
+        message,
+        stack: body.stack ? String(body.stack) : undefined,
+        file: body.file ? String(body.file) : undefined,
+        line:
+          Number.isFinite(Number(body.line)) && Number(body.line) > 0
+            ? Number(body.line)
+            : undefined,
+        url: body.currentUrl ? String(body.currentUrl) : undefined,
+        userAgent: body.userAgent ? String(body.userAgent) : req.headers["user-agent"],
+        source: body.source ? String(body.source) : "api.log-error",
+        userId: body.userId ? String(body.userId) : undefined,
+        timestamp: body.timestamp ? String(body.timestamp) : undefined,
+      });
+
+      return res.json({ success: true });
+    } catch (error: any) {
+      return res.status(500).json({ error: error?.message || "Failed to log error" });
+    }
+  });
+
+  app.get("/api/test-telegram", async (req: Request, res: Response) => {
+    try {
+      const message =
+        typeof req.query.message === "string" && req.query.message.trim()
+          ? req.query.message.trim()
+          : "Manual Telegram pipeline test";
+      await logSystemError({
+        layer: "BACKEND",
+        message,
+        stack: "Triggered by /api/test-telegram",
+        url: req.originalUrl,
+        userAgent: req.headers["user-agent"] as string | undefined,
+        source: "api.test-telegram",
+      });
+      return res.json({ success: true, message: "Test alert sent to Telegram (if configured)." });
+    } catch (error: any) {
+      return res.status(500).json({ error: error?.message || "Failed to send test Telegram alert" });
+    }
+  });
+
+  app.get("/api/fix-now", async (req: Request, res: Response) => {
+    try {
+      const fingerprint = String(req.query.fingerprint || "").trim();
+      if (!fingerprint) return res.status(400).json({ error: "fingerprint is required" });
+      const ctx = recentLoggedErrors.get(fingerprint);
+      if (!ctx) {
+        return res.status(404).json({
+          error:
+            "No stored error found for this fingerprint. Trigger the error again, then click Fix now shortly after.",
+        });
+      }
+
+      const suggestion = await generateFixSuggestion({
+        message: ctx.message,
+        stack: ctx.stack,
+        fileName: ctx.file,
+        lineNumber: ctx.line,
+        currentUrl: ctx.url,
+        rawLog: `Layer=${ctx.layer}; Source=${ctx.source || "n/a"}; UserAgent=${ctx.userAgent || "n/a"}`,
+      });
+
+      await sendTelegramTextMessage(
+        [
+          `🤖 FIX RESULT`,
+          `Fingerprint: ${fingerprint}`,
+          `Layer: ${ctx.layer}`,
+          "",
+          suggestion.formatted,
+        ].join("\n"),
+      );
+
+      return res.json({
+        success: true,
+        fingerprint,
+        note: "Fix suggestion generated and sent to Telegram.",
+        result: suggestion,
+      });
+    } catch (error: any) {
+      return res.status(500).json({ error: error?.message || "Failed to generate fix suggestion" });
+    }
+  });
+
+  const parseTelegramErrorMessage = (text: string) => {
+    const normalized = String(text || "");
+    const getLine = (label: string) => {
+      const re = new RegExp(`^${label}:\\s*(.*)$`, "im");
+      const m = normalized.match(re);
+      return m?.[1]?.trim() || "";
+    };
+    const currentUrl = getLine("URL");
+    const message = getLine("Message") || normalized || "Unknown telegram error payload";
+    const stack = getLine("Stack");
+    return { message, stack: stack === "N/A" ? "" : stack, currentUrl };
+  };
+
+  app.post("/api/ai/fix-suggestion", async (req, res) => {
+    try {
+      const body = req.body || {};
+      const message = String(body.message || "").trim();
+      if (!message) return res.status(400).json({ error: "message is required" });
+
+      const result = await generateFixSuggestion({
+        message,
+        stack: body.stack ? String(body.stack) : undefined,
+        fileName: body.fileName ? String(body.fileName) : undefined,
+        lineNumber:
+          Number.isFinite(Number(body.lineNumber)) && Number(body.lineNumber) > 0
+            ? Number(body.lineNumber)
+            : undefined,
+        currentUrl: body.currentUrl ? String(body.currentUrl) : undefined,
+        rawLog: body.rawLog ? String(body.rawLog) : undefined,
+      });
+
+      res.json({ success: true, result });
+    } catch (e: any) {
+      res.status(500).json({ error: e?.message || "Failed to generate fix suggestion" });
+    }
+  });
+
+  app.post("/api/telegram/error-webhook", async (req, res) => {
+    try {
+      const callbackQuery = req.body?.callback_query;
+      if (callbackQuery) {
+        const callbackId = String(callbackQuery.id || "");
+        const callbackData = String(callbackQuery.data || "");
+        const chatId =
+          callbackQuery?.message?.chat?.id !== undefined
+            ? String(callbackQuery.message.chat.id)
+            : TELEGRAM_CHAT_ID;
+        if (callbackId) {
+          await callTelegramApi("answerCallbackQuery", {
+            callback_query_id: callbackId,
+            text: "Fix started",
+            show_alert: false,
+          });
+        }
+        if (callbackData.startsWith("fix:")) {
+          const fingerprint = callbackData.slice(4).trim();
+          const ctx = recentLoggedErrors.get(fingerprint);
+          if (!ctx) {
+            await callTelegramApi("sendMessage", {
+              chat_id: chatId,
+              text: `No stored error found for fingerprint ${fingerprint}. Trigger error again and retry.`,
+            });
+            return res.json({ success: true, handled: "callback.no-context" });
+          }
+          await callTelegramApi("sendMessage", {
+            chat_id: chatId,
+            text: `Codex-style AI is now analyzing and preparing a fix for fingerprint ${fingerprint}. I will notify you when done.`,
+          });
+
+          void (async () => {
+            const suggestion = await generateFixSuggestion({
+              message: ctx.message,
+              stack: ctx.stack,
+              fileName: ctx.file,
+              lineNumber: ctx.line,
+              currentUrl: ctx.url,
+              rawLog: `Layer=${ctx.layer}; Source=${ctx.source || "n/a"}; User=${ctx.userId || "n/a"}`,
+            });
+            await callTelegramApi("sendMessage", {
+              chat_id: chatId,
+              text: [
+                `Fix analysis completed for ${fingerprint}.`,
+                `File: ${ctx.file || "N/A"}`,
+                `User: ${ctx.userId || "N/A"}`,
+                `Time: ${ctx.timestamp}`,
+                "",
+                suggestion.formatted,
+              ].join("\n").slice(0, 3900),
+            });
+          })();
+          return res.json({ success: true, handled: "callback.fix-started", fingerprint });
+        }
+        return res.json({ success: true, handled: "callback.ignored" });
+      }
+
+      const text = String(req.body?.message?.text || req.body?.text || "").trim();
+      if (!text) return res.status(400).json({ error: "telegram message text is required" });
+      const parsed = parseTelegramErrorMessage(text);
+
+      const result = await generateFixSuggestion({
+        message: parsed.message,
+        stack: parsed.stack || undefined,
+        currentUrl: parsed.currentUrl || undefined,
+        rawLog: text,
+      });
+
+      res.json({ success: true, result });
+    } catch (e: any) {
+      res.status(500).json({ error: e?.message || "Failed to process telegram webhook" });
+    }
+  });
   app.use((req: Request, res: Response, next) => {
     const startedAt = Date.now();
     const requestId = stableHash(
@@ -2385,6 +2882,14 @@ export async function createApp(options: CreateAppOptions = {}) {
       }
       return res.json({ success: true, contents: contentsRes.data || [], storage: 'database' });
     } catch (e: any) {
+      void logSystemError({
+        layer: detectErrorLayer(`${e?.message || ''}\n${e?.stack || ''}`),
+        message: e?.message || 'Failed to load lesson contents',
+        stack: e?.stack,
+        url: req.originalUrl,
+        userAgent: req.headers["user-agent"] as string | undefined,
+        source: 'api.teacher.lesson-contents.list',
+      });
       return res.status(500).json({ error: e?.message || 'Failed to load lesson contents' });
     }
   });
@@ -2438,6 +2943,14 @@ export async function createApp(options: CreateAppOptions = {}) {
       }
       return res.json({ success: true, content: ins.data });
     } catch (e: any) {
+      void logSystemError({
+        layer: detectErrorLayer(`${e?.message || ''}\n${e?.stack || ''}`),
+        message: e?.message || 'Failed to create lesson content',
+        stack: e?.stack,
+        url: req.originalUrl,
+        userAgent: req.headers["user-agent"] as string | undefined,
+        source: 'api.teacher.lesson-contents.create',
+      });
       return res.status(500).json({ error: e?.message || 'Failed to create lesson content' });
     }
   });
@@ -2501,6 +3014,14 @@ export async function createApp(options: CreateAppOptions = {}) {
       }
       return res.json({ success: true, content: upd.data });
     } catch (e: any) {
+      void logSystemError({
+        layer: detectErrorLayer(`${e?.message || ''}\n${e?.stack || ''}`),
+        message: e?.message || 'Failed to update lesson content',
+        stack: e?.stack,
+        url: req.originalUrl,
+        userAgent: req.headers["user-agent"] as string | undefined,
+        source: 'api.teacher.lesson-contents.update',
+      });
       return res.status(500).json({ error: e?.message || 'Failed to update lesson content' });
     }
   });
@@ -2536,6 +3057,14 @@ export async function createApp(options: CreateAppOptions = {}) {
       }
       return res.json({ success: true });
     } catch (e: any) {
+      void logSystemError({
+        layer: detectErrorLayer(`${e?.message || ''}\n${e?.stack || ''}`),
+        message: e?.message || 'Failed to delete lesson content',
+        stack: e?.stack,
+        url: req.originalUrl,
+        userAgent: req.headers["user-agent"] as string | undefined,
+        source: 'api.teacher.lesson-contents.delete',
+      });
       return res.status(500).json({ error: e?.message || 'Failed to delete lesson content' });
     }
   });
@@ -6628,6 +7157,25 @@ export async function createApp(options: CreateAppOptions = {}) {
     } catch (e: any) { res.status(500).json({ error: e.message }); }
   });
 
+  app.use((err: any, req: Request, res: Response, next: any) => {
+    if (!err) return next();
+    const status = Number(err?.status || err?.statusCode || 500);
+    const normalizedStatus = Number.isFinite(status) ? Math.max(400, status) : 500;
+    const layer = detectErrorLayer(`${err?.message || ""}\n${err?.stack || ""}`);
+    void logSystemError({
+      layer,
+      message: err?.message || "Unhandled backend error",
+      stack: err?.stack,
+      file: err?.fileName,
+      line: Number.isFinite(Number(err?.lineNumber)) ? Number(err.lineNumber) : undefined,
+      url: req.originalUrl,
+      userAgent: req.headers["user-agent"] as string | undefined,
+      source: "express.error-middleware",
+    });
+    if (res.headersSent) return next(err);
+    return res.status(normalizedStatus).json({ error: err?.message || "Internal server error" });
+  });
+
   app.use((req, res, next) => {
     if (req.path.startsWith("/api")) {
       return res.status(404).json({
@@ -6715,25 +7263,30 @@ async function startServer() {
 }
 
 if (!process.env.VERCEL) {
+  setInterval(() => {
+    void flushFailedTelegramAlerts();
+  }, TELEGRAM_RETRY_INTERVAL_MS);
+  void flushFailedTelegramAlerts();
+
   process.on("unhandledRejection", (reason) => {
     const details = serializeUnknownError(reason);
     console.error("[runtime] unhandledRejection:", details);
-    void sendTelegramErrorAlert({
-      title: "Unhandled Promise Rejection",
-      summary: "Server observed an unhandled async error.",
-      fingerprintSource: `unhandledRejection:${details.slice(0, 300)}`,
-      details,
+    void logSystemError({
+      layer: detectErrorLayer(details, "BACKEND"),
+      message: "Unhandled Promise Rejection",
+      stack: details,
+      source: "process.unhandledRejection",
     });
   });
 
   process.on("uncaughtException", (error) => {
     const details = serializeUnknownError(error);
     console.error("[runtime] uncaughtException:", details);
-    void sendTelegramErrorAlert({
-      title: "Uncaught Exception",
-      summary: "Server crashed on a non-caught exception.",
-      fingerprintSource: `uncaughtException:${details.slice(0, 300)}`,
-      details,
+    void logSystemError({
+      layer: detectErrorLayer(details, "BACKEND"),
+      message: "Uncaught Exception",
+      stack: details,
+      source: "process.uncaughtException",
     });
   });
 }

@@ -39,7 +39,7 @@ interface ClassRecord {
   enrollment_count?: number;
 }
 
-interface Course { id: string; title: string; status?: string }
+interface Course { id: string; title: string; status?: string; student_ids?: string[] }
 
 const STATUS_CONFIG: Record<ClassStatus, { label: string; bg: string; text: string; dot: string; icon: React.ElementType }> = {
   active:    { label: 'Active',    bg: 'bg-emerald-50', text: 'text-emerald-700', dot: 'bg-emerald-500', icon: CheckCircle2 },
@@ -120,6 +120,7 @@ export default function TeacherClasses() {
               id: c.id,
               title: (c.title || c.name || 'Untitled').trim() || 'Untitled',
               status: c.status,
+              student_ids: Array.isArray(c.student_ids) ? c.student_ids.map((sid: unknown) => String(sid)) : [],
             }));
           }
         }
@@ -137,6 +138,7 @@ export default function TeacherClasses() {
             id: c.id,
             title: (c.title || 'Untitled').trim() || 'Untitled',
             status: c.status,
+            student_ids: Array.isArray(c.student_ids) ? c.student_ids.map((sid: unknown) => String(sid)) : [],
           }));
         }
       }
@@ -152,11 +154,22 @@ export default function TeacherClasses() {
         };
       });
 
+      const classCountPerCourse = classesRows.reduce((acc: Record<string, number>, cls: Record<string, unknown>) => {
+        const row = normalizeClassRow(cls) as ClassRecord;
+        const courseId = row.course_id ? String(row.course_id) : '';
+        if (courseId) acc[courseId] = (acc[courseId] || 0) + 1;
+        return acc;
+      }, {});
+
       const enriched = classesRows.map((cls: Record<string, unknown>) => {
         const row = normalizeClassRow(cls) as ClassRecord;
         const classStudentIds = Array.isArray(row.student_ids) ? row.student_ids.map((sid: unknown) => String(sid)) : [];
         const courseStudentIds = row.course_id ? (courseMap[String(row.course_id)]?.studentIds || []) : [];
-        const enrollmentCount = new Set([...classStudentIds, ...courseStudentIds]).size;
+        const hasSingleClassForCourse = row.course_id ? (classCountPerCourse[String(row.course_id)] || 0) === 1 : false;
+        const enrollmentCount =
+          classStudentIds.length > 0
+            ? classStudentIds.length
+            : (hasSingleClassForCourse ? courseStudentIds.length : 0);
         return {
           ...row,
           course: row.course_id ? ({ title: courseMap[String(row.course_id)]?.title || 'Unknown Course' }) : null,

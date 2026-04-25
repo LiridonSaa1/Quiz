@@ -1,4 +1,5 @@
 import { supabase } from '../supabase';
+import { monitoredFetch } from './httpClient';
 
 /**
  * Prefix for `/api/...` requests.
@@ -84,12 +85,12 @@ export async function authFetch(path: string, init: RequestInit = {}): Promise<R
 
   const url = apiUrl(path);
   let headers = await buildHeaders();
-  let res = await fetch(url, { ...init, headers, credentials: 'same-origin' });
+  let res = await monitoredFetch(url, { ...init, headers, credentials: 'same-origin' });
 
   if (res.status === 401) {
     await supabase.auth.refreshSession();
     headers = await buildHeaders();
-    res = await fetch(url, { ...init, headers, credentials: 'same-origin' });
+    res = await monitoredFetch(url, { ...init, headers, credentials: 'same-origin' });
   }
 
   return res;

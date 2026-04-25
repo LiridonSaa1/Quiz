@@ -10,7 +10,8 @@
     "preview:vite": "vite preview",
     "start": "cross-env NODE_ENV=production tsx server.ts",
     "clean": "rm -rf dist",
-    "lint": "tsc --noEmit"
+    "lint": "tsc --noEmit",
+    "telegram:set-webhook": "tsx scripts/set-telegram-webhook.ts"
   },
   "dependencies": {
     "@google/genai": "^1.49.0",
