@@ -385,22 +385,29 @@ async function recordApi5xxAlertForFix(
   });
 }
 
-async function logSystemError(event: {
-  layer?: ErrorLayer;
-  message: string;
-  stack?: string;
-  file?: string;
-  line?: number;
-  url?: string;
-  userAgent?: string;
-  source?: string;
-  userId?: string;
-  timestamp?: string;
-}) {
+async function logSystemError(
+  event: {
+    layer?: ErrorLayer;
+    message: string;
+    stack?: string;
+    file?: string;
+    line?: number;
+    url?: string;
+    userAgent?: string;
+    source?: string;
+    userId?: string;
+    timestamp?: string;
+  },
+  /** When set, marks the response so the 5xx middleware skips a duplicate "API 5xx" Telegram alert. */
+  res?: Response,
+) {
   const timestamp = event.timestamp || new Date().toISOString();
   const layer = event.layer || detectErrorLayer(`${event.message}\n${event.stack || ""}`);
   const fingerprintSource = `${layer}:${event.message}:${event.file || ""}:${event.line || ""}:${event.url || ""}`;
   const fingerprint = stableHash(fingerprintSource);
+  if (res) {
+    (res.locals as any).errorAlertEmitted = true;
+  }
   const details = [
     `Layer: ${layer}`,
     `Message: ${event.message}`,
@@ -695,21 +702,24 @@ export async function createApp(options: CreateAppOptions = {}) {
         ? (body.layer as ErrorLayer)
         : detectErrorLayer(`${message}\n${String(body.stack || "")}`, "FRONTEND");
 
-      void logSystemError({
-        layer: inferredLayer,
-        message,
-        stack: body.stack ? String(body.stack) : undefined,
-        file: body.file ? String(body.file) : undefined,
-        line:
-          Number.isFinite(Number(body.line)) && Number(body.line) > 0
-            ? Number(body.line)
-            : undefined,
-        url: body.currentUrl ? String(body.currentUrl) : undefined,
-        userAgent: body.userAgent ? String(body.userAgent) : req.headers["user-agent"],
-        source: body.source ? String(body.source) : "api.log-error",
-        userId: body.userId ? String(body.userId) : undefined,
-        timestamp: body.timestamp ? String(body.timestamp) : undefined,
-      });
+      void logSystemError(
+        {
+          layer: inferredLayer,
+          message,
+          stack: body.stack ? String(body.stack) : undefined,
+          file: body.file ? String(body.file) : undefined,
+          line:
+            Number.isFinite(Number(body.line)) && Number(body.line) > 0
+              ? Number(body.line)
+              : undefined,
+          url: body.currentUrl ? String(body.currentUrl) : undefined,
+          userAgent: body.userAgent ? String(body.userAgent) : req.headers["user-agent"],
+          source: body.source ? String(body.source) : "api.log-error",
+          userId: body.userId ? String(body.userId) : undefined,
+          timestamp: body.timestamp ? String(body.timestamp) : undefined,
+        },
+        res,
+      );
 
       return res.json({ success: true });
     } catch (error: any) {
@@ -723,14 +733,17 @@ export async function createApp(options: CreateAppOptions = {}) {
         typeof req.query.message === "string" && req.query.message.trim()
           ? req.query.message.trim()
           : "Manual Telegram pipeline test";
-      await logSystemError({
-        layer: "BACKEND",
-        message,
-        stack: "Triggered by /api/test-telegram",
-        url: req.originalUrl,
-        userAgent: req.headers["user-agent"] as string | undefined,
-        source: "api.test-telegram",
-      });
+      await logSystemError(
+        {
+          layer: "BACKEND",
+          message,
+          stack: "Triggered by /api/test-telegram",
+          url: req.originalUrl,
+          userAgent: req.headers["user-agent"] as string | undefined,
+          source: "api.test-telegram",
+        },
+        res,
+      );
       return res.json({ success: true, message: "Test alert sent to Telegram (if configured)." });
     } catch (error: any) {
       return res.status(500).json({ error: error?.message || "Failed to send test Telegram alert" });
@@ -963,6 +976,14 @@ export async function createApp(options: CreateAppOptions = {}) {
     res.setHeader("X-Request-Id", requestId);
     res.on("finish", () => {
       if (res.statusCode < 500 || !req.path.startsWith("/api")) return;
+      if ((res.locals as any).errorAlertEmitted) {
+        console.log(
+          "[alerts] skip middleware API 5xx Telegram (route already called logSystemError)",
+          req.method,
+          req.path,
+        );
+        return;
+      }
       const durationMs = Date.now() - startedAt;
       void recordApi5xxAlertForFix(req, res.statusCode, durationMs, requestId);
     });
@@ -3133,14 +3154,17 @@ export async function createApp(options: CreateAppOptions = {}) {
       }
       return res.json({ success: true, contents: contentsRes.data || [], storage: 'database' });
     } catch (e: any) {
-      void logSystemError({
-        layer: detectErrorLayer(`${e?.message || ''}\n${e?.stack || ''}`),
-        message: e?.message || 'Failed to load lesson contents',
-        stack: e?.stack,
-        url: req.originalUrl,
-        userAgent: req.headers["user-agent"] as string | undefined,
-        source: 'api.teacher.lesson-contents.list',
-      });
+      void logSystemError(
+        {
+          layer: detectErrorLayer(`${e?.message || ''}\n${e?.stack || ''}`),
+          message: e?.message || 'Failed to load lesson contents',
+          stack: e?.stack,
+          url: req.originalUrl,
+          userAgent: req.headers["user-agent"] as string | undefined,
+          source: 'api.teacher.lesson-contents.list',
+        },
+        res,
+      );
       return res.status(500).json({ error: e?.message || 'Failed to load lesson contents' });
     }
   });
@@ -3194,14 +3218,17 @@ export async function createApp(options: CreateAppOptions = {}) {
       }
       return res.json({ success: true, content: ins.data });
     } catch (e: any) {
-      void logSystemError({
-        layer: detectErrorLayer(`${e?.message || ''}\n${e?.stack || ''}`),
-        message: e?.message || 'Failed to create lesson content',
-        stack: e?.stack,
-        url: req.originalUrl,
-        userAgent: req.headers["user-agent"] as string | undefined,
-        source: 'api.teacher.lesson-contents.create',
-      });
+      void logSystemError(
+        {
+          layer: detectErrorLayer(`${e?.message || ''}\n${e?.stack || ''}`),
+          message: e?.message || 'Failed to create lesson content',
+          stack: e?.stack,
+          url: req.originalUrl,
+          userAgent: req.headers["user-agent"] as string | undefined,
+          source: 'api.teacher.lesson-contents.create',
+        },
+        res,
+      );
       return res.status(500).json({ error: e?.message || 'Failed to create lesson content' });
     }
   });
@@ -3265,14 +3292,17 @@ export async function createApp(options: CreateAppOptions = {}) {
       }
       return res.json({ success: true, content: upd.data });
     } catch (e: any) {
-      void logSystemError({
-        layer: detectErrorLayer(`${e?.message || ''}\n${e?.stack || ''}`),
-        message: e?.message || 'Failed to update lesson content',
-        stack: e?.stack,
-        url: req.originalUrl,
-        userAgent: req.headers["user-agent"] as string | undefined,
-        source: 'api.teacher.lesson-contents.update',
-      });
+      void logSystemError(
+        {
+          layer: detectErrorLayer(`${e?.message || ''}\n${e?.stack || ''}`),
+          message: e?.message || 'Failed to update lesson content',
+          stack: e?.stack,
+          url: req.originalUrl,
+          userAgent: req.headers["user-agent"] as string | undefined,
+          source: 'api.teacher.lesson-contents.update',
+        },
+        res,
+      );
       return res.status(500).json({ error: e?.message || 'Failed to update lesson content' });
     }
   });
@@ -3308,14 +3338,17 @@ export async function createApp(options: CreateAppOptions = {}) {
       }
       return res.json({ success: true });
     } catch (e: any) {
-      void logSystemError({
-        layer: detectErrorLayer(`${e?.message || ''}\n${e?.stack || ''}`),
-        message: e?.message || 'Failed to delete lesson content',
-        stack: e?.stack,
-        url: req.originalUrl,
-        userAgent: req.headers["user-agent"] as string | undefined,
-        source: 'api.teacher.lesson-contents.delete',
-      });
+      void logSystemError(
+        {
+          layer: detectErrorLayer(`${e?.message || ''}\n${e?.stack || ''}`),
+          message: e?.message || 'Failed to delete lesson content',
+          stack: e?.stack,
+          url: req.originalUrl,
+          userAgent: req.headers["user-agent"] as string | undefined,
+          source: 'api.teacher.lesson-contents.delete',
+        },
+        res,
+      );
       return res.status(500).json({ error: e?.message || 'Failed to delete lesson content' });
     }
   });
@@ -7413,16 +7446,19 @@ export async function createApp(options: CreateAppOptions = {}) {
     const status = Number(err?.status || err?.statusCode || 500);
     const normalizedStatus = Number.isFinite(status) ? Math.max(400, status) : 500;
     const layer = detectErrorLayer(`${err?.message || ""}\n${err?.stack || ""}`);
-    void logSystemError({
-      layer,
-      message: err?.message || "Unhandled backend error",
-      stack: err?.stack,
-      file: err?.fileName,
-      line: Number.isFinite(Number(err?.lineNumber)) ? Number(err.lineNumber) : undefined,
-      url: req.originalUrl,
-      userAgent: req.headers["user-agent"] as string | undefined,
-      source: "express.error-middleware",
-    });
+    void logSystemError(
+      {
+        layer,
+        message: err?.message || "Unhandled backend error",
+        stack: err?.stack,
+        file: err?.fileName,
+        line: Number.isFinite(Number(err?.lineNumber)) ? Number(err.lineNumber) : undefined,
+        url: req.originalUrl,
+        userAgent: req.headers["user-agent"] as string | undefined,
+        source: "express.error-middleware",
+      },
+      res,
+    );
     if (res.headersSent) return next(err);
     return res.status(normalizedStatus).json({ error: err?.message || "Internal server error" });
   });

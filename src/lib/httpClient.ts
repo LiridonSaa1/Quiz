@@ -20,14 +20,22 @@ export async function monitoredFetch(
   try {
     const res = await fetch(input, init);
     if (!res.ok) {
-      reportErrorToTelegram({
-        layer: "FRONTEND",
-        message: `HTTP ${res.status} ${res.statusText || ""} on ${method} ${requestUrl}`.trim(),
-        stack: undefined,
-        url: window.location.href,
-        timestamp: new Date().toISOString(),
-        userAgent: navigator.userAgent,
-      });
+      // Same-origin /api errors are already logged by the backend (and duplicate FRONTEND + BACKEND Telegram spam).
+      const isSameOriginApi =
+        /\/api(\/|$)/.test(requestUrl) &&
+        (requestUrl.startsWith("/") ||
+          (typeof window !== "undefined" &&
+            requestUrl.startsWith(`${window.location.origin}/`)));
+      if (!isSameOriginApi) {
+        reportErrorToTelegram({
+          layer: "FRONTEND",
+          message: `HTTP ${res.status} ${res.statusText || ""} on ${method} ${requestUrl}`.trim(),
+          stack: undefined,
+          url: window.location.href,
+          timestamp: new Date().toISOString(),
+          userAgent: navigator.userAgent,
+        });
+      }
     }
     return res;
   } catch (error) {
