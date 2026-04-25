@@ -300,4 +300,13 @@ VALUES
   ('mentor', 'Mentor', 'Got multiple best answers', 5)
 ON CONFLICT (key) DO NOTHING;
 
+-- Error alerts: persist fingerprint context for Telegram "Fix now" on serverless (Vercel).
+create table if not exists public.error_alert_context (
+  fingerprint text primary key,
+  payload jsonb not null,
+  created_at timestamptz not null default now()
+);
+create index if not exists error_alert_context_created_at_idx
+  on public.error_alert_context (created_at desc);
+
 NOTIFY pgrst, 'reload schema';

@@ -11,7 +11,7 @@ Usage:
 
 Requires in .env:
   TELEGRAM_BOT_TOKEN=...
-  TELEGRAM_WEBHOOK_BASE_URL=https://your-public-host   (no trailing slash; e.g. ngrok URL)
+  TELEGRAM_WEBHOOK_BASE_URL=https://your-public-host   (no trailing slash; e.g. https://quiz-amber-omega.vercel.app or ngrok)
 
 Optional CLI override (full webhook URL):
   npx tsx scripts/set-telegram-webhook.ts https://abc.ngrok-free.app/api/telegram/error-webhook

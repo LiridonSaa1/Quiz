@@ -13,6 +13,20 @@ const __dirname = path.dirname(__filename);
 const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN?.trim() || "";
 const TELEGRAM_CHAT_ID = process.env.TELEGRAM_CHAT_ID?.trim() || "";
 const TELEGRAM_ALERT_FIX_URL = process.env.TELEGRAM_ALERT_FIX_URL?.trim() || "";
+
+/** Never use Telegram sendMessage as open-link URL (empty text breaks; wrong UX). Use callback or your app URL. */
+function resolveTelegramFixButtonUrl(): string {
+  const raw = TELEGRAM_ALERT_FIX_URL;
+  if (!raw) return "";
+  if (/api\.telegram\.org\/bot[^/]+\/sendMessage/i.test(raw)) {
+    console.warn(
+      "[alerts] TELEGRAM_ALERT_FIX_URL points to api.telegram.org sendMessage; ignoring. " +
+        "Remove it in Vercel env, or set it to your app URL (e.g. https://YOUR.vercel.app/api/fix-now).",
+    );
+    return "";
+  }
+  return raw;
+}
 const TELEGRAM_ALERT_COOLDOWN_MS = Math.max(
   Number(process.env.TELEGRAM_ALERT_COOLDOWN_MS || 120000),
   10000,
@@ -39,6 +53,19 @@ const recentLoggedErrors = new Map<
   }
 >();
 type ErrorLayer = "FRONTEND" | "BACKEND" | "DATABASE";
+
+type StoredErrorContext = {
+  layer: ErrorLayer;
+  message: string;
+  stack?: string;
+  file?: string;
+  line?: number;
+  url?: string;
+  userAgent?: string;
+  source?: string;
+  userId?: string;
+  timestamp: string;
+};
 type TelegramPayload = {
   chat_id: string;
   text: string;
@@ -107,7 +134,7 @@ async function sendTelegramErrorAlert(params: {
     `${escapedSummary}\n` +
     `fingerprint: \`${escapeTelegramText(fingerprint)}\`${escapedDetails}`;
 
-  const buttonUrlBase = params.fixUrl || TELEGRAM_ALERT_FIX_URL;
+  const buttonUrlBase = params.fixUrl || resolveTelegramFixButtonUrl();
   const buttonUrl = buttonUrlBase
     ? `${buttonUrlBase}${buttonUrlBase.includes("?") ? "&" : "?"}fingerprint=${encodeURIComponent(fingerprint)}`
     : "";
@@ -360,7 +387,7 @@ async function logSystemError(event: {
   });
 
   if (fingerprint) {
-    recentLoggedErrors.set(fingerprint, {
+    const ctx: StoredErrorContext = {
       layer,
       message: event.message,
       stack: event.stack,
@@ -371,7 +398,9 @@ async function logSystemError(event: {
       source: event.source,
       userId: event.userId,
       timestamp,
-    });
+    };
+    recentLoggedErrors.set(fingerprint, ctx);
+    void persistErrorAlertContext(fingerprint, ctx);
     if (recentLoggedErrors.size > 300) {
       const first = recentLoggedErrors.keys().next().value;
       if (first) recentLoggedErrors.delete(first);
@@ -428,6 +457,35 @@ const supabaseAdmin = new Proxy({} as any, {
     return value;
   },
 });
+
+async function persistErrorAlertContext(fingerprint: string, ctx: StoredErrorContext): Promise<void> {
+  try {
+    const { error } = await supabaseAdmin.from("error_alert_context").upsert(
+      {
+        fingerprint,
+        payload: ctx,
+      },
+      { onConflict: "fingerprint" },
+    );
+    if (error) console.warn("[alerts] persist error_alert_context:", error.message);
+  } catch (e: any) {
+    console.warn("[alerts] persist error_alert_context failed:", e?.message || e);
+  }
+}
+
+async function loadErrorAlertContext(fingerprint: string): Promise<StoredErrorContext | null> {
+  try {
+    const { data, error } = await supabaseAdmin
+      .from("error_alert_context")
+      .select("payload")
+      .eq("fingerprint", fingerprint)
+      .maybeSingle();
+    if (error || !data?.payload) return null;
+    return data.payload as StoredErrorContext;
+  } catch {
+    return null;
+  }
+}
 
 function addDaysToYmd(ymd: string, days: number): string {
   const parts = ymd.split("-").map((x) => parseInt(x, 10));
@@ -549,11 +607,12 @@ export async function createApp(options: CreateAppOptions = {}) {
     try {
       const fingerprint = String(req.query.fingerprint || "").trim();
       if (!fingerprint) return res.status(400).json({ error: "fingerprint is required" });
-      const ctx = recentLoggedErrors.get(fingerprint);
+      const ctx =
+        (await loadErrorAlertContext(fingerprint)) || recentLoggedErrors.get(fingerprint) || null;
       if (!ctx) {
         return res.status(404).json({
           error:
-            "No stored error found for this fingerprint. Trigger the error again, then click Fix now shortly after.",
+            "No stored error found for this fingerprint. Run migration 006_error_alert_context.sql in Supabase, trigger the error again, then retry.",
         });
       }
 
@@ -643,11 +702,12 @@ export async function createApp(options: CreateAppOptions = {}) {
         }
         if (callbackData.startsWith("fix:")) {
           const fingerprint = callbackData.slice(4).trim();
-          const ctx = recentLoggedErrors.get(fingerprint);
+          const ctx =
+            (await loadErrorAlertContext(fingerprint)) || recentLoggedErrors.get(fingerprint) || null;
           if (!ctx) {
             await callTelegramApi("sendMessage", {
               chat_id: chatId,
-              text: `No stored error found for fingerprint ${fingerprint}. Trigger error again and retry.`,
+              text: `No stored error found for fingerprint ${fingerprint}. Run DB migration error_alert_context in Supabase, trigger error again, then retry.`,
             });
             return res.json({ success: true, handled: "callback.no-context" });
           }
