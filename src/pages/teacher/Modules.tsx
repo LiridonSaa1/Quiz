@@ -8,7 +8,7 @@ import {
 import { toast } from 'sonner';
 import { Module, Course } from '../../types';
 import { cn } from '../../lib/utils';
-import { apiUrl, readApiError } from '../../lib/apiUrl';
+import { authFetch, readApiError } from '../../lib/apiUrl';
 import { resolveTeacherIdCandidates } from '../../lib/teacherScope';
 import { motion, AnimatePresence, useMotionValue, useSpring, useTransform } from 'motion/react';
 import { useTeacherPermissions } from '../../lib/teacherPermissions';
@@ -104,7 +104,7 @@ export default function TeacherModules() {
       let courseRows: any[] = [];
       let classRows: Array<{ id: string; name: string; course_id: string | null }> = [];
 
-      const backendRes = await fetch(apiUrl(`/api/teacher/courses?userId=${encodeURIComponent(session.user.id)}`));
+      const backendRes = await authFetch(`/api/teacher/courses?userId=${encodeURIComponent(session.user.id)}`);
       if (backendRes.ok) {
         const backendJson = await backendRes.json();
         if (backendJson?.success && Array.isArray(backendJson.courses)) {
@@ -123,7 +123,7 @@ export default function TeacherModules() {
         courseRows = coursesData || [];
       }
 
-      const classesRes = await fetch(apiUrl(`/api/teacher/classes?userId=${encodeURIComponent(session.user.id)}`));
+      const classesRes = await authFetch(`/api/teacher/classes?userId=${encodeURIComponent(session.user.id)}`);
       if (classesRes.ok) {
         const classesJson = await classesRes.json();
         if (classesJson?.success && Array.isArray(classesJson.classes)) {
@@ -150,9 +150,7 @@ export default function TeacherModules() {
       }
 
       let modulesData: any[] | null = null;
-      const modulesRes = await fetch(
-        apiUrl(`/api/teacher/modules?userId=${encodeURIComponent(session.user.id)}`)
-      );
+      const modulesRes = await authFetch(`/api/teacher/modules?userId=${encodeURIComponent(session.user.id)}`);
       if (modulesRes.ok) {
         const modulesJson = await modulesRes.json();
         if (modulesJson?.success && Array.isArray(modulesJson.modules)) {
@@ -298,20 +296,18 @@ export default function TeacherModules() {
       };
 
       if (editing) {
-        const res = await fetch(
-          apiUrl(`/api/teacher/modules/${encodeURIComponent(editing.id)}?userId=${encodeURIComponent(session.user.id)}`),
+        const res = await authFetch(
+          `/api/teacher/modules/${encodeURIComponent(editing.id)}?userId=${encodeURIComponent(session.user.id)}`,
           {
             method: 'PATCH',
-            headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(body),
           }
         );
         if (!res.ok) throw new Error(await readApiError(res));
         toast.success('Module updated');
       } else {
-        const res = await fetch(apiUrl('/api/teacher/modules'), {
+        const res = await authFetch('/api/teacher/modules', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ userId: session.user.id, ...body }),
         });
         if (!res.ok) throw new Error(await readApiError(res));
@@ -334,8 +330,8 @@ export default function TeacherModules() {
         toast.error('Not signed in');
         return;
       }
-      const res = await fetch(
-        apiUrl(`/api/teacher/modules/${encodeURIComponent(id)}/delete?userId=${encodeURIComponent(session.user.id)}`),
+      const res = await authFetch(
+        `/api/teacher/modules/${encodeURIComponent(id)}/delete?userId=${encodeURIComponent(session.user.id)}`,
         { method: 'POST' }
       );
       const json = await res.json().catch(() => ({}));
@@ -356,11 +352,10 @@ export default function TeacherModules() {
         toast.error('Not signed in');
         return;
       }
-      const res = await fetch(
-        apiUrl(`/api/teacher/modules/${encodeURIComponent(mod.id)}?userId=${encodeURIComponent(session.user.id)}`),
+      const res = await authFetch(
+        `/api/teacher/modules/${encodeURIComponent(mod.id)}?userId=${encodeURIComponent(session.user.id)}`,
         {
           method: 'PATCH',
-          headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ status: newStatus }),
         }
       );

@@ -11,7 +11,7 @@ import {
 import { toast } from 'sonner';
 import { cn } from '../../lib/utils';
 import { useNavigate } from 'react-router-dom';
-import { apiUrl, authFetch, readApiError } from '../../lib/apiUrl';
+import { authFetch, readApiError } from '../../lib/apiUrl';
 import { resolveTeacherIdCandidates } from '../../lib/teacherScope';
 import {
   fetchTeacherQuizzesFromSupabase,
@@ -106,8 +106,8 @@ export default function Exams() {
 
     try {
       let courseRows: { id: string; title: string | null }[] | null = null;
-      const coursesRes = await fetch(
-        apiUrl(`/api/teacher/courses?userId=${encodeURIComponent(session.user.id)}`)
+      const coursesRes = await authFetch(
+        `/api/teacher/courses?userId=${encodeURIComponent(session.user.id)}`
       );
       if (coursesRes.ok) {
         const j = await coursesRes.json();

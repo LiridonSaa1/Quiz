@@ -11,7 +11,7 @@ import {
 import { toast } from 'sonner';
 import { Quiz } from '../../types';
 import { cn } from '../../lib/utils';
-import { apiUrl, authFetch, readApiError } from '../../lib/apiUrl';
+import { authFetch, readApiError } from '../../lib/apiUrl';
 import { resolveTeacherIdCandidates } from '../../lib/teacherScope';
 import { fetchTeacherQuizzesFromSupabase, missingQuizzesPublishedColumn } from '../../lib/fetchTeacherQuizzes';
 import { Link, useNavigate } from 'react-router-dom';
@@ -104,7 +104,7 @@ export default function QuizManagement() {
         }
       }
 
-      const classesRes = await fetch(apiUrl(`/api/teacher/classes?userId=${encodeURIComponent(session.user.id)}`));
+      const classesRes = await authFetch(`/api/teacher/classes?userId=${encodeURIComponent(session.user.id)}`);
       if (classesRes.ok) {
         const classesJson = await classesRes.json();
         if (classesJson?.success && Array.isArray(classesJson.classes)) {

@@ -121,7 +121,7 @@ export default function TeacherLessons() {
       }
       setCourses(courseList);
 
-      const classesRes = await authFetch(`/api/teacher/classes?teacher_id=${encodeURIComponent(session.user.id)}`);
+      const classesRes = await authFetch(`/api/teacher/classes?userId=${encodeURIComponent(session.user.id)}`);
       if (classesRes.ok) {
         const classesJson = await classesRes.json();
         if (classesJson?.success && Array.isArray(classesJson.classes)) {
