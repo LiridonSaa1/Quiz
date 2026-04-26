@@ -136,9 +136,8 @@ export default function AdminDashboard() {
     try {
       const endpoint = newUserData.role === 'teacher' ? '/api/admin/create-teacher' : '/api/admin/create-student';
       const { data: { session } } = await supabase.auth.getSession();
-      const response = await fetch(endpoint, {
+      const response = await authFetch(endpoint, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ name: newUserData.name, email: newUserData.email, password: newUserData.password, teacherId: session?.user.id })
       });
       const data = await response.json();

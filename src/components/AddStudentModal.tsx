@@ -99,14 +99,10 @@ export default function AddStudentModal({ onClose, onSuccess, accentColor = 'vio
       return;
     }
     setSubmitting(true);
-    const { data: { session } } = await supabase.auth.getSession();
     try {
-      const res = await fetch('/api/admin/create-student', {
+      const { data: { session } } = await supabase.auth.getSession();
+      const res = await authFetch('/api/admin/create-student', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          ...(session ? { Authorization: `Bearer ${session.access_token}` } : {}),
-        },
         body: JSON.stringify({
           name: form.name.trim(),
           email: form.email.trim(),

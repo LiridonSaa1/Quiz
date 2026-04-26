@@ -52,6 +52,30 @@ function extractJsonBlock(text: string): any | null {
   }
 }
 
+function buildOpenAIRequestBody(errorData: ErrorData, contextBlock: string): Record<string, unknown> {
+  return {
+    model: DEFAULT_MODEL,
+    input: buildPrompt(errorData, contextBlock),
+  };
+}
+
+function parseOpenAIError(body: string): { message: string; param?: string } | null {
+  try {
+    const parsed = JSON.parse(body);
+    const error = parsed?.error;
+    if (!error || typeof error !== "object") return null;
+    const message = typeof error.message === "string" ? error.message.trim() : "";
+    const param = typeof error.param === "string" ? error.param.trim() : "";
+    if (!message) return null;
+    return {
+      message,
+      param: param || undefined,
+    };
+  } catch {
+    return null;
+  }
+}
+
 function buildPrompt(errorData: ErrorData, contextBlock: string): string {
   return [
     "You are an expert debugging assistant.",
@@ -102,26 +126,32 @@ export async function generateFixSuggestion(errorDataInput: ErrorData): Promise<
   const timeout = setTimeout(() => controller.abort(), 30000);
 
   try {
+    const requestBody = buildOpenAIRequestBody(errorData, contextBlock);
     const response = await fetch(OPENAI_API_URL, {
       method: "POST",
       headers: {
         Authorization: `Bearer ${apiKey}`,
         "Content-Type": "application/json",
       },
-      body: JSON.stringify({
-        model: DEFAULT_MODEL,
-        input: buildPrompt(errorData, contextBlock),
-        temperature: 0.2,
-      }),
+      body: JSON.stringify(requestBody),
       signal: controller.signal,
     });
 
     if (!response.ok) {
       const body = await response.text();
+      const parsedError = parseOpenAIError(body);
+      const unsupportedParam =
+        parsedError?.message.toLowerCase().includes("unsupported parameter");
+      const paramDetails = parsedError?.param ? ` (param: ${parsedError.param})` : "";
+      const details =
+        parsedError?.message ||
+        `OpenAI returned a non-OK response body: ${body.slice(0, 500)}`;
       return withFormattedOutput({
         ...fallback,
         analysis: `OpenAI request failed (${response.status}).`,
-        fixSuggestion: `Inspect OpenAI API response and credentials. Raw response: ${body.slice(0, 500)}`,
+        fixSuggestion: unsupportedParam
+          ? `OpenAI rejected an unsupported request parameter${paramDetails}. The service now sends a safe payload without optional tuning parameters. Response: ${details}`
+          : `Inspect OpenAI API response and credentials. Response: ${details}`,
       });
     }
 

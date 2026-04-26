@@ -1,5 +1,6 @@
 import "dotenv/config";
 import { isMissingCoursesStudentIdsError } from "./src/lib/schemaErrors.js";
+import { canAccessTeacherCourses, isAdmin, isAdminSeedAllowed } from "./src/lib/routeAuth.js";
 import { generateFixSuggestion } from "./src/lib/ai/generateFixSuggestion.js";
 import express, { Request, Response } from "express";
 import { appendFile, mkdir, readFile as readFileFs, writeFile } from "fs/promises";
@@ -1508,6 +1509,10 @@ export async function createApp(options: CreateAppOptions = {}) {
 
   app.get("/api/admin/config/:section", async (req, res) => {
     try {
+      const caller = await assertAuthenticated(req, res);
+      if (!caller) return;
+      if (!isAdmin(caller)) return res.status(403).json({ error: "Forbidden: admin role required" });
+
       const section = String(req.params.section || "").trim();
       if (!CONFIG_SECTIONS.has(section)) {
         return res.status(400).json({ error: "Unsupported config section" });
@@ -1526,6 +1531,10 @@ export async function createApp(options: CreateAppOptions = {}) {
 
   app.put("/api/admin/config/:section", async (req, res) => {
     try {
+      const caller = await assertAuthenticated(req, res);
+      if (!caller) return;
+      if (!isAdmin(caller)) return res.status(403).json({ error: "Forbidden: admin role required" });
+
       const section = String(req.params.section || "").trim();
       if (!CONFIG_SECTIONS.has(section)) {
         return res.status(400).json({ error: "Unsupported config section" });
@@ -1663,6 +1672,10 @@ export async function createApp(options: CreateAppOptions = {}) {
   // Route to fetch all teachers (bypasses RLS using service role)
   app.get("/api/admin/teachers", async (req, res) => {
     try {
+      const caller = await assertAuthenticated(req, res);
+      if (!caller) return;
+      if (!isAdmin(caller)) return res.status(403).json({ error: "Forbidden: admin role required" });
+
       const [profilesRes, teachersRes] = await Promise.all([
         supabaseAdmin.from("profiles").select("*").eq("role", "teacher"),
         supabaseAdmin.from("teachers").select("id, user_id"),
@@ -1700,6 +1713,13 @@ export async function createApp(options: CreateAppOptions = {}) {
     const adminPassword = "Admin123!";
     
     try {
+      const caller = await assertAuthenticated(req, res);
+      if (!caller) return;
+      if (!isAdmin(caller)) return res.status(403).json({ error: "Forbidden: admin role required" });
+      if (!isAdminSeedAllowed(process.env.NODE_ENV)) {
+        return res.status(403).json({ error: "Forbidden: admin seed is disabled outside development" });
+      }
+
       // 1. Check if profiles table exists
       const { error: tableCheckError } = await supabaseAdmin
         .from('profiles')
@@ -1971,6 +1991,10 @@ export async function createApp(options: CreateAppOptions = {}) {
     const { name, email, password, phone, specialization } = req.body;
     
     try {
+      const caller = await assertAuthenticated(req, res);
+      if (!caller) return;
+      if (!isAdmin(caller)) return res.status(403).json({ error: "Forbidden: admin role required" });
+
       // 1. Create or find user in Supabase Auth
       const { data: authData, error: authError } = await supabaseAdmin.auth.admin.createUser({
         email,
@@ -2050,14 +2074,16 @@ export async function createApp(options: CreateAppOptions = {}) {
     } = req.body;
     
     try {
-      // Resolve teacher ID — prefer the verified JWT identity over the body value
-      const authHeader = req.headers.authorization as string | undefined;
-      const token = authHeader?.replace('Bearer ', '');
-      let resolvedTeacherId: string | undefined = teacherId;
-      if (token) {
-        const { data: { user: callerUser } } = await supabaseAdmin.auth.getUser(token);
-        if (callerUser?.id) resolvedTeacherId = callerUser.id;
+      const caller = await assertAuthenticated(req, res);
+      if (!caller) return;
+      if (caller.role !== "admin" && caller.role !== "teacher") {
+        return res.status(403).json({ error: "Forbidden: admin or teacher role required" });
       }
+
+      // Teacher-created students are always bound to the authenticated teacher.
+      // Admin-created students require an explicit teacher assignment.
+      const resolvedTeacherId: string | undefined =
+        caller.role === "teacher" ? caller.userId : typeof teacherId === "string" ? teacherId.trim() : "";
       if (!resolvedTeacherId) throw new Error('Could not determine teacher identity.');
 
       // 1. Create or find user in Supabase Auth
@@ -2213,8 +2239,14 @@ export async function createApp(options: CreateAppOptions = {}) {
     // Teacher courses (service-role query to avoid RLS/ID-mapping mismatches)
   app.get('/api/teacher/courses', async (req, res) => {
     try {
+      const caller = await assertAuthenticated(req, res);
+      if (!caller) return;
+
       const userId = typeof req.query.userId === 'string' ? req.query.userId.trim() : '';
       if (!userId) return res.status(400).json({ error: 'userId is required' });
+      if (!canAccessTeacherCourses(caller, userId)) {
+        return res.status(403).json({ error: "Forbidden" });
+      }
 
       const teacherIds = await getTeacherIdCandidates(userId);
       const scopedIds = teacherIds.length > 0 ? teacherIds : [userId];

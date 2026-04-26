@@ -7,6 +7,7 @@ import {
 import { toast } from 'sonner';
 import { supabase } from '../supabase';
 import { cn } from '../lib/utils';
+import { authFetch } from '../lib/apiUrl';
 
 interface FormData {
   name: string;
@@ -61,13 +62,8 @@ export default function AddTeacherModal({ onClose, onSuccess }: Props) {
     }
     setSubmitting(true);
     try {
-      const { data: { session } } = await supabase.auth.getSession();
-      const res = await fetch('/api/admin/create-teacher', {
+      const res = await authFetch('/api/admin/create-teacher', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          ...(session ? { Authorization: `Bearer ${session.access_token}` } : {}),
-        },
         body: JSON.stringify({
           name: form.name.trim(),
           email: form.email.trim(),
