@@ -80,10 +80,10 @@ export default function StudentLayout({ children }: { children: React.ReactNode 
     let mounted = true;
     const loadSettings = async () => {
       try {
-        const res = await authFetch('/api/admin/config/settings');
+        const res = await authFetch('/api/platform/features');
         const json = await res.json();
         if (!mounted || !res.ok || !json?.success) return;
-        setFeatures(extractFeatureFlags(json.value));
+        setFeatures(extractFeatureFlags({ features: json.features }));
       } catch {
         // keep defaults
       }

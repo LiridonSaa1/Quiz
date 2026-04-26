@@ -37,6 +37,11 @@ const TELEGRAM_RETRY_INTERVAL_MS = Math.max(
   5000,
 );
 const ERROR_ALERTS_ENABLED = Boolean(TELEGRAM_BOT_TOKEN && TELEGRAM_CHAT_ID);
+const TELEGRAM_ALERTS_SETTINGS_CACHE_TTL_MS = 15000;
+let telegramAlertsSettingsCache: { value: boolean; expiresAt: number } = {
+  value: true,
+  expiresAt: 0,
+};
 const recentErrorAlerts = new Map<string, number>();
 const recentLoggedErrors = new Map<
   string,
@@ -120,9 +125,9 @@ async function sendTelegramErrorAlert(params: {
   fingerprint?: string;
 }): Promise<string | null> {
   const fingerprint = params.fingerprint ?? stableHash(params.fingerprintSource);
-  if (!ERROR_ALERTS_ENABLED) {
+  if (!(await isTelegramErrorAlertsEnabled())) {
     console.warn(
-      "[alerts] Telegram disabled (missing TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID); skip send. fingerprint=",
+      "[alerts] Telegram error alerts disabled (env or admin settings); skip send. fingerprint=",
       fingerprint,
     );
     return fingerprint;
@@ -198,6 +203,38 @@ async function sendTelegramErrorAlert(params: {
     });
   }
   return fingerprint;
+}
+
+async function isTelegramErrorAlertsEnabled(): Promise<boolean> {
+  if (!ERROR_ALERTS_ENABLED) return false;
+
+  const now = Date.now();
+  if (now < telegramAlertsSettingsCache.expiresAt) {
+    return telegramAlertsSettingsCache.value;
+  }
+
+  let enabled = true;
+  try {
+    const settingsRes = await supabaseAdmin
+      .from("platform_config")
+      .select("value")
+      .eq("section", "settings")
+      .maybeSingle();
+    if (!settingsRes.error) {
+      const settings = settingsRes.data?.value as any;
+      if (typeof settings?.advanced?.telegramErrorAlerts === "boolean") {
+        enabled = settings.advanced.telegramErrorAlerts;
+      }
+    }
+  } catch {
+    // keep fail-open behavior so critical alerts still send if config lookup fails
+  }
+
+  telegramAlertsSettingsCache = {
+    value: enabled,
+    expiresAt: now + TELEGRAM_ALERTS_SETTINGS_CACHE_TTL_MS,
+  };
+  return enabled;
 }
 
 async function sendTelegramTextMessage(text: string): Promise<void> {
@@ -1470,6 +1507,20 @@ export async function createApp(options: CreateAppOptions = {}) {
     return error?.code === "42P01" || (error?.code === "PGRST205" && hay.includes("platform_config"));
   };
 
+  const extractPublicFeatureFlags = (settingsValue: any) => {
+    const features = settingsValue?.features || {};
+    return {
+      communityEnabled:
+        typeof features.communityEnabled === "boolean" ? features.communityEnabled : true,
+      liveSessionsEnabled:
+        typeof features.liveSessionsEnabled === "boolean" ? features.liveSessionsEnabled : true,
+      announcementsEnabled:
+        typeof features.announcementsEnabled === "boolean" ? features.announcementsEnabled : true,
+      paymentsEnabled:
+        typeof features.paymentsEnabled === "boolean" ? features.paymentsEnabled : true,
+    };
+  };
+
   // API routes FIRST
   app.get("/api/health", async (req, res) => {
     const supabaseUrl = process.env.VITE_SUPABASE_URL;
@@ -1505,6 +1556,50 @@ export async function createApp(options: CreateAppOptions = {}) {
         error: supabaseError
       }
     });
+  });
+
+  app.get("/api/platform/features", async (_req, res) => {
+    try {
+      const settings = await getConfigSection("settings");
+      res.json({ success: true, features: extractPublicFeatureFlags(settings) });
+    } catch (e: any) {
+      if (isPlatformConfigMissing(e)) {
+        return res.json({
+          success: true,
+          features: extractPublicFeatureFlags(null),
+        });
+      }
+      res.status(500).json({ error: e?.message || "Failed to load feature flags" });
+    }
+  });
+
+  app.get("/api/teacher/permissions", async (req, res) => {
+    try {
+      const caller = await assertAuthenticated(req, res);
+      if (!caller) return;
+
+      const roles = await getConfigSection("roles");
+      const perms =
+        roles &&
+        typeof roles === "object" &&
+        roles.perms &&
+        typeof roles.perms === "object" &&
+        roles.perms[caller.role] &&
+        typeof roles.perms[caller.role] === "object"
+          ? roles.perms[caller.role]
+          : {};
+
+      res.json({
+        success: true,
+        role: caller.role,
+        permissions: perms,
+      });
+    } catch (e: any) {
+      if (isPlatformConfigMissing(e)) {
+        return res.json({ success: true, permissions: {} });
+      }
+      res.status(500).json({ error: e?.message || "Failed to load permissions" });
+    }
   });
 
   app.get("/api/admin/config/:section", async (req, res) => {
@@ -2876,8 +2971,14 @@ export async function createApp(options: CreateAppOptions = {}) {
   // ── Teacher Lesson routes (service-role, bypasses RLS) ──────────────────
   app.get("/api/teacher/lessons", async (req, res) => {
     try {
+      const caller = await assertAuthenticated(req, res);
+      if (!caller) return;
+
       const userId = typeof req.query.userId === "string" ? req.query.userId.trim() : "";
       if (!userId) return res.status(400).json({ error: "userId is required" });
+      if (!canAccessTeacherCourses(caller, userId)) {
+        return res.status(403).json({ error: "Forbidden" });
+      }
 
       const teacherIds = await getTeacherIdCandidates(userId);
       const scopedIds = teacherIds.length > 0 ? teacherIds : [userId];
@@ -2901,8 +3002,14 @@ export async function createApp(options: CreateAppOptions = {}) {
 
   app.post("/api/teacher/lessons", async (req, res) => {
     try {
+      const caller = await assertAuthenticated(req, res);
+      if (!caller) return;
+
       const userId = typeof req.body?.userId === "string" ? req.body.userId.trim() : "";
       if (!userId) return res.status(400).json({ error: "userId is required" });
+      if (!canAccessTeacherCourses(caller, userId)) {
+        return res.status(403).json({ error: "Forbidden" });
+      }
       const { course_id, module_id, title, slug, short_description, type, duration_minutes, order, status, is_free_preview } = req.body;
       if (!course_id || !module_id || typeof title !== "string" || !title.trim()) {
         return res.status(400).json({ error: "course_id, module_id and title are required" });
@@ -2937,10 +3044,16 @@ export async function createApp(options: CreateAppOptions = {}) {
 
   app.patch("/api/teacher/lessons/:id", async (req, res) => {
     try {
+      const caller = await assertAuthenticated(req, res);
+      if (!caller) return;
+
       const lessonId = typeof req.params.id === "string" ? req.params.id.trim() : "";
       const userId = typeof req.query.userId === "string" ? req.query.userId.trim() : "";
       if (!lessonId) return res.status(400).json({ error: "Lesson id is required" });
       if (!userId) return res.status(400).json({ error: "userId is required" });
+      if (!canAccessTeacherCourses(caller, userId)) {
+        return res.status(403).json({ error: "Forbidden" });
+      }
 
       const { data: lesson, error: lErr } = await supabaseAdmin
         .from("lessons").select("id, course_id").eq("id", lessonId).maybeSingle();
@@ -2980,11 +3093,17 @@ export async function createApp(options: CreateAppOptions = {}) {
 
   const teacherLessonDeleteHandler = async (req: any, res: any) => {
     try {
+      const caller = await assertAuthenticated(req, res);
+      if (!caller) return;
+
       const lessonId = typeof req.params.id === "string" ? req.params.id.trim() : "";
       const userId = typeof (req.query.userId ?? req.body?.userId) === "string"
         ? String(req.query.userId ?? req.body?.userId).trim() : "";
       if (!lessonId) return res.status(400).json({ error: "Lesson id is required" });
       if (!userId) return res.status(400).json({ error: "userId is required" });
+      if (!canAccessTeacherCourses(caller, userId)) {
+        return res.status(403).json({ error: "Forbidden" });
+      }
 
       const { data: lesson, error: lErr } = await supabaseAdmin
         .from("lessons").select("id, course_id").eq("id", lessonId).maybeSingle();

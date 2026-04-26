@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
 import { authFetch } from './apiUrl';
-import { supabase } from '../supabase';
 
 export const teacherPagePermissionsByPath: Record<string, string> = {
   '/teacher': 'pages.teacher.dashboard',
@@ -45,19 +44,9 @@ export function useTeacherPermissions() {
     const load = async () => {
       setLoading(true);
       try {
-        const { data: authData } = await supabase.auth.getSession();
-        const userId = authData.session?.user?.id;
-        if (!userId) {
-          if (active) setPermissionMap({});
-          return;
-        }
-        const [{ data: profile }, rolesRes] = await Promise.all([
-          supabase.from('profiles').select('role').eq('id', userId).maybeSingle(),
-          authFetch('/api/admin/config/roles'),
-        ]);
-        const role = String(profile?.role || 'student').toLowerCase();
-        const rolesJson = await rolesRes.json().catch(() => null);
-        const perms = rolesJson?.value?.perms?.[role];
+        const res = await authFetch('/api/teacher/permissions');
+        const json = await res.json().catch(() => null);
+        const perms = json?.permissions;
         if (active) setPermissionMap(perms && typeof perms === 'object' ? perms : {});
       } catch {
         if (active) setPermissionMap({});

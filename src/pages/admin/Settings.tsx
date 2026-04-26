@@ -54,6 +54,7 @@ export default function AdminSettings() {
   const [autoLogout, setAutoLogout] = useState(true);
   const [sessionTimeoutMinutes, setSessionTimeoutMinutes] = useState(30);
   const [maxLoginAttempts, setMaxLoginAttempts] = useState(5);
+  const [telegramErrorAlerts, setTelegramErrorAlerts] = useState(true);
   const [features, setFeatures] = useState<FeatureFlags>(defaultFeatureFlags);
 
   const [general, setGeneral] = useState<GeneralForm>({
@@ -99,7 +100,7 @@ export default function AdminSettings() {
             notifications: notifs,
             email: emailSettings,
             security: { twoFactor, requireEmailVerify, registrationOpen, strongPasswords, autoLogout, sessionTimeoutMinutes, maxLoginAttempts },
-            advanced: { maintenance },
+            advanced: { maintenance, telegramErrorAlerts },
             features,
           },
         }),
@@ -135,6 +136,9 @@ export default function AdminSettings() {
           if (Number.isFinite(Number(v.security.maxLoginAttempts))) setMaxLoginAttempts(Number(v.security.maxLoginAttempts));
         }
         if (v.advanced && typeof v.advanced.maintenance === 'boolean') setMaintenance(v.advanced.maintenance);
+        if (v.advanced && typeof v.advanced.telegramErrorAlerts === 'boolean') {
+          setTelegramErrorAlerts(v.advanced.telegramErrorAlerts);
+        }
         if (v.features) {
           setFeatures({
             communityEnabled: typeof v.features.communityEnabled === 'boolean' ? v.features.communityEnabled : true,
@@ -385,6 +389,12 @@ export default function AdminSettings() {
                     description="Enable business pages and payment/invoice management"
                     value={features.paymentsEnabled}
                     onChange={v => setFeatures(p => ({ ...p, paymentsEnabled: v }))}
+                  />
+                  <Toggle
+                    label="Telegram Error Alerts"
+                    description="Send backend error alerts to Telegram when incidents happen"
+                    value={telegramErrorAlerts}
+                    onChange={setTelegramErrorAlerts}
                   />
                 </Section>
                 <Section title="Data & Storage" subtitle="Manage platform data settings">

@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { supabase } from '../../supabase';
-import { apiUrl } from '../../lib/apiUrl';
+import { authFetch, readApiError } from '../../lib/apiUrl';
 import { resolveTeacherIdCandidates } from '../../lib/teacherScope';
 import TeacherLayout from '../../components/layout/TeacherLayout';
 import {
@@ -101,7 +101,7 @@ export default function TeacherLessons() {
       // Try backend API first (same approach as Modules page, handles all teacher_id variants)
       let courseList: any[] = [];
       let classRows: Array<{ id: string; name: string; course_id: string | null }> = [];
-      const backendRes = await fetch(apiUrl(`/api/teacher/courses?userId=${encodeURIComponent(session.user.id)}`));
+      const backendRes = await authFetch(`/api/teacher/courses?userId=${encodeURIComponent(session.user.id)}`);
       if (backendRes.ok) {
         const backendJson = await backendRes.json();
         if (backendJson?.success && Array.isArray(backendJson.courses)) {
@@ -121,7 +121,7 @@ export default function TeacherLessons() {
       }
       setCourses(courseList);
 
-      const classesRes = await fetch(apiUrl(`/api/teacher/classes?userId=${encodeURIComponent(session.user.id)}`));
+      const classesRes = await authFetch(`/api/teacher/classes?teacher_id=${encodeURIComponent(session.user.id)}`);
       if (classesRes.ok) {
         const classesJson = await classesRes.json();
         if (classesJson?.success && Array.isArray(classesJson.classes)) {
@@ -144,7 +144,7 @@ export default function TeacherLessons() {
 
       // Fetch modules via backend API first (bypasses RLS), same pattern as Modules page
       let modulesData: any[] | null = null;
-      const modulesApiRes = await fetch(apiUrl(`/api/teacher/modules?userId=${encodeURIComponent(session.user.id)}`));
+      const modulesApiRes = await authFetch(`/api/teacher/modules?userId=${encodeURIComponent(session.user.id)}`);
       if (modulesApiRes.ok) {
         const modulesJson = await modulesApiRes.json();
         if (modulesJson?.success && Array.isArray(modulesJson.modules)) {
@@ -159,7 +159,7 @@ export default function TeacherLessons() {
 
       // Fetch lessons via backend API (bypasses RLS)
       let lessonsData: any[] = [];
-      const lessonsApiRes = await fetch(apiUrl(`/api/teacher/lessons?userId=${encodeURIComponent(session.user.id)}`));
+      const lessonsApiRes = await authFetch(`/api/teacher/lessons?userId=${encodeURIComponent(session.user.id)}`);
       if (lessonsApiRes.ok) {
         const lessonsJson = await lessonsApiRes.json();
         if (lessonsJson?.success && Array.isArray(lessonsJson.lessons)) {
@@ -259,22 +259,18 @@ export default function TeacherLessons() {
       };
 
       if (editing) {
-        const res = await fetch(apiUrl(`/api/teacher/lessons/${editing.id}?userId=${encodeURIComponent(userId)}`), {
+        const res = await authFetch(`/api/teacher/lessons/${editing.id}?userId=${encodeURIComponent(userId)}`, {
           method: 'PATCH',
-          headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(payload),
         });
-        const json = await res.json();
-        if (!res.ok) throw new Error(json.error || 'Failed to update lesson');
+        if (!res.ok) throw new Error(await readApiError(res));
         toast.success('Lesson updated');
       } else {
-        const res = await fetch(apiUrl('/api/teacher/lessons'), {
+        const res = await authFetch('/api/teacher/lessons', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(payload),
         });
-        const json = await res.json();
-        if (!res.ok) throw new Error(json.error || 'Failed to create lesson');
+        if (!res.ok) throw new Error(await readApiError(res));
         toast.success('Lesson created');
       }
       closeModal();
@@ -289,9 +285,8 @@ export default function TeacherLessons() {
   const handleDelete = async (id: string) => {
     if (!window.confirm('Delete this lesson? This cannot be undone.')) return;
     try {
-      const res = await fetch(apiUrl(`/api/teacher/lessons/${id}?userId=${encodeURIComponent(userId)}`), { method: 'DELETE' });
-      const json = await res.json();
-      if (!res.ok) throw new Error(json.error || 'Failed to delete lesson');
+      const res = await authFetch(`/api/teacher/lessons/${id}?userId=${encodeURIComponent(userId)}`, { method: 'DELETE' });
+      if (!res.ok) throw new Error(await readApiError(res));
       toast.success('Lesson deleted');
       fetchData();
     } catch (err: any) { toast.error(err.message || 'Failed to delete lesson'); }
@@ -300,13 +295,11 @@ export default function TeacherLessons() {
   const handleToggleStatus = async (lesson: Lesson) => {
     const newStatus = lesson.status === 'published' ? 'draft' : 'published';
     try {
-      const res = await fetch(apiUrl(`/api/teacher/lessons/${lesson.id}?userId=${encodeURIComponent(userId)}`), {
+      const res = await authFetch(`/api/teacher/lessons/${lesson.id}?userId=${encodeURIComponent(userId)}`, {
         method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ status: newStatus }),
       });
-      const json = await res.json();
-      if (!res.ok) throw new Error(json.error || 'Failed to update status');
+      if (!res.ok) throw new Error(await readApiError(res));
       toast.success(`Lesson ${newStatus === 'published' ? 'published' : 'set to draft'}`);
       fetchData();
     } catch (err: any) { toast.error(err.message || 'Failed to update status'); }
@@ -314,13 +307,11 @@ export default function TeacherLessons() {
 
   const handleToggleFreePreview = async (lesson: Lesson) => {
     try {
-      const res = await fetch(apiUrl(`/api/teacher/lessons/${lesson.id}?userId=${encodeURIComponent(userId)}`), {
+      const res = await authFetch(`/api/teacher/lessons/${lesson.id}?userId=${encodeURIComponent(userId)}`, {
         method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ is_free_preview: !lesson.isFreePreview }),
       });
-      const json = await res.json();
-      if (!res.ok) throw new Error(json.error || 'Failed to update');
+      if (!res.ok) throw new Error(await readApiError(res));
       toast.success(lesson.isFreePreview ? 'Free preview removed' : 'Set as free preview');
       fetchData();
     } catch (err: any) { toast.error(err.message || 'Failed to update'); }
