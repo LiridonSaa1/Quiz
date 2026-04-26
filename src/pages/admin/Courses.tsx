@@ -10,6 +10,7 @@ import {
 import { cn } from '../../lib/utils';
 import { motion, AnimatePresence } from 'motion/react';
 import { toast } from 'sonner';
+import { authFetch } from '../../lib/apiUrl';
 
 const GRADIENT_PALETTES = [
   'from-indigo-500 to-violet-600',
@@ -58,19 +59,28 @@ export default function AdminCourses() {
   const fetchData = async () => {
     setLoading(true);
     try {
-      const [coursesRes, teachersApiRes] = await Promise.all([
-        supabase.from('courses').select('*').order('created_at', { ascending: false }),
-        fetch('/api/admin/teachers').then(async (res) => {
+      const [coursesRes, teachersRes] = await Promise.allSettled([
+        authFetch('/api/admin/courses').then(async (res) => {
+          const json = await res.json().catch(() => ({}));
+          if (!res.ok || !json?.success) throw new Error(json?.error || 'Failed to load courses');
+          return json;
+        }),
+        authFetch('/api/admin/teachers').then(async (res) => {
           if (!res.ok) throw new Error('Failed to load teachers');
           return res.json();
         }),
       ]);
 
-      if (coursesRes.error) throw coursesRes.error;
-      if (!teachersApiRes.success) throw new Error(teachersApiRes.error || 'Failed to load teachers');
+      if (coursesRes.status === 'rejected') {
+        throw new Error('Failed to load courses');
+      }
+      setCourses(Array.isArray(coursesRes.value?.courses) ? coursesRes.value.courses : []);
 
-      setCourses(coursesRes.data || []);
-      setTeachers(teachersApiRes.teachers || []);
+      if (teachersRes.status === 'fulfilled' && teachersRes.value?.success) {
+        setTeachers(teachersRes.value.teachers || []);
+      } else {
+        setTeachers([]);
+      }
     } catch {
       toast.error('Failed to load courses');
     } finally {

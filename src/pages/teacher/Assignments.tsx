@@ -18,7 +18,7 @@ import {
 import { cn } from '../../lib/utils';
 import { format, isPast, isToday } from 'date-fns';
 import { resolveTeacherIdCandidates } from '../../lib/teacherScope';
-import { apiUrl, authFetch } from '../../lib/apiUrl';
+import { authFetch } from '../../lib/apiUrl';
 
 type AssignmentStatus = 'draft' | 'published' | 'closed';
 type AssignmentType = 'homework' | 'project' | 'essay' | 'quiz' | 'lab' | 'other';
@@ -133,7 +133,7 @@ export default function TeacherAssignments() {
 
       // Fallback to server endpoints when direct client queries return no rows (RLS/schema drift).
       if (coursesData.length === 0) {
-        const coursesRes = await fetch(apiUrl(`/api/teacher/courses?userId=${encodeURIComponent(teacherId)}`));
+        const coursesRes = await authFetch(`/api/teacher/courses?userId=${encodeURIComponent(teacherId)}`);
         if (coursesRes.ok) {
           const json = await coursesRes.json();
           if (json?.success && Array.isArray(json.courses)) {

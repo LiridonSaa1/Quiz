@@ -10,6 +10,7 @@ import {
   ADMIN_LIST_CARD_GRID,
   ADMIN_LIST_ITEM_CARD,
 } from '../../components/admin/AdminListPageShell';
+import { supabase } from '../../supabase';
 import { format, formatDistanceToNow, isPast } from 'date-fns';
 import {
   Megaphone, Plus, Search, Trash2, Pencil, X,
@@ -63,7 +64,7 @@ const emptyForm = {
   expires_at: '',
 };
 
-interface ClassOption { id: string; name: string; student_ids: string[]; }
+interface ClassOption { id: string; name: string; course_id?: string | null; student_ids: string[]; enrollment_count?: number; }
 interface UserOption { id: string; display_name: string; email: string; }
 
 export default function TeacherAnnouncements() {
@@ -104,15 +105,57 @@ export default function TeacherAnnouncements() {
 
   const fetchClasses = async () => {
     try {
-      const res = await authFetch('/api/teacher/classes');
-      const json = await res.json();
-      if (json.success) {
-        setClasses((json.classes || []).map((c: any) => ({
-          id: String(c.id),
-          name: String(c.name || 'Untitled class'),
-          student_ids: Array.isArray(c.student_ids) ? c.student_ids.map((sid: unknown) => String(sid)) : [],
-        })));
+      const classesRes = await authFetch('/api/teacher/classes');
+      const classesJson = await classesRes.json().catch(() => null);
+      if (!classesRes.ok || !classesJson?.success || !Array.isArray(classesJson.classes)) return;
+
+      const normalizedClasses: ClassOption[] = classesJson.classes.map((c: any) => ({
+        id: String(c.id),
+        name: String(c.name || 'Untitled class'),
+        course_id: c.course_id ? String(c.course_id) : null,
+        student_ids: Array.isArray(c.student_ids) ? c.student_ids.map((sid: unknown) => String(sid)) : [],
+      }));
+
+      let coursesWithStudents: Array<{ id: string; student_ids: string[] }> = [];
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        const uid = session?.user?.id;
+        if (uid) {
+          const coursesRes = await authFetch(`/api/teacher/courses?userId=${encodeURIComponent(uid)}`);
+          const coursesJson = await coursesRes.json().catch(() => null);
+          if (coursesRes.ok && coursesJson?.success && Array.isArray(coursesJson.courses)) {
+            coursesWithStudents = coursesJson.courses.map((course: any) => ({
+              id: String(course.id),
+              student_ids: Array.isArray(course.student_ids) ? course.student_ids.map((sid: unknown) => String(sid)) : [],
+            }));
+          }
+        }
+      } catch {
+        // Keep class targeting usable even if course enrichment fails.
       }
+
+      const courseStudentMap = new Map<string, string[]>(
+        coursesWithStudents.map((course) => [course.id, course.student_ids]),
+      );
+      const classCountPerCourse = normalizedClasses.reduce((acc: Record<string, number>, cls) => {
+        const courseId = cls.course_id ? String(cls.course_id) : '';
+        if (courseId) acc[courseId] = (acc[courseId] || 0) + 1;
+        return acc;
+      }, {});
+
+      const enrichedClasses = normalizedClasses.map((cls) => {
+        const classStudentIds = Array.isArray(cls.student_ids) ? cls.student_ids : [];
+        const courseId = cls.course_id ? String(cls.course_id) : '';
+        const hasSingleClassForCourse = courseId ? (classCountPerCourse[courseId] || 0) === 1 : false;
+        const courseStudentIds = courseId ? (courseStudentMap.get(courseId) || []) : [];
+        const enrollmentCount =
+          classStudentIds.length > 0
+            ? classStudentIds.length
+            : (hasSingleClassForCourse ? courseStudentIds.length : 0);
+        return { ...cls, enrollment_count: enrollmentCount };
+      });
+
+      setClasses(enrichedClasses);
     } catch {
       // non-blocking
     }
@@ -433,7 +476,7 @@ export default function TeacherAnnouncements() {
                               />
                               <span className="text-sm text-slate-700 truncate">{c.name}</span>
                             </span>
-                            <span className="text-xs text-slate-400 shrink-0">{c.student_ids.length} students</span>
+                            <span className="text-xs text-slate-400 shrink-0">{c.enrollment_count ?? c.student_ids.length} students</span>
                           </label>
                         );
                       })}

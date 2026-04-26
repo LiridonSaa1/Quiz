@@ -2,7 +2,7 @@ import React, { useEffect, useState, useCallback } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import TeacherLayout from '../../components/layout/TeacherLayout';
 import { supabase } from '../../supabase';
-import { authFetch, apiUrl } from '../../lib/apiUrl';
+import { authFetch } from '../../lib/apiUrl';
 import { toast } from 'sonner';
 import { motion, AnimatePresence } from 'motion/react';
 import {
@@ -60,7 +60,7 @@ const emptyForm = {
 };
 
 interface UserOption { id: string; display_name: string; email: string; }
-interface ClassOption { id: string; name: string; student_ids: string[]; }
+interface ClassOption { id: string; name: string; course_id?: string | null; student_ids: string[]; enrollment_count?: number; }
 
 interface AttendanceEntry {
   user_id: string;
@@ -93,7 +93,7 @@ export default function TeacherLiveSessions() {
 
   const fetchCourses = useCallback(async (uid: string) => {
     try {
-      const res = await fetch(apiUrl(`/api/teacher/courses?userId=${encodeURIComponent(uid)}`));
+      const res = await authFetch(`/api/teacher/courses?userId=${encodeURIComponent(uid)}`);
       const json = await res.json();
       if (json.success) setCourses((json.courses || []).map((c: { id: string; title: string }) => ({ id: c.id, title: c.title })));
     } catch { /* ignore */ }
@@ -589,9 +589,57 @@ function NewSessionModal({
 
   useEffect(() => {
     const fetchClasses = async () => {
-      const res = await authFetch('/api/teacher/classes');
-      const json = await res.json();
-      if (json.success) setClasses(json.classes || []);
+      const classesRes = await authFetch('/api/teacher/classes');
+      const classesJson = await classesRes.json().catch(() => null);
+      if (!classesRes.ok || !classesJson?.success || !Array.isArray(classesJson.classes)) return;
+
+      const normalizedClasses = classesJson.classes.map((row: any) => ({
+        id: String(row.id),
+        name: String(row.name || 'Untitled class'),
+        course_id: row.course_id ? String(row.course_id) : null,
+        student_ids: Array.isArray(row.student_ids) ? row.student_ids.map((sid: unknown) => String(sid)) : [],
+      }));
+
+      let coursesWithStudents: Array<{ id: string; student_ids: string[] }> = [];
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        const uid = session?.user?.id;
+        if (uid) {
+          const coursesRes = await authFetch(`/api/teacher/courses?userId=${encodeURIComponent(uid)}`);
+          const coursesJson = await coursesRes.json().catch(() => null);
+          if (coursesRes.ok && coursesJson?.success && Array.isArray(coursesJson.courses)) {
+            coursesWithStudents = coursesJson.courses.map((course: any) => ({
+              id: String(course.id),
+              student_ids: Array.isArray(course.student_ids) ? course.student_ids.map((sid: unknown) => String(sid)) : [],
+            }));
+          }
+        }
+      } catch {
+        // Keep class list usable even if course enrichment fails.
+      }
+
+      const courseStudentMap = new Map<string, string[]>(
+        coursesWithStudents.map((course) => [course.id, course.student_ids]),
+      );
+      const classCountPerCourse = normalizedClasses.reduce((acc: Record<string, number>, cls: ClassOption) => {
+        const courseId = cls.course_id ? String(cls.course_id) : '';
+        if (courseId) acc[courseId] = (acc[courseId] || 0) + 1;
+        return acc;
+      }, {});
+
+      const enrichedClasses = normalizedClasses.map((cls: ClassOption) => {
+        const classStudentIds = Array.isArray(cls.student_ids) ? cls.student_ids : [];
+        const courseId = cls.course_id ? String(cls.course_id) : '';
+        const hasSingleClassForCourse = courseId ? (classCountPerCourse[courseId] || 0) === 1 : false;
+        const courseStudentIds = courseId ? (courseStudentMap.get(courseId) || []) : [];
+        const enrollmentCount =
+          classStudentIds.length > 0
+            ? classStudentIds.length
+            : (hasSingleClassForCourse ? courseStudentIds.length : 0);
+        return { ...cls, enrollment_count: enrollmentCount };
+      });
+
+      setClasses(enrichedClasses);
     };
     fetchClasses();
   }, []);
@@ -768,7 +816,7 @@ function NewSessionModal({
                           />
                           <span className="text-sm text-slate-700 truncate">{c.name}</span>
                         </span>
-                        <span className="text-xs text-slate-400 shrink-0">{c.student_ids?.length || 0} students</span>
+                        <span className="text-xs text-slate-400 shrink-0">{c.enrollment_count ?? c.student_ids?.length ?? 0} students</span>
                       </label>
                     );
                   })}

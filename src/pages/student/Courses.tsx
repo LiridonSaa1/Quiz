@@ -1,7 +1,6 @@
 import React, { useEffect, useState, useMemo } from 'react';
 import { supabase } from '../../supabase';
 import StudentLayout from '../../components/layout/StudentLayout';
-import { resolveTeacherIdCandidates } from '../../lib/teacherScope';
 import { authFetch } from '../../lib/apiUrl';
 import { selectPublishedQuizzesCompat } from '../../lib/quizzesCompat';
 import {
@@ -298,41 +297,59 @@ export default function StudentCourses() {
   useEffect(() => {
     const fetchData = async () => {
       const { data: { session } } = await supabase.auth.getSession();
-      if (!session) return;
+      if (!session) {
+        setCourses([]);
+        setLoading(false);
+        return;
+      }
       const uid = session.user.id;
       setStudentId(uid);
 
       const profileSnap = await supabase
         .from('profiles')
-        .select('display_name, teacher_id')
+        .select('display_name')
         .eq('id', uid)
         .single();
 
       if (profileSnap.data) setStudentName(profileSnap.data.display_name || '');
 
-      const linkedTeacherId = profileSnap.data?.teacher_id || null;
-      if (!linkedTeacherId) {
-        setCourses([]);
+      const [enrolledCoursesRes, enrolledClassesRes] = await Promise.all([
+        supabase
+          .from('courses')
+          .select('*')
+          .contains('student_ids', [uid]),
+        supabase
+          .from('classes')
+          .select('course_id,student_ids')
+          .contains('student_ids', [uid]),
+      ]);
+      if (enrolledCoursesRes.error) {
         setLoading(false);
+        toast.error(enrolledCoursesRes.error.message || 'Failed to load courses');
+        return;
+      }
+      if (enrolledClassesRes.error) {
+        setLoading(false);
+        toast.error(enrolledClassesRes.error.message || 'Failed to load courses');
         return;
       }
 
-      const teacherIdCandidates = await resolveTeacherIdCandidates(String(linkedTeacherId));
-      const scopedTeacherIds = teacherIdCandidates.length > 0 ? teacherIdCandidates : [String(linkedTeacherId)];
-      if (import.meta.env.DEV) {
-        console.debug('[StudentCourses] linkedTeacherId:', linkedTeacherId);
-        console.debug('[StudentCourses] scopedTeacherIds:', scopedTeacherIds);
+      let rawCourses = (Array.isArray(enrolledCoursesRes.data) ? enrolledCoursesRes.data : []);
+      const classCourseIds = (Array.isArray(enrolledClassesRes.data) ? enrolledClassesRes.data : [])
+        .map((row: any) => String(row?.course_id || '').trim())
+        .filter(Boolean);
+      const missingCourseIds = classCourseIds.filter((cid) => !rawCourses.some((c: any) => String(c?.id || '') === cid));
+      if (missingCourseIds.length > 0) {
+        const classLinkedCoursesRes = await supabase
+          .from('courses')
+          .select('*')
+          .in('id', missingCourseIds);
+        if (!classLinkedCoursesRes.error && Array.isArray(classLinkedCoursesRes.data)) {
+          rawCourses = [...rawCourses, ...classLinkedCoursesRes.data];
+        }
       }
-
-      const coursesRes = await authFetch(`/api/teacher/courses?userId=${encodeURIComponent(String(linkedTeacherId))}`);
-      const coursesJson = coursesRes.ok ? await coursesRes.json() : { courses: [] };
-      const rawCourses = Array.isArray(coursesJson?.courses)
-        ? coursesJson.courses.filter((c: any) => String(c?.status || '').toLowerCase() === 'published')
-        : [];
-      if (import.meta.env.DEV) {
-        console.debug('[StudentCourses] fetched courses count:', rawCourses.length);
-      }
-      if (rawCourses.length === 0) { setLoading(false); return; }
+      rawCourses = rawCourses.filter((c: any) => String(c?.status || '').toLowerCase() === 'published');
+      if (rawCourses.length === 0) { setCourses([]); setLoading(false); return; }
 
       const courseIds = rawCourses.map((c: any) => c.id);
       const teacherIds = [...new Set(rawCourses.map((c: any) => c.teacher_id).filter(Boolean))] as string[];

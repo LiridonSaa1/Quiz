@@ -1,5 +1,4 @@
 import React, { useEffect, useState } from 'react';
-import { supabase } from '../../supabase';
 import AdminLayout from '../../components/layout/AdminLayout';
 import {
   Search, FileText, BookOpen, Clock, HelpCircle, PlayCircle,
@@ -8,6 +7,7 @@ import {
 import { toast } from 'sonner';
 import { cn } from '../../lib/utils';
 import { motion, useMotionValue, useSpring, useTransform } from 'motion/react';
+import { authFetch } from '../../lib/apiUrl';
 
 function AnimatedCount({ value }: { value: number }) {
   const motionVal = useMotionValue(0);
@@ -69,47 +69,12 @@ export default function AdminQuizzes() {
   const fetchData = async () => {
     setLoading(true);
     try {
-      const [quizzesSnap, coursesSnap, teachersSnap, questionsSnap] = await Promise.all([
-        supabase.from('quizzes').select('*').order('created_at', { ascending: false }),
-        supabase.from('courses').select('id, title, teacher_id'),
-        supabase.from('teachers').select('user_id, first_name, last_name'),
-        supabase.from('questions').select('quiz_id'),
-      ]);
+      const res = await authFetch('/api/admin/quizzes');
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok || !json?.success) throw new Error(json?.error || 'Failed to load quizzes');
 
-      if (quizzesSnap.error) throw quizzesSnap.error;
-
-      const teacherMap: Record<string, string> = {};
-      (teachersSnap.data || []).forEach(t => {
-        teacherMap[t.user_id] = `${t.first_name} ${t.last_name}`;
-      });
-
-      const courseMap: Record<string, { name: string; teacher: string }> = {};
-      const options: { id: string; name: string }[] = [];
-      (coursesSnap.data || []).forEach(c => {
-        const name = c.title || 'Untitled';
-        courseMap[c.id] = { name, teacher: teacherMap[c.teacher_id] || '—' };
-        options.push({ id: c.id, name });
-      });
-      setCourseOptions(options);
-
-      const questionCountMap: Record<string, number> = {};
-      (questionsSnap.data || []).forEach(q => {
-        questionCountMap[q.quiz_id] = (questionCountMap[q.quiz_id] || 0) + 1;
-      });
-
-      setQuizzes((quizzesSnap.data || []).map(d => ({
-        id: d.id,
-        title: d.title,
-        description: d.description,
-        courseId: d.course_id,
-        courseName: courseMap[d.course_id]?.name || 'Unknown',
-        teacherName: courseMap[d.course_id]?.teacher || '—',
-        questionCount: questionCountMap[d.id] || 0,
-        timeLimit: d.time_limit || 0,
-        published: d.published ?? false,
-        settings: d.settings,
-        createdAt: d.created_at,
-      })));
+      setQuizzes(Array.isArray(json.quizzes) ? json.quizzes : []);
+      setCourseOptions(Array.isArray(json.courses) ? json.courses : []);
     } catch {
       toast.error('Failed to load quizzes');
     } finally {

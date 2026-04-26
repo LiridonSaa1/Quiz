@@ -11,8 +11,7 @@ import {
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { cn } from '../../lib/utils';
-import { fetchAttemptRowsByQuizIds } from '../../lib/quizAttempts';
-import { resolveTeacherIdCandidates } from '../../lib/teacherScope';
+import { authFetch, readApiError } from '../../lib/apiUrl';
 import { useTeacherPermissions } from '../../lib/teacherPermissions';
 
 interface ProfileData {
@@ -70,47 +69,29 @@ export default function TeacherProfile() {
       const { data: { session } } = await supabase.auth.getSession();
       if (!session?.user?.id) return;
       const uid = session.user.id;
-      const scopedIds = await resolveTeacherIdCandidates(uid);
+      const res = await authFetch(`/api/teacher/profile?userId=${encodeURIComponent(uid)}`);
+      if (!res.ok) throw new Error(await readApiError(res));
+      const json = await res.json();
 
-      const [pSnap, studentsCountSnap, coursesSnap] = await Promise.all([
-        supabase.from('profiles').select('*').eq('id', uid).single(),
-        supabase.from('profiles').select('id', { count: 'exact', head: true }).eq('teacher_id', uid).eq('role', 'student'),
-        supabase.from('courses').select('id').in('teacher_id', scopedIds),
-      ]);
-
-      if (pSnap.error) throw pSnap.error;
-      const d = pSnap.data as Record<string, string | null | undefined>;
+      const dataProfile = (json?.profile || {}) as Partial<ProfileData>;
       setProfile({
-        displayName: String(d.display_name || ''),
-        bio: String(d.bio || ''),
-        subject: String(d.subject || ''),
-        institution: String(d.institution || ''),
-        phone: String(d.phone || ''),
-        website: String(d.website || ''),
-        avatarUrl: String(d.avatar_url || ''),
-        email: session.user.email || String(d.email || ''),
-        createdAt: String(d.created_at || session.user.created_at || ''),
+        displayName: String(dataProfile.displayName || ''),
+        bio: String(dataProfile.bio || ''),
+        subject: String(dataProfile.subject || ''),
+        institution: String(dataProfile.institution || ''),
+        phone: String(dataProfile.phone || ''),
+        website: String(dataProfile.website || ''),
+        avatarUrl: String(dataProfile.avatarUrl || ''),
+        email: session.user.email || String(dataProfile.email || ''),
+        createdAt: String(dataProfile.createdAt || session.user.created_at || ''),
       });
 
-      const teacherCourseIds = (coursesSnap.data || []).map((c: { id: string }) => c.id);
-      let quizIds: string[] = [];
-      let quizzesCount = 0;
-      if (teacherCourseIds.length > 0) {
-        const qSnap = await supabase.from('quizzes').select('id').in('course_id', teacherCourseIds);
-        if (qSnap.error) throw qSnap.error;
-        quizIds = (qSnap.data || []).map((q: { id: string }) => q.id);
-        quizzesCount = quizIds.length;
-      }
-
-      const attemptsRows = await fetchAttemptRowsByQuizIds(supabase, quizIds);
-      const passed = (attemptsRows || []).filter((a: { passed?: boolean }) => a.passed === true).length;
-      const passRate = attemptsRows.length > 0 ? Math.round((passed / attemptsRows.length) * 100) : 0;
-
+      const dataStats = (json?.stats || {}) as Partial<Stats>;
       setStats({
-        students: studentsCountSnap.count ?? 0,
-        courses: (coursesSnap.data || []).length,
-        quizzes: quizzesCount,
-        passRate,
+        students: Number(dataStats.students || 0),
+        courses: Number(dataStats.courses || 0),
+        quizzes: Number(dataStats.quizzes || 0),
+        passRate: Number(dataStats.passRate || 0),
       });
     } catch (e) {
       console.error(e);

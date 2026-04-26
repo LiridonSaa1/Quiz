@@ -17,7 +17,7 @@ import {
   Hash, Calendar, Download,
 } from 'lucide-react';
 import { cn } from '../../lib/utils';
-import { authFetch, apiUrl } from '../../lib/apiUrl';
+import { authFetch } from '../../lib/apiUrl';
 import { resolveTeacherIdCandidates } from '../../lib/teacherScope';
 import { format } from 'date-fns';
 
@@ -267,7 +267,7 @@ export default function TeacherCertificates() {
 
       let courseList = (c || []) as Array<{ id: string; title: string; status?: string }>;
       if (courseList.length === 0) {
-        const coursesRes = await fetch(apiUrl(`/api/teacher/courses?userId=${encodeURIComponent(tid)}`));
+        const coursesRes = await authFetch(`/api/teacher/courses?userId=${encodeURIComponent(tid)}`);
         if (coursesRes.ok) {
           const json = await coursesRes.json().catch(() => null);
           if (json?.success && Array.isArray(json.courses)) {

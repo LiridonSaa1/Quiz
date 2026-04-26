@@ -38,12 +38,43 @@ export default function AdminTeachers() {
   const fetchUsers = async () => {
     setLoading(true);
     try {
-      const res = await fetch('/api/admin/teachers');
-      const json = await res.json();
+      const res = await authFetch('/api/admin/teachers');
+      const json = await res.json().catch(() => ({}));
       if (!res.ok || !json.success) throw new Error(json.error || 'Failed to fetch teachers');
-      setUsers(json.teachers);
+      setUsers(Array.isArray(json.teachers) ? json.teachers : []);
     } catch {
-      toast.error('Failed to load teachers');
+      try {
+        const [profilesRes, teachersRes] = await Promise.all([
+          supabase.from('profiles').select('id, email, display_name, role, status, created_at').eq('role', 'teacher'),
+          supabase.from('teachers').select('id, user_id'),
+        ]);
+
+        if (profilesRes.error) throw profilesRes.error;
+
+        const teacherIdByUserId: Record<string, string> = {};
+        if (!teachersRes.error) {
+          (teachersRes.data || []).forEach((t: any) => {
+            if (t?.user_id && t?.id) teacherIdByUserId[String(t.user_id)] = String(t.id);
+          });
+        }
+
+        const fallbackUsers = (profilesRes.data || []).map((p: any) => ({
+          uid: String(p.id),
+          teacherId: teacherIdByUserId[String(p.id)] || null,
+          email: String(p.email || ''),
+          displayName: String(p.display_name || p.email || 'Unknown'),
+          role: 'teacher',
+          status: p.status || 'active',
+          createdAt: p.created_at || new Date().toISOString(),
+        }));
+
+        setUsers(fallbackUsers);
+        if (fallbackUsers.length === 0) {
+          toast.error('Unauthorized from API and no teachers found.');
+        }
+      } catch {
+        toast.error('Failed to load teachers');
+      }
     } finally {
       setLoading(false);
     }

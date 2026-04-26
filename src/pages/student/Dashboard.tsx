@@ -34,22 +34,37 @@ export default function StudentDashboard() {
         let quizzes: Quiz[] = [];
         let attempts: any[] = [];
 
-        const profileSnap = await supabase
-          .from('profiles')
-          .select('teacher_id')
-          .eq('id', studentId)
-          .single();
-        const linkedTeacherId = profileSnap.data?.teacher_id || null;
-        if (linkedTeacherId) {
-          const coursesRes = await authFetch(`/api/teacher/courses?userId=${encodeURIComponent(String(linkedTeacherId))}`);
-          const coursesJson = coursesRes.ok ? await coursesRes.json() : { courses: [] };
-          courses = Array.isArray(coursesJson?.courses) ? coursesJson.courses : [];
+        const [enrolledCoursesRes, enrolledClassesRes] = await Promise.all([
+          supabase
+            .from('courses')
+            .select('*')
+            .contains('student_ids', [studentId]),
+          supabase
+            .from('classes')
+            .select('course_id,student_ids')
+            .contains('student_ids', [studentId]),
+        ]);
+        if (enrolledCoursesRes.error) throw enrolledCoursesRes.error;
+        if (enrolledClassesRes.error) throw enrolledClassesRes.error;
+
+        const directCourses = Array.isArray(enrolledCoursesRes.data) ? enrolledCoursesRes.data : [];
+        const classCourseIds = (Array.isArray(enrolledClassesRes.data) ? enrolledClassesRes.data : [])
+          .map((row: any) => String(row?.course_id || '').trim())
+          .filter(Boolean);
+
+        courses = [...directCourses];
+        const missingCourseIds = classCourseIds.filter((cid) => !courses.some((c: any) => String(c?.id || '') === cid));
+        if (missingCourseIds.length > 0) {
+          const classLinkedCoursesRes = await supabase
+            .from('courses')
+            .select('*')
+            .in('id', missingCourseIds);
+          if (!classLinkedCoursesRes.error && Array.isArray(classLinkedCoursesRes.data)) {
+            courses = [...courses, ...classLinkedCoursesRes.data];
+          }
         }
-        const enrolledCourses = courses.filter((c: any) => {
-          if (String(c?.status || '').toLowerCase() !== 'published') return false;
-          if (!Array.isArray(c?.student_ids)) return false;
-          return c.student_ids.map((sid: unknown) => String(sid)).includes(studentId);
-        });
+
+        const enrolledCourses = courses.filter((c: any) => String(c?.status || '').toLowerCase() === 'published');
         setEnrolledCourses(enrolledCourses);
 
         if (enrolledCourses.length > 0) {
@@ -128,6 +143,15 @@ export default function StudentDashboard() {
       : null;
     return { day: format(day, 'EEE'), score: avg };
   });
+  const trendWithValues = dashboardTrend.filter((point) => typeof point.score === 'number');
+  const lastScore = trendWithValues.length > 0
+    ? Number(trendWithValues[trendWithValues.length - 1].score)
+    : null;
+  const firstScore = trendWithValues.length > 0
+    ? Number(trendWithValues[0].score)
+    : null;
+  const trendDelta = lastScore !== null && firstScore !== null ? lastScore - firstScore : null;
+  const activeDays = trendWithValues.length;
 
   const statCards = [
     { label: 'Enrolled Courses', value: stats.courses, icon: BookOpen, gradient: 'from-indigo-500 to-violet-500', light: 'bg-indigo-50', text: 'text-indigo-600' },
@@ -195,27 +219,67 @@ export default function StudentDashboard() {
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           <div className="lg:col-span-3 bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
-            <div className="h-1 bg-gradient-to-r from-indigo-500 to-violet-500" />
+            <div className="h-1 bg-gradient-to-r from-indigo-500 via-violet-500 to-fuchsia-500" />
             <div className="p-5">
               <div className="flex items-center justify-between mb-4">
-                <h2 className="text-base font-bold text-slate-900">Score Trend (Last 7 Days)</h2>
+                <div>
+                  <h2 className="text-base font-bold text-slate-900">Score Trend (Last 7 Days)</h2>
+                  <div className="mt-1 flex flex-wrap items-center gap-2">
+                    <span className="inline-flex items-center rounded-lg bg-indigo-50 px-2 py-1 text-[11px] font-semibold text-indigo-700">
+                      Last score: {lastScore ?? '—'}%
+                    </span>
+                    <span className={cn(
+                      "inline-flex items-center rounded-lg px-2 py-1 text-[11px] font-semibold",
+                      trendDelta === null
+                        ? "bg-slate-100 text-slate-600"
+                        : trendDelta >= 0
+                          ? "bg-emerald-50 text-emerald-700"
+                          : "bg-rose-50 text-rose-700",
+                    )}>
+                      {trendDelta === null ? "No trend yet" : `${trendDelta > 0 ? "+" : ""}${trendDelta}% vs first day`}
+                    </span>
+                    <span className="inline-flex items-center rounded-lg bg-slate-100 px-2 py-1 text-[11px] font-semibold text-slate-600">
+                      Active days: {activeDays}/7
+                    </span>
+                  </div>
+                </div>
                 <Link to="/student/progress" className="text-xs font-semibold text-emerald-600 hover:text-emerald-700 flex items-center gap-1">
                   Open full analytics <ArrowRight className="w-3.5 h-3.5" />
                 </Link>
               </div>
-              <ResponsiveContainer width="100%" height={180}>
+              <ResponsiveContainer width="100%" height={220}>
                 <AreaChart data={dashboardTrend}>
                   <defs>
                     <linearGradient id="dashboardTrendGrad" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor="#6366f1" stopOpacity={0.25} />
+                      <stop offset="5%" stopColor="#6366f1" stopOpacity={0.35} />
                       <stop offset="95%" stopColor="#6366f1" stopOpacity={0} />
                     </linearGradient>
                   </defs>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
+                  <CartesianGrid strokeDasharray="3 3" stroke="#eef2ff" vertical={false} />
                   <XAxis dataKey="day" tick={{ fontSize: 10, fill: '#94a3b8' }} tickLine={false} axisLine={false} />
                   <YAxis domain={[0, 100]} tick={{ fontSize: 10, fill: '#94a3b8' }} tickLine={false} axisLine={false} tickFormatter={(v) => `${v}%`} />
-                  <Tooltip formatter={(v: any) => [`${v ?? '—'}%`, 'Avg score']} contentStyle={{ borderRadius: 10, border: '1px solid #e2e8f0', fontSize: 12 }} />
-                  <Area type="monotone" dataKey="score" stroke="#6366f1" strokeWidth={2} fill="url(#dashboardTrendGrad)" connectNulls />
+                  <Tooltip
+                    formatter={(v: any) => [`${v ?? '—'}%`, 'Average score']}
+                    labelFormatter={(label: any) => `${label}`}
+                    contentStyle={{
+                      borderRadius: 12,
+                      border: '1px solid #e2e8f0',
+                      fontSize: 12,
+                      boxShadow: '0 10px 30px rgba(15, 23, 42, 0.08)',
+                    }}
+                  />
+                  <Area
+                    type="monotone"
+                    dataKey="score"
+                    stroke="#6366f1"
+                    strokeWidth={3}
+                    fill="url(#dashboardTrendGrad)"
+                    connectNulls
+                    isAnimationActive
+                    animationDuration={1000}
+                    animationEasing="ease-out"
+                    activeDot={{ r: 5, strokeWidth: 0, fill: '#6366f1' }}
+                  />
                 </AreaChart>
               </ResponsiveContainer>
             </div>

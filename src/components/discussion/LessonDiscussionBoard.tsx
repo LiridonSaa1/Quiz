@@ -17,6 +17,11 @@ import {
 import { authFetch } from '../../lib/apiUrl';
 
 type QuestionRow = any;
+type LocalDiscussionStore = {
+  questions: any[];
+  answers: any[];
+  replies: any[];
+};
 
 type Props = {
   lessonId: string;
@@ -41,6 +46,61 @@ export default function LessonDiscussionBoard({ lessonId, canModerate = false, t
   const [replyDrafts, setReplyDrafts] = useState<Record<string, string>>({});
   const [myStats, setMyStats] = useState<any | null>(null);
   const [myBadges, setMyBadges] = useState<any[]>([]);
+  const isDiscussionSetupError = (message: unknown) =>
+    String(message || '').toLowerCase().includes('lesson discussion tables are not installed yet');
+  const localStorageKey = `lesson_discussion_local:${lessonId}`;
+
+  const readLocalStore = (): LocalDiscussionStore => {
+    try {
+      const raw = localStorage.getItem(localStorageKey);
+      if (!raw) return { questions: [], answers: [], replies: [] };
+      const parsed = JSON.parse(raw) as Partial<LocalDiscussionStore>;
+      return {
+        questions: Array.isArray(parsed.questions) ? parsed.questions : [],
+        answers: Array.isArray(parsed.answers) ? parsed.answers : [],
+        replies: Array.isArray(parsed.replies) ? parsed.replies : [],
+      };
+    } catch {
+      return { questions: [], answers: [], replies: [] };
+    }
+  };
+
+  const writeLocalStore = (store: LocalDiscussionStore) => {
+    try {
+      localStorage.setItem(localStorageKey, JSON.stringify(store));
+    } catch {
+      // ignore local storage write failures
+    }
+  };
+
+  const loadLocalQuestions = () => {
+    const store = readLocalStore();
+    const incoming = [...store.questions].sort(
+      (a, b) => new Date(String(b?.created_at || 0)).getTime() - new Date(String(a?.created_at || 0)).getTime(),
+    );
+    setQuestions(incoming);
+    setHasMore(false);
+    setCursor(null);
+    if (incoming[0]?.id) setActiveQuestionId(String(incoming[0].id));
+  };
+
+  const loadLocalThread = (questionId: string) => {
+    const store = readLocalStore();
+    setAnswers(
+      store.answers
+        .filter((a) => String(a?.question_id || '') === questionId)
+        .sort((a, b) => new Date(String(a?.created_at || 0)).getTime() - new Date(String(b?.created_at || 0)).getTime()),
+    );
+    setReplies(
+      store.replies
+        .filter((r) =>
+          store.answers.some(
+            (a) => String(a.id) === String(r?.answer_id || '') && String(a.question_id || '') === questionId,
+          ),
+        )
+        .sort((a, b) => new Date(String(a?.created_at || 0)).getTime() - new Date(String(b?.created_at || 0)).getTime()),
+    );
+  };
 
   const loadQuestions = async (append = false) => {
     try {
@@ -49,10 +109,7 @@ export default function LessonDiscussionBoard({ lessonId, canModerate = false, t
       const disabled = Boolean(json?.disabled);
       setDiscussionDisabled(disabled);
       if (disabled) {
-        setQuestions([]);
-        setHasMore(false);
-        setCursor(null);
-        if (!append) setActiveQuestionId('');
+        loadLocalQuestions();
         return;
       }
       const incoming = Array.isArray(json?.questions) ? json.questions : [];
@@ -61,6 +118,11 @@ export default function LessonDiscussionBoard({ lessonId, canModerate = false, t
       setCursor(json?.nextCursor || null);
       if (!append && incoming[0]?.id) setActiveQuestionId(String(incoming[0].id));
     } catch (e: any) {
+      if (isDiscussionSetupError(e?.message)) {
+        setDiscussionDisabled(true);
+        loadLocalQuestions();
+        return;
+      }
       toast.error(e.message || 'Failed to load questions');
     } finally {
       setLoading(false);
@@ -68,6 +130,10 @@ export default function LessonDiscussionBoard({ lessonId, canModerate = false, t
   };
 
   const loadThread = async (questionId: string) => {
+    if (discussionDisabled) {
+      loadLocalThread(questionId);
+      return;
+    }
     try {
       const json = await getQuestionThread(questionId);
       setAnswers(Array.isArray(json?.answers) ? json.answers : []);
@@ -85,7 +151,12 @@ export default function LessonDiscussionBoard({ lessonId, canModerate = false, t
   useEffect(() => {
     const loadStats = async () => {
       const res = await authFetch('/api/student/discussions/me/stats');
-      const json = res.ok ? await res.json() : null;
+      if (!res.ok) {
+        setMyStats(null);
+        setMyBadges([]);
+        return;
+      }
+      const json = await res.json();
       setMyStats(json?.stats || null);
       setMyBadges(Array.isArray(json?.badges) ? json.badges : []);
     };
@@ -142,6 +213,12 @@ export default function LessonDiscussionBoard({ lessonId, canModerate = false, t
         </div>
       ) : null}
 
+      {discussionDisabled ? (
+        <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-center">
+          <p className="text-sm font-semibold text-amber-700">Discussion is running in local mode for now.</p>
+          <p className="text-xs text-amber-600 mt-1">Posts are saved in this browser until Supabase discussion tables are installed.</p>
+        </div>
+      ) : (
       <div className="grid grid-cols-1 md:grid-cols-[320px_1fr] gap-5">
         <div className="space-y-3">
           <div className="relative">
@@ -182,10 +259,27 @@ export default function LessonDiscussionBoard({ lessonId, canModerate = false, t
               onClick={async () => {
                 if (!formTitle.trim() || !formBody.trim()) return;
                 try {
-                  await createLessonQuestion(lessonId, { title: formTitle.trim(), body: formBody.trim() });
+                  if (discussionDisabled) {
+                    const now = new Date().toISOString();
+                    const store = readLocalStore();
+                    store.questions.unshift({
+                      id: `local-q-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+                      lesson_id: lessonId,
+                      title: formTitle.trim(),
+                      body: formBody.trim(),
+                      is_pinned: false,
+                      answers_count: 0,
+                      created_at: now,
+                      author: { display_name: 'You' },
+                    });
+                    writeLocalStore(store);
+                  } else {
+                    await createLessonQuestion(lessonId, { title: formTitle.trim(), body: formBody.trim() });
+                  }
                   setFormTitle('');
                   setFormBody('');
-                  await loadQuestions(false);
+                  if (discussionDisabled) loadLocalQuestions();
+                  else await loadQuestions(false);
                 } catch (e: any) {
                   toast.error(e.message || 'Failed to create question');
                 }
@@ -196,11 +290,7 @@ export default function LessonDiscussionBoard({ lessonId, canModerate = false, t
             </button>
           </div>
 
-          {discussionDisabled ? (
-            <div className="rounded-2xl border border-dashed border-amber-300 bg-amber-50 p-8 text-sm text-amber-700 text-center">
-              Lesson discussion is not configured yet on this database. Please run the SQL setup script in Supabase.
-            </div>
-          ) : !activeQuestion ? (
+          {!activeQuestion ? (
             <div className="rounded-2xl border border-dashed border-slate-300 p-8 text-sm text-slate-500 text-center">Select a question to view replies.</div>
           ) : (
             <div className="space-y-3">
@@ -233,10 +323,34 @@ export default function LessonDiscussionBoard({ lessonId, canModerate = false, t
                   onClick={async () => {
                     if (!answerBody.trim()) return;
                     try {
-                      await addAnswer(String(activeQuestion.id), answerBody.trim());
+                      if (discussionDisabled) {
+                        const now = new Date().toISOString();
+                        const store = readLocalStore();
+                        store.answers.push({
+                          id: `local-a-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+                          question_id: String(activeQuestion.id),
+                          body: answerBody.trim(),
+                          created_at: now,
+                          is_best: false,
+                          author: { display_name: 'You' },
+                        });
+                        store.questions = store.questions.map((qRow) =>
+                          String(qRow.id) === String(activeQuestion.id)
+                            ? { ...qRow, answers_count: Number(qRow.answers_count || 0) + 1, last_activity_at: now }
+                            : qRow,
+                        );
+                        writeLocalStore(store);
+                      } else {
+                        await addAnswer(String(activeQuestion.id), answerBody.trim());
+                      }
                       setAnswerBody('');
-                      await loadThread(String(activeQuestion.id));
-                      await loadQuestions(false);
+                      if (discussionDisabled) {
+                        loadLocalThread(String(activeQuestion.id));
+                        loadLocalQuestions();
+                      } else {
+                        await loadThread(String(activeQuestion.id));
+                        await loadQuestions(false);
+                      }
                     } catch (e: any) {
                       toast.error(e.message || 'Failed to post answer');
                     }
@@ -297,9 +411,22 @@ export default function LessonDiscussionBoard({ lessonId, canModerate = false, t
                           const draft = String(replyDrafts[String(answer.id)] || '').trim();
                           if (!draft) return;
                           try {
-                            await addReply(String(answer.id), draft);
+                            if (discussionDisabled) {
+                              const store = readLocalStore();
+                              store.replies.push({
+                                id: `local-r-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+                                answer_id: String(answer.id),
+                                body: draft,
+                                created_at: new Date().toISOString(),
+                                author: { display_name: 'You' },
+                              });
+                              writeLocalStore(store);
+                            } else {
+                              await addReply(String(answer.id), draft);
+                            }
                             setReplyDrafts((prev) => ({ ...prev, [String(answer.id)]: '' }));
-                            await loadThread(String(activeQuestion.id));
+                            if (discussionDisabled) loadLocalThread(String(activeQuestion.id));
+                            else await loadThread(String(activeQuestion.id));
                           } catch (e: any) {
                             toast.error(e.message || 'Failed to post reply');
                           }
@@ -329,6 +456,7 @@ export default function LessonDiscussionBoard({ lessonId, canModerate = false, t
           )}
         </div>
       </div>
+      )}
     </div>
   );
 }

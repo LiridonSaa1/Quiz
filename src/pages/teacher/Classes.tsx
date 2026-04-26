@@ -18,7 +18,7 @@ import {
 import { cn } from '../../lib/utils';
 import StyledSelect from '../../components/ui/StyledSelect';
 import { resolveTeacherIdCandidates } from '../../lib/teacherScope';
-import { apiUrl, authFetch, readApiError } from '../../lib/apiUrl';
+import { authFetch, readApiError } from '../../lib/apiUrl';
 import { normalizeClassRow } from '../../lib/classesTable';
 
 type ClassStatus = 'active' | 'upcoming' | 'completed' | 'archived';
@@ -112,7 +112,7 @@ export default function TeacherClasses() {
 
       let allCourses: Course[] = [];
       try {
-        const backendRes = await fetch(apiUrl(`/api/teacher/courses?userId=${encodeURIComponent(tid)}`));
+        const backendRes = await authFetch(`/api/teacher/courses?userId=${encodeURIComponent(tid)}`);
         if (backendRes.ok) {
           const backendJson = await backendRes.json();
           if (backendJson?.success && Array.isArray(backendJson.courses)) {
@@ -130,7 +130,7 @@ export default function TeacherClasses() {
       if (allCourses.length === 0) {
         const { data, error } = await supabase
           .from('courses')
-          .select('id, title, status')
+          .select('id, title, status, student_ids')
           .in('teacher_id', scopedIds)
           .order('created_at', { ascending: false });
         if (!error || error.code === 'PGRST116') {

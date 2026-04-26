@@ -10,6 +10,7 @@ import {
 import { toast } from 'sonner';
 import StyledSelect from '../../components/ui/StyledSelect';
 import { FormPageSkeleton } from '../../components/ui/Skeleton';
+import { authFetch } from '../../lib/apiUrl';
 
 const GRADIENTS = [
   { label: 'Indigo', value: 'from-indigo-500 to-violet-600' },
@@ -65,16 +66,18 @@ export default function AdminCourseForm() {
   useEffect(() => {
     const fetchTeachers = async () => {
       try {
-        const res = await fetch('/api/admin/teachers');
-        const json = await res.json();
-        if (json.success) {
-          setTeachers(json.teachers.map((t: any) => ({
+        const res = await authFetch('/api/admin/teachers');
+        const json = await res.json().catch(() => ({}));
+        if (!res.ok || !json?.success) throw new Error(json?.error || 'Failed to load teachers');
+
+        setTeachers(
+          (Array.isArray(json.teachers) ? json.teachers : []).map((t: any) => ({
             id: t.teacherId || t.uid,
             display_name: t.displayName,
             email: t.email,
             role: t.role,
-          })));
-        }
+          })),
+        );
       } catch {
         const { data } = await supabase
           .from('profiles')

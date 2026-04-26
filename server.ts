@@ -2322,6 +2322,23 @@ export async function createApp(options: CreateAppOptions = {}) {
   });
 
   // Courses list (for dropdowns)
+  app.get('/api/admin/courses', async (req, res) => {
+    try {
+      const caller = await assertAuthenticated(req, res);
+      if (!caller) return;
+      if (!isAdmin(caller)) return res.status(403).json({ error: 'Forbidden: admin role required' });
+
+      const { data, error } = await supabaseAdmin
+        .from('courses')
+        .select('*')
+        .order('created_at', { ascending: false });
+      if (error) throw error;
+      res.json({ success: true, courses: data || [] });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
   app.get('/api/admin/courses-list', async (req, res) => {
     try {
       const { data, error } = await supabaseAdmin.from('courses').select('id, title').order('title');
@@ -2933,6 +2950,91 @@ export async function createApp(options: CreateAppOptions = {}) {
       });
     } catch (e: any) {
       res.status(500).json({ error: e?.message || "Failed to load teacher dashboard" });
+    }
+  });
+
+  // Teacher profile summary — scoped to authenticated teacher.
+  app.get("/api/teacher/profile", async (req: Request, res: Response) => {
+    try {
+      const caller = await assertAuthenticated(req, res);
+      if (!caller) return;
+      if (caller.role !== "teacher" && caller.role !== "admin") {
+        return res.status(403).json({ error: "Forbidden: teacher or admin role required" });
+      }
+
+      const requestedUserId =
+        typeof req.query.userId === "string" && req.query.userId.trim()
+          ? req.query.userId.trim()
+          : caller.userId;
+      if (caller.role !== "admin" && requestedUserId !== caller.userId) {
+        return res.status(403).json({ error: "Forbidden" });
+      }
+
+      const teacherIds = await getTeacherIdCandidates(requestedUserId);
+      const scopedIds = teacherIds.length > 0 ? teacherIds : [requestedUserId];
+
+      const [profileRes, studentsRes, coursesRes] = await Promise.all([
+        supabaseAdmin.from("profiles").select("*").eq("id", requestedUserId).maybeSingle(),
+        supabaseAdmin.from("profiles").select("id").in("teacher_id", scopedIds).eq("role", "student"),
+        supabaseAdmin.from("courses").select("id").in("teacher_id", scopedIds),
+      ]);
+      if (profileRes.error) throw profileRes.error;
+      if (studentsRes.error) throw studentsRes.error;
+      if (coursesRes.error) throw coursesRes.error;
+
+      const profileRow = (profileRes.data || {}) as Record<string, unknown>;
+      const courseIds = (coursesRes.data || []).map((c: any) => String(c.id || "")).filter(Boolean);
+      const studentIds = new Set((studentsRes.data || []).map((s: any) => String(s.id || "")).filter(Boolean));
+
+      let quizRows: any[] = [];
+      if (courseIds.length > 0) {
+        const quizzesRes = await supabaseAdmin.from("quizzes").select("*").in("course_id", courseIds);
+        if (quizzesRes.error) throw quizzesRes.error;
+        quizRows = quizzesRes.data || [];
+      }
+
+      const quizIds = new Set(quizRows.map((q: any) => String(q.id || "")).filter(Boolean));
+      const passingScoreByQuiz = quizRows.reduce((acc: Record<string, number>, q: any) => {
+        const raw =
+          q?.settings?.passingScore ??
+          q?.passing_score ??
+          q?.pass_mark ??
+          q?.passMark;
+        const n = Number(raw);
+        acc[String(q.id)] = Number.isFinite(n) ? n : 50;
+        return acc;
+      }, {});
+
+      const attempts = normalizeAttempts(await fetchAllAttemptRows(), passingScoreByQuiz).filter((a: any) => {
+        return quizIds.has(String(a.quiz_id || "")) && studentIds.has(String(a.student_id || ""));
+      });
+      const completedAttempts = attempts.filter((a: any) => String(a.status || "").toLowerCase() === "completed");
+      const passRate = completedAttempts.length
+        ? Math.round((completedAttempts.filter((a: any) => Boolean(a.passed)).length / completedAttempts.length) * 100)
+        : 0;
+
+      return res.json({
+        success: true,
+        profile: {
+          displayName: String(profileRow.display_name || ""),
+          bio: String(profileRow.bio || ""),
+          subject: String(profileRow.subject || ""),
+          institution: String(profileRow.institution || ""),
+          phone: String(profileRow.phone || ""),
+          website: String(profileRow.website || ""),
+          avatarUrl: String(profileRow.avatar_url || ""),
+          email: String(profileRow.email || ""),
+          createdAt: String(profileRow.created_at || ""),
+        },
+        stats: {
+          students: studentIds.size,
+          courses: courseIds.length,
+          quizzes: quizIds.size,
+          passRate,
+        },
+      });
+    } catch (e: any) {
+      return res.status(500).json({ error: e?.message || "Failed to load teacher profile" });
     }
   });
 
@@ -4322,6 +4424,69 @@ export async function createApp(options: CreateAppOptions = {}) {
 
       res.json({ success: true, report });
     } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  app.get('/api/admin/quizzes', async (req, res) => {
+    try {
+      const [quizzesRes, coursesRes, teachersRes, questionsRes] = await Promise.all([
+        supabaseAdmin.from('quizzes').select('*').order('created_at', { ascending: false }),
+        supabaseAdmin.from('courses').select('id,title,teacher_id'),
+        supabaseAdmin.from('teachers').select('user_id,first_name,last_name'),
+        supabaseAdmin.from('questions').select('quiz_id'),
+      ]);
+
+      if (quizzesRes.error) throw quizzesRes.error;
+      if (coursesRes.error) throw coursesRes.error;
+
+      const teacherMap: Record<string, string> = {};
+      if (!teachersRes.error) {
+        (teachersRes.data || []).forEach((t: any) => {
+          const fullName = `${String(t?.first_name || '').trim()} ${String(t?.last_name || '').trim()}`.trim();
+          teacherMap[String(t?.user_id || '')] = fullName || '—';
+        });
+      }
+
+      const courseMap: Record<string, { name: string; teacher: string }> = {};
+      const courseOptions: { id: string; name: string }[] = [];
+      (coursesRes.data || []).forEach((c: any) => {
+        const cid = String(c?.id || '');
+        if (!cid) return;
+        const name = String(c?.title || 'Untitled');
+        courseMap[cid] = { name, teacher: teacherMap[String(c?.teacher_id || '')] || '—' };
+        courseOptions.push({ id: cid, name });
+      });
+
+      const questionCountMap: Record<string, number> = {};
+      if (!questionsRes.error) {
+        (questionsRes.data || []).forEach((q: any) => {
+          const qid = String(q?.quiz_id || '');
+          if (!qid) return;
+          questionCountMap[qid] = (questionCountMap[qid] || 0) + 1;
+        });
+      }
+
+      const quizzes = (quizzesRes.data || []).map((q: any) => {
+        const qid = String(q?.id || '');
+        const courseId = String(q?.course_id || '');
+        return {
+          id: qid,
+          title: String(q?.title || 'Untitled Quiz'),
+          description: typeof q?.description === 'string' ? q.description : undefined,
+          courseId,
+          courseName: courseMap[courseId]?.name || 'Unknown',
+          teacherName: courseMap[courseId]?.teacher || '—',
+          questionCount: questionCountMap[qid] || 0,
+          timeLimit: Number(q?.time_limit || 0),
+          published: Boolean(q?.published),
+          settings: (q?.settings && typeof q.settings === 'object') ? q.settings : {},
+          createdAt: String(q?.created_at || ''),
+        };
+      });
+
+      return res.json({ success: true, quizzes, courses: courseOptions });
+    } catch (e: any) {
+      return res.status(500).json({ error: e?.message || 'Failed to load admin quizzes' });
+    }
   });
 
   app.get('/api/admin/reports/quizzes', async (req, res) => {

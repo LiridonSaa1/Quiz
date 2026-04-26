@@ -260,7 +260,7 @@ export default function ContinueLearning() {
       const uid = session.user.id;
 
       const [profileSnap, attemptRows] = await Promise.all([
-        supabase.from('profiles').select('display_name, teacher_id').eq('id', uid).single(),
+        supabase.from('profiles').select('display_name').eq('id', uid).single(),
         fetchAttemptRowsByStudentId(supabase, uid),
       ]);
 
@@ -268,20 +268,37 @@ export default function ContinueLearning() {
       const attemptsData: AttemptData[] = attemptRows || [];
       setAttempts(attemptsData);
 
-      const linkedTeacherId = profileSnap.data?.teacher_id || null;
-      let raw: any[] = [];
-      if (linkedTeacherId) {
-        const coursesRes = await authFetch(`/api/teacher/courses?userId=${encodeURIComponent(String(linkedTeacherId))}`);
-        const coursesJson = coursesRes.ok ? await coursesRes.json() : { courses: [] };
-        raw = Array.isArray(coursesJson?.courses)
-          ? coursesJson.courses.filter((c: any) => String(c?.status || '').toLowerCase() === 'published')
-          : [];
+      const [enrolledCoursesRes, enrolledClassesRes] = await Promise.all([
+        supabase
+          .from('courses')
+          .select('*')
+          .contains('student_ids', [uid]),
+        supabase
+          .from('classes')
+          .select('course_id,student_ids')
+          .contains('student_ids', [uid]),
+      ]);
+      if (enrolledCoursesRes.error || enrolledClassesRes.error) {
+        setLoading(false);
+        return;
       }
 
-      // Continue page should show only courses the student has enrolled in.
-      const enrolledOnly = raw.filter((c: any) =>
-        Array.isArray(c?.student_ids) && c.student_ids.map((sid: unknown) => String(sid)).includes(uid)
-      );
+      let enrolledOnly = Array.isArray(enrolledCoursesRes.data) ? enrolledCoursesRes.data : [];
+      const classCourseIds = (Array.isArray(enrolledClassesRes.data) ? enrolledClassesRes.data : [])
+        .map((row: any) => String(row?.course_id || '').trim())
+        .filter(Boolean);
+      const missingCourseIds = classCourseIds.filter((cid) => !enrolledOnly.some((c: any) => String(c?.id || '') === cid));
+      if (missingCourseIds.length > 0) {
+        const classLinkedCoursesRes = await supabase
+          .from('courses')
+          .select('*')
+          .in('id', missingCourseIds);
+        if (!classLinkedCoursesRes.error && Array.isArray(classLinkedCoursesRes.data)) {
+          enrolledOnly = [...enrolledOnly, ...classLinkedCoursesRes.data];
+        }
+      }
+
+      enrolledOnly = enrolledOnly.filter((c: any) => String(c?.status || '').toLowerCase() === 'published');
       if (enrolledOnly.length === 0) { setLoading(false); return; }
 
       const courseIds = enrolledOnly.map((c: any) => c.id);
