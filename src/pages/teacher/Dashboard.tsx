@@ -12,15 +12,16 @@ import {
   Tooltip, ResponsiveContainer
 } from 'recharts';
 import { motion } from 'motion/react';
+import { authFetch } from '../../lib/apiUrl';
 
 const CHART_DATA = [
-  { day: 'Mon', attempts: 40 },
-  { day: 'Tue', attempts: 30 },
-  { day: 'Wed', attempts: 55 },
-  { day: 'Thu', attempts: 27 },
-  { day: 'Fri', attempts: 48 },
-  { day: 'Sat', attempts: 23 },
-  { day: 'Sun', attempts: 62 },
+  { day: 'Mon', attempts: 0 },
+  { day: 'Tue', attempts: 0 },
+  { day: 'Wed', attempts: 0 },
+  { day: 'Thu', attempts: 0 },
+  { day: 'Fri', attempts: 0 },
+  { day: 'Sat', attempts: 0 },
+  { day: 'Sun', attempts: 0 },
 ];
 
 const QUICK_ACTIONS = [
@@ -35,6 +36,9 @@ interface Stats {
   students: number;
   quizzes: number;
   avgScore: number;
+  passRate: number;
+  avgDuration: number;
+  certificates: number;
 }
 
 function useCountUp(target: number, duration = 900, enabled = true) {
@@ -101,9 +105,10 @@ function StatCard({
 }
 
 export default function TeacherDashboard() {
-  const [stats, setStats]     = useState<Stats>({ courses: 0, students: 0, quizzes: 0, avgScore: 0 });
+  const [stats, setStats]     = useState<Stats>({ courses: 0, students: 0, quizzes: 0, avgScore: 0, passRate: 0, avgDuration: 0, certificates: 0 });
   const [loading, setLoading] = useState(true);
   const [displayName, setDisplayName] = useState('');
+  const [chartData, setChartData] = useState(CHART_DATA);
 
   useEffect(() => {
     const fetch = async () => {
@@ -112,17 +117,20 @@ export default function TeacherDashboard() {
       const uid = session.user.id;
       setDisplayName(session.user.user_metadata?.displayName || session.user.email?.split('@')[0] || 'Teacher');
       try {
-        const [courses, students, quizzes] = await Promise.all([
-          supabase.from('courses').select('*', { count: 'exact', head: true }).eq('teacher_id', uid),
-          supabase.from('profiles').select('*', { count: 'exact', head: true }).eq('teacher_id', uid),
-          supabase.from('quizzes').select('*', { count: 'exact', head: true }).eq('teacher_id', uid),
-        ]);
+        const res = await authFetch(`/api/teacher/dashboard?userId=${encodeURIComponent(uid)}`);
+        const json = await res.json().catch(() => ({}));
+        if (!res.ok || !json?.success) throw new Error(json?.error || 'Failed to load dashboard');
+
         setStats({
-          courses:  courses.count  || 0,
-          students: students.count || 0,
-          quizzes:  quizzes.count  || 0,
-          avgScore: 0,
+          courses: Number(json?.stats?.courses || 0),
+          students: Number(json?.stats?.students || 0),
+          quizzes: Number(json?.stats?.quizzes || 0),
+          avgScore: Number(json?.stats?.avgScore || 0),
+          passRate: Number(json?.stats?.passRate || 0),
+          avgDuration: Number(json?.stats?.avgDuration || 0),
+          certificates: Number(json?.stats?.certificates || 0),
         });
+        setChartData(Array.isArray(json?.trend) && json.trend.length ? json.trend : CHART_DATA);
       } catch (e) {
         console.error('Dashboard fetch error:', e);
       } finally {
@@ -205,7 +213,7 @@ export default function TeacherDashboard() {
               </div>
               <div className="h-[240px] w-full">
                 <ResponsiveContainer width="100%" height="100%">
-                  <AreaChart data={CHART_DATA} margin={{ left: -10, right: 0 }}>
+                  <AreaChart data={chartData} margin={{ left: -10, right: 0 }}>
                     <defs>
                       <linearGradient id="areaGrad" x1="0" y1="0" x2="0" y2="1">
                         <stop offset="5%"  stopColor="#7c3aed" stopOpacity={0.15} />
@@ -266,9 +274,9 @@ export default function TeacherDashboard() {
               <h2 className="text-sm font-bold text-slate-900 mb-4">At a Glance</h2>
               <div className="space-y-1">
                 {[
-                  { icon: Target, label: 'Pass rate',      value: '—', color: 'text-violet-500',  bg: 'bg-violet-50',  ring: 'ring-violet-100'  },
-                  { icon: Clock,  label: 'Avg. time/quiz', value: '—', color: 'text-indigo-500',  bg: 'bg-indigo-50',  ring: 'ring-indigo-100'  },
-                  { icon: Award,  label: 'Certs issued',   value: '—', color: 'text-amber-500',   bg: 'bg-amber-50',   ring: 'ring-amber-100'   },
+                  { icon: Target, label: 'Pass rate',      value: `${stats.passRate}%`, color: 'text-violet-500',  bg: 'bg-violet-50',  ring: 'ring-violet-100'  },
+                  { icon: Clock,  label: 'Avg. time/quiz', value: `${stats.avgDuration}m`, color: 'text-indigo-500',  bg: 'bg-indigo-50',  ring: 'ring-indigo-100'  },
+                  { icon: Award,  label: 'Certs issued',   value: String(stats.certificates), color: 'text-amber-500',   bg: 'bg-amber-50',   ring: 'ring-amber-100'   },
                 ].map((row) => (
                   <div key={row.label} className="flex items-center gap-3 py-2.5 border-b border-slate-50 last:border-0 group">
                     <div className={`w-8 h-8 rounded-lg ${row.bg} ring-2 ${row.ring} flex items-center justify-center shrink-0 transition-transform group-hover:scale-105 duration-200`}>

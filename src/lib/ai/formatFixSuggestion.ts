@@ -4,14 +4,21 @@ export function formatFixSuggestion(result: {
   analysis: string;
   fixSuggestion: string;
   patch?: string;
+  assumptions?: string[];
 }): string {
   const analysis = String(result.analysis || "No analysis available.").trim();
   const suggestion = String(result.fixSuggestion || "No fix suggestion available.").trim();
   const patch = String(result.patch || "").trim();
+  const assumptions = Array.isArray(result.assumptions)
+    ? result.assumptions.map((item) => String(item || "").trim()).filter(Boolean)
+    : [];
 
   const patchSection = patch
     ? `🛠️ CODE PATCH\n\`\`\`diff\n${patch}\n\`\`\``
     : "🛠️ CODE PATCH\n```diff\n# No patch generated\n```";
+  const assumptionsSection = assumptions.length
+    ? ["", "📝 ASSUMPTIONS", ...assumptions.map((item) => `- ${item}`)].join("\n")
+    : "";
 
   return [
     "🧠 BUG ANALYSIS",
@@ -21,6 +28,7 @@ export function formatFixSuggestion(result: {
     suggestion,
     "",
     patchSection,
+    assumptionsSection,
   ].join("\n");
 }
 
@@ -33,6 +41,7 @@ export function withFormattedOutput(
       analysis: result.analysis,
       fixSuggestion: result.fixSuggestion,
       patch: result.patch,
+      assumptions: result.assumptions,
     }),
   };
 }

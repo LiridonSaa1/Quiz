@@ -2596,6 +2596,346 @@ export async function createApp(options: CreateAppOptions = {}) {
   app.get("/api/teacher/quizzes", teacherQuizzesGetHandler);
   app.get("/api/teacher/quizzes/", teacherQuizzesGetHandler);
 
+  // Teacher progress (service role) — scoped strictly to authenticated teacher ownership.
+  app.get("/api/teacher/progress", async (req: Request, res: Response) => {
+    try {
+      const caller = await assertAuthenticated(req, res);
+      if (!caller) return;
+      if (caller.role !== "teacher" && caller.role !== "admin") {
+        return res.status(403).json({ error: "Forbidden: teacher or admin role required" });
+      }
+
+      const requestedUserId =
+        typeof req.query.userId === "string" ? req.query.userId.trim() : "";
+      if (!requestedUserId) {
+        return res.status(400).json({ error: "userId is required" });
+      }
+      if (caller.role !== "admin" && caller.userId !== requestedUserId) {
+        return res.status(403).json({ error: "Forbidden" });
+      }
+
+      const teacherIds = await getTeacherIdCandidates(requestedUserId);
+      const scopedIds = teacherIds.length > 0 ? teacherIds : [requestedUserId];
+
+      const coursesRes = await supabaseAdmin
+        .from("courses")
+        .select("id,title,student_ids")
+        .in("teacher_id", scopedIds);
+      if (coursesRes.error) throw coursesRes.error;
+      const courseRows = coursesRes.data || [];
+      const coursesCount = courseRows.length;
+      const teacherCourseIds = courseRows.map((c: any) => String(c.id || "")).filter(Boolean);
+
+      const enrolledIds = new Set<string>();
+      courseRows.forEach((c: any) => {
+        (Array.isArray(c.student_ids) ? c.student_ids : []).forEach((sid: unknown) => {
+          const s = String(sid || "").trim();
+          if (s) enrolledIds.add(s);
+        });
+      });
+
+      // Legacy compatibility: classes.student_ids may contain enrollments.
+      const classRowsRes = await supabaseAdmin
+        .from("classes")
+        .select("student_ids")
+        .in("teacher_id", scopedIds);
+      if (!classRowsRes.error) {
+        (classRowsRes.data || []).forEach((cl: any) => {
+          (Array.isArray(cl.student_ids) ? cl.student_ids : []).forEach((sid: unknown) => {
+            const s = String(sid || "").trim();
+            if (s) enrolledIds.add(s);
+          });
+        });
+      } else if (!isClassesTableMissing(classRowsRes.error)) {
+        throw classRowsRes.error;
+      }
+
+      const [linkedStudentsRes, enrolledStudentsRes] = await Promise.all([
+        supabaseAdmin
+          .from("profiles")
+          .select("id,display_name,email,teacher_id,role,status,created_at")
+          .in("teacher_id", scopedIds)
+          .eq("role", "student"),
+        enrolledIds.size > 0
+          ? supabaseAdmin
+              .from("profiles")
+              .select("id,display_name,email,teacher_id,role,status,created_at")
+              .in("id", [...enrolledIds])
+          : Promise.resolve({ data: [] as any[], error: null }),
+      ]);
+      if (linkedStudentsRes.error) throw linkedStudentsRes.error;
+      if (enrolledStudentsRes.error) throw enrolledStudentsRes.error;
+
+      const studentById = new Map<string, any>();
+      (linkedStudentsRes.data || []).forEach((s: any) => s?.id && studentById.set(String(s.id), s));
+      (enrolledStudentsRes.data || []).forEach((s: any) => {
+        const sid = String(s?.id || "");
+        if (sid && !studentById.has(sid)) studentById.set(sid, s);
+      });
+      const allowedStudentIds = new Set([...studentById.keys()]);
+
+      let quizRows: any[] = [];
+      if (teacherCourseIds.length > 0) {
+        const quizzesRes = await supabaseAdmin.from("quizzes").select("*").in("course_id", teacherCourseIds);
+        if (quizzesRes.error) throw quizzesRes.error;
+        quizRows = quizzesRes.data || [];
+      }
+      const quizzesCount = quizRows.length;
+      const quizIds = new Set(quizRows.map((q: any) => String(q.id || "")).filter(Boolean));
+      const passingScoreByQuiz = quizRows.reduce((acc: Record<string, number>, q: any) => {
+        const raw =
+          q?.settings?.passingScore ??
+          q?.passing_score ??
+          q?.pass_mark ??
+          q?.passMark;
+        const n = Number(raw);
+        acc[String(q.id)] = Number.isFinite(n) ? n : 50;
+        return acc;
+      }, {});
+
+      const attemptsRows = normalizeAttempts(await fetchAllAttemptRows(), passingScoreByQuiz).filter((a: any) => {
+        if (!quizIds.has(String(a.quiz_id || ""))) return false;
+        return allowedStudentIds.has(String(a.student_id || ""));
+      });
+
+      const attemptsByStudent: Record<string, { attempts: number; passed: number; scoreSum: number }> = {};
+      attemptsRows.forEach((a: any) => {
+        const sid = String(a.student_id || "");
+        if (!sid) return;
+        if (!attemptsByStudent[sid]) attemptsByStudent[sid] = { attempts: 0, passed: 0, scoreSum: 0 };
+        attemptsByStudent[sid].attempts += 1;
+        if (a.passed) attemptsByStudent[sid].passed += 1;
+        attemptsByStudent[sid].scoreSum += toFiniteNumber(a.score_percent, 0);
+      });
+
+      const rows = [...studentById.values()].map((s: any) => {
+        const sid = String(s.id);
+        const aggr = attemptsByStudent[sid] || { attempts: 0, passed: 0, scoreSum: 0 };
+        const avgScore = aggr.attempts > 0 ? Math.round(aggr.scoreSum / aggr.attempts) : 0;
+        const passRate = aggr.attempts > 0 ? Math.round((aggr.passed / aggr.attempts) * 100) : 0;
+        return {
+          studentId: sid,
+          studentName: String(s.display_name || "Unknown Student"),
+          studentEmail: String(s.email || ""),
+          attempts: aggr.attempts,
+          passed: aggr.passed,
+          passRate,
+          avgScore,
+        };
+      });
+
+      res.json({ success: true, rows, coursesCount, quizzesCount });
+    } catch (e: any) {
+      res.status(500).json({ error: e?.message || "Failed to load teacher progress" });
+    }
+  });
+
+  // Teacher results (service role) — scoped strictly to authenticated teacher ownership.
+  app.get("/api/teacher/results", async (req: Request, res: Response) => {
+    try {
+      const caller = await assertAuthenticated(req, res);
+      if (!caller) return;
+      if (caller.role !== "teacher" && caller.role !== "admin") {
+        return res.status(403).json({ error: "Forbidden: teacher or admin role required" });
+      }
+
+      const requestedUserId =
+        typeof req.query.userId === "string" ? req.query.userId.trim() : "";
+      if (!requestedUserId) {
+        return res.status(400).json({ error: "userId is required" });
+      }
+      if (caller.role !== "admin" && caller.userId !== requestedUserId) {
+        return res.status(403).json({ error: "Forbidden" });
+      }
+
+      const teacherIds = await getTeacherIdCandidates(requestedUserId);
+      const scopedIds = teacherIds.length > 0 ? teacherIds : [requestedUserId];
+
+      const coursesRes = await supabaseAdmin.from("courses").select("id").in("teacher_id", scopedIds);
+      if (coursesRes.error) throw coursesRes.error;
+      const teacherCourseIds = (coursesRes.data || []).map((c: any) => String(c.id || "")).filter(Boolean);
+
+      let quizRows: any[] = [];
+      if (teacherCourseIds.length > 0) {
+        const quizzesRes = await supabaseAdmin.from("quizzes").select("*").in("course_id", teacherCourseIds);
+        if (quizzesRes.error) throw quizzesRes.error;
+        quizRows = quizzesRes.data || [];
+      }
+      const quizIds = new Set(quizRows.map((q: any) => String(q.id || "")).filter(Boolean));
+      const quizzes: Record<string, string> = {};
+      const passingScoreByQuiz = quizRows.reduce((acc: Record<string, number>, q: any) => {
+        const qid = String(q.id || "");
+        quizzes[qid] = String(q.title || "Quiz");
+        const raw =
+          q?.settings?.passingScore ??
+          q?.passing_score ??
+          q?.pass_mark ??
+          q?.passMark;
+        const parsed = Number(raw);
+        acc[qid] = Number.isFinite(parsed) ? parsed : 50;
+        return acc;
+      }, {});
+
+      const studentsRes = await supabaseAdmin
+        .from("profiles")
+        .select("id,display_name,email,teacher_id,role")
+        .in("teacher_id", scopedIds)
+        .eq("role", "student");
+      if (studentsRes.error) throw studentsRes.error;
+      const studentRows = studentsRes.data || [];
+      const allowedStudentIds = new Set(studentRows.map((s: any) => String(s.id || "")).filter(Boolean));
+      const students: Record<string, { name: string; email: string }> = {};
+      studentRows.forEach((s: any) => {
+        const sid = String(s.id || "");
+        if (!sid) return;
+        students[sid] = {
+          name: String(s.display_name || "Unknown"),
+          email: String(s.email || ""),
+        };
+      });
+
+      const attempts = normalizeAttempts(await fetchAllAttemptRows(), passingScoreByQuiz)
+        .filter((a: any) => quizIds.has(String(a.quiz_id || "")) && allowedStudentIds.has(String(a.student_id || "")))
+        .map((a: any) => ({
+          id: String(a.id || ""),
+          quizId: String(a.quiz_id || ""),
+          studentId: String(a.student_id || ""),
+          scorePercent: toFiniteNumber(a.score_percent, 0),
+          passed: Boolean(a.passed),
+          status: String(a.status || "completed"),
+          startedAt: a.started_at || null,
+          completedAt: a.completed_at || null,
+          score: toFiniteNumber(a.score, 0),
+          totalPoints: toFiniteNumber(a.total_points, 0),
+          correctAnswers:
+            a.correct_answers == null ? null : toFiniteNumber(a.correct_answers, 0),
+          totalQuestions:
+            a.total_questions == null ? null : toFiniteNumber(a.total_questions, 0),
+        }));
+
+      res.json({ success: true, attempts, quizzes, students });
+    } catch (e: any) {
+      res.status(500).json({ error: e?.message || "Failed to load teacher results" });
+    }
+  });
+
+  // Teacher dashboard summary — scoped strictly to authenticated teacher ownership.
+  app.get("/api/teacher/dashboard", async (req: Request, res: Response) => {
+    try {
+      const caller = await assertAuthenticated(req, res);
+      if (!caller) return;
+      if (caller.role !== "teacher" && caller.role !== "admin") {
+        return res.status(403).json({ error: "Forbidden: teacher or admin role required" });
+      }
+
+      const requestedUserId =
+        typeof req.query.userId === "string" ? req.query.userId.trim() : "";
+      if (!requestedUserId) {
+        return res.status(400).json({ error: "userId is required" });
+      }
+      if (caller.role !== "admin" && caller.userId !== requestedUserId) {
+        return res.status(403).json({ error: "Forbidden" });
+      }
+
+      const teacherIds = await getTeacherIdCandidates(requestedUserId);
+      const scopedIds = teacherIds.length > 0 ? teacherIds : [requestedUserId];
+
+      const coursesRes = await supabaseAdmin.from("courses").select("id").in("teacher_id", scopedIds);
+      if (coursesRes.error) throw coursesRes.error;
+      const courseIds = (coursesRes.data || []).map((c: any) => String(c.id || "")).filter(Boolean);
+
+      const studentsRes = await supabaseAdmin
+        .from("profiles")
+        .select("id")
+        .in("teacher_id", scopedIds)
+        .eq("role", "student");
+      if (studentsRes.error) throw studentsRes.error;
+      const studentIds = new Set((studentsRes.data || []).map((s: any) => String(s.id || "")).filter(Boolean));
+
+      let quizRows: any[] = [];
+      if (courseIds.length > 0) {
+        const quizzesRes = await supabaseAdmin.from("quizzes").select("*").in("course_id", courseIds);
+        if (quizzesRes.error) throw quizzesRes.error;
+        quizRows = quizzesRes.data || [];
+      }
+      const quizIds = new Set(quizRows.map((q: any) => String(q.id || "")).filter(Boolean));
+      const passingScoreByQuiz = quizRows.reduce((acc: Record<string, number>, q: any) => {
+        const raw =
+          q?.settings?.passingScore ??
+          q?.passing_score ??
+          q?.pass_mark ??
+          q?.passMark;
+        const n = Number(raw);
+        acc[String(q.id)] = Number.isFinite(n) ? n : 50;
+        return acc;
+      }, {});
+
+      const attempts = normalizeAttempts(await fetchAllAttemptRows(), passingScoreByQuiz).filter((a: any) => {
+        return quizIds.has(String(a.quiz_id || "")) && studentIds.has(String(a.student_id || ""));
+      });
+      const completedAttempts = attempts.filter((a: any) => String(a.status || "").toLowerCase() === "completed");
+      const avgScore = completedAttempts.length
+        ? Math.round(
+            completedAttempts.reduce((sum: number, a: any) => sum + toFiniteNumber(a.score_percent, 0), 0) /
+              completedAttempts.length,
+          )
+        : 0;
+      const passRate = completedAttempts.length
+        ? Math.round(
+            (completedAttempts.filter((a: any) => Boolean(a.passed)).length / completedAttempts.length) * 100,
+          )
+        : 0;
+
+      const durationRows = completedAttempts.filter((a: any) => a.started_at && a.completed_at);
+      const avgDuration = durationRows.length
+        ? Math.round(
+            durationRows.reduce((sum: number, a: any) => {
+              const s = new Date(String(a.started_at)).getTime();
+              const e = new Date(String(a.completed_at)).getTime();
+              if (!Number.isFinite(s) || !Number.isFinite(e) || e < s) return sum;
+              return sum + Math.round((e - s) / 60000);
+            }, 0) / durationRows.length,
+          )
+        : 0;
+
+      let certificatesCount = 0;
+      if (studentIds.size > 0) {
+        const certsRes = await supabaseAdmin.from("certificates").select("student_id").in("student_id", [...studentIds]);
+        if (!certsRes.error) certificatesCount = (certsRes.data || []).length;
+      }
+
+      const now = new Date();
+      const trend = Array.from({ length: 7 }).map((_, idx) => {
+        const d = new Date(now);
+        d.setDate(now.getDate() - (6 - idx));
+        const isoDay = d.toISOString().slice(0, 10);
+        const attemptsForDay = completedAttempts.filter((a: any) =>
+          String(a.completed_at || a.created_at || "").slice(0, 10) === isoDay,
+        );
+        return {
+          day: d.toLocaleDateString("en-US", { weekday: "short" }),
+          attempts: attemptsForDay.length,
+        };
+      });
+
+      res.json({
+        success: true,
+        stats: {
+          courses: courseIds.length,
+          students: studentIds.size,
+          quizzes: quizIds.size,
+          avgScore,
+          passRate,
+          avgDuration,
+          certificates: certificatesCount,
+        },
+        trend,
+      });
+    } catch (e: any) {
+      res.status(500).json({ error: e?.message || "Failed to load teacher dashboard" });
+    }
+  });
+
   // Teacher quiz question counts (service role) — avoids RLS issues when counting from browser.
   app.get("/api/teacher/quizzes/question-counts", async (req: Request, res: Response) => {
     try {

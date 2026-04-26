@@ -11,7 +11,7 @@ import { cn } from '../../lib/utils';
 import { motion, AnimatePresence } from 'motion/react';
 import { toast } from 'sonner';
 import { resolveTeacherIdCandidates } from '../../lib/teacherScope';
-import { apiUrl, authFetch } from '../../lib/apiUrl';
+import { authFetch } from '../../lib/apiUrl';
 import { AIPanel, AITriggerButton } from '../../components/AIPanel';
 import { generateCourseData } from '../../lib/gemini';
 import { useTeacherPermissions } from '../../lib/teacherPermissions';
@@ -59,7 +59,7 @@ export default function TeacherCourses() {
       return;
     }
     try {
-      const backendRes = await fetch(apiUrl(`/api/teacher/courses?userId=${encodeURIComponent(session.user.id)}`));
+      const backendRes = await authFetch(`/api/teacher/courses?userId=${encodeURIComponent(session.user.id)}`);
       if (backendRes.ok) {
         const backendJson = await backendRes.json();
         if (backendJson?.success && Array.isArray(backendJson.courses)) {

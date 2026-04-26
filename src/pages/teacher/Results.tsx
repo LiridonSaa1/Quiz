@@ -22,8 +22,6 @@ import {
 import { toast } from 'sonner';
 import { format } from 'date-fns';
 import { cn } from '../../lib/utils';
-import { fetchAttemptRowsByQuizIds, normalizeAttempts } from '../../lib/quizAttempts';
-import { resolveTeacherIdCandidates } from '../../lib/teacherScope';
 import { authFetch } from '../../lib/apiUrl';
 
 type TabFilter = 'all' | 'passed' | 'failed';
@@ -69,16 +67,6 @@ export default function TeacherResults() {
   const [sortBy, setSortBy] = useState<SortField>('date');
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
 
-  const getPassingScore = (quizRow: Record<string, unknown>) => {
-    const raw =
-      (quizRow?.settings as { passingScore?: number } | undefined)?.passingScore ??
-      quizRow?.passing_score ??
-      quizRow?.pass_mark ??
-      quizRow?.passMark;
-    const parsed = Number(raw);
-    return Number.isFinite(parsed) ? parsed : 50;
-  };
-
   const loadData = useCallback(async () => {
     setLoading(true);
     try {
@@ -86,85 +74,17 @@ export default function TeacherResults() {
       if (!session?.user?.id) return;
 
       const teacherId = session.user.id;
-      const scopedIds = await resolveTeacherIdCandidates(teacherId);
-
-      const [studentsHttp, coursesSnap] = await Promise.all([
-        authFetch(`/api/teacher/students?userId=${encodeURIComponent(teacherId)}`),
-        supabase.from('courses').select('id').in('teacher_id', scopedIds),
-      ]);
-      if (coursesSnap.error) throw coursesSnap.error;
-      const studentsJson = studentsHttp.ok ? await studentsHttp.json() : { students: [] };
-      const studentRows = Array.isArray(studentsJson?.students) ? studentsJson.students : [];
-      const teacherCourseIds = (coursesSnap.data || []).map((c: { id: string }) => c.id);
-
-      let quizRows: Record<string, unknown>[] = [];
-      if (teacherCourseIds.length > 0) {
-        const qSnap = await supabase.from('quizzes').select('*').in('course_id', teacherCourseIds);
-        if (qSnap.error) throw qSnap.error;
-        quizRows = qSnap.data || [];
+      const res = await authFetch(`/api/teacher/results?userId=${encodeURIComponent(teacherId)}`);
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok || !json?.success) {
+        throw new Error(json?.error || 'Failed to load results');
       }
 
-      const quizzesMap: Record<string, string> = {};
-      quizRows.forEach((d: Record<string, unknown>) => {
-        quizzesMap[String(d.id)] = String(d.title || 'Quiz');
-      });
-
-      const quizIds = quizRows.map((q) => String(q.id));
-      const passingScoreByQuiz = quizRows.reduce((acc: Record<string, number>, q) => {
-        const id = String(q.id);
-        acc[id] = getPassingScore(q);
-        return acc;
-      }, {});
-
-      const attemptsRows = await fetchAttemptRowsByQuizIds(supabase, quizIds);
-      const normalized = normalizeAttempts(attemptsRows, passingScoreByQuiz);
-      const allowedStudentIds = new Set(
-        studentRows.map((s: { id?: string }) => String(s?.id || '')).filter(Boolean),
-      );
-
-      const attemptsData: UiAttempt[] = normalized
-        .filter((a) => allowedStudentIds.size === 0 || allowedStudentIds.has(a.student_id))
-        .map((a) => ({
-        id: a.id,
-        quizId: a.quiz_id,
-        studentId: a.student_id,
-        scorePercent: a.score_percent,
-        passed: a.passed,
-        status: a.status || 'completed',
-        startedAt: a.started_at,
-        completedAt: a.completed_at,
-        score: a.score,
-        totalPoints: a.total_points,
-        correctAnswers: a.raw?.correct_answers,
-        totalQuestions: a.raw?.total_questions,
-      }));
-
-      const studentIds = [...new Set(attemptsData.map((x) => x.studentId).filter(Boolean))];
-      const studentsMap: Record<string, { name: string; email: string }> = {};
-
-      studentRows.forEach((p: { id: string; display_name: string; email: string }) => {
-        if (!p?.id) return;
-        studentsMap[String(p.id)] = {
-          name: p.display_name || 'Unknown',
-          email: p.email || '',
-        };
-      });
-
-      const missing = studentIds.filter((id) => !studentsMap[id]);
-      if (missing.length > 0) {
-        const extra = await supabase.from('profiles').select('id, display_name, email').in('id', missing);
-        if (!extra.error) {
-          (extra.data || []).forEach((p: { id: string; display_name: string; email: string }) => {
-            studentsMap[p.id] = { name: p.display_name || 'Unknown', email: p.email || '' };
-          });
-        }
-      }
-
-      setQuizzes(quizzesMap);
-      setStudents(studentsMap);
-      setAttempts(attemptsData);
-    } catch {
-      toast.error('Failed to load results');
+      setQuizzes((json?.quizzes && typeof json.quizzes === 'object') ? json.quizzes : {});
+      setStudents((json?.students && typeof json.students === 'object') ? json.students : {});
+      setAttempts(Array.isArray(json?.attempts) ? json.attempts : []);
+    } catch (error: any) {
+      toast.error(error?.message || 'Failed to load results');
     } finally {
       setLoading(false);
     }

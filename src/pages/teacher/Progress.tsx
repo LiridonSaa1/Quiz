@@ -11,7 +11,6 @@ import {
 } from '../../components/admin/AdminListPageShell';
 import { BarChart3, Search, Users, BookOpen, FileText, TrendingUp, CheckCircle2 } from 'lucide-react';
 import { cn } from '../../lib/utils';
-import { fetchAttemptRowsByQuizIds, normalizeAttempts } from '../../lib/quizAttempts';
 import { authFetch } from '../../lib/apiUrl';
 
 interface StudentProgressRow {
@@ -45,16 +44,6 @@ export default function TeacherProgress() {
   const [coursesCount, setCoursesCount] = useState(0);
   const [quizzesCount, setQuizzesCount] = useState(0);
 
-  const getPassingScore = (quizRow: Record<string, unknown>) => {
-    const raw =
-      (quizRow?.settings as { passingScore?: number } | undefined)?.passingScore ??
-      quizRow?.passing_score ??
-      quizRow?.pass_mark ??
-      quizRow?.passMark;
-    const parsed = Number(raw);
-    return Number.isFinite(parsed) ? parsed : 50;
-  };
-
   useEffect(() => {
     const fetchData = async () => {
       setLoading(true);
@@ -63,94 +52,14 @@ export default function TeacherProgress() {
         if (!session?.user?.id) return;
         const teacherId = session.user.id;
 
-        const [studentsHttp, coursesHttp] = await Promise.all([
-          authFetch(`/api/teacher/students?userId=${encodeURIComponent(teacherId)}`),
-          authFetch(`/api/teacher/courses?userId=${encodeURIComponent(teacherId)}`),
-        ]);
-        const studentsJson = studentsHttp.ok ? await studentsHttp.json() : { students: [] };
-        const coursesJson = coursesHttp.ok ? await coursesHttp.json() : { courses: [] };
-        const studentRows = Array.isArray(studentsJson?.students) ? studentsJson.students : [];
-        const courseRows = Array.isArray(coursesJson?.courses) ? coursesJson.courses : [];
-
-        setCoursesCount(courseRows.length);
-        const teacherCourseIds = courseRows.map((course: { id: string }) => String(course.id)).filter(Boolean);
-
-        /** Scope quizzes by teacher's courses only — avoids `quizzes.teacher_id` when that column is missing. */
-        let quizRows: Record<string, unknown>[] = [];
-        if (teacherCourseIds.length > 0) {
-          const quizzesRes = await supabase
-            .from('quizzes')
-            .select('*')
-            .in('course_id', teacherCourseIds);
-          if (quizzesRes.error) throw quizzesRes.error;
-          quizRows = quizzesRes.data || [];
+        const progressRes = await authFetch(`/api/teacher/progress?userId=${encodeURIComponent(teacherId)}`);
+        const progressJson = await progressRes.json().catch(() => ({}));
+        if (!progressRes.ok || !progressJson?.success) {
+          throw new Error(progressJson?.error || 'Failed to load student progress');
         }
-
-        setQuizzesCount(quizRows.length);
-
-        const quizIds = quizRows.map((q) => q.id as string);
-        const passingScoreByQuiz = quizRows.reduce((acc: Record<string, number>, q) => {
-          const id = q.id as string;
-          const value = getPassingScore(q);
-          acc[id] = Number.isFinite(value) ? value : 50;
-          return acc;
-        }, {});
-
-        const attemptsRows = await fetchAttemptRowsByQuizIds(supabase, quizIds);
-        const allowedStudentIds = new Set(
-          studentRows.map((s: { id?: string }) => String(s?.id || '')).filter(Boolean),
-        );
-        const attempts = normalizeAttempts(attemptsRows, passingScoreByQuiz)
-          .filter((a) => allowedStudentIds.size === 0 || allowedStudentIds.has(a.student_id));
-
-        const studentMap: Record<string, { id: string; display_name: string; email: string }> = {};
-        studentRows.forEach((student: { id: string; display_name: string; email: string }) => {
-          if (!student?.id) return;
-          studentMap[String(student.id)] = {
-            id: String(student.id),
-            display_name: String(student.display_name || 'Unknown Student'),
-            email: String(student.email || ''),
-          };
-        });
-
-        const missingStudentIds = [...new Set(attempts.map((a) => a.student_id).filter((sid) => sid && !studentMap[sid]))];
-        if (missingStudentIds.length > 0) {
-          const extraStudentsRes = await supabase
-            .from('profiles')
-            .select('id,display_name,email')
-            .in('id', missingStudentIds);
-          if (!extraStudentsRes.error) {
-            (extraStudentsRes.data || []).forEach((student: { id: string; display_name: string; email: string }) => {
-              studentMap[student.id] = student;
-            });
-          }
-        }
-
-        const attemptsByStudent: Record<string, { attempts: number; passed: number; scoreSum: number }> = {};
-        attempts.forEach((a) => {
-          const sid = a.student_id;
-          if (!attemptsByStudent[sid]) attemptsByStudent[sid] = { attempts: 0, passed: 0, scoreSum: 0 };
-          attemptsByStudent[sid].attempts += 1;
-          if (a.passed) attemptsByStudent[sid].passed += 1;
-          attemptsByStudent[sid].scoreSum += a.score_percent;
-        });
-
-        const mapped = Object.values(studentMap).map((s) => {
-          const aggr = attemptsByStudent[s.id] || { attempts: 0, passed: 0, scoreSum: 0 };
-          const avgScore = aggr.attempts > 0 ? Math.round(aggr.scoreSum / aggr.attempts) : 0;
-          const passRate = aggr.attempts > 0 ? Math.round((aggr.passed / aggr.attempts) * 100) : 0;
-          return {
-            studentId: s.id,
-            studentName: s.display_name || 'Unknown Student',
-            studentEmail: s.email || '',
-            attempts: aggr.attempts,
-            passed: aggr.passed,
-            passRate,
-            avgScore,
-          };
-        });
-
-        setRows(mapped);
+        setRows(Array.isArray(progressJson.rows) ? progressJson.rows : []);
+        setCoursesCount(Number(progressJson.coursesCount || 0));
+        setQuizzesCount(Number(progressJson.quizzesCount || 0));
       } catch (error: unknown) {
         toast.error((error as Error)?.message || 'Failed to load student progress');
       } finally {
