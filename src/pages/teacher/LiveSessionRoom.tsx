@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { supabase } from '../../supabase';
-import { authFetch } from '../../lib/apiUrl';
+import { authFetch, readApiError } from '../../lib/apiUrl';
 import { toast } from 'sonner';
 import { motion, AnimatePresence } from 'motion/react';
 import {
@@ -150,6 +150,7 @@ export default function TeacherLiveSessionRoom() {
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
   const [chatInput, setChatInput] = useState('');
   const [sendingChat, setSendingChat] = useState(false);
+  const [chatRealtimeConnected, setChatRealtimeConnected] = useState(false);
 
   const [recordingState, setRecordingState] = useState<RecordingState>('idle');
   const [recordingTime, setRecordingTime] = useState(0);
@@ -237,9 +238,21 @@ export default function TeacherLiveSessionRoom() {
       }, async (payload) => {
         const msg = payload.new as { id: string; session_id: string; sender_id: string; message: string; created_at: string };
         const { data: sender } = await supabase.from('profiles').select('id, display_name, avatar_url').eq('id', msg.sender_id).single();
-        setChatMessages(prev => [...prev, { ...msg, sender: sender || { id: msg.sender_id, display_name: 'User', avatar_url: null } }]);
+        setChatMessages(prev => {
+          if (prev.some((m) => m.id === msg.id)) return prev;
+          return [...prev, { ...msg, sender: sender || { id: msg.sender_id, display_name: 'User', avatar_url: null } }];
+        });
       })
-      .subscribe();
+      .subscribe((status) => {
+        if (status === 'SUBSCRIBED') {
+          setChatRealtimeConnected(true);
+          return;
+        }
+        if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
+          setChatRealtimeConnected(false);
+          console.warn('[live-chat] Teacher chat realtime status:', status);
+        }
+      });
 
     return () => { supabase.removeChannel(channel); };
   }, [id]);
@@ -363,14 +376,22 @@ export default function TeacherLiveSessionRoom() {
     const msg = chatInput.trim();
     if (!msg || !userId) return;
     setSendingChat(true);
-    setChatInput('');
     try {
-      await authFetch(`/api/teacher/live-sessions/${id}/chat`, {
+      const res = await authFetch(`/api/teacher/live-sessions/${id}/chat`, {
         method: 'POST',
         body: JSON.stringify({ sender_id: userId, message: msg }),
       });
-    } catch {
-      toast.error('Failed to send message');
+      if (!res.ok) {
+        const errText = await readApiError(res);
+        throw new Error(errText || 'Failed to send message');
+      }
+      setChatInput('');
+      // Fallback sync when realtime is temporarily unstable.
+      if (!chatRealtimeConnected) {
+        void fetchChat();
+      }
+    } catch (error: any) {
+      toast.error(error?.message || 'Failed to send message');
     } finally {
       setSendingChat(false);
     }

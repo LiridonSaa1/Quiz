@@ -54,6 +54,7 @@ export default function Login() {
   const [configError, setConfigError] = useState<string | null>(null);
   const [checking, setChecking]     = useState(false);
   const [seeding, setSeeding]       = useState(false);
+  const [googleLoading, setGoogleLoading] = useState(false);
   const [activeField, setActiveField] = useState<'email' | 'password' | null>(null);
   const mouseRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
   const blobRef  = useRef<HTMLDivElement>(null);
@@ -77,6 +78,14 @@ export default function Login() {
     const key = import.meta.env.VITE_SUPABASE_ANON_KEY;
     if (!url || !key) setConfigError('Supabase config missing — add VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY to Secrets.');
   }, []);
+
+  useEffect(() => {
+    const skipIfAuthenticated = async () => {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (session?.user?.id) navigate('/', { replace: true });
+    };
+    void skipIfAuthenticated();
+  }, [navigate]);
 
   const checkConnection = async () => {
     setChecking(true);
@@ -130,6 +139,21 @@ export default function Login() {
       toast.error(err.message || 'Login failed');
       if (err.message?.includes('Invalid login credentials')) toast.info('Seed the admin account first.');
     } finally { setLoading(false); }
+  };
+
+  const handleGoogleLogin = async () => {
+    setGoogleLoading(true);
+    try {
+      const redirectTo = `${window.location.origin}/`;
+      const { error } = await supabase.auth.signInWithOAuth({
+        provider: 'google',
+        options: { redirectTo },
+      });
+      if (error) throw error;
+    } catch (err: any) {
+      toast.error(err.message || 'Google login failed');
+      setGoogleLoading(false);
+    }
   };
 
   return (
@@ -389,6 +413,21 @@ export default function Login() {
                 )}
               </button>
             </form>
+
+            <div className="my-4 flex items-center gap-3">
+              <div className="h-px flex-1 bg-white/[0.08]" />
+              <span className="text-[11px] text-slate-600 uppercase tracking-wider">or</span>
+              <div className="h-px flex-1 bg-white/[0.08]" />
+            </div>
+
+            <button
+              type="button"
+              onClick={handleGoogleLogin}
+              disabled={googleLoading || loading}
+              className="w-full py-3 rounded-xl text-sm font-semibold border border-white/10 bg-white/[0.03] text-slate-200 hover:bg-white/[0.06] transition-all disabled:opacity-60 disabled:cursor-not-allowed"
+            >
+              {googleLoading ? 'Redirecting to Google…' : 'Continue with Google'}
+            </button>
           </div>
 
           {/* dev utility links */}

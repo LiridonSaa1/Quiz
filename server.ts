@@ -3135,29 +3135,110 @@ export async function createApp(options: CreateAppOptions = {}) {
   };
 
   /** PostgREST schema cache not yet refreshed after ALTER TABLE (common right after migrations). */
-  const getStaleLessonContentsColumn = (error: any): string | null => {
-    if (error?.code !== 'PGRST204') return null;
-    const msg = `${error?.message || ''} ${error?.details || ''}`;
-    if (!/schema cache/i.test(msg) || !/lesson_contents/i.test(msg)) return null;
-    const m = msg.match(/Could not find the '([^']+)' column of 'lesson_contents'/i);
-    return m?.[1] ? String(m[1]) : null;
+  const getMissingLessonContentsColumn = (error: any): string | null => {
+    const msg = `${error?.message || ''} ${error?.details || ''} ${error?.hint || ''}`;
+
+    let m = msg.match(/column\s+(?:"([^"]+)"|'([^']+)'|(\w+))\s+of\s+relation\s+(?:"lesson_contents"|'lesson_contents'|lesson_contents)/i);
+    if (m?.[1] || m?.[2] || m?.[3]) return String(m[1] || m[2] || m[3] || '').toLowerCase();
+
+    m = msg.match(/\blesson_contents\.([a-zA-Z_][\w]*)\s+does\s+not\s+exist/i);
+    if (m?.[1]) return String(m[1]).toLowerCase();
+
+    m = msg.match(/column\s+\w+\.([a-zA-Z_][\w]*)\s+does\s+not\s+exist/i);
+    if (m?.[1]) return String(m[1]).toLowerCase();
+
+    m = msg.match(/Could not find the '([^']+)' column of 'lesson_contents'/i);
+    if (m?.[1]) return String(m[1]).toLowerCase();
+
+    m = msg.match(/find\s+the\s+['"]([a-zA-Z_][\w]*)['"]\s+column/i);
+    if (m?.[1]) return String(m[1]).toLowerCase();
+
+    return null;
+  };
+
+  const normalizeLessonContentRow = (row: any, index: number) => {
+    const rawType = String(row?.type || row?.content_type || '').toLowerCase();
+    const type =
+      rawType === 'video' || rawType === 'audio' || rawType === 'pdf' || rawType === 'text'
+        ? rawType
+        : 'text';
+
+    const positionCandidates = [row?.position, row?.sort_order, row?.order, row?.position_index];
+    const firstPosition = positionCandidates.find((value) => Number.isFinite(Number(value)));
+
+    const durationCandidates = [row?.duration_seconds, row?.duration];
+    const firstDuration = durationCandidates.find((value) => Number.isFinite(Number(value)));
+
+    const pageCandidates = [row?.pdf_page, row?.page];
+    const firstPage = pageCandidates.find((value) => Number.isFinite(Number(value)));
+
+    const sizeCandidates = [row?.size_bytes, row?.file_size];
+    const firstSize = sizeCandidates.find((value) => Number.isFinite(Number(value)));
+
+    return {
+      ...row,
+      type,
+      title: row?.title ?? null,
+      description: row?.description ?? row?.summary ?? null,
+      storage_path: row?.storage_path ?? row?.file_path ?? row?.file_url ?? row?.content_url ?? null,
+      mime_type: row?.mime_type ?? null,
+      size_bytes: firstSize !== undefined ? Number(firstSize) : null,
+      text_content: row?.text_content ?? row?.content_text ?? row?.content ?? null,
+      pdf_page: firstPage !== undefined ? Math.max(1, Number(firstPage)) : null,
+      duration_seconds: firstDuration !== undefined ? Math.max(0, Number(firstDuration)) : null,
+      position: firstPosition !== undefined ? Math.max(1, Number(firstPosition)) : index + 1,
+      created_at: row?.created_at ?? null,
+      updated_at: row?.updated_at ?? null,
+    };
+  };
+
+  const normalizeLessonContentRows = (rows: any[]) =>
+    (rows || []).map((row: any, index: number) => normalizeLessonContentRow(row, index));
+
+  const mutateLessonContentsWithFallback = async (
+    execute: (payload: Record<string, unknown>) => Promise<any>,
+    basePayload: Record<string, unknown>,
+  ) => {
+    let payload = { ...basePayload };
+    let result = await execute(payload);
+    for (let attempts = 0; result.error && attempts < 12; attempts += 1) {
+      const missingColumn = getMissingLessonContentsColumn(result.error);
+      if (!missingColumn || !Object.prototype.hasOwnProperty.call(payload, missingColumn)) break;
+      const { [missingColumn]: _omit, ...nextPayload } = payload;
+      payload = nextPayload;
+      result = await execute(payload);
+    }
+    return { result, payload };
   };
 
   const fetchLessonContentsWithFallbackOrder = async (lessonId: string) => {
-    let contentsRes = await supabaseAdmin
-      .from('lesson_contents')
-      .select('*')
-      .eq('lesson_id', lessonId)
-      .order('position', { ascending: true });
-    const staleColumn = contentsRes.error ? getStaleLessonContentsColumn(contentsRes.error) : null;
-    if (staleColumn === 'position') {
-      contentsRes = await supabaseAdmin
+    let orderColumn: 'position' | 'created_at' | null = 'position';
+    for (let attempts = 0; attempts < 4; attempts += 1) {
+      let query = supabaseAdmin
         .from('lesson_contents')
         .select('*')
-        .eq('lesson_id', lessonId)
-        .order('created_at', { ascending: true });
+        .eq('lesson_id', lessonId);
+      if (orderColumn) {
+        query = query.order(orderColumn, { ascending: true });
+      }
+      const contentsRes = await query;
+      if (!contentsRes.error) return contentsRes;
+      if (isLessonContentsTableMissing(contentsRes.error)) return contentsRes;
+      const missingColumn = getMissingLessonContentsColumn(contentsRes.error);
+      if (orderColumn === 'position' && missingColumn === 'position') {
+        orderColumn = 'created_at';
+        continue;
+      }
+      if (orderColumn === 'created_at' && missingColumn === 'created_at') {
+        orderColumn = null;
+        continue;
+      }
+      return contentsRes;
     }
-    return contentsRes;
+    return await supabaseAdmin
+      .from('lesson_contents')
+      .select('*')
+      .eq('lesson_id', lessonId);
   };
 
   const isLessonProgressTableMissing = (error: any) => {
@@ -3303,7 +3384,11 @@ export async function createApp(options: CreateAppOptions = {}) {
         }
         throw contentsRes.error;
       }
-      return res.json({ success: true, contents: contentsRes.data || [], storage: 'database' });
+      return res.json({
+        success: true,
+        contents: normalizeLessonContentRows(contentsRes.data || []),
+        storage: 'database',
+      });
     } catch (e: any) {
       void logSystemError(
         {
@@ -3337,37 +3422,49 @@ export async function createApp(options: CreateAppOptions = {}) {
       const gate = await assertTeacherOwnsCourse(userId, String((lesson as any).course_id || ''));
       if (!gate.ok) return res.status(403).json({ error: 'Forbidden: no access to this lesson' });
 
+      const normalizedType = String(req.body?.type || req.body?.content_type || 'text');
+      const normalizedStoragePath =
+        typeof req.body?.storage_path === 'string'
+          ? req.body.storage_path.trim() || null
+          : typeof req.body?.file_url === 'string'
+            ? req.body.file_url.trim() || null
+            : null;
+      const normalizedTextContent =
+        typeof req.body?.text_content === 'string'
+          ? req.body.text_content
+          : typeof req.body?.content === 'string'
+            ? req.body.content
+            : null;
+
       const payload: Record<string, unknown> = {
         lesson_id: lessonId,
-        type: String(req.body?.type || 'text'),
+        type: normalizedType,
+        content_type: normalizedType,
         title: typeof req.body?.title === 'string' ? req.body.title.trim() || null : null,
         description: typeof req.body?.description === 'string' ? req.body.description.trim() || null : null,
-        storage_path: typeof req.body?.storage_path === 'string' ? req.body.storage_path.trim() || null : null,
+        storage_path: normalizedStoragePath,
+        file_url: normalizedStoragePath,
         mime_type: typeof req.body?.mime_type === 'string' ? req.body.mime_type.trim() || null : null,
         size_bytes: Number.isFinite(Number(req.body?.size_bytes)) ? Number(req.body.size_bytes) : null,
-        text_content: typeof req.body?.text_content === 'string' ? req.body.text_content : null,
+        text_content: normalizedTextContent,
+        content: normalizedTextContent,
         pdf_page: Number.isFinite(Number(req.body?.pdf_page)) ? Math.max(1, Number(req.body.pdf_page)) : null,
         duration_seconds: Number.isFinite(Number(req.body?.duration_seconds)) ? Math.max(0, Number(req.body.duration_seconds)) : null,
         position: Number.isFinite(Number(req.body?.position)) ? Math.max(1, Number(req.body.position)) : 1,
         updated_at: new Date().toISOString(),
       };
 
-      let insPayload = { ...payload };
-      let ins = await supabaseAdmin.from('lesson_contents').insert(insPayload).select('*').single();
-      for (let attempts = 0; ins.error && attempts < 4; attempts += 1) {
-        const staleColumn = getStaleLessonContentsColumn(ins.error);
-        if (!staleColumn || !Object.prototype.hasOwnProperty.call(insPayload, staleColumn)) break;
-        const { [staleColumn]: _omit, ...nextPayload } = insPayload;
-        insPayload = nextPayload;
-        ins = await supabaseAdmin.from('lesson_contents').insert(insPayload).select('*').single();
-      }
+      const { result: ins } = await mutateLessonContentsWithFallback(
+        (insPayload) => supabaseAdmin.from('lesson_contents').insert(insPayload).select('*').single(),
+        payload,
+      );
       if (ins.error) {
         if (isLessonContentsTableMissing(ins.error)) {
           return res.status(501).json({ error: 'lesson_contents table is not available in this database yet.' });
         }
         throw ins.error;
       }
-      return res.json({ success: true, content: ins.data });
+      return res.json({ success: true, content: normalizeLessonContentRow(ins.data, 0) });
     } catch (e: any) {
       void logSystemError(
         {
@@ -3403,45 +3500,56 @@ export async function createApp(options: CreateAppOptions = {}) {
       if (!gate.ok) return res.status(403).json({ error: 'Forbidden: no access to this lesson' });
 
       const updates: Record<string, unknown> = { updated_at: new Date().toISOString() };
-      if (req.body?.type !== undefined) updates.type = String(req.body.type || 'text');
+      if (req.body?.type !== undefined || req.body?.content_type !== undefined) {
+        const normalizedType = String(req.body?.type || req.body?.content_type || 'text');
+        updates.type = normalizedType;
+        updates.content_type = normalizedType;
+      }
       if (req.body?.title !== undefined) updates.title = typeof req.body.title === 'string' ? req.body.title.trim() || null : null;
       if (req.body?.description !== undefined) updates.description = typeof req.body.description === 'string' ? req.body.description.trim() || null : null;
-      if (req.body?.storage_path !== undefined) updates.storage_path = typeof req.body.storage_path === 'string' ? req.body.storage_path.trim() || null : null;
+      if (req.body?.storage_path !== undefined || req.body?.file_url !== undefined) {
+        const normalizedStoragePath =
+          typeof req.body?.storage_path === 'string'
+            ? req.body.storage_path.trim() || null
+            : typeof req.body?.file_url === 'string'
+              ? req.body.file_url.trim() || null
+              : null;
+        updates.storage_path = normalizedStoragePath;
+        updates.file_url = normalizedStoragePath;
+      }
       if (req.body?.mime_type !== undefined) updates.mime_type = typeof req.body.mime_type === 'string' ? req.body.mime_type.trim() || null : null;
       if (req.body?.size_bytes !== undefined) updates.size_bytes = Number.isFinite(Number(req.body.size_bytes)) ? Number(req.body.size_bytes) : null;
-      if (req.body?.text_content !== undefined) updates.text_content = typeof req.body.text_content === 'string' ? req.body.text_content : null;
+      if (req.body?.text_content !== undefined || req.body?.content !== undefined) {
+        const normalizedTextContent =
+          typeof req.body?.text_content === 'string'
+            ? req.body.text_content
+            : typeof req.body?.content === 'string'
+              ? req.body.content
+              : null;
+        updates.text_content = normalizedTextContent;
+        updates.content = normalizedTextContent;
+      }
       if (req.body?.pdf_page !== undefined) updates.pdf_page = Number.isFinite(Number(req.body.pdf_page)) ? Math.max(1, Number(req.body.pdf_page)) : null;
       if (req.body?.duration_seconds !== undefined) updates.duration_seconds = Number.isFinite(Number(req.body.duration_seconds)) ? Math.max(0, Number(req.body.duration_seconds)) : null;
       if (req.body?.position !== undefined) updates.position = Number.isFinite(Number(req.body.position)) ? Math.max(1, Number(req.body.position)) : 1;
 
-      let updPayload = { ...updates };
-      let upd = await supabaseAdmin
-        .from('lesson_contents')
-        .update(updPayload)
-        .eq('id', contentId)
-        .eq('lesson_id', lessonId)
-        .select('*')
-        .single();
-      for (let attempts = 0; upd.error && attempts < 4; attempts += 1) {
-        const staleColumn = getStaleLessonContentsColumn(upd.error);
-        if (!staleColumn || !Object.prototype.hasOwnProperty.call(updPayload, staleColumn)) break;
-        const { [staleColumn]: _omit, ...nextPayload } = updPayload;
-        updPayload = nextPayload;
-        upd = await supabaseAdmin
+      const { result: upd } = await mutateLessonContentsWithFallback(
+        (updPayload) => supabaseAdmin
           .from('lesson_contents')
           .update(updPayload)
           .eq('id', contentId)
           .eq('lesson_id', lessonId)
           .select('*')
-          .single();
-      }
+          .single(),
+        updates,
+      );
       if (upd.error) {
         if (isLessonContentsTableMissing(upd.error)) {
           return res.status(501).json({ error: 'lesson_contents table is not available in this database yet.' });
         }
         throw upd.error;
       }
-      return res.json({ success: true, content: upd.data });
+      return res.json({ success: true, content: normalizeLessonContentRow(upd.data, 0) });
     } catch (e: any) {
       void logSystemError(
         {
@@ -3525,11 +3633,26 @@ export async function createApp(options: CreateAppOptions = {}) {
 
       for (let i = 0; i < orderedIds.length; i += 1) {
         const id = orderedIds[i];
-        const upd = await supabaseAdmin
+        let reorderPayload: Record<string, unknown> = { position: i + 1, updated_at: new Date().toISOString() };
+        let upd = await supabaseAdmin
           .from('lesson_contents')
-          .update({ position: i + 1, updated_at: new Date().toISOString() })
+          .update(reorderPayload)
           .eq('id', id)
           .eq('lesson_id', lessonId);
+        for (let attempts = 0; upd.error && attempts < 4; attempts += 1) {
+          const missingColumn = getMissingLessonContentsColumn(upd.error);
+          if (missingColumn === 'position') {
+            return res.json({ success: true, storage: 'legacy_no_position' });
+          }
+          if (!missingColumn || !Object.prototype.hasOwnProperty.call(reorderPayload, missingColumn)) break;
+          const { [missingColumn]: _omit, ...nextPayload } = reorderPayload;
+          reorderPayload = nextPayload;
+          upd = await supabaseAdmin
+            .from('lesson_contents')
+            .update(reorderPayload)
+            .eq('id', id)
+            .eq('lesson_id', lessonId);
+        }
         if (upd.error) {
           if (isLessonContentsTableMissing(upd.error)) {
             return res.status(501).json({ error: 'lesson_contents table is not available in this database yet.' });
@@ -4975,7 +5098,7 @@ export async function createApp(options: CreateAppOptions = {}) {
       res.status(403).json({ error: 'Forbidden: you have been removed from this session' }); return null;
     }
     if (participation) return caller.userId;
-    res.status(403).json({ error: 'Forbidden: you are not a participant of this session' }); return null;
+    res.status(403).json({ error: 'Forbidden: join this live session first or ask the host to invite you' }); return null;
   };
 
   // assertSessionAccess — broader: host/admin/invited participant OR enrolled student for ended sessions (recording access only)
@@ -5273,12 +5396,16 @@ export async function createApp(options: CreateAppOptions = {}) {
       const caller = await getAuthUser(req);
       if (!caller) return;
       const { sender_id, message } = req.body;
+      const text = typeof message === 'string' ? message.trim() : '';
+      if (!text) {
+        return res.status(400).json({ error: 'message is required' });
+      }
       if (caller.userId !== sender_id) {
         return res.status(403).json({ error: 'Forbidden: sender_id must match authenticated user' });
       }
       const { data, error } = await supabaseAdmin
         .from('session_chat_messages')
-        .insert({ session_id: req.params.id, sender_id, message, created_at: new Date().toISOString() })
+        .insert({ session_id: req.params.id, sender_id, message: text, created_at: new Date().toISOString() })
         .select('*, sender:profiles!sender_id(id,display_name,avatar_url)').single();
       if (error) throw error;
       res.json({ success: true, message: data });
@@ -6419,15 +6546,15 @@ export async function createApp(options: CreateAppOptions = {}) {
 
       const progressRes = await fetchLessonProgressSingle(caller.userId, lessonId);
 
-      const contentRows = (contentsRes.data || []).map((row: any) => ({
+      const contentRows = normalizeLessonContentRows(contentsRes.data || []).map((row: any) => ({
         ...row,
-        signed_url: row?.storage_path
-          ? null
+        signed_url: typeof row?.storage_path === 'string' && /^https?:\/\//i.test(row.storage_path)
+          ? row.storage_path
           : null,
       }));
       for (const row of contentRows) {
         const path = String(row?.storage_path || '').trim();
-        if (!path) continue;
+        if (!path || /^https?:\/\//i.test(path)) continue;
         await ensureLessonMediaBucket();
         const signed = await supabaseAdmin.storage.from('lesson-media').createSignedUrl(path, 3600);
         row.signed_url = signed.error ? null : signed.data?.signedUrl || null;
