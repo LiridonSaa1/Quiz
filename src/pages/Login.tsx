@@ -56,9 +56,21 @@ export default function Login() {
   const [seeding, setSeeding]       = useState(false);
   const [googleLoading, setGoogleLoading] = useState(false);
   const [activeField, setActiveField] = useState<'email' | 'password' | null>(null);
+  const [maintenanceMode, setMaintenanceMode] = useState(false);
   const mouseRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
   const blobRef  = useRef<HTMLDivElement>(null);
   const navigate = useNavigate();
+
+  const fetchRuntimeMaintenance = async (): Promise<boolean | null> => {
+    try {
+      const res = await fetch(`${apiUrl('/api/platform/runtime')}?t=${Date.now()}`, { cache: 'no-store' });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok || !json?.success) return null;
+      return Boolean(json.maintenanceMode);
+    } catch {
+      return null;
+    }
+  };
 
   /* Cursor-following blob on left panel */
   useEffect(() => {
@@ -86,6 +98,14 @@ export default function Login() {
     };
     void skipIfAuthenticated();
   }, [navigate]);
+
+  useEffect(() => {
+    const loadMaintenanceMode = async () => {
+      const enabled = await fetchRuntimeMaintenance();
+      setMaintenanceMode(Boolean(enabled));
+    };
+    void loadMaintenanceMode();
+  }, []);
 
   const checkConnection = async () => {
     setChecking(true);
@@ -119,7 +139,7 @@ export default function Login() {
 
       const { data: prof, error: profileError } = await supabase
         .from('profiles')
-        .select('status')
+        .select('status, role')
         .eq('id', uid)
         .single();
 
@@ -130,6 +150,17 @@ export default function Login() {
       if (!isProfileAccessAllowed(prof?.status)) {
         await supabase.auth.signOut();
         toast.error('This account has been disabled. Contact an administrator.', { id: 'account-disabled' });
+        return;
+      }
+
+      const role = String(prof?.role || 'student').toLowerCase();
+      const latestMaintenance = await fetchRuntimeMaintenance();
+      const isMaintenance = latestMaintenance === null ? maintenanceMode : latestMaintenance;
+      setMaintenanceMode(Boolean(isMaintenance));
+
+      if (isMaintenance && role !== 'admin') {
+        await supabase.auth.signOut();
+        toast.error('Platform is currently offline for all students and teachers.', { id: 'maintenance-mode' });
         return;
       }
 
@@ -294,6 +325,15 @@ export default function Login() {
             <div className="mb-6 p-4 rounded-2xl border border-red-500/20 bg-red-500/8 flex gap-3">
               <Shield className="w-4 h-4 text-red-400 shrink-0 mt-0.5" />
               <p className="text-xs text-red-400 leading-relaxed">{configError}</p>
+            </div>
+          )}
+
+          {maintenanceMode && (
+            <div className="mb-6 p-4 rounded-2xl border border-amber-500/30 bg-amber-500/10 flex gap-3">
+              <Shield className="w-4 h-4 text-amber-300 shrink-0 mt-0.5" />
+              <p className="text-xs text-amber-200 leading-relaxed">
+                Platform is currently offline for all students and teachers.
+              </p>
             </div>
           )}
 

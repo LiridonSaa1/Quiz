@@ -95,7 +95,7 @@ export default function StudentLayout({ children }: { children: React.ReactNode 
       mounted = false;
       window.removeEventListener('settings-updated', onSettingsUpdated);
     };
-  }, [features.liveSessionsEnabled]);
+  }, []);
 
   // Poll for live sessions to display badge
   useEffect(() => {
@@ -115,7 +115,7 @@ export default function StudentLayout({ children }: { children: React.ReactNode 
     check();
     const interval = setInterval(check, 30000);
     return () => clearInterval(interval);
-  }, []);
+  }, [features.liveSessionsEnabled]);
 
   const handleLogout = async () => {
     await supabase.auth.signOut();

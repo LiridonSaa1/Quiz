@@ -1573,6 +1573,44 @@ export async function createApp(options: CreateAppOptions = {}) {
     }
   });
 
+  app.get("/api/platform/runtime", async (_req, res) => {
+    try {
+      const settings = await getConfigSection("settings");
+      const features = extractPublicFeatureFlags(settings);
+      const maintenanceMode = Boolean(
+        settings &&
+        typeof settings === "object" &&
+        settings.advanced &&
+        typeof settings.advanced === "object" &&
+        settings.advanced.maintenance
+      );
+      const schoolName =
+        settings &&
+        typeof settings === "object" &&
+        settings.general &&
+        typeof settings.general === "object" &&
+        typeof settings.general.school_name === "string"
+          ? settings.general.school_name
+          : "QuizMaster";
+      res.json({
+        success: true,
+        features,
+        maintenanceMode,
+        schoolName,
+      });
+    } catch (e: any) {
+      if (isPlatformConfigMissing(e)) {
+        return res.json({
+          success: true,
+          features: extractPublicFeatureFlags(null),
+          maintenanceMode: false,
+          schoolName: "QuizMaster",
+        });
+      }
+      res.status(500).json({ error: e?.message || "Failed to load platform runtime config" });
+    }
+  });
+
   app.get("/api/teacher/permissions", async (req, res) => {
     try {
       const caller = await assertAuthenticated(req, res);

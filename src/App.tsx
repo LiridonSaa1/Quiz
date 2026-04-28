@@ -141,19 +141,19 @@ export default function App() {
 
   const loadPlatformRuntimeConfig = async () => {
     try {
-      const [settingsRes, brandingRes] = await Promise.all([
-        fetch(apiUrl('/api/admin/config/settings')),
+      const [runtimeRes, brandingRes] = await Promise.all([
+        fetch(`${apiUrl('/api/platform/runtime')}?t=${Date.now()}`, { cache: 'no-store' }),
         fetch(apiUrl('/api/admin/config/branding')),
       ]);
-      const settingsJson = await settingsRes.json();
-      if (settingsRes.ok && settingsJson?.success) {
-        const nextFeatures = extractFeatureFlags(settingsJson.value);
+      const runtimeJson = await runtimeRes.json().catch(() => ({}));
+      if (runtimeRes.ok && runtimeJson?.success) {
+        const nextFeatures = extractFeatureFlags({ features: runtimeJson.features });
         setFeatures(nextFeatures);
-        setMaintenanceMode(Boolean(settingsJson.value?.advanced?.maintenance));
-        const schoolName = String(settingsJson.value?.general?.school_name || 'QuizMaster').trim();
+        setMaintenanceMode(Boolean(runtimeJson.maintenanceMode));
+        const schoolName = String(runtimeJson.schoolName || 'QuizMaster').trim();
         if (schoolName) document.title = schoolName;
       }
-      const brandingJson = await brandingRes.json();
+      const brandingJson = await brandingRes.json().catch(() => ({}));
       if (brandingRes.ok && brandingJson?.success) {
         const faviconUrl = brandingJson?.value?.faviconUrl;
         if (typeof faviconUrl === 'string' && faviconUrl.trim()) {
@@ -173,6 +173,18 @@ export default function App() {
 
   const fetchProfile = async (userId: string) => {
     try {
+      let runtimeMaintenanceMode = maintenanceMode;
+      try {
+        const runtimeRes = await fetch(`${apiUrl('/api/platform/runtime')}?t=${Date.now()}`, { cache: 'no-store' });
+        const runtimeJson = await runtimeRes.json().catch(() => ({}));
+        if (runtimeRes.ok && runtimeJson?.success) {
+          runtimeMaintenanceMode = Boolean(runtimeJson.maintenanceMode);
+          setMaintenanceMode(runtimeMaintenanceMode);
+        }
+      } catch {
+        // keep current in-memory maintenance value
+      }
+
       let profile: any = null;
       const profileRes = await supabase.from('profiles').select('*').eq('id', userId).maybeSingle();
       if (profileRes.error) {
@@ -189,12 +201,20 @@ export default function App() {
         const metadata = authUser?.user_metadata && typeof authUser.user_metadata === 'object'
           ? authUser.user_metadata as Record<string, unknown>
           : {};
+        const fallbackRole = normalizeUserRole(typeof metadata.role === 'string' ? metadata.role : null);
+
+        if (runtimeMaintenanceMode && fallbackRole !== 'admin') {
+          await supabase.auth.signOut();
+          setUser(null);
+          toast.error('Platform is currently offline for all students and teachers.', { id: 'maintenance-mode' });
+          return;
+        }
 
         setUser({
           uid: userId,
           email: String(authUser?.email || ''),
           displayName: String(metadata.display_name || metadata.full_name || authUser?.email || 'Student'),
-          role: normalizeUserRole(typeof metadata.role === 'string' ? metadata.role : null),
+          role: fallbackRole,
           teacherId: typeof metadata.teacher_id === 'string' ? metadata.teacher_id : undefined,
           status: 'active',
           createdAt: String(authUser?.created_at || new Date().toISOString()),
@@ -206,6 +226,12 @@ export default function App() {
         await supabase.auth.signOut();
         setUser(null);
         toast.error('Your account has been disabled. Contact an administrator.', { id: 'account-disabled' });
+        return;
+      }
+      if (profile && runtimeMaintenanceMode && normalizeUserRole(profile.role) !== 'admin') {
+        await supabase.auth.signOut();
+        setUser(null);
+        toast.error('Platform is currently offline for all students and teachers.', { id: 'maintenance-mode' });
         return;
       }
       if (profile) {
@@ -251,6 +277,46 @@ export default function App() {
       void supabase.removeChannel(channel);
     };
   }, [user?.uid]);
+
+  /** Enforce maintenance mode for already logged-in non-admin users. */
+  useEffect(() => {
+    if (!user || user.role === 'admin') return;
+
+    let active = true;
+    let signingOut = false;
+
+    const enforceMaintenance = async () => {
+      if (!active || signingOut) return;
+      try {
+        const res = await fetch(`${apiUrl('/api/platform/runtime')}?t=${Date.now()}`, { cache: 'no-store' });
+        const json = await res.json().catch(() => ({}));
+        const enabled = Boolean(res.ok && json?.success && json?.maintenanceMode);
+        setMaintenanceMode(enabled);
+        if (enabled) {
+          signingOut = true;
+          await supabase.auth.signOut();
+          if (!active) return;
+          setUser(null);
+          toast.error('Platform is currently offline for all students and teachers.', { id: 'maintenance-mode' });
+        }
+      } catch {
+        // ignore transient polling failures
+      }
+    };
+
+    void enforceMaintenance();
+    const intervalId = window.setInterval(() => { void enforceMaintenance(); }, 10000);
+    const onVisibility = () => {
+      if (document.visibilityState === 'visible') void enforceMaintenance();
+    };
+    document.addEventListener('visibilitychange', onVisibility);
+
+    return () => {
+      active = false;
+      window.clearInterval(intervalId);
+      document.removeEventListener('visibilitychange', onVisibility);
+    };
+  }, [user]);
 
   if (loading) {
     return <AppBootSkeleton />;
