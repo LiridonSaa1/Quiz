@@ -2,6 +2,7 @@ import "dotenv/config";
 import { isMissingCoursesStudentIdsError } from "./src/lib/schemaErrors.js";
 import { canAccessTeacherCourses, isAdmin, isAdminSeedAllowed } from "./src/lib/routeAuth.js";
 import { generateFixSuggestion } from "./src/lib/ai/generateFixSuggestion.js";
+import { isEmailConfigured, sendEmail, renderVerificationEmail } from "./src/lib/email.js";
 import express, { Request, Response } from "express";
 import { appendFile, mkdir, readFile as readFileFs, writeFile } from "fs/promises";
 import path from "path";
@@ -1656,9 +1657,12 @@ export async function createApp(options: CreateAppOptions = {}) {
       });
 
       let email = "";
+      let displayName = "";
       try {
         const { data } = await supabaseAdmin.auth.admin.getUserById(caller.userId);
         email = data?.user?.email || "";
+        const meta: any = data?.user?.user_metadata || {};
+        displayName = String(meta.display_name || meta.full_name || "").trim();
       } catch {
         // ignore — email lookup is non-critical
       }
@@ -1667,14 +1671,55 @@ export async function createApp(options: CreateAppOptions = {}) {
         ? email.replace(/(.{1,2})([^@]*)(@.*)/, (_m, a, b, c) => `${a}${"*".repeat(Math.max(b.length, 3))}${c}`)
         : "your email";
 
-      console.log(`[2FA] Code for ${email || caller.userId}: ${code} (expires in 5 min)`);
+      // Try to deliver the code via Brevo. If sending succeeds, do NOT echo
+      // the code back to the client — the user must check their inbox.
+      let delivered = false;
+      let deliveryError: string | undefined;
+      if (isEmailConfigured() && email) {
+        try {
+          let brandName = "QuizMaster";
+          try {
+            const branding: any = await getConfigSection("branding");
+            const fromBranding = String(branding?.schoolName || branding?.appName || "").trim();
+            if (fromBranding) brandName = fromBranding;
+          } catch { /* ignore */ }
+
+          const tpl = renderVerificationEmail({ code, brandName, ttlMinutes: 5 });
+          await sendEmail({
+            to: email,
+            toName: displayName || undefined,
+            subject: tpl.subject,
+            htmlContent: tpl.htmlContent,
+            textContent: tpl.textContent,
+          });
+          delivered = true;
+          console.log(`[2FA] Code emailed to ${email} via Brevo (expires in 5 min)`);
+        } catch (mailErr: any) {
+          deliveryError = mailErr?.message || "Email delivery failed";
+          console.error(`[2FA] Brevo send failed for ${email}:`, deliveryError);
+        }
+      }
+
+      // Dev fallback — surface the code in the response so the flow is testable
+      // when Brevo is not configured OR when delivery failed in development.
+      const allowDevCode = !delivered && process.env.NODE_ENV !== "production";
+      if (!delivered && !allowDevCode) {
+        return res.status(502).json({
+          error: deliveryError || "Email delivery is not configured on the server.",
+        });
+      }
+
+      if (!delivered) {
+        console.log(`[2FA] (dev fallback) code for ${email || caller.userId}: ${code}`);
+      }
 
       res.json({
         success: true,
         required: true,
         maskedEmail,
-        // In development we surface the code so the flow is testable without SMTP.
-        devCode: process.env.NODE_ENV !== "production" ? code : undefined,
+        delivered,
+        devCode: allowDevCode ? code : undefined,
+        deliveryError: allowDevCode ? deliveryError : undefined,
       });
     } catch (e: any) {
       res.status(500).json({ error: e?.message || "Failed to issue 2FA challenge" });

@@ -86,3 +86,22 @@ Set these in Replit Secrets:
 - Port 5000 is used for both frontend and backend (Express serves Vite middleware)
 - Vite is configured with `allowedHosts: true` for Replit proxy compatibility
 - The server listens on `0.0.0.0` to be accessible in the Replit environment
+
+## Two-Factor Authentication (2FA)
+Per-role 2FA toggle in `/admin/settings` → Security tab. Admin can enable separately for Student / Teacher / Admin.
+
+**Email delivery — Brevo (manual integration, NOT via Replit connectors)**
+- The user dismissed the Resend/SendGrid integration flow and chose to provide a Brevo API key directly.
+- Required secrets: `BREVO_API_KEY`, `BREVO_SENDER_EMAIL` (must be verified in Brevo's Senders panel), `BREVO_SENDER_NAME`.
+- Helper: `src/lib/email.ts` exports `isEmailConfigured()`, `sendEmail()`, `renderVerificationEmail()`. Uses `https://api.brevo.com/v3/smtp/email`.
+- If secrets are missing, server falls back to returning `devCode` in the challenge response (only in non-prod) so the flow stays testable.
+
+**Endpoints (in `server.ts` ~line 1614):**
+- `GET /api/auth/2fa/required` — returns whether 2FA is required for the caller's role
+- `POST /api/auth/2fa/challenge` — generates a 6-digit code (5-min TTL), emails it via Brevo, falls back to `devCode` in dev
+- `POST /api/auth/2fa/verify` — validates the code (max 5 attempts)
+- In-memory `twoFactorCodes` Map — codes don't survive a server restart (acceptable for now)
+
+**Client flow:**
+- `src/pages/Login.tsx` — after password sign-in, calls `/2fa/challenge`; if `required`, swaps the form for a 6-digit code panel (emerald accent). On verify success, sets `sessionStorage.quizmaster_2fa_ok = '1'` and navigates.
+- `src/App.tsx` — `fetchProfile` re-checks `/2fa/required` on every load; if required and the session flag is missing, signs the user out (prevents refresh-bypass).
