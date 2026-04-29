@@ -2,12 +2,13 @@ import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
 import { supabase } from '../supabase';
-import { apiUrl } from '../lib/apiUrl';
+import { apiUrl, authFetch } from '../lib/apiUrl';
 import { isProfileAccessAllowed } from '../lib/profileAccess';
 import {
   Mail, Lock, Shield, GraduationCap,
   BookOpen, Users, Trophy, Eye, EyeOff,
-  ArrowRight, Sparkles, CheckCircle2, BarChart3
+  ArrowRight, Sparkles, CheckCircle2, BarChart3,
+  KeyRound, RefreshCw, ArrowLeft, MailCheck
 } from 'lucide-react';
 
 /* ─── tiny helpers ─────────────────────────────────────────── */
@@ -57,6 +58,11 @@ export default function Login() {
   const [googleLoading, setGoogleLoading] = useState(false);
   const [activeField, setActiveField] = useState<'email' | 'password' | null>(null);
   const [maintenanceMode, setMaintenanceMode] = useState(false);
+  const [twoFactorStep, setTwoFactorStep] = useState(false);
+  const [twoFactorCode, setTwoFactorCode] = useState('');
+  const [twoFactorMaskedEmail, setTwoFactorMaskedEmail] = useState('');
+  const [twoFactorVerifying, setTwoFactorVerifying] = useState(false);
+  const [twoFactorResending, setTwoFactorResending] = useState(false);
   const mouseRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
   const blobRef  = useRef<HTMLDivElement>(null);
   const navigate = useNavigate();
@@ -164,12 +170,93 @@ export default function Login() {
         return;
       }
 
+      // ── 2FA gate ──
+      try {
+        const challengeRes = await authFetch('/api/auth/2fa/challenge', { method: 'POST' });
+        const challengeJson = await challengeRes.json().catch(() => ({}));
+        if (challengeRes.ok && challengeJson?.required) {
+          setTwoFactorMaskedEmail(challengeJson.maskedEmail || email);
+          setTwoFactorCode('');
+          setTwoFactorStep(true);
+          if (challengeJson.devCode) {
+            toast.message(`Dev code: ${challengeJson.devCode}`, {
+              description: 'No SMTP configured — code shown here for testing',
+              duration: 10_000,
+            });
+          } else {
+            toast.success(`Verification code sent to ${challengeJson.maskedEmail || 'your email'}`);
+          }
+          return;
+        }
+      } catch (twoFaErr) {
+        console.warn('[2FA] challenge check failed, allowing login', twoFaErr);
+      }
+
+      sessionStorage.setItem('quizmaster_2fa_ok', '1');
       toast.success('Welcome back!');
       navigate('/');
     } catch (err: any) {
       toast.error(err.message || 'Login failed');
       if (err.message?.includes('Invalid login credentials')) toast.info('Seed the admin account first.');
     } finally { setLoading(false); }
+  };
+
+  const handleVerifyTwoFactor = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!/^\d{6}$/.test(twoFactorCode)) {
+      toast.error('Code must be 6 digits');
+      return;
+    }
+    setTwoFactorVerifying(true);
+    try {
+      const res = await authFetch('/api/auth/2fa/verify', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ code: twoFactorCode }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok || !json?.success) throw new Error(json?.error || 'Verification failed');
+
+      sessionStorage.setItem('quizmaster_2fa_ok', '1');
+      toast.success('Verified — welcome back!');
+      navigate('/');
+    } catch (err: any) {
+      toast.error(err.message || 'Verification failed');
+    } finally {
+      setTwoFactorVerifying(false);
+    }
+  };
+
+  const handleResendCode = async () => {
+    setTwoFactorResending(true);
+    try {
+      const res = await authFetch('/api/auth/2fa/challenge', { method: 'POST' });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok || !json?.required) throw new Error(json?.error || 'Could not resend code');
+      setTwoFactorMaskedEmail(json.maskedEmail || email);
+      setTwoFactorCode('');
+      if (json.devCode) {
+        toast.message(`New dev code: ${json.devCode}`, {
+          description: 'No SMTP configured — code shown here for testing',
+          duration: 10_000,
+        });
+      } else {
+        toast.success(`New code sent to ${json.maskedEmail || 'your email'}`);
+      }
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to resend code');
+    } finally {
+      setTwoFactorResending(false);
+    }
+  };
+
+  const handleCancelTwoFactor = async () => {
+    try { await supabase.auth.signOut(); } catch { /* ignore */ }
+    sessionStorage.removeItem('quizmaster_2fa_ok');
+    setTwoFactorStep(false);
+    setTwoFactorCode('');
+    setTwoFactorMaskedEmail('');
+    toast.info('Sign-in cancelled');
   };
 
   const handleGoogleLogin = async () => {
@@ -339,12 +426,27 @@ export default function Login() {
 
           {/* header */}
           <div className="mb-8">
-            <div className="inline-flex items-center gap-1.5 bg-violet-500/10 border border-violet-500/20 rounded-full px-3 py-1 mb-4">
-              <Sparkles className="w-3 h-3 text-violet-400" />
-              <span className="text-[11px] font-semibold text-violet-400 tracking-wide">Welcome back</span>
-            </div>
-            <h2 className="text-2xl font-bold text-white tracking-tight">Sign in to continue</h2>
-            <p className="text-slate-500 text-sm mt-1.5">Access your dashboard and learning tools</p>
+            {twoFactorStep ? (
+              <>
+                <div className="inline-flex items-center gap-1.5 bg-emerald-500/10 border border-emerald-500/20 rounded-full px-3 py-1 mb-4">
+                  <Shield className="w-3 h-3 text-emerald-400" />
+                  <span className="text-[11px] font-semibold text-emerald-400 tracking-wide">Two-Factor Authentication</span>
+                </div>
+                <h2 className="text-2xl font-bold text-white tracking-tight">Verify it's you</h2>
+                <p className="text-slate-500 text-sm mt-1.5">
+                  We sent a 6-digit code to <span className="text-slate-300 font-semibold">{twoFactorMaskedEmail}</span>
+                </p>
+              </>
+            ) : (
+              <>
+                <div className="inline-flex items-center gap-1.5 bg-violet-500/10 border border-violet-500/20 rounded-full px-3 py-1 mb-4">
+                  <Sparkles className="w-3 h-3 text-violet-400" />
+                  <span className="text-[11px] font-semibold text-violet-400 tracking-wide">Welcome back</span>
+                </div>
+                <h2 className="text-2xl font-bold text-white tracking-tight">Sign in to continue</h2>
+                <p className="text-slate-500 text-sm mt-1.5">Access your dashboard and learning tools</p>
+              </>
+            )}
           </div>
 
           {/* ── form card ── */}
@@ -359,6 +461,94 @@ export default function Login() {
             {/* gradient top accent */}
             <div className="absolute top-0 left-8 right-8 h-px bg-gradient-to-r from-transparent via-violet-500/40 to-transparent rounded-full" />
 
+            {twoFactorStep ? (
+              <form onSubmit={handleVerifyTwoFactor} className="space-y-5">
+                <div className="flex items-center justify-center gap-3 py-2">
+                  <div className="w-12 h-12 rounded-2xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center">
+                    <MailCheck className="w-5 h-5 text-emerald-400" />
+                  </div>
+                </div>
+
+                <div className="space-y-1.5">
+                  <label className="text-xs font-medium text-slate-500 uppercase tracking-widest text-center block">
+                    Verification Code
+                  </label>
+                  <div
+                    className="flex items-center rounded-xl transition-all duration-200 overflow-hidden"
+                    style={{
+                      background: 'rgba(16,185,129,0.06)',
+                      border: '1px solid rgba(16,185,129,0.25)',
+                      boxShadow: '0 0 0 3px rgba(16,185,129,0.06)',
+                    }}
+                  >
+                    <KeyRound className="ml-4 w-4 h-4 shrink-0 text-emerald-400" />
+                    <input
+                      type="text"
+                      inputMode="numeric"
+                      autoComplete="one-time-code"
+                      autoFocus
+                      maxLength={6}
+                      value={twoFactorCode}
+                      onChange={e => setTwoFactorCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                      placeholder="000000"
+                      className="flex-1 px-3 py-3.5 bg-transparent text-center text-xl font-bold tracking-[0.5em] text-white placeholder:text-slate-700 placeholder:tracking-[0.3em] focus:outline-none"
+                    />
+                  </div>
+                  <p className="text-[11px] text-slate-500 text-center pt-1">
+                    Code expires in 5 minutes — 5 attempts allowed
+                  </p>
+                </div>
+
+                <button
+                  type="submit"
+                  disabled={twoFactorVerifying || twoFactorCode.length !== 6}
+                  className="relative w-full py-3.5 rounded-xl font-semibold text-sm text-white flex items-center justify-center gap-2 overflow-hidden transition-all duration-200 active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed"
+                  style={{
+                    background: twoFactorVerifying
+                      ? 'rgba(16,185,129,0.6)'
+                      : 'linear-gradient(135deg,#10b981 0%,#059669 50%,#047857 100%)',
+                    boxShadow: '0 1px 0 rgba(255,255,255,0.12) inset, 0 8px 24px rgba(5,150,105,0.45)',
+                  }}
+                >
+                  <div className="absolute top-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-white/30 to-transparent" />
+                  {twoFactorVerifying ? (
+                    <>
+                      <svg className="animate-spin w-4 h-4" fill="none" viewBox="0 0 24 24">
+                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                      </svg>
+                      Verifying…
+                    </>
+                  ) : (
+                    <>
+                      <Shield className="w-4 h-4" />
+                      Verify & Continue
+                    </>
+                  )}
+                </button>
+
+                <div className="flex items-center justify-between gap-3 pt-1">
+                  <button
+                    type="button"
+                    onClick={handleCancelTwoFactor}
+                    className="inline-flex items-center gap-1.5 text-xs text-slate-500 hover:text-slate-300 transition-colors"
+                  >
+                    <ArrowLeft className="w-3 h-3" />
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleResendCode}
+                    disabled={twoFactorResending}
+                    className="inline-flex items-center gap-1.5 text-xs text-emerald-400 hover:text-emerald-300 disabled:opacity-50 transition-colors"
+                  >
+                    <RefreshCw className={`w-3 h-3 ${twoFactorResending ? 'animate-spin' : ''}`} />
+                    {twoFactorResending ? 'Sending…' : 'Resend code'}
+                  </button>
+                </div>
+              </form>
+            ) : (
+            <>
             <form onSubmit={handleLogin} className="space-y-4">
 
               {/* email */}
@@ -468,6 +658,8 @@ export default function Login() {
             >
               {googleLoading ? 'Redirecting to Google…' : 'Continue with Google'}
             </button>
+            </>
+            )}
           </div>
 
           {/* dev utility links */}

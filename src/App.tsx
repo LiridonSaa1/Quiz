@@ -75,7 +75,7 @@ import StudentLiveSessionJoin from './pages/student/LiveSessionJoin';
 import StudentLiveSessionsList from './pages/student/LiveSessionsList';
 import StudentExams from './pages/student/Exams';
 import NotFound from './pages/NotFound';
-import { apiUrl } from './lib/apiUrl';
+import { apiUrl, authFetch } from './lib/apiUrl';
 import { isProfileAccessAllowed } from './lib/profileAccess';
 import { normalizeUserRole } from './lib/userRole';
 import { defaultFeatureFlags, extractFeatureFlags, FeatureFlags } from './lib/platformFeatures';
@@ -235,11 +235,32 @@ export default function App() {
         return;
       }
       if (profile) {
+        const verifiedRole = normalizeUserRole(profile.role);
+
+        // ── 2FA enforcement on refresh ──
+        // If 2FA is required for this role and the session-flag is missing,
+        // sign out so attackers can't bypass by reloading after a partial login.
+        try {
+          const twoFaOk = sessionStorage.getItem('quizmaster_2fa_ok') === '1';
+          if (!twoFaOk) {
+            const reqRes = await authFetch('/api/auth/2fa/required');
+            const reqJson = await reqRes.json().catch(() => ({}));
+            if (reqRes.ok && reqJson?.required) {
+              await supabase.auth.signOut();
+              setUser(null);
+              toast.error('Please sign in again to complete two-factor verification.', { id: '2fa-required' });
+              return;
+            }
+          }
+        } catch (twoFaErr) {
+          console.warn('[App] 2FA gate check failed (allowing session)', twoFaErr);
+        }
+
         setUser({
           uid: profile.id,
           email: profile.email,
           displayName: profile.display_name,
-          role: normalizeUserRole(profile.role),
+          role: verifiedRole,
           teacherId: profile.teacher_id,
           status: profile.status,
           createdAt: profile.created_at

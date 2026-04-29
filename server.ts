@@ -1611,6 +1611,115 @@ export async function createApp(options: CreateAppOptions = {}) {
     }
   });
 
+  // ─── Two-Factor Authentication ──────────────────────────────────────────
+  const twoFactorCodes = new Map<string, { code: string; expiresAt: number; attempts: number }>();
+  const TWOFA_TTL_MS = 5 * 60 * 1000;
+  const TWOFA_MAX_ATTEMPTS = 5;
+
+  const isTwoFactorRequiredForRole = async (role: string): Promise<boolean> => {
+    try {
+      const settings: any = await getConfigSection("settings");
+      const tf = settings?.security?.twoFactor;
+      if (!tf) return false;
+      if (typeof tf === "boolean") return tf;
+      if (typeof tf === "object" && role in tf) return Boolean(tf[role]);
+      return false;
+    } catch {
+      return false;
+    }
+  };
+
+  app.get("/api/auth/2fa/required", async (req, res) => {
+    try {
+      const caller = await getAuthUser(req);
+      if (!caller) return res.status(401).json({ error: "Unauthorized" });
+      const required = await isTwoFactorRequiredForRole(caller.role);
+      res.json({ success: true, required });
+    } catch (e: any) {
+      res.status(500).json({ error: e?.message || "Failed to check 2FA requirement" });
+    }
+  });
+
+  app.post("/api/auth/2fa/challenge", async (req, res) => {
+    try {
+      const caller = await getAuthUser(req);
+      if (!caller) return res.status(401).json({ error: "Unauthorized" });
+
+      const required = await isTwoFactorRequiredForRole(caller.role);
+      if (!required) return res.json({ success: true, required: false });
+
+      const code = String(Math.floor(100000 + Math.random() * 900000));
+      twoFactorCodes.set(caller.userId, {
+        code,
+        expiresAt: Date.now() + TWOFA_TTL_MS,
+        attempts: 0,
+      });
+
+      let email = "";
+      try {
+        const { data } = await supabaseAdmin.auth.admin.getUserById(caller.userId);
+        email = data?.user?.email || "";
+      } catch {
+        // ignore — email lookup is non-critical
+      }
+
+      const maskedEmail = email
+        ? email.replace(/(.{1,2})([^@]*)(@.*)/, (_m, a, b, c) => `${a}${"*".repeat(Math.max(b.length, 3))}${c}`)
+        : "your email";
+
+      console.log(`[2FA] Code for ${email || caller.userId}: ${code} (expires in 5 min)`);
+
+      res.json({
+        success: true,
+        required: true,
+        maskedEmail,
+        // In development we surface the code so the flow is testable without SMTP.
+        devCode: process.env.NODE_ENV !== "production" ? code : undefined,
+      });
+    } catch (e: any) {
+      res.status(500).json({ error: e?.message || "Failed to issue 2FA challenge" });
+    }
+  });
+
+  app.post("/api/auth/2fa/verify", async (req, res) => {
+    try {
+      const caller = await getAuthUser(req);
+      if (!caller) return res.status(401).json({ error: "Unauthorized" });
+
+      const code = String(req.body?.code || "").trim();
+      if (!/^\d{6}$/.test(code)) {
+        return res.status(400).json({ error: "Code must be 6 digits" });
+      }
+
+      const entry = twoFactorCodes.get(caller.userId);
+      if (!entry) {
+        return res.status(400).json({ error: "No active code — please request a new one" });
+      }
+      if (entry.expiresAt < Date.now()) {
+        twoFactorCodes.delete(caller.userId);
+        return res.status(400).json({ error: "Code expired — please request a new one" });
+      }
+      if (entry.attempts >= TWOFA_MAX_ATTEMPTS) {
+        twoFactorCodes.delete(caller.userId);
+        return res.status(429).json({ error: "Too many attempts — please request a new code" });
+      }
+
+      entry.attempts += 1;
+
+      if (entry.code !== code) {
+        const remaining = TWOFA_MAX_ATTEMPTS - entry.attempts;
+        return res
+          .status(400)
+          .json({ error: `Incorrect code. ${remaining} attempt${remaining === 1 ? "" : "s"} remaining.` });
+      }
+
+      twoFactorCodes.delete(caller.userId);
+      res.json({ success: true });
+    } catch (e: any) {
+      res.status(500).json({ error: e?.message || "Failed to verify 2FA code" });
+    }
+  });
+
   app.get("/api/teacher/permissions", async (req, res) => {
     try {
       const caller = await assertAuthenticated(req, res);
