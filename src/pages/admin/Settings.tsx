@@ -7,8 +7,42 @@ import { defaultFeatureFlags, FeatureFlags } from '../../lib/platformFeatures';
 import {
   Settings, Globe, Bell, Shield, Database, Mail,
   Clock, Languages, Save, ToggleLeft, ToggleRight,
-  ChevronRight, School, Phone, MapPin, AlertTriangle
+  ChevronRight, School, Phone, MapPin, AlertTriangle,
+  GraduationCap, Briefcase, Crown, Info
 } from 'lucide-react';
+
+type Role = 'student' | 'teacher' | 'admin';
+type RoleBoolMap = Record<Role, boolean>;
+type RoleNumMap = Record<Role, number>;
+
+const ROLES: { id: Role; label: string; icon: React.ElementType; color: string }[] = [
+  { id: 'student', label: 'Students', icon: GraduationCap, color: 'emerald' },
+  { id: 'teacher', label: 'Teachers', icon: Briefcase,    color: 'violet' },
+  { id: 'admin',   label: 'Admins',   icon: Crown,        color: 'amber' },
+];
+
+function asRoleBool(v: any, fallback = false): RoleBoolMap {
+  if (v && typeof v === 'object' && 'student' in v) {
+    return { student: !!v.student, teacher: !!v.teacher, admin: !!v.admin };
+  }
+  if (typeof v === 'boolean') return { student: v, teacher: v, admin: v };
+  return { student: fallback, teacher: fallback, admin: fallback };
+}
+
+function asRoleNum(v: any, fallback: number): RoleNumMap {
+  if (v && typeof v === 'object' && 'student' in v) {
+    return {
+      student: Number.isFinite(Number(v.student)) ? Number(v.student) : fallback,
+      teacher: Number.isFinite(Number(v.teacher)) ? Number(v.teacher) : fallback,
+      admin:   Number.isFinite(Number(v.admin))   ? Number(v.admin)   : fallback,
+    };
+  }
+  if (Number.isFinite(Number(v))) {
+    const n = Number(v);
+    return { student: n, teacher: n, admin: n };
+  }
+  return { student: fallback, teacher: fallback, admin: fallback };
+}
 
 interface GeneralForm {
   school_name: string;
@@ -49,11 +83,11 @@ export default function AdminSettings() {
   const [maintenance, setMaintenance] = useState(false);
   const [registrationOpen, setRegistrationOpen] = useState(true);
   const [requireEmailVerify, setRequireEmailVerify] = useState(true);
-  const [twoFactor, setTwoFactor] = useState(false);
-  const [strongPasswords, setStrongPasswords] = useState(true);
-  const [autoLogout, setAutoLogout] = useState(true);
-  const [sessionTimeoutMinutes, setSessionTimeoutMinutes] = useState(30);
-  const [maxLoginAttempts, setMaxLoginAttempts] = useState(5);
+  const [twoFactor, setTwoFactor] = useState<RoleBoolMap>({ student: false, teacher: false, admin: false });
+  const [strongPasswords, setStrongPasswords] = useState<RoleBoolMap>({ student: true, teacher: true, admin: true });
+  const [autoLogout, setAutoLogout] = useState<RoleBoolMap>({ student: true, teacher: true, admin: true });
+  const [sessionTimeoutMinutes, setSessionTimeoutMinutes] = useState<RoleNumMap>({ student: 30, teacher: 30, admin: 30 });
+  const [maxLoginAttempts, setMaxLoginAttempts] = useState<RoleNumMap>({ student: 5, teacher: 5, admin: 5 });
   const [telegramErrorAlerts, setTelegramErrorAlerts] = useState(true);
   const [features, setFeatures] = useState<FeatureFlags>(defaultFeatureFlags);
 
@@ -127,13 +161,13 @@ export default function AdminSettings() {
         if (v.notifications) setNotifs((prev) => ({ ...prev, ...v.notifications }));
         if (v.email) setEmailSettings((prev) => ({ ...prev, ...v.email }));
         if (v.security) {
-          if (typeof v.security.twoFactor === 'boolean') setTwoFactor(v.security.twoFactor);
           if (typeof v.security.requireEmailVerify === 'boolean') setRequireEmailVerify(v.security.requireEmailVerify);
           if (typeof v.security.registrationOpen === 'boolean') setRegistrationOpen(v.security.registrationOpen);
-          if (typeof v.security.strongPasswords === 'boolean') setStrongPasswords(v.security.strongPasswords);
-          if (typeof v.security.autoLogout === 'boolean') setAutoLogout(v.security.autoLogout);
-          if (Number.isFinite(Number(v.security.sessionTimeoutMinutes))) setSessionTimeoutMinutes(Number(v.security.sessionTimeoutMinutes));
-          if (Number.isFinite(Number(v.security.maxLoginAttempts))) setMaxLoginAttempts(Number(v.security.maxLoginAttempts));
+          setTwoFactor(asRoleBool(v.security.twoFactor, false));
+          setStrongPasswords(asRoleBool(v.security.strongPasswords, true));
+          setAutoLogout(asRoleBool(v.security.autoLogout, true));
+          setSessionTimeoutMinutes(asRoleNum(v.security.sessionTimeoutMinutes, 30));
+          setMaxLoginAttempts(asRoleNum(v.security.maxLoginAttempts, 5));
         }
         if (v.advanced && typeof v.advanced.maintenance === 'boolean') setMaintenance(v.advanced.maintenance);
         if (v.advanced && typeof v.advanced.telegramErrorAlerts === 'boolean') {
@@ -313,35 +347,58 @@ export default function AdminSettings() {
             {/* SECURITY */}
             {activeTab === 'security' && (
               <>
-                <Section title="Authentication" subtitle="Login and account security settings">
-                  <Toggle
+                <div className="bg-gradient-to-br from-indigo-50 to-blue-50 border border-indigo-100 rounded-2xl p-4 flex items-start gap-3">
+                  <div className="w-9 h-9 rounded-xl bg-white flex items-center justify-center shrink-0 shadow-sm">
+                    <Shield className="w-4 h-4 text-indigo-600" />
+                  </div>
+                  <div>
+                    <p className="text-sm font-bold text-slate-900">Per-role security policies</p>
+                    <p className="text-xs text-slate-500 mt-0.5 leading-relaxed">
+                      Each rule below can be configured separately for <span className="font-semibold text-emerald-700">Students</span>, <span className="font-semibold text-violet-700">Teachers</span>, and <span className="font-semibold text-amber-700">Admins</span>. Toggle the role chip to enable/disable, or set a different value per role.
+                    </p>
+                  </div>
+                </div>
+
+                <Section title="Authentication" subtitle="Login and account security policies — applied per role">
+                  <RoleToggleRow
                     label="Two-Factor Authentication"
-                    description="Require admins to use 2FA when signing in"
+                    description="Require a second verification step (code from authenticator app or email) at every sign-in. Stronger protection against stolen passwords."
                     value={twoFactor}
                     onChange={setTwoFactor}
                   />
-                  <Toggle
+                  <RoleToggleRow
                     label="Require Strong Passwords"
-                    description="Enforce minimum 8 characters, uppercase, number, and symbol"
+                    description="Force passwords to be at least 8 characters and include uppercase, a number, and a symbol when users sign up or change their password."
                     value={strongPasswords}
                     onChange={setStrongPasswords}
                   />
-                  <Toggle
+                  <RoleToggleRow
                     label="Auto Logout on Inactivity"
-                    description="Automatically log out users after 30 minutes of inactivity"
+                    description="Automatically sign the user out after a period of inactivity to protect unattended sessions on shared devices."
                     value={autoLogout}
                     onChange={setAutoLogout}
                   />
                 </Section>
-                <Section title="Session Settings" subtitle="Control active session behaviour">
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <Field label="Session Timeout (minutes)">
-                      <input type="number" value={sessionTimeoutMinutes} onChange={e => setSessionTimeoutMinutes(Number(e.target.value) || 30)} className={inputCls} />
-                    </Field>
-                    <Field label="Max Login Attempts">
-                      <input type="number" value={maxLoginAttempts} onChange={e => setMaxLoginAttempts(Number(e.target.value) || 5)} className={inputCls} />
-                    </Field>
-                  </div>
+
+                <Section title="Session Settings" subtitle="Control active session limits — applied per role">
+                  <RoleNumberRow
+                    label="Session Timeout (minutes)"
+                    description="How long a user can stay idle before being signed out. Lower = stricter security; higher = better convenience."
+                    value={sessionTimeoutMinutes}
+                    onChange={setSessionTimeoutMinutes}
+                    min={1}
+                    max={1440}
+                    suffix="min"
+                  />
+                  <RoleNumberRow
+                    label="Max Login Attempts"
+                    description="How many wrong password attempts before the account is temporarily locked. Lower = better protection against brute-force; higher = fewer accidental lockouts."
+                    value={maxLoginAttempts}
+                    onChange={setMaxLoginAttempts}
+                    min={1}
+                    max={20}
+                    suffix="tries"
+                  />
                 </Section>
               </>
             )}
@@ -465,6 +522,130 @@ function Toggle({ label, description, value, onChange }: { label: string; descri
       >
         <span className={cn('absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full shadow-sm transition-transform', value ? 'translate-x-5' : 'translate-x-0')} />
       </button>
+    </div>
+  );
+}
+
+const ROLE_COLORS: Record<Role, { on: string; off: string; ring: string }> = {
+  student: { on: 'bg-emerald-500 border-emerald-500 text-white', off: 'bg-white border-slate-200 text-slate-500 hover:border-emerald-300', ring: 'focus:ring-emerald-300' },
+  teacher: { on: 'bg-violet-500 border-violet-500 text-white',   off: 'bg-white border-slate-200 text-slate-500 hover:border-violet-300', ring: 'focus:ring-violet-300' },
+  admin:   { on: 'bg-amber-500 border-amber-500 text-white',     off: 'bg-white border-slate-200 text-slate-500 hover:border-amber-300', ring: 'focus:ring-amber-300' },
+};
+
+function RoleToggleRow({ label, description, value, onChange }: {
+  label: string; description: string;
+  value: RoleBoolMap; onChange: (v: RoleBoolMap) => void;
+}) {
+  const allOn  = ROLES.every(r => value[r.id]);
+  const allOff = ROLES.every(r => !value[r.id]);
+  const enabledCount = ROLES.filter(r => value[r.id]).length;
+
+  return (
+    <div className="py-4 border-b border-slate-100 last:border-0">
+      <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4">
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2 mb-1">
+            <p className="text-sm font-bold text-slate-800">{label}</p>
+            <span className={cn(
+              'text-[10px] font-bold px-2 py-0.5 rounded-md',
+              allOn ? 'bg-emerald-50 text-emerald-700' : allOff ? 'bg-slate-100 text-slate-500' : 'bg-amber-50 text-amber-700'
+            )}>
+              {allOn ? 'ALL ON' : allOff ? 'OFF' : `${enabledCount}/3`}
+            </span>
+          </div>
+          <p className="text-xs text-slate-400 leading-relaxed pr-2">{description}</p>
+        </div>
+
+        <div className="flex items-center gap-1.5 shrink-0">
+          {ROLES.map(r => {
+            const Icon = r.icon;
+            const on = value[r.id];
+            return (
+              <button
+                key={r.id}
+                type="button"
+                onClick={() => onChange({ ...value, [r.id]: !on })}
+                className={cn(
+                  'inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl text-[11px] font-bold border transition-all focus:outline-none focus:ring-2',
+                  on ? ROLE_COLORS[r.id].on : ROLE_COLORS[r.id].off,
+                  ROLE_COLORS[r.id].ring
+                )}
+                title={`${on ? 'Disable for' : 'Enable for'} ${r.label}`}
+              >
+                <Icon className="w-3 h-3" />
+                {r.label}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function RoleNumberRow({ label, description, value, onChange, min = 1, max = 9999, suffix }: {
+  label: string; description: string;
+  value: RoleNumMap; onChange: (v: RoleNumMap) => void;
+  min?: number; max?: number; suffix?: string;
+}) {
+  const same = value.student === value.teacher && value.teacher === value.admin;
+
+  return (
+    <div className="py-4 border-b border-slate-100 last:border-0">
+      <div className="flex items-center gap-2 mb-1">
+        <p className="text-sm font-bold text-slate-800">{label}</p>
+        {same && (
+          <span className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-slate-100 text-slate-500">
+            SAME FOR ALL
+          </span>
+        )}
+      </div>
+      <p className="text-xs text-slate-400 leading-relaxed mb-3 pr-2">{description}</p>
+
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+        {ROLES.map(r => {
+          const Icon = r.icon;
+          const colorMap: Record<Role, string> = {
+            student: 'border-emerald-200 bg-emerald-50/40 focus-within:ring-emerald-300 focus-within:border-emerald-400',
+            teacher: 'border-violet-200 bg-violet-50/40 focus-within:ring-violet-300 focus-within:border-violet-400',
+            admin:   'border-amber-200 bg-amber-50/40 focus-within:ring-amber-300 focus-within:border-amber-400',
+          };
+          const iconColor: Record<Role, string> = {
+            student: 'text-emerald-600', teacher: 'text-violet-600', admin: 'text-amber-600',
+          };
+          return (
+            <div
+              key={r.id}
+              className={cn(
+                'flex items-center gap-2 px-3 py-2 rounded-xl border transition-all focus-within:ring-2',
+                colorMap[r.id]
+              )}
+            >
+              <Icon className={cn('w-4 h-4 shrink-0', iconColor[r.id])} />
+              <div className="flex-1 min-w-0">
+                <div className="text-[10px] font-bold text-slate-500 uppercase tracking-wide leading-none">
+                  {r.label}
+                </div>
+                <div className="flex items-baseline gap-1.5 mt-0.5">
+                  <input
+                    type="number"
+                    min={min}
+                    max={max}
+                    value={value[r.id]}
+                    onChange={e => {
+                      const n = Number(e.target.value);
+                      const safe = Number.isFinite(n) ? Math.max(min, Math.min(max, n)) : min;
+                      onChange({ ...value, [r.id]: safe });
+                    }}
+                    className="w-full bg-transparent border-0 p-0 text-base font-black text-slate-900 focus:outline-none focus:ring-0"
+                  />
+                  {suffix && <span className="text-[10px] font-bold text-slate-400 shrink-0">{suffix}</span>}
+                </div>
+              </div>
+            </div>
+          );
+        })}
+      </div>
     </div>
   );
 }
