@@ -112,6 +112,12 @@ export default function App() {
       }
     };
 
+    // Reset the "2FA in progress" sentinel on every fresh app mount (page load
+    // or reload). The flag is only meant to silence the App-level 2FA gate
+    // during the brief window of an active login attempt — it must NOT survive
+    // a refresh, otherwise users could bypass 2FA by reloading the panel.
+    sessionStorage.removeItem('quizmaster_2fa_pending');
+
     checkBackend();
     void loadPlatformRuntimeConfig();
     initSession();
@@ -240,9 +246,13 @@ export default function App() {
         // ── 2FA enforcement on refresh ──
         // If 2FA is required for this role and the session-flag is missing,
         // sign out so attackers can't bypass by reloading after a partial login.
+        // Skip when the Login page is actively negotiating the 2FA challenge —
+        // otherwise we race the login flow and kick the user out before they
+        // ever see the code-entry panel.
         try {
           const twoFaOk = sessionStorage.getItem('quizmaster_2fa_ok') === '1';
-          if (!twoFaOk) {
+          const twoFaPending = sessionStorage.getItem('quizmaster_2fa_pending') === '1';
+          if (!twoFaOk && !twoFaPending) {
             const reqRes = await authFetch('/api/auth/2fa/required');
             const reqJson = await reqRes.json().catch(() => ({}));
             if (reqRes.ok && reqJson?.required) {

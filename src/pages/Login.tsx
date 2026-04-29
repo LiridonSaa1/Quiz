@@ -137,6 +137,10 @@ export default function Login() {
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
+    // Tell App.tsx's auth listener to back off while we negotiate 2FA —
+    // otherwise it races us, sees no 2fa_ok flag, and signs the user out.
+    sessionStorage.setItem('quizmaster_2fa_pending', '1');
+    sessionStorage.removeItem('quizmaster_2fa_ok');
     try {
       const { data: signData, error } = await supabase.auth.signInWithPassword({ email, password });
       if (error) throw error;
@@ -193,9 +197,11 @@ export default function Login() {
       }
 
       sessionStorage.setItem('quizmaster_2fa_ok', '1');
+      sessionStorage.removeItem('quizmaster_2fa_pending');
       toast.success('Welcome back!');
       navigate('/');
     } catch (err: any) {
+      sessionStorage.removeItem('quizmaster_2fa_pending');
       toast.error(err.message || 'Login failed');
       if (err.message?.includes('Invalid login credentials')) toast.info('Seed the admin account first.');
     } finally { setLoading(false); }
@@ -218,6 +224,7 @@ export default function Login() {
       if (!res.ok || !json?.success) throw new Error(json?.error || 'Verification failed');
 
       sessionStorage.setItem('quizmaster_2fa_ok', '1');
+      sessionStorage.removeItem('quizmaster_2fa_pending');
       toast.success('Verified — welcome back!');
       navigate('/');
     } catch (err: any) {
@@ -253,6 +260,7 @@ export default function Login() {
   const handleCancelTwoFactor = async () => {
     try { await supabase.auth.signOut(); } catch { /* ignore */ }
     sessionStorage.removeItem('quizmaster_2fa_ok');
+    sessionStorage.removeItem('quizmaster_2fa_pending');
     setTwoFactorStep(false);
     setTwoFactorCode('');
     setTwoFactorMaskedEmail('');
