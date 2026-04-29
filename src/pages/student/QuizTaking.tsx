@@ -2,7 +2,6 @@ import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { supabase } from '../../supabase';
 import { Quiz, Question, QuizAttempt } from '../../types';
-import { sendNotification } from '../../lib/utils';
 import { 
   Clock, 
   ChevronLeft, 
@@ -608,13 +607,30 @@ export default function QuizTaking() {
         answers,
       });
       
-      // Notify teacher
-      sendNotification(
-        quiz.teacherId,
-        'Quiz Attempt Completed',
-        `${session.user.user_metadata.display_name || session.user.email} has completed the quiz "${quiz.title}" with a score of ${score}/${totalPoints}.`,
-        passed ? 'success' : 'warning'
-      );
+      // Fan out an in-app notification to the student (themselves), the quiz's
+      // teacher, and all admins — gated by the admin Settings → Email Notifications
+      // → "Quiz Submitted" toggle. Best-effort; never blocks the submit flow.
+      try {
+        await authFetch('/api/notifications/event', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            event: 'quizSubmitted',
+            ctx: {
+              studentId: session.user.id,
+              teacherId: quiz.teacherId,
+              quizId: quiz.id,
+              quizTitle: quiz.title,
+              attemptId: attempt.id,
+              score,
+              totalPoints,
+              passed,
+            },
+          }),
+        });
+      } catch {
+        // Notifications are best-effort — don't fail the submission if dispatch fails.
+      }
 
       toast.success('Quiz submitted successfully');
       if (quizId) {

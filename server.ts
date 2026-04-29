@@ -3,6 +3,7 @@ import { isMissingCoursesStudentIdsError } from "./src/lib/schemaErrors.js";
 import { canAccessTeacherCourses, isAdmin, isAdminSeedAllowed } from "./src/lib/routeAuth.js";
 import { generateFixSuggestion } from "./src/lib/ai/generateFixSuggestion.js";
 import { isEmailConfigured, sendEmail, renderVerificationEmail } from "./src/lib/email.js";
+import { notifyEvent, type NotifyContext, type NotifyEventKey } from "./src/lib/notifyEvents.js";
 import express, { Request, Response } from "express";
 import { appendFile, mkdir, readFile as readFileFs, writeFile } from "fs/promises";
 import path from "path";
@@ -1506,6 +1507,27 @@ export async function createApp(options: CreateAppOptions = {}) {
   const isPlatformConfigMissing = (error: any) => {
     const hay = `${error?.message || ""} ${error?.details || ""}`.toLowerCase();
     return error?.code === "42P01" || (error?.code === "PGRST205" && hay.includes("platform_config"));
+  };
+
+  /**
+   * Reads `platform_config.settings.notifications[settingsKey]` to decide whether
+   * an event-driven notification should fire. Defaults to `true` when no settings
+   * row exists yet so events fan out on a fresh install.
+   */
+  const isNotificationEnabled = async (settingsKey: string): Promise<boolean> => {
+    try {
+      const settings: any = await getConfigSection("settings");
+      const notifs = settings?.notifications;
+      if (!notifs || typeof notifs !== "object") return true;
+      const v = notifs[settingsKey];
+      return v === undefined ? true : Boolean(v);
+    } catch {
+      return false;
+    }
+  };
+
+  const dispatchNotifyEvent = async (event: NotifyEventKey, ctx: NotifyContext): Promise<void> => {
+    await notifyEvent(supabaseAdmin, { isEventEnabled: isNotificationEnabled }, event, ctx);
   };
 
   const extractPublicFeatureFlags = (settingsValue: any) => {
@@ -4982,6 +5004,14 @@ export async function createApp(options: CreateAppOptions = {}) {
           throw invInsert.error;
         }
 
+        await dispatchNotifyEvent('paymentReceived', {
+          studentId: String(student_id),
+          teacherId: String(teacher_id),
+          paymentId: String(paymentId),
+          amount: numericAmount,
+          currency,
+        });
+
         return res.json({
           success: true,
           id: paymentId,
@@ -4989,6 +5019,14 @@ export async function createApp(options: CreateAppOptions = {}) {
           invoice_number: invInsert.data?.invoice_number,
         });
       }
+
+      await dispatchNotifyEvent('paymentReceived', {
+        studentId: String(student_id),
+        teacherId: String(teacher_id),
+        paymentId: data?.id ? String(data.id) : undefined,
+        amount: numericAmount,
+        currency,
+      });
 
       res.json({ success: true, id: data?.id });
     } catch (e: any) {
@@ -6450,6 +6488,15 @@ export async function createApp(options: CreateAppOptions = {}) {
         if (!isClassesTableMissing(classError)) throw classError;
       }
 
+      if (!alreadyEnrolled) {
+        await dispatchNotifyEvent('newEnrollment', {
+          studentId: caller.userId,
+          teacherId: courseTeacherId,
+          courseId,
+          courseTitle: String(course.title || ''),
+        });
+      }
+
       return res.json({
         success: true,
         enrolled: !alreadyEnrolled,
@@ -6459,6 +6506,97 @@ export async function createApp(options: CreateAppOptions = {}) {
       });
     } catch (e: any) {
       return res.status(500).json({ error: e?.message || 'Failed to enroll in course' });
+    }
+  });
+
+  // Dispatch an in-app notification event from the client (for events whose source
+  // of truth is still client-driven: quiz submissions and certificate issuances).
+  // Server validates the caller has the right to fire the event for the supplied ctx.
+  app.post('/api/notifications/event', async (req, res) => {
+    try {
+      const caller = await assertAuthenticated(req, res);
+      if (!caller) return;
+
+      const eventKey = String(req.body?.event || '').trim() as NotifyEventKey;
+      const ctxIn = (req.body?.ctx ?? {}) as Partial<NotifyContext>;
+
+      const ALLOWED: NotifyEventKey[] = ['quizSubmitted', 'certificateIssued'];
+      if (!ALLOWED.includes(eventKey)) {
+        return res.status(400).json({ error: 'Unsupported event' });
+      }
+
+      const studentId = String(ctxIn.studentId || '').trim();
+      if (!studentId) return res.status(400).json({ error: 'studentId is required' });
+
+      // Authorization rules per event.
+      if (eventKey === 'quizSubmitted') {
+        // Only the student themselves may report their own submission.
+        if (caller.role !== 'student' || caller.userId !== studentId) {
+          return res.status(403).json({ error: 'Forbidden' });
+        }
+      } else if (eventKey === 'certificateIssued') {
+        // Only teachers/admins may announce a certificate issuance.
+        if (caller.role !== 'teacher' && caller.role !== 'admin') {
+          return res.status(403).json({ error: 'Forbidden' });
+        }
+      }
+
+      // Pick allow-listed fields from the body (don't let clients spoof other ctx).
+      const ctx: NotifyContext = {
+        studentId,
+        teacherId: ctxIn.teacherId ? String(ctxIn.teacherId) : undefined,
+        courseId: ctxIn.courseId ? String(ctxIn.courseId) : undefined,
+        courseTitle: ctxIn.courseTitle ? String(ctxIn.courseTitle) : undefined,
+        quizId: ctxIn.quizId ? String(ctxIn.quizId) : undefined,
+        quizTitle: ctxIn.quizTitle ? String(ctxIn.quizTitle) : undefined,
+        attemptId: ctxIn.attemptId ? String(ctxIn.attemptId) : undefined,
+        score: typeof ctxIn.score === 'number' ? ctxIn.score : undefined,
+        totalPoints: typeof ctxIn.totalPoints === 'number' ? ctxIn.totalPoints : undefined,
+        passed: typeof ctxIn.passed === 'boolean' ? ctxIn.passed : undefined,
+        certificateId: ctxIn.certificateId ? String(ctxIn.certificateId) : undefined,
+        certificateNumber: ctxIn.certificateNumber ? String(ctxIn.certificateNumber) : undefined,
+      };
+
+      // For certificates issued by a teacher, force teacherId to be the caller.
+      if (eventKey === 'certificateIssued' && caller.role === 'teacher') {
+        ctx.teacherId = caller.userId;
+      }
+
+      // For quiz submissions, fetch course/teacher info from the quiz row when missing
+      // so we can be sure the recipients line up correctly.
+      if (eventKey === 'quizSubmitted' && (!ctx.teacherId || !ctx.courseId)) {
+        try {
+          const { data: quizRow } = await supabaseAdmin
+            .from('quizzes')
+            .select('teacher_id, course_id, title')
+            .eq('id', ctx.quizId || '')
+            .maybeSingle();
+          if (quizRow) {
+            ctx.teacherId = ctx.teacherId || (quizRow.teacher_id ? String(quizRow.teacher_id) : undefined);
+            ctx.courseId = ctx.courseId || (quizRow.course_id ? String(quizRow.course_id) : undefined);
+            ctx.quizTitle = ctx.quizTitle || (quizRow.title ? String(quizRow.title) : undefined);
+          }
+        } catch { /* best-effort */ }
+      }
+
+      // For certificates, fetch course title (and teacher_id when admin-issued) from the course row.
+      if (eventKey === 'certificateIssued' && ctx.courseId && (!ctx.courseTitle || !ctx.teacherId)) {
+        try {
+          const { data: courseRow } = await supabaseAdmin
+            .from('courses')
+            .select('title, teacher_id')
+            .eq('id', ctx.courseId)
+            .maybeSingle();
+          if (courseRow?.title && !ctx.courseTitle) ctx.courseTitle = String(courseRow.title);
+          if (courseRow?.teacher_id && !ctx.teacherId) ctx.teacherId = String(courseRow.teacher_id);
+        } catch { /* best-effort */ }
+      }
+
+      await dispatchNotifyEvent(eventKey, ctx);
+      return res.json({ success: true });
+    } catch (e: any) {
+      console.error('POST /api/notifications/event', e);
+      return res.status(500).json({ error: e?.message || 'Failed to dispatch notification event' });
     }
   });
 

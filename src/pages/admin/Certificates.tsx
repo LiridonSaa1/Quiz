@@ -214,9 +214,35 @@ export default function AdminCertificates() {
         toast.success('Certificate updated');
       } else {
         payload.created_at = new Date().toISOString();
-        const { error } = await supabase.from('certificates').insert(payload);
+        const { data: inserted, error } = await supabase
+          .from('certificates')
+          .insert(payload)
+          .select('id')
+          .single();
         if (error) throw error;
         toast.success('Certificate issued');
+
+        // Fan out an in-app notification to the student, the course's teacher,
+        // and all admins — gated by the admin Settings → "Certificate Issued" toggle.
+        try {
+          const courseTitle = courses.find(c => c.id === form.course_id)?.title;
+          await authFetch(apiUrl('/api/notifications/event'), {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              event: 'certificateIssued',
+              ctx: {
+                studentId: form.student_id,
+                courseId: form.course_id || undefined,
+                courseTitle,
+                certificateId: inserted?.id,
+                certificateNumber: payload.certificate_number,
+              },
+            }),
+          });
+        } catch {
+          // Notifications are best-effort — don't fail issuance if dispatch fails.
+        }
       }
       setShowModal(false);
       fetchData();
