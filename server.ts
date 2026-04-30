@@ -1532,6 +1532,99 @@ export async function createApp(options: CreateAppOptions = {}) {
     await notifyEvent(supabaseAdmin, { isEventEnabled: isNotificationEnabled }, event, ctx);
   };
 
+  // ── Weekly summary report ─────────────────────────────────────────────
+  // Computes a 7-day digest and fires `weeklyReport` to all admins. It is
+  // gated by the same `weekly_report` toggle in admin → notifications and
+  // self-throttles via the most recent stored notification.
+  const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
+
+  const safeCountSince = async (table: string, column: string, sinceIso: string): Promise<number | undefined> => {
+    try {
+      const { count, error } = await supabaseAdmin
+        .from(table)
+        .select("id", { count: "exact", head: true })
+        .gte(column, sinceIso);
+      if (error) return undefined;
+      return typeof count === "number" ? count : undefined;
+    } catch {
+      return undefined;
+    }
+  };
+
+  const safeSumSince = async (
+    table: string,
+    column: string,
+    sinceIso: string,
+    sumField: string,
+    currencyField?: string,
+  ): Promise<{ count: number; sum: number; currency?: string } | undefined> => {
+    try {
+      const select = currencyField ? `${sumField}, ${currencyField}` : sumField;
+      const { data, error } = await supabaseAdmin
+        .from(table)
+        .select(select)
+        .gte(column, sinceIso);
+      if (error || !Array.isArray(data)) return undefined;
+      let sum = 0;
+      let currency: string | undefined;
+      for (const row of data as any[]) {
+        const v = Number(row?.[sumField]);
+        if (Number.isFinite(v)) sum += v;
+        if (!currency && currencyField && typeof row?.[currencyField] === "string") {
+          currency = row[currencyField];
+        }
+      }
+      return { count: data.length, sum, currency };
+    } catch {
+      return undefined;
+    }
+  };
+
+  const runWeeklyReportIfDue = async (): Promise<void> => {
+    try {
+      const enabled = await isNotificationEnabled("weekly_report");
+      if (!enabled) return;
+
+      // Throttle: skip when a weekly report was already sent in the last 7 days.
+      const { data: lastRows } = await supabaseAdmin
+        .from("notifications")
+        .select("created_at")
+        .eq("title", "Weekly summary report")
+        .order("created_at", { ascending: false })
+        .limit(1);
+      const lastAt = lastRows && lastRows[0]?.created_at ? Date.parse(lastRows[0].created_at) : 0;
+      if (lastAt && Date.now() - lastAt < WEEK_MS) return;
+
+      const sinceIso = new Date(Date.now() - WEEK_MS).toISOString();
+
+      const [enrollments, quizAttempts, certificates, payments] = await Promise.all([
+        safeCountSince("course_enrollments", "created_at", sinceIso),
+        safeCountSince("attempts", "submitted_at", sinceIso),
+        safeCountSince("certificates", "created_at", sinceIso),
+        safeSumSince("payments", "created_at", sinceIso, "amount", "currency"),
+      ]);
+
+      await dispatchNotifyEvent("weeklyReport", {
+        reportPeriodStart: sinceIso,
+        reportPeriodEnd: new Date().toISOString(),
+        reportTotals: {
+          enrollments,
+          quizAttempts,
+          certificatesIssued: certificates,
+          payments: payments?.count,
+          revenue: payments?.sum,
+          currency: payments?.currency,
+        },
+      });
+    } catch (err: any) {
+      console.warn("[notify:weeklyReport] check failed:", err?.message || err);
+    }
+  };
+
+  // Run an initial check shortly after boot, then every 6 hours.
+  setTimeout(() => { void runWeeklyReportIfDue(); }, 30_000);
+  setInterval(() => { void runWeeklyReportIfDue(); }, 6 * 60 * 60 * 1000);
+
   const extractPublicFeatureFlags = (settingsValue: any) => {
     const features = settingsValue?.features || {};
     return {
@@ -1877,7 +1970,33 @@ export async function createApp(options: CreateAppOptions = {}) {
       if (value === undefined) {
         return res.status(400).json({ error: "value is required" });
       }
+
+      // Detect a maintenance-mode flip so we can fan out an admin bell alert.
+      let prevMaintenance: boolean | null = null;
+      let nextMaintenance: boolean | null = null;
+      if (section === "settings") {
+        try {
+          const prev: any = await getConfigSection("settings");
+          prevMaintenance = Boolean(prev?.advanced?.maintenance);
+        } catch { /* first save — treat as unchanged */ }
+        if (value && typeof value === "object" && (value as any).advanced && typeof (value as any).advanced === "object") {
+          nextMaintenance = Boolean((value as any).advanced.maintenance);
+        }
+      }
+
       const data = await upsertConfigSection(section, value);
+
+      if (
+        section === "settings" &&
+        prevMaintenance !== null &&
+        nextMaintenance !== null &&
+        prevMaintenance !== nextMaintenance
+      ) {
+        void dispatchNotifyEvent("maintenanceAlert", {
+          maintenanceEnabled: nextMaintenance,
+        });
+      }
+
       res.json({ success: true, config: data });
     } catch (e: any) {
       if (isPlatformConfigMissing(e)) {

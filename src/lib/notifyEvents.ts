@@ -20,10 +20,12 @@ export type NotifyEventKey =
   | "newEnrollment"
   | "quizSubmitted"
   | "certificateIssued"
-  | "paymentReceived";
+  | "paymentReceived"
+  | "maintenanceAlert"
+  | "weeklyReport";
 
 export interface NotifyContext {
-  studentId: string;
+  studentId?: string;
   studentName?: string;
   teacherId?: string;
   courseId?: string;
@@ -39,15 +41,30 @@ export interface NotifyContext {
   paymentId?: string;
   amount?: number;
   currency?: string;
+  // Admin-only event payloads
+  maintenanceEnabled?: boolean;
+  maintenanceNote?: string;
+  reportPeriodStart?: string;
+  reportPeriodEnd?: string;
+  reportTotals?: {
+    enrollments?: number;
+    quizAttempts?: number;
+    certificatesIssued?: number;
+    payments?: number;
+    revenue?: number;
+    currency?: string;
+  };
 }
 
 type Role = "student" | "teacher" | "admin";
 
 const RECIPIENTS: Record<NotifyEventKey, Record<Role, boolean>> = {
-  newEnrollment:     { student: true, teacher: true,  admin: true },
-  quizSubmitted:     { student: true, teacher: true,  admin: true },
-  certificateIssued: { student: true, teacher: true,  admin: true },
-  paymentReceived:   { student: true, teacher: false, admin: true },
+  newEnrollment:     { student: true,  teacher: true,  admin: true },
+  quizSubmitted:     { student: true,  teacher: true,  admin: true },
+  certificateIssued: { student: true,  teacher: true,  admin: true },
+  paymentReceived:   { student: true,  teacher: true,  admin: true },
+  maintenanceAlert:  { student: false, teacher: false, admin: true },
+  weeklyReport:      { student: false, teacher: false, admin: true },
 };
 
 /** Maps an event to the existing notifications.type enum. */
@@ -56,6 +73,8 @@ const TYPE_MAP: Record<NotifyEventKey, string> = {
   quizSubmitted: "quiz",
   certificateIssued: "success",
   paymentReceived: "success",
+  maintenanceAlert: "warning",
+  weeklyReport: "info",
 };
 
 /** Maps the admin "Email Notifications" toggle key to our event key. */
@@ -64,6 +83,8 @@ export const SETTINGS_KEY: Record<NotifyEventKey, string> = {
   quizSubmitted: "email_quiz_submitted",
   certificateIssued: "email_certificate_issued",
   paymentReceived: "email_payment_received",
+  maintenanceAlert: "system_maintenance_alerts",
+  weeklyReport: "weekly_report",
 };
 
 const ACTION_URLS: Record<NotifyEventKey, Record<Role, string>> = {
@@ -86,6 +107,16 @@ const ACTION_URLS: Record<NotifyEventKey, Record<Role, string>> = {
     student: "/student/payments",
     teacher: "/teacher/payments",
     admin:   "/admin/payments",
+  },
+  maintenanceAlert: {
+    student: "/admin/settings",
+    teacher: "/admin/settings",
+    admin:   "/admin/settings",
+  },
+  weeklyReport: {
+    student: "/admin",
+    teacher: "/admin",
+    admin:   "/admin",
   },
 };
 
@@ -176,9 +207,57 @@ function renderContent(role: Role, event: NotifyEventKey, ctx: NotifyContext): {
           message: `Your payment${amountText} was processed successfully. A receipt is available in your billing history.`,
         };
       }
+      if (role === "teacher") {
+        return {
+          title: "Payment received",
+          message: `Payment${amountText} from ${studentName}${ctx.courseTitle ? ` for "${ctx.courseTitle}"` : ""} was processed successfully.`,
+        };
+      }
       return {
         title: "Payment received",
         message: `Payment${amountText} from ${studentName} was processed successfully.`,
+      };
+    }
+
+    case "maintenanceAlert": {
+      const enabled = ctx.maintenanceEnabled;
+      const note = (ctx.maintenanceNote || "").trim();
+      if (enabled === true) {
+        return {
+          title: "Maintenance mode enabled",
+          message: note
+            ? `The platform is now in maintenance mode. ${note}`
+            : "The platform is now in maintenance mode. Non-admin users will see a maintenance notice until it is turned off.",
+        };
+      }
+      if (enabled === false) {
+        return {
+          title: "Maintenance mode disabled",
+          message: note
+            ? `The platform is back online and available to all users. ${note}`
+            : "The platform is back online and available to all users.",
+        };
+      }
+      return {
+        title: "System maintenance alert",
+        message: note || "A platform health alert was triggered.",
+      };
+    }
+
+    case "weeklyReport": {
+      const t = ctx.reportTotals || {};
+      const parts: string[] = [];
+      if (typeof t.enrollments === "number") parts.push(`${t.enrollments} new enrollments`);
+      if (typeof t.quizAttempts === "number") parts.push(`${t.quizAttempts} quiz attempts`);
+      if (typeof t.certificatesIssued === "number") parts.push(`${t.certificatesIssued} certificates issued`);
+      if (typeof t.payments === "number" && t.payments > 0) {
+        const revenue = formatMoney(t.revenue, t.currency);
+        parts.push(`${t.payments} payments${revenue ? ` (${revenue})` : ""}`);
+      }
+      const summary = parts.length ? parts.join(", ") : "No new activity in the last 7 days";
+      return {
+        title: "Weekly summary report",
+        message: `Last 7 days: ${summary}.`,
       };
     }
   }
