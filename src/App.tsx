@@ -250,7 +250,12 @@ export default function App() {
         // otherwise we race the login flow and kick the user out before they
         // ever see the code-entry panel.
         try {
-          const twoFaOk = sessionStorage.getItem('quizmaster_2fa_ok') === '1';
+          // `_ok` lives in localStorage so it survives full page reloads
+          // (including Replit's preview iframe being re-created on HMR
+          // reconnect). `_pending` stays in sessionStorage and is cleared on
+          // every fresh App mount — that's how we still block bypass-by-reload
+          // *during* an in-progress login.
+          const twoFaOk = localStorage.getItem('quizmaster_2fa_ok') === '1';
           const twoFaPending = sessionStorage.getItem('quizmaster_2fa_pending') === '1';
           if (!twoFaOk && !twoFaPending) {
             const reqRes = await authFetch('/api/auth/2fa/required');

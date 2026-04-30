@@ -338,7 +338,24 @@ export async function notifyEvent(
 
     const { error } = await admin.from("notifications").insert(rows);
     if (error) {
-      console.warn(`[notify:${event}] insert failed:`, error.message);
+      // Some Supabase deployments don't have the `action_url` column on
+      // `notifications` (or the PostgREST schema cache hasn't picked it up).
+      // Retry without that field so the bell still fires — the link target is
+      // a nice-to-have, not core to the notification.
+      const msg = String(error.message || "");
+      if (/action_url/i.test(msg)) {
+        const trimmed = rows.map((r) => {
+          const { action_url, ...rest } = r as { action_url?: unknown } & Record<string, unknown>;
+          void action_url;
+          return rest;
+        });
+        const retry = await admin.from("notifications").insert(trimmed);
+        if (retry.error) {
+          console.warn(`[notify:${event}] insert failed (retry):`, retry.error.message);
+        }
+      } else {
+        console.warn(`[notify:${event}] insert failed:`, msg);
+      }
     }
   } catch (err: any) {
     console.warn(`[notify:${event}] dispatch failed:`, err?.message || err);

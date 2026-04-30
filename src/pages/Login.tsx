@@ -140,7 +140,7 @@ export default function Login() {
     // Tell App.tsx's auth listener to back off while we negotiate 2FA —
     // otherwise it races us, sees no 2fa_ok flag, and signs the user out.
     sessionStorage.setItem('quizmaster_2fa_pending', '1');
-    sessionStorage.removeItem('quizmaster_2fa_ok');
+    localStorage.removeItem('quizmaster_2fa_ok');
     try {
       const { data: signData, error } = await supabase.auth.signInWithPassword({ email, password });
       if (error) throw error;
@@ -196,7 +196,7 @@ export default function Login() {
         console.warn('[2FA] challenge check failed, allowing login', twoFaErr);
       }
 
-      sessionStorage.setItem('quizmaster_2fa_ok', '1');
+      localStorage.setItem('quizmaster_2fa_ok', '1');
       sessionStorage.removeItem('quizmaster_2fa_pending');
       toast.success('Welcome back!');
       navigate('/');
@@ -223,7 +223,7 @@ export default function Login() {
       const json = await res.json().catch(() => ({}));
       if (!res.ok || !json?.success) throw new Error(json?.error || 'Verification failed');
 
-      sessionStorage.setItem('quizmaster_2fa_ok', '1');
+      localStorage.setItem('quizmaster_2fa_ok', '1');
       sessionStorage.removeItem('quizmaster_2fa_pending');
       toast.success('Verified — welcome back!');
       navigate('/');
@@ -259,7 +259,7 @@ export default function Login() {
 
   const handleCancelTwoFactor = async () => {
     try { await supabase.auth.signOut(); } catch { /* ignore */ }
-    sessionStorage.removeItem('quizmaster_2fa_ok');
+    localStorage.removeItem('quizmaster_2fa_ok');
     sessionStorage.removeItem('quizmaster_2fa_pending');
     setTwoFactorStep(false);
     setTwoFactorCode('');
