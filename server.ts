@@ -6,6 +6,7 @@ import { isEmailConfigured, sendEmail, renderVerificationEmail } from "./src/lib
 import { notifyEvent, type NotifyContext, type NotifyEventKey } from "./src/lib/notifyEvents.js";
 import express, { Request, Response } from "express";
 import { appendFile, mkdir, readFile as readFileFs, writeFile } from "fs/promises";
+import http from "http";
 import path from "path";
 import { fileURLToPath } from "url";
 import { createClient } from '@supabase/supabase-js';
@@ -725,6 +726,7 @@ async function nextInvoiceNumberForPaymentDate(paymentDateYmd: string): Promise<
 
 type CreateAppOptions = {
   includeFrontend?: boolean;
+  httpServer?: http.Server;
 };
 
 export async function createApp(options: CreateAppOptions = {}) {
@@ -8592,8 +8594,15 @@ export async function createApp(options: CreateAppOptions = {}) {
   if (includeFrontend) {
     if (process.env.NODE_ENV !== "production") {
       const { createServer } = await import("vite");
+      const isReplit = !!(process.env.REPL_ID || process.env.REPLIT_DEV_DOMAIN);
+      const hmrConfig: any = options.httpServer
+        ? { server: options.httpServer }
+        : true;
+      if (isReplit && hmrConfig && typeof hmrConfig === "object") {
+        hmrConfig.protocol = "wss";
+      }
       const vite = await createServer({
-        server: { middlewareMode: true },
+        server: { middlewareMode: true, hmr: hmrConfig, allowedHosts: true },
         appType: "spa",
       });
       app.use(vite.middlewares);
@@ -8616,16 +8625,25 @@ async function startServer() {
   const hostCandidates = preferredHost === "0.0.0.0" ? [preferredHost] : [preferredHost, "0.0.0.0"];
   const maxPortAttempts = 10;
   const recoverableListenErrors = new Set(["EACCES", "EADDRINUSE"]);
-  const app = await createApp({ includeFrontend: true });
+  const httpServer = http.createServer();
+  const app = await createApp({ includeFrontend: true, httpServer });
+  httpServer.on("request", app);
 
   const tryListen = (port: number, host: string) =>
     new Promise<void>((resolve, reject) => {
-      const server = app.listen(port, host, () => {
+      const onError = (error: NodeJS.ErrnoException) => {
+        httpServer.off("listening", onListening);
+        reject(error);
+      };
+      const onListening = () => {
+        httpServer.off("error", onError);
         const displayHost = host === "0.0.0.0" ? "localhost" : host;
         console.log(`Server running on http://${displayHost}:${port}`);
         resolve();
-      });
-      server.once("error", (error) => reject(error));
+      };
+      httpServer.once("error", onError);
+      httpServer.once("listening", onListening);
+      httpServer.listen(port, host);
     });
 
   let lastRecoverableError: NodeJS.ErrnoException | null = null;
