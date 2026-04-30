@@ -8602,7 +8602,24 @@ export async function createApp(options: CreateAppOptions = {}) {
         hmrConfig.protocol = "wss";
       }
       const vite = await createServer({
-        server: { middlewareMode: true, hmr: hmrConfig, allowedHosts: true },
+        server: {
+          middlewareMode: true,
+          hmr: hmrConfig,
+          allowedHosts: true,
+          watch: {
+            ignored: [
+              "**/.local/**",
+              "**/.git/**",
+              "**/.cache/**",
+              "**/dist/**",
+              "**/node_modules/**",
+              "**/attached_assets/**",
+              "**/tmp/**",
+              "**/.replit",
+              "**/replit.md",
+            ],
+          },
+        },
         appType: "spa",
       });
       app.use(vite.middlewares);
