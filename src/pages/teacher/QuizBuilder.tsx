@@ -219,8 +219,8 @@ export default function QuizBuilder() {
       if (!session) return;
       try {
         let courseRows: unknown[] | null = null;
-        const backendRes = await fetch(
-          apiUrl(`/api/teacher/courses?userId=${encodeURIComponent(session.user.id)}`)
+        const backendRes = await authFetch(
+          `/api/teacher/courses?userId=${encodeURIComponent(session.user.id)}`
         );
         if (backendRes.ok) {
           const backendJson = await backendRes.json();
