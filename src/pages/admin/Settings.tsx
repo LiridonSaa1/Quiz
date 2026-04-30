@@ -120,6 +120,9 @@ export default function AdminSettings() {
     from_name: 'QuizMaster Academy',
     from_email: 'noreply@quizmaster.edu',
     reply_to: 'support@quizmaster.edu',
+    brevo_api_key: '',
+    brevo_sender_email: '',
+    brevo_sender_name: '',
   });
 
   const handleSave = async () => {
@@ -339,6 +342,52 @@ export default function AdminSettings() {
                       <input type="email" value={emailSettings.reply_to} onChange={e => setEmailSettings(p => ({ ...p, reply_to: e.target.value }))} className={inputCls} />
                     </Field>
                   </div>
+
+                  <div className="mt-6 pt-5 border-t border-slate-200/70">
+                    <div className="flex items-start gap-3 mb-4">
+                      <div className="w-8 h-8 rounded-lg bg-indigo-50 flex items-center justify-center shrink-0">
+                        <Shield className="w-4 h-4 text-indigo-600" />
+                      </div>
+                      <div>
+                        <p className="text-sm font-bold text-slate-900">OTP Email Provider (Brevo)</p>
+                        <p className="text-xs text-slate-500 mt-0.5 leading-relaxed">
+                          Used to deliver Two-Factor Authentication codes. When filled in, these values override server-side environment variables.
+                        </p>
+                      </div>
+                    </div>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <Field label="Brevo API Key">
+                        <input
+                          type="password"
+                          autoComplete="off"
+                          placeholder="xkeysib-..."
+                          value={emailSettings.brevo_api_key}
+                          onChange={e => setEmailSettings(p => ({ ...p, brevo_api_key: e.target.value }))}
+                          className={inputCls}
+                        />
+                      </Field>
+                      <Field label="Brevo Sender Name">
+                        <input
+                          placeholder="QuizMaster"
+                          value={emailSettings.brevo_sender_name}
+                          onChange={e => setEmailSettings(p => ({ ...p, brevo_sender_name: e.target.value }))}
+                          className={inputCls}
+                        />
+                      </Field>
+                      <div className="md:col-span-2">
+                        <Field label="Brevo Sender Email (verified in Brevo)">
+                          <input
+                            type="email"
+                            placeholder="otp@yourdomain.com"
+                            value={emailSettings.brevo_sender_email}
+                            onChange={e => setEmailSettings(p => ({ ...p, brevo_sender_email: e.target.value }))}
+                            className={inputCls}
+                          />
+                        </Field>
+                      </div>
+                    </div>
+                  </div>
+
                   <button className="mt-3 text-sm text-indigo-600 font-semibold hover:underline">Send Test Email</button>
                 </Section>
               </>

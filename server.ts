@@ -1699,7 +1699,30 @@ export async function createApp(options: CreateAppOptions = {}) {
       // the code back to the client — the user must check their inbox.
       let delivered = false;
       let deliveryError: string | undefined;
-      if (isEmailConfigured() && email) {
+      let brevoOverride: { apiKey?: string; senderEmail?: string; senderName?: string } = {};
+      try {
+        const settings: any = await getConfigSection("settings");
+        const emailCfg = settings?.email;
+        if (emailCfg && typeof emailCfg === "object") {
+          brevoOverride = {
+            apiKey: typeof emailCfg.brevo_api_key === "string" ? emailCfg.brevo_api_key : undefined,
+            senderEmail:
+              typeof emailCfg.brevo_sender_email === "string"
+                ? emailCfg.brevo_sender_email
+                : typeof emailCfg.from_email === "string"
+                ? emailCfg.from_email
+                : undefined,
+            senderName:
+              typeof emailCfg.brevo_sender_name === "string"
+                ? emailCfg.brevo_sender_name
+                : typeof emailCfg.from_name === "string"
+                ? emailCfg.from_name
+                : undefined,
+          };
+        }
+      } catch { /* ignore — fall back to env vars */ }
+
+      if (isEmailConfigured(brevoOverride) && email) {
         try {
           let brandName = "QuizMaster";
           try {
@@ -1715,7 +1738,7 @@ export async function createApp(options: CreateAppOptions = {}) {
             subject: tpl.subject,
             htmlContent: tpl.htmlContent,
             textContent: tpl.textContent,
-          });
+          }, brevoOverride);
           delivered = true;
           console.log(`[2FA] Code emailed to ${email} via Brevo (expires in 5 min)`);
         } catch (mailErr: any) {

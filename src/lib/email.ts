@@ -24,23 +24,36 @@ export interface SendEmailResult {
 
 const BREVO_ENDPOINT = "https://api.brevo.com/v3/smtp/email";
 
-function getEnv() {
-  return {
-    apiKey: (process.env.BREVO_API_KEY || "").trim(),
-    senderEmail: (process.env.BREVO_SENDER_EMAIL || "").trim(),
-    senderName: (process.env.BREVO_SENDER_NAME || "QuizMaster").trim(),
-  };
+export interface BrevoOverride {
+  apiKey?: string;
+  senderEmail?: string;
+  senderName?: string;
 }
 
-export function isEmailConfigured(): boolean {
-  const { apiKey, senderEmail } = getEnv();
+function pick(value: unknown): string {
+  return typeof value === "string" ? value.trim() : "";
+}
+
+function resolveConfig(override?: BrevoOverride) {
+  const apiKey = pick(override?.apiKey) || pick(process.env.BREVO_API_KEY);
+  const senderEmail = pick(override?.senderEmail) || pick(process.env.BREVO_SENDER_EMAIL);
+  const senderName =
+    pick(override?.senderName) || pick(process.env.BREVO_SENDER_NAME) || "QuizMaster";
+  return { apiKey, senderEmail, senderName };
+}
+
+export function isEmailConfigured(override?: BrevoOverride): boolean {
+  const { apiKey, senderEmail } = resolveConfig(override);
   return Boolean(apiKey && senderEmail);
 }
 
-export async function sendEmail(msg: EmailMessage): Promise<SendEmailResult> {
-  const { apiKey, senderEmail, senderName } = getEnv();
+export async function sendEmail(
+  msg: EmailMessage,
+  override?: BrevoOverride,
+): Promise<SendEmailResult> {
+  const { apiKey, senderEmail, senderName } = resolveConfig(override);
   if (!apiKey || !senderEmail) {
-    throw new Error("Brevo is not configured (missing BREVO_API_KEY or BREVO_SENDER_EMAIL)");
+    throw new Error("Brevo is not configured (missing API key or sender email)");
   }
 
   const body = {
