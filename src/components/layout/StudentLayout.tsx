@@ -5,6 +5,7 @@ import { authFetch } from '../../lib/apiUrl';
 import { cn } from '../../lib/utils';
 import NotificationCenter from '../NotificationCenter';
 import { defaultFeatureFlags, extractFeatureFlags, FeatureFlags } from '../../lib/platformFeatures';
+import { useBranding } from '../../lib/useBranding';
 import { 
   LayoutDashboard, 
   BookOpen, 
@@ -73,6 +74,7 @@ export default function StudentLayout({ children }: { children: React.ReactNode 
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [liveSessionCount, setLiveSessionCount] = useState(0);
   const [features, setFeatures] = useState<FeatureFlags>(defaultFeatureFlags);
+  const branding = useBranding();
   const location = useLocation();
   const navigate = useNavigate();
 
@@ -162,11 +164,15 @@ export default function StudentLayout({ children }: { children: React.ReactNode 
     <>
       <div className="p-5 border-b border-slate-700/50">
         <div className="flex items-center gap-3">
-          <div className="w-9 h-9 bg-emerald-600 rounded-xl flex items-center justify-center shadow-lg shadow-emerald-900/40">
-            <GraduationCap className="w-5 h-5 text-white" />
+          <div className="w-9 h-9 bg-emerald-600 rounded-xl flex items-center justify-center shadow-lg shadow-emerald-900/40 overflow-hidden">
+            {branding.logoUrl ? (
+              <img src={branding.logoUrl} alt="Brand logo" className="w-full h-full object-contain rounded-xl" />
+            ) : (
+              <GraduationCap className="w-5 h-5 text-white" />
+            )}
           </div>
           <div>
-            <h1 className="text-base font-bold text-white leading-tight">QuizMaster</h1>
+            <h1 className="text-base font-bold text-white leading-tight">{branding.schoolName}</h1>
             <p className="text-[10px] text-slate-400 font-medium uppercase tracking-widest">Student Portal</p>
           </div>
         </div>
@@ -215,10 +221,14 @@ export default function StudentLayout({ children }: { children: React.ReactNode 
       {/* Mobile Header */}
       <div className="lg:hidden fixed top-0 left-0 right-0 h-14 bg-slate-800 flex items-center justify-between px-4 z-50">
         <div className="flex items-center gap-2.5">
-          <div className="w-8 h-8 bg-emerald-600 rounded-lg flex items-center justify-center">
-            <GraduationCap className="w-4 h-4 text-white" />
+          <div className="w-8 h-8 bg-emerald-600 rounded-lg flex items-center justify-center overflow-hidden">
+            {branding.logoUrl ? (
+              <img src={branding.logoUrl} alt="Brand logo" className="w-full h-full object-contain rounded-lg" />
+            ) : (
+              <GraduationCap className="w-4 h-4 text-white" />
+            )}
           </div>
-          <h1 className="text-base font-bold text-white">QuizMaster</h1>
+          <h1 className="text-base font-bold text-white">{branding.schoolName}</h1>
         </div>
         <div className="flex items-center gap-3">
           <NotificationCenter />

@@ -5,6 +5,7 @@ import { cn } from '../../lib/utils';
 import NotificationCenter from '../NotificationCenter';
 import { authFetch } from '../../lib/apiUrl';
 import { defaultFeatureFlags, extractFeatureFlags, FeatureFlags } from '../../lib/platformFeatures';
+import { useBranding } from '../../lib/useBranding';
 import { 
   LayoutDashboard, 
   BookOpen, 
@@ -103,51 +104,31 @@ const adminNavSections = [
 
 export default function AdminLayout({ children }: { children: React.ReactNode }) {
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
-  const [brandLogoUrl, setBrandLogoUrl] = useState<string | null>(null);
   const [features, setFeatures] = useState<FeatureFlags>(defaultFeatureFlags);
+  const branding = useBranding();
+  const brandLogoUrl = branding.logoUrl;
   const location = useLocation();
   const navigate = useNavigate();
 
   useEffect(() => {
     let mounted = true;
-    const loadConfig = async () => {
+    const loadSettings = async () => {
       try {
-        const [brandingRes, settingsRes] = await Promise.all([
-          authFetch('/api/admin/config/branding'),
-          authFetch('/api/admin/config/settings'),
-        ]);
-        const res = brandingRes;
-        const json = await res.json();
-        if (!mounted || !res.ok || !json?.success || !json?.value) return;
-        const url = typeof json.value?.logoUrl === 'string' ? json.value.logoUrl : null;
-        setBrandLogoUrl(url);
+        const settingsRes = await authFetch('/api/admin/config/settings');
         const settingsJson = await settingsRes.json();
+        if (!mounted) return;
         if (settingsRes.ok && settingsJson?.success) {
           setFeatures(extractFeatureFlags(settingsJson.value));
         }
       } catch {
-        // keep default logo
+        // keep default features
       }
     };
-    (async () => {
-      await loadConfig();
-    })();
-
-    const onBrandUpdated = (event: Event) => {
-      const custom = event as CustomEvent<{ logoUrl?: string | null }>;
-      if (custom.detail && 'logoUrl' in custom.detail) {
-        setBrandLogoUrl(custom.detail.logoUrl || null);
-      }
-    };
-    const onSettingsUpdated = () => {
-      loadConfig();
-    };
-
-    window.addEventListener('branding-updated', onBrandUpdated);
+    loadSettings();
+    const onSettingsUpdated = () => loadSettings();
     window.addEventListener('settings-updated', onSettingsUpdated);
     return () => {
       mounted = false;
-      window.removeEventListener('branding-updated', onBrandUpdated);
       window.removeEventListener('settings-updated', onSettingsUpdated);
     };
   }, []);
@@ -198,7 +179,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
             )}
           </div>
           <div>
-            <h1 className="text-base font-bold text-white leading-tight">QuizMaster</h1>
+            <h1 className="text-base font-bold text-white leading-tight">{branding.schoolName}</h1>
             <p className="text-[10px] text-slate-400 font-medium uppercase tracking-widest">Admin Panel</p>
           </div>
         </div>
@@ -254,7 +235,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
               <GraduationCap className="w-4 h-4 text-white" />
             )}
           </div>
-          <h1 className="text-base font-bold text-white">QuizMaster</h1>
+          <h1 className="text-base font-bold text-white">{branding.schoolName}</h1>
         </div>
         <div className="flex items-center gap-3">
           <NotificationCenter />

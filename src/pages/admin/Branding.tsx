@@ -72,6 +72,9 @@ export default function AdminBranding() {
         );
       } else {
         setFaviconUrl(dataUrl);
+        window.dispatchEvent(
+          new CustomEvent('branding-updated', { detail: { faviconUrl: dataUrl } }),
+        );
       }
       toast.success(`${type === 'logo' ? 'Logo' : 'Favicon'} uploaded.`);
     };
@@ -94,7 +97,9 @@ export default function AdminBranding() {
       const json = await res.json();
       if (!res.ok || !json?.success) throw new Error(json?.error || 'Failed to save branding');
       window.dispatchEvent(
-        new CustomEvent('branding-updated', { detail: { logoUrl } }),
+        new CustomEvent('branding-updated', {
+          detail: { logoUrl, faviconUrl, colors, typography, copy, darkMode },
+        }),
       );
       toast.success('Branding saved successfully.');
     } catch (e: any) {

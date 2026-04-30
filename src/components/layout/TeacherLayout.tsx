@@ -12,6 +12,7 @@ import NotificationCenter from '../NotificationCenter';
 import { authFetch } from '../../lib/apiUrl';
 import { defaultFeatureFlags, extractFeatureFlags, FeatureFlags } from '../../lib/platformFeatures';
 import { getTeacherPagePermission, useTeacherPermissions } from '../../lib/teacherPermissions';
+import { useBranding } from '../../lib/useBranding';
 
 const NAV_SECTIONS = [
   {
@@ -130,6 +131,7 @@ function SidebarContent({
 }) {
   const [userEmail, setUserEmail] = useState('');
   const [displayName, setDisplayName] = useState('');
+  const branding = useBranding();
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
@@ -155,14 +157,18 @@ function SidebarContent({
         )}
       >
         <div className="relative shrink-0">
-          <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-violet-500 to-indigo-600 flex items-center justify-center shadow-lg shadow-violet-900/50">
-            <GraduationCap className="w-5 h-5 text-white" />
+          <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-violet-500 to-indigo-600 flex items-center justify-center shadow-lg shadow-violet-900/50 overflow-hidden">
+            {branding.logoUrl ? (
+              <img src={branding.logoUrl} alt="Brand logo" className="w-full h-full object-contain rounded-xl" />
+            ) : (
+              <GraduationCap className="w-5 h-5 text-white" />
+            )}
           </div>
           <div className="absolute -inset-0.5 rounded-xl bg-gradient-to-br from-violet-500 to-indigo-600 opacity-25 blur-md -z-10" />
         </div>
         {!collapsed && (
           <div className="overflow-hidden">
-            <div className="text-sm font-bold text-white tracking-tight">QuizMaster</div>
+            <div className="text-sm font-bold text-white tracking-tight">{branding.schoolName}</div>
             <div className="text-[9px] text-violet-400/70 font-semibold tracking-[0.18em] uppercase">Teacher Portal</div>
           </div>
         )}
@@ -340,10 +346,14 @@ export default function TeacherLayout({ children }: { children: React.ReactNode 
         style={{ background: '#0c0e16' }}
       >
         <div className="flex items-center gap-2.5">
-          <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-violet-500 to-indigo-600 flex items-center justify-center">
-            <GraduationCap className="w-4 h-4 text-white" />
+          <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-violet-500 to-indigo-600 flex items-center justify-center overflow-hidden">
+            {branding.logoUrl ? (
+              <img src={branding.logoUrl} alt="Brand logo" className="w-full h-full object-contain rounded-xl" />
+            ) : (
+              <GraduationCap className="w-4 h-4 text-white" />
+            )}
           </div>
-          <span className="text-sm font-bold text-white">QuizMaster</span>
+          <span className="text-sm font-bold text-white">{branding.schoolName}</span>
         </div>
         <div className="flex items-center gap-2">
           <NotificationCenter />

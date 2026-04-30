@@ -1691,6 +1691,47 @@ export async function createApp(options: CreateAppOptions = {}) {
     }
   });
 
+  // Public branding payload — no auth required so every panel (admin, teacher,
+  // student) and the login screen can render the same logo, colors, fonts and
+  // copy that the admin configures at /admin/branding.
+  app.get("/api/platform/branding", async (_req, res) => {
+    const fallback = {
+      success: true as const,
+      logoUrl: null as string | null,
+      faviconUrl: null as string | null,
+      schoolName: "QuizMaster",
+      colors: null as Record<string, string> | null,
+      typography: null as Record<string, string> | null,
+      copy: null as Record<string, string> | null,
+      darkMode: false,
+    };
+    try {
+      const [branding, settings] = await Promise.all([
+        getConfigSection("branding").catch(() => null),
+        getConfigSection("settings").catch(() => null),
+      ]);
+      const b: any = branding || {};
+      const s: any = settings || {};
+      const schoolName =
+        (typeof s?.general?.school_name === "string" && s.general.school_name.trim()) ||
+        (typeof b?.schoolName === "string" && b.schoolName.trim()) ||
+        "QuizMaster";
+      res.json({
+        success: true,
+        logoUrl: typeof b.logoUrl === "string" ? b.logoUrl : null,
+        faviconUrl: typeof b.faviconUrl === "string" ? b.faviconUrl : null,
+        schoolName,
+        colors: b.colors && typeof b.colors === "object" ? b.colors : null,
+        typography: b.typography && typeof b.typography === "object" ? b.typography : null,
+        copy: b.copy && typeof b.copy === "object" ? b.copy : null,
+        darkMode: Boolean(b.darkMode),
+      });
+    } catch (e: any) {
+      if (isPlatformConfigMissing(e)) return res.json(fallback);
+      res.status(500).json({ error: e?.message || "Failed to load branding" });
+    }
+  });
+
   app.get("/api/platform/runtime", async (_req, res) => {
     try {
       const settings = await getConfigSection("settings");
