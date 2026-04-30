@@ -253,6 +253,7 @@ export default function TeacherLayout({ children }: { children: React.ReactNode 
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [collapsed, setCollapsed] = useState(false);
   const [features, setFeatures] = useState<FeatureFlags>(defaultFeatureFlags);
+  const branding = useBranding();
   const { can } = useTeacherPermissions();
   const location = useLocation();
   const navigate = useNavigate();

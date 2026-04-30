@@ -149,7 +149,7 @@ export default function App() {
     try {
       const [runtimeRes, brandingRes] = await Promise.all([
         fetch(`${apiUrl('/api/platform/runtime')}?t=${Date.now()}`, { cache: 'no-store' }),
-        fetch(apiUrl('/api/admin/config/branding')),
+        fetch(`${apiUrl('/api/platform/branding')}?t=${Date.now()}`, { cache: 'no-store' }),
       ]);
       const runtimeJson = await runtimeRes.json().catch(() => ({}));
       if (runtimeRes.ok && runtimeJson?.success) {
@@ -161,7 +161,7 @@ export default function App() {
       }
       const brandingJson = await brandingRes.json().catch(() => ({}));
       if (brandingRes.ok && brandingJson?.success) {
-        const faviconUrl = brandingJson?.value?.faviconUrl;
+        const faviconUrl = brandingJson?.faviconUrl;
         if (typeof faviconUrl === 'string' && faviconUrl.trim()) {
           let link = document.querySelector("link[rel~='icon']") as HTMLLinkElement | null;
           if (!link) {
