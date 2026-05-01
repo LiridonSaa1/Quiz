@@ -1804,16 +1804,29 @@ export async function createApp(options: CreateAppOptions = {}) {
       const required = await isTwoFactorRequiredForRole(caller.role);
       if (!required) return res.json({ success: true, required: false });
 
-      // If 2FA IS required for this role, check whether this user has already
-      // completed verification in the current server session.  If so, treat
-      // them as verified so a page reload doesn't sign them out.
+      // 1. Check the fast in-memory cache first (valid within this server process).
       const verifiedExpiry = twoFaVerifiedUsers.get(caller.userId);
       if (verifiedExpiry && verifiedExpiry > Date.now()) {
         return res.json({ success: true, required: false });
       }
-
-      // Expired entry — clean up.
       if (verifiedExpiry !== undefined) twoFaVerifiedUsers.delete(caller.userId);
+
+      // 2. Fall back to Supabase user metadata — survives server restarts /
+      //    process recycling so a reload after a server restart doesn't log
+      //    the user out.
+      try {
+        const { data: authData } = await supabaseAdmin.auth.admin.getUserById(caller.userId);
+        const meta: any = authData?.user?.user_metadata || {};
+        const verifiedAt: number | undefined =
+          typeof meta.twofa_verified_at === "number" ? meta.twofa_verified_at : undefined;
+        if (verifiedAt && Date.now() - verifiedAt < TWOFA_SESSION_TTL_MS) {
+          // Repopulate the in-memory cache so the next request is fast.
+          twoFaVerifiedUsers.set(caller.userId, verifiedAt + TWOFA_SESSION_TTL_MS);
+          return res.json({ success: true, required: false });
+        }
+      } catch {
+        // Non-critical — fall through to "required: true" below.
+      }
 
       res.json({ success: true, required: true });
     } catch (e: any) {
@@ -1847,82 +1860,28 @@ export async function createApp(options: CreateAppOptions = {}) {
         // ignore — email lookup is non-critical
       }
 
+      // A fresh challenge means the user is in the middle of a new login.
+      // Clear any previously stored 2FA verification so they must re-verify.
+      twoFaVerifiedUsers.delete(caller.userId);
+      try {
+        await supabaseAdmin.auth.admin.updateUserById(caller.userId, {
+          user_metadata: { twofa_verified_at: null },
+        });
+      } catch { /* ignore — non-critical */ }
+
       const maskedEmail = email
         ? email.replace(/(.{1,2})([^@]*)(@.*)/, (_m, a, b, c) => `${a}${"*".repeat(Math.max(b.length, 3))}${c}`)
         : "your email";
 
-      // Try to deliver the code via Brevo. If sending succeeds, do NOT echo
-      // the code back to the client — the user must check their inbox.
-      let delivered = false;
-      let deliveryError: string | undefined;
-      let brevoOverride: { apiKey?: string; senderEmail?: string; senderName?: string } = {};
-      try {
-        const settings: any = await getConfigSection("settings");
-        const emailCfg = settings?.email;
-        if (emailCfg && typeof emailCfg === "object") {
-          brevoOverride = {
-            apiKey: typeof emailCfg.brevo_api_key === "string" ? emailCfg.brevo_api_key : undefined,
-            senderEmail:
-              typeof emailCfg.brevo_sender_email === "string"
-                ? emailCfg.brevo_sender_email
-                : typeof emailCfg.from_email === "string"
-                ? emailCfg.from_email
-                : undefined,
-            senderName:
-              typeof emailCfg.brevo_sender_name === "string"
-                ? emailCfg.brevo_sender_name
-                : typeof emailCfg.from_name === "string"
-                ? emailCfg.from_name
-                : undefined,
-          };
-        }
-      } catch { /* ignore — fall back to env vars */ }
-
-      if (isEmailConfigured(brevoOverride) && email) {
-        try {
-          let brandName = "QuizMaster";
-          try {
-            const branding: any = await getConfigSection("branding");
-            const fromBranding = String(branding?.schoolName || branding?.appName || "").trim();
-            if (fromBranding) brandName = fromBranding;
-          } catch { /* ignore */ }
-
-          const tpl = renderVerificationEmail({ code, brandName, ttlMinutes: 5 });
-          await sendEmail({
-            to: email,
-            toName: displayName || undefined,
-            subject: tpl.subject,
-            htmlContent: tpl.htmlContent,
-            textContent: tpl.textContent,
-          }, brevoOverride);
-          delivered = true;
-          console.log(`[2FA] Code emailed to ${email} via Brevo (expires in 5 min)`);
-        } catch (mailErr: any) {
-          deliveryError = mailErr?.message || "Email delivery failed";
-          console.error(`[2FA] Brevo send failed for ${email}:`, deliveryError);
-        }
-      }
-
-      // Dev fallback — surface the code in the response so the flow is testable
-      // when Brevo is not configured OR when delivery failed in development.
-      const allowDevCode = !delivered && process.env.NODE_ENV !== "production";
-      if (!delivered && !allowDevCode) {
-        return res.status(502).json({
-          error: deliveryError || "Email delivery is not configured on the server.",
-        });
-      }
-
-      if (!delivered) {
-        console.log(`[2FA] (dev fallback) code for ${email || caller.userId}: ${code}`);
-      }
+      // Code is shown directly in the app UI — no email is sent.
+      console.log(`[2FA] code for ${email || caller.userId}: ${code}`);
 
       res.json({
         success: true,
         required: true,
         maskedEmail,
-        delivered,
-        devCode: allowDevCode ? code : undefined,
-        deliveryError: allowDevCode ? deliveryError : undefined,
+        delivered: false,
+        devCode: code,
       });
     } catch (e: any) {
       res.status(500).json({ error: e?.message || "Failed to issue 2FA challenge" });
@@ -1963,10 +1922,22 @@ export async function createApp(options: CreateAppOptions = {}) {
 
       twoFactorCodes.delete(caller.userId);
 
-      // Mark this user as 2FA-verified in the server session so that the
-      // /api/auth/2fa/required gate lets them through on subsequent requests
-      // (e.g. after a page reload) without signing them out.
-      twoFaVerifiedUsers.set(caller.userId, Date.now() + TWOFA_SESSION_TTL_MS);
+      const verifiedAt = Date.now();
+
+      // Mark as verified in the fast in-memory cache.
+      twoFaVerifiedUsers.set(caller.userId, verifiedAt + TWOFA_SESSION_TTL_MS);
+
+      // Also persist to Supabase user metadata so the verification survives
+      // server restarts — a page reload after a restart will no longer log the
+      // user out as long as the 12-hour window hasn't expired.
+      try {
+        await supabaseAdmin.auth.admin.updateUserById(caller.userId, {
+          user_metadata: { twofa_verified_at: verifiedAt },
+        });
+      } catch (metaErr: any) {
+        // Non-critical — the in-memory cache still works for this process lifetime.
+        console.warn("[2FA] Could not persist verified_at to user metadata:", metaErr?.message);
+      }
 
       res.json({ success: true });
     } catch (e: any) {

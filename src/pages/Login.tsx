@@ -183,9 +183,9 @@ export default function Login() {
           setTwoFactorCode('');
           setTwoFactorStep(true);
           if (challengeJson.devCode) {
-            toast.message(`Dev code: ${challengeJson.devCode}`, {
-              description: 'No SMTP configured — code shown here for testing',
-              duration: 10_000,
+            toast.message(`Your verification code: ${challengeJson.devCode}`, {
+              description: 'Enter this code below to continue',
+              duration: 30_000,
             });
           } else {
             toast.success(`Verification code sent to ${challengeJson.maskedEmail || 'your email'}`);
@@ -243,9 +243,9 @@ export default function Login() {
       setTwoFactorMaskedEmail(json.maskedEmail || email);
       setTwoFactorCode('');
       if (json.devCode) {
-        toast.message(`New dev code: ${json.devCode}`, {
-          description: 'No SMTP configured — code shown here for testing',
-          duration: 10_000,
+        toast.message(`New verification code: ${json.devCode}`, {
+          description: 'Enter this code below to continue',
+          duration: 30_000,
         });
       } else {
         toast.success(`New code sent to ${json.maskedEmail || 'your email'}`);
