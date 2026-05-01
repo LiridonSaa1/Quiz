@@ -155,6 +155,7 @@ export default function QuizTaking() {
   const [runtimeHydrated, setRuntimeHydrated] = useState(false);
   const autoSubmittingRef = useRef(false);
   const lastViolationAtRef = useRef(0);
+  const dbPersistTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const fetchQuiz = useCallback(async () => {
     if (!quizId) {
@@ -293,21 +294,41 @@ export default function QuizTaking() {
       const now = Date.now();
       const freshStartedAt = new Date().toISOString();
       const freshExpiresAt = formattedQuiz.timeLimit > 0 ? now + formattedQuiz.timeLimit * 60 * 1000 : null;
+
+      // Coerce expires_at_ms: Supabase BIGINT may come back as a string in some configs.
+      const dbExpiresAtMs = dbRuntimeSnapshot?.expires_at_ms != null
+        ? Number(dbRuntimeSnapshot.expires_at_ms)
+        : null;
       const restoredExpiresAt =
-        (typeof dbRuntimeSnapshot?.expires_at_ms === 'number' ? dbRuntimeSnapshot.expires_at_ms : null) ??
+        (dbExpiresAtMs !== null && Number.isFinite(dbExpiresAtMs) ? dbExpiresAtMs : null) ??
         (typeof savedSnapshot?.expiresAtMs === 'number' ? savedSnapshot.expiresAtMs : null) ??
         (typeof savedTimerSnapshot?.expiresAtMs === 'number' ? savedTimerSnapshot.expiresAtMs : null);
       const resolvedExpiresAt = restoredExpiresAt && restoredExpiresAt > now ? restoredExpiresAt : freshExpiresAt;
-      // Priority: DB answers → localStorage answers → empty
-      const dbAnswers =
-        dbRuntimeSnapshot?.answers && typeof dbRuntimeSnapshot.answers === 'object'
-          ? dbRuntimeSnapshot.answers as Record<string, string>
+
+      // Priority: DB answers (only if non-empty) merged with localStorage answers.
+      // Bug fix: an empty DB `{}` (the column default) must NOT override localStorage
+      // answers that were saved after the student started answering questions.
+      const dbAnswersRaw =
+        dbRuntimeSnapshot?.answers &&
+        typeof dbRuntimeSnapshot.answers === 'object' &&
+        !Array.isArray(dbRuntimeSnapshot.answers)
+          ? (dbRuntimeSnapshot.answers as Record<string, string>)
           : null;
-      const restoredAnswers: Record<string, string> =
-        dbAnswers ??
-        (savedSnapshot?.answers && typeof savedSnapshot.answers === 'object'
-          ? savedSnapshot.answers
-          : {});
+      const dbAnswers =
+        dbAnswersRaw && Object.keys(dbAnswersRaw).length > 0 ? dbAnswersRaw : null;
+
+      const lsAnswers =
+        savedSnapshot?.answers &&
+        typeof savedSnapshot.answers === 'object' &&
+        !Array.isArray(savedSnapshot.answers)
+          ? (savedSnapshot.answers as Record<string, string>)
+          : {};
+
+      // Merge: start with localStorage, then layer DB on top (DB wins on key conflicts).
+      // This ensures neither source silently drops data the other has.
+      const restoredAnswers: Record<string, string> = { ...lsAnswers, ...(dbAnswers || {}) };
+      const hasRestoredState = Object.keys(restoredAnswers).length > 0 || (restoredExpiresAt !== null && restoredExpiresAt !== freshExpiresAt);
+
       const restoredIndex = Number.isFinite(Number(dbRuntimeSnapshot?.current_question_index ?? savedSnapshot?.currentQuestionIndex))
         ? Math.max(0, Math.min(formattedQuestions.length - 1, Number(dbRuntimeSnapshot?.current_question_index ?? savedSnapshot?.currentQuestionIndex ?? 0)))
         : 0;
@@ -323,6 +344,10 @@ export default function QuizTaking() {
         ? Math.max(0, Math.min(formattedQuestions.length - 1, Number(dbRuntimeSnapshot?.current_question_index || 0)))
         : null;
       const resolvedQuestionIndex = dbQuestionIndex ?? restoredIndex;
+
+      if (hasRestoredState) {
+        toast.info('Resumed from your saved progress', { duration: 3000 });
+      }
 
       setStartedAt(resolvedStartedAt);
       setExpiresAtMs(resolvedExpiresAt);
@@ -413,7 +438,11 @@ export default function QuizTaking() {
 
   useEffect(() => {
     if (!runtimeHydrated || !quiz || !quizId || !sessionUserId) return;
-    const persistRuntime = async () => {
+    // Debounce DB writes by 600 ms to avoid racing concurrent PUTs when the
+    // student changes answers rapidly. The localStorage effect above fires
+    // synchronously, so the student's progress is never lost between ticks.
+    if (dbPersistTimerRef.current) clearTimeout(dbPersistTimerRef.current);
+    dbPersistTimerRef.current = setTimeout(async () => {
       try {
         await authFetch(`/api/student/quiz-runtime/${encodeURIComponent(quizId)}`, {
           method: 'PUT',
@@ -428,8 +457,10 @@ export default function QuizTaking() {
       } catch {
         // Best-effort persistence; local snapshot remains fallback.
       }
+    }, 600);
+    return () => {
+      if (dbPersistTimerRef.current) clearTimeout(dbPersistTimerRef.current);
     };
-    void persistRuntime();
   }, [runtimeHydrated, quiz, quizId, sessionUserId, startedAt, expiresAtMs, violationCount, currentQuestionIndex, answers]);
 
   // Force-save to localStorage synchronously just before the page unloads.
