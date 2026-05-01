@@ -164,8 +164,6 @@ export default function Login() {
         return;
       }
 
-      // 2FA (if required for this role) is handled by App.tsx's TwoFaChallengeGate,
-      // which fires automatically via the onAuthStateChange → fetchProfile path.
       toast.success('Welcome back!');
       navigate('/');
     } catch (err: any) {

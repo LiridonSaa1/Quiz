@@ -1791,18 +1791,8 @@ export async function createApp(options: CreateAppOptions = {}) {
     } catch { return 0; }
   };
 
-  const isTwoFactorRequiredForRole = async (role: string): Promise<boolean> => {
-    try {
-      const settings: any = await getConfigSection("settings");
-      const tf = settings?.security?.twoFactor;
-      if (!tf) return false;
-      if (typeof tf === "boolean") return tf;
-      if (typeof tf === "object" && role in tf) return Boolean(tf[role]);
-      return false;
-    } catch {
-      return false;
-    }
-  };
+  // 2FA has been removed from the platform — this always returns false.
+  const isTwoFactorRequiredForRole = async (_role: string): Promise<boolean> => false;
 
   app.get("/api/auth/2fa/required", async (req, res) => {
     try {

@@ -83,7 +83,6 @@ export default function AdminSettings() {
   const [maintenance, setMaintenance] = useState(false);
   const [registrationOpen, setRegistrationOpen] = useState(true);
   const [requireEmailVerify, setRequireEmailVerify] = useState(true);
-  const [twoFactor, setTwoFactor] = useState<RoleBoolMap>({ student: false, teacher: false, admin: false });
   const [strongPasswords, setStrongPasswords] = useState<RoleBoolMap>({ student: true, teacher: true, admin: true });
   const [autoLogout, setAutoLogout] = useState<RoleBoolMap>({ student: true, teacher: true, admin: true });
   const [sessionTimeoutMinutes, setSessionTimeoutMinutes] = useState<RoleNumMap>({ student: 30, teacher: 30, admin: 30 });
@@ -136,7 +135,7 @@ export default function AdminSettings() {
             general,
             notifications: notifs,
             email: emailSettings,
-            security: { twoFactor, requireEmailVerify, registrationOpen, strongPasswords, autoLogout, sessionTimeoutMinutes, maxLoginAttempts },
+            security: { requireEmailVerify, registrationOpen, strongPasswords, autoLogout, sessionTimeoutMinutes, maxLoginAttempts },
             advanced: { maintenance, telegramErrorAlerts },
             features,
           },
@@ -166,7 +165,6 @@ export default function AdminSettings() {
         if (v.security) {
           if (typeof v.security.requireEmailVerify === 'boolean') setRequireEmailVerify(v.security.requireEmailVerify);
           if (typeof v.security.registrationOpen === 'boolean') setRegistrationOpen(v.security.registrationOpen);
-          setTwoFactor(asRoleBool(v.security.twoFactor, false));
           setStrongPasswords(asRoleBool(v.security.strongPasswords, true));
           setAutoLogout(asRoleBool(v.security.autoLogout, true));
           setSessionTimeoutMinutes(asRoleNum(v.security.sessionTimeoutMinutes, 30));
@@ -409,12 +407,6 @@ export default function AdminSettings() {
                 </div>
 
                 <Section title="Authentication" subtitle="Login and account security policies — applied per role">
-                  <RoleToggleRow
-                    label="Two-Factor Authentication"
-                    description="Require a second verification step (code from authenticator app or email) at every sign-in. Stronger protection against stolen passwords."
-                    value={twoFactor}
-                    onChange={setTwoFactor}
-                  />
                   <RoleToggleRow
                     label="Require Strong Passwords"
                     description="Force passwords to be at least 8 characters and include uppercase, a number, and a symbol when users sign up or change their password."

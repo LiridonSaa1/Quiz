@@ -4,10 +4,9 @@ import { cn } from '../../lib/utils';
 import { toast } from 'sonner';
 import { supabase } from '../../supabase';
 import {
-  Shield, Lock, Smartphone, Eye, EyeOff,
+  Lock, Eye, EyeOff,
   CheckCircle2, AlertTriangle, LogOut, Monitor,
-  Clock, MapPin, RefreshCw, Key, ShieldAlert,
-  ShieldCheck, Trash2, X
+  Clock, MapPin, Key, ShieldCheck, Trash2, X
 } from 'lucide-react';
 import { format } from 'date-fns';
 
@@ -55,10 +54,7 @@ export default function AdminSecurity() {
   const [newPw, setNewPw]         = useState('');
   const [confirmPw, setConfirmPw] = useState('');
   const [pwSaving, setPwSaving]   = useState(false);
-  const [twoFAEnabled, setTwoFAEnabled] = useState(false);
-  const [twoFAStep, setTwoFAStep] = useState<'idle' | 'setup' | 'verify'>('idle');
-  const [twoFACode, setTwoFACode] = useState('');
-  const [configSaving, setConfigSaving] = useState(false);
+
 
   const strength = passwordStrength(newPw);
 
@@ -112,12 +108,6 @@ export default function AdminSecurity() {
           },
         ]);
 
-        const cfgRes = await fetch('/api/admin/config/settings');
-        const cfgJson = await cfgRes.json();
-        if (cfgRes.ok && cfgJson?.success && cfgJson?.value?.security) {
-          const val = cfgJson.value.security;
-          if (typeof val.twoFactor === 'boolean') setTwoFAEnabled(val.twoFactor);
-        }
       } catch {
         // keep defaults if unavailable
       } finally {
@@ -126,32 +116,6 @@ export default function AdminSecurity() {
     })();
   }, [browserLabel, deviceLabel]);
 
-  const saveTwoFactorSetting = async (enabled: boolean) => {
-    try {
-      setConfigSaving(true);
-      const currentRes = await fetch('/api/admin/config/settings');
-      const currentJson = await currentRes.json().catch(() => ({}));
-      const currentValue = currentJson?.value || {};
-      const merged = {
-        ...currentValue,
-        security: {
-          ...(currentValue.security || {}),
-          twoFactor: enabled,
-        },
-      };
-      const res = await fetch('/api/admin/config/settings', {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ value: merged }),
-      });
-      const json = await res.json();
-      if (!res.ok || !json?.success) {
-        throw new Error(json?.error || 'Failed to save security settings');
-      }
-    } finally {
-      setConfigSaving(false);
-    }
-  };
 
   const handlePasswordSave = async () => {
     if (!currentPw) return toast.error('Enter your current password.');
@@ -182,37 +146,6 @@ export default function AdminSecurity() {
     toast.success('All other sessions have been revoked.');
   };
 
-  const handleTwoFAToggle = () => {
-    if (twoFAEnabled) {
-      (async () => {
-        try {
-          await saveTwoFactorSetting(false);
-          setTwoFAEnabled(false);
-          toast.success('Two-factor authentication disabled.');
-        } catch (e: any) {
-          toast.error(e?.message || 'Failed to update 2FA setting.');
-        }
-      })();
-    } else {
-      setTwoFAStep('setup');
-    }
-  };
-
-  const handleTwoFAVerify = () => {
-    if (twoFACode.length !== 6) return toast.error('Enter a valid 6-digit code.');
-    (async () => {
-      try {
-        await saveTwoFactorSetting(true);
-        setTwoFAEnabled(true);
-        setTwoFAStep('idle');
-        setTwoFACode('');
-        toast.success('Two-factor authentication enabled.');
-      } catch (e: any) {
-        toast.error(e?.message || 'Failed to update 2FA setting.');
-      }
-    })();
-  };
-
   return (
     <AdminLayout>
       <div className="p-6 space-y-6">
@@ -223,34 +156,18 @@ export default function AdminSecurity() {
         </div>
 
         {/* Security score */}
-        <div className={cn(
-          'rounded-2xl border p-5 flex items-start gap-4',
-          twoFAEnabled ? 'bg-emerald-50 border-emerald-200' : 'bg-amber-50 border-amber-200'
-        )}>
-          <div className={cn('w-11 h-11 rounded-xl flex items-center justify-center shrink-0',
-            twoFAEnabled ? 'bg-emerald-100 text-emerald-600' : 'bg-amber-100 text-amber-600'
-          )}>
-            {twoFAEnabled ? <ShieldCheck className="w-5 h-5" /> : <ShieldAlert className="w-5 h-5" />}
+        <div className="rounded-2xl border p-5 flex items-start gap-4 bg-emerald-50 border-emerald-200">
+          <div className="w-11 h-11 rounded-xl flex items-center justify-center shrink-0 bg-emerald-100 text-emerald-600">
+            <ShieldCheck className="w-5 h-5" />
           </div>
           <div className="flex-1">
-            <p className={cn('font-bold text-sm', twoFAEnabled ? 'text-emerald-800' : 'text-amber-800')}>
-              {twoFAEnabled ? 'Your account is well protected' : 'Improve your account security'}
-            </p>
-            <p className={cn('text-xs mt-0.5', twoFAEnabled ? 'text-emerald-600' : 'text-amber-600')}>
-              {twoFAEnabled
-                ? 'Two-factor authentication is active. Your account has strong protection.'
-                : 'Enable two-factor authentication to add an extra layer of security.'}
-            </p>
+            <p className="font-bold text-sm text-emerald-800">Your account is protected</p>
+            <p className="text-xs mt-0.5 text-emerald-600">Use a strong, unique password and keep your credentials private.</p>
             <div className="mt-2.5 flex items-center gap-3">
               <div className="flex-1 h-1.5 bg-white/60 rounded-full overflow-hidden max-w-48">
-                <div
-                  className={cn('h-full rounded-full transition-all', twoFAEnabled ? 'bg-emerald-500' : 'bg-amber-500')}
-                  style={{ width: twoFAEnabled ? '90%' : '55%' }}
-                />
+                <div className="h-full rounded-full bg-emerald-500" style={{ width: '75%' }} />
               </div>
-              <span className={cn('text-xs font-bold', twoFAEnabled ? 'text-emerald-700' : 'text-amber-700')}>
-                {twoFAEnabled ? '90/100' : '55/100'}
-              </span>
+              <span className="text-xs font-bold text-emerald-700">75/100</span>
             </div>
           </div>
         </div>
@@ -306,95 +223,6 @@ export default function AdminSecurity() {
             </div>
           </Card>
 
-          {/* Two-Factor Auth */}
-          <Card title="Two-Factor Authentication" icon={Smartphone} subtitle="Add an extra layer of security">
-            <div className="space-y-4">
-              <div className={cn('rounded-xl p-4 flex items-center gap-4', twoFAEnabled ? 'bg-emerald-50 border border-emerald-200' : 'bg-slate-50 border border-slate-200')}>
-                <div className={cn('w-10 h-10 rounded-xl flex items-center justify-center shrink-0', twoFAEnabled ? 'bg-emerald-100 text-emerald-600' : 'bg-slate-200 text-slate-500')}>
-                  <Shield className="w-5 h-5" />
-                </div>
-                <div className="flex-1">
-                  <p className={cn('text-sm font-bold', twoFAEnabled ? 'text-emerald-700' : 'text-slate-700')}>
-                    {twoFAEnabled ? '2FA is Enabled' : '2FA is Disabled'}
-                  </p>
-                  <p className="text-xs text-slate-400 mt-0.5">Authenticator app (TOTP)</p>
-                </div>
-                <button
-                  onClick={handleTwoFAToggle}
-                  disabled={configSaving}
-                  className={cn(
-                    'text-sm font-semibold px-3 py-1.5 rounded-lg transition-colors disabled:opacity-60',
-                    twoFAEnabled
-                      ? 'text-rose-600 hover:bg-rose-50 border border-rose-200'
-                      : 'text-indigo-600 hover:bg-indigo-50 border border-indigo-200'
-                  )}
-                >
-                  {twoFAEnabled ? 'Disable' : 'Enable'}
-                </button>
-              </div>
-
-              {/* 2FA Setup Flow */}
-              {twoFAStep === 'setup' && (
-                <div className="border border-indigo-200 rounded-xl p-4 space-y-4 bg-indigo-50/40">
-                  <p className="text-sm font-bold text-slate-800">Scan QR Code</p>
-                  <p className="text-xs text-slate-500">Use Google Authenticator, Authy, or another TOTP app to scan this code.</p>
-                  {/* Fake QR */}
-                  <div className="w-36 h-36 mx-auto bg-white border-2 border-slate-200 rounded-xl flex items-center justify-center">
-                    <div className="w-28 h-28 grid grid-cols-7 gap-0.5 opacity-80">
-                      {Array.from({ length: 49 }).map((_, i) => (
-                        <div key={i} className={cn('rounded-sm', Math.random() > 0.5 ? 'bg-slate-900' : 'bg-white')} />
-                      ))}
-                    </div>
-                  </div>
-                  <p className="text-center text-xs text-slate-400">Can't scan? Use code: <span className="font-mono font-bold text-slate-700">JBSW Y3DP EHPK</span></p>
-                  <div className="space-y-2">
-                    <label className="block text-xs font-semibold text-slate-600 uppercase tracking-wide">Enter 6-digit code to verify</label>
-                    <div className="flex gap-2">
-                      <input
-                        value={twoFACode}
-                        onChange={e => setTwoFACode(e.target.value.replace(/\D/g, '').slice(0, 6))}
-                        placeholder="000000"
-                        className="flex-1 px-3.5 py-2.5 text-sm border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-400 font-mono tracking-widest text-center"
-                      />
-                      <button onClick={handleTwoFAVerify} className="bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-semibold px-4 py-2.5 rounded-xl transition-colors">
-                        Verify
-                      </button>
-                    </div>
-                    <p className="text-xs text-slate-400 text-center">Enter code from your authenticator app</p>
-                  </div>
-                  <button onClick={() => setTwoFAStep('idle')} className="w-full text-xs text-slate-400 hover:text-slate-600 hover:underline transition-colors">
-                    Cancel
-                  </button>
-                </div>
-              )}
-
-              {!twoFAEnabled && twoFAStep === 'idle' && (
-                <div className="space-y-2">
-                  {['Download an authenticator app (Google Authenticator, Authy)', 'Click Enable and scan the QR code', 'Enter the 6-digit code to confirm'].map((step, i) => (
-                    <div key={i} className="flex items-start gap-2.5 text-xs text-slate-500">
-                      <span className="w-4 h-4 rounded-full bg-indigo-100 text-indigo-600 text-xs font-bold flex items-center justify-center shrink-0 mt-0.5">{i + 1}</span>
-                      {step}
-                    </div>
-                  ))}
-                </div>
-              )}
-
-              {twoFAEnabled && (
-                <div className="space-y-2.5">
-                  <p className="text-xs font-semibold text-slate-600 uppercase tracking-wide">Backup Codes</p>
-                  <div className="grid grid-cols-2 gap-1.5">
-                    {['8f2a-3c9d', 'x7k1-m4qp', 'n9w2-r5ht', 'j3e8-b6vy', 'p1u7-k2ms', 'a4t6-w9zn'].map(code => (
-                      <div key={code} className="font-mono text-xs bg-slate-100 text-slate-700 px-2.5 py-1.5 rounded-lg text-center font-semibold">{code}</div>
-                    ))}
-                  </div>
-                  <p className="text-xs text-slate-400">Store these codes safely. Each can only be used once.</p>
-                  <button className="text-xs text-indigo-600 font-semibold hover:underline flex items-center gap-1">
-                    <RefreshCw className="w-3 h-3" /> Regenerate backup codes
-                  </button>
-                </div>
-              )}
-            </div>
-          </Card>
         </div>
 
         {/* Active Sessions */}
