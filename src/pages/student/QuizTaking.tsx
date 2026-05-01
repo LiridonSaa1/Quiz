@@ -96,6 +96,7 @@ type QuizRuntimeDbState = {
   expires_at_ms: number | null;
   violation_count: number | null;
   current_question_index: number | null;
+  answers?: Record<string, string> | null;
 };
 
 const getQuizProgressStorageKey = (userId: string, quizId: string) =>
@@ -297,11 +298,18 @@ export default function QuizTaking() {
         (typeof savedSnapshot?.expiresAtMs === 'number' ? savedSnapshot.expiresAtMs : null) ??
         (typeof savedTimerSnapshot?.expiresAtMs === 'number' ? savedTimerSnapshot.expiresAtMs : null);
       const resolvedExpiresAt = restoredExpiresAt && restoredExpiresAt > now ? restoredExpiresAt : freshExpiresAt;
-      const restoredAnswers = savedSnapshot?.answers && typeof savedSnapshot.answers === 'object'
-        ? savedSnapshot.answers
-        : {};
-      const restoredIndex = Number.isFinite(Number(savedSnapshot?.currentQuestionIndex))
-        ? Math.max(0, Math.min(formattedQuestions.length - 1, Number(savedSnapshot?.currentQuestionIndex || 0)))
+      // Priority: DB answers → localStorage answers → empty
+      const dbAnswers =
+        dbRuntimeSnapshot?.answers && typeof dbRuntimeSnapshot.answers === 'object'
+          ? dbRuntimeSnapshot.answers as Record<string, string>
+          : null;
+      const restoredAnswers: Record<string, string> =
+        dbAnswers ??
+        (savedSnapshot?.answers && typeof savedSnapshot.answers === 'object'
+          ? savedSnapshot.answers
+          : {});
+      const restoredIndex = Number.isFinite(Number(dbRuntimeSnapshot?.current_question_index ?? savedSnapshot?.currentQuestionIndex))
+        ? Math.max(0, Math.min(formattedQuestions.length - 1, Number(dbRuntimeSnapshot?.current_question_index ?? savedSnapshot?.currentQuestionIndex ?? 0)))
         : 0;
       const restoredViolationCount = Number.isFinite(Number(savedSnapshot?.violationCount))
         ? Math.max(0, Number(savedSnapshot?.violationCount || 0))
@@ -414,6 +422,7 @@ export default function QuizTaking() {
             expiresAtMs,
             violationCount,
             currentQuestionIndex,
+            answers,
           }),
         });
       } catch {
@@ -421,7 +430,37 @@ export default function QuizTaking() {
       }
     };
     void persistRuntime();
-  }, [runtimeHydrated, quiz, quizId, sessionUserId, startedAt, expiresAtMs, violationCount, currentQuestionIndex]);
+  }, [runtimeHydrated, quiz, quizId, sessionUserId, startedAt, expiresAtMs, violationCount, currentQuestionIndex, answers]);
+
+  // Force-save to localStorage synchronously just before the page unloads.
+  // This covers the gap between a React re-render and the effect actually
+  // flushing — without this, a very fast reload can drop the last answer.
+  useEffect(() => {
+    if (!quizId || !sessionUserId) return;
+    const handleBeforeUnload = () => {
+      try {
+        const snapshot: QuizProgressSnapshot = {
+          quizId,
+          userId: sessionUserId,
+          currentQuestionIndex,
+          answers,
+          questionOrder: questions.map((q) => String(q.id)),
+          startedAt: startedAt || new Date().toISOString(),
+          expiresAtMs,
+          violationCount,
+        };
+        localStorage.setItem(getQuizProgressStorageKey(sessionUserId, quizId), JSON.stringify(snapshot));
+        localStorage.setItem(
+          getQuizTimerStorageKey(sessionUserId, quizId),
+          JSON.stringify({ quizId, userId: sessionUserId, startedAt: snapshot.startedAt, expiresAtMs }),
+        );
+      } catch {
+        // Ignore — storage unavailable.
+      }
+    };
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload);
+  }, [quizId, sessionUserId, currentQuestionIndex, answers, questions, startedAt, expiresAtMs, violationCount]);
 
   useEffect(() => {
     const timer = window.setInterval(() => {
@@ -507,7 +546,31 @@ export default function QuizTaking() {
   }, [quiz, loadError, submitting, reportViolation]);
 
   const handleAnswerChange = (questionId: string, answer: string) => {
-    setAnswers(prev => ({ ...prev, [questionId]: answer }));
+    setAnswers(prev => {
+      const next = { ...prev, [questionId]: answer };
+      // Save immediately — don't wait for the React effect to flush.
+      // This guarantees the answer survives even an instant reload.
+      if (quizId && sessionUserId) {
+        try {
+          const existing = localStorage.getItem(getQuizProgressStorageKey(sessionUserId, quizId));
+          const base: Partial<QuizProgressSnapshot> = existing ? JSON.parse(existing) : {};
+          localStorage.setItem(
+            getQuizProgressStorageKey(sessionUserId, quizId),
+            JSON.stringify({
+              ...base,
+              quizId,
+              userId: sessionUserId,
+              answers: next,
+              currentQuestionIndex,
+              expiresAtMs,
+            }),
+          );
+        } catch {
+          // Private / storage-full — effect-based save is still the safety net.
+        }
+      }
+      return next;
+    });
   };
 
   const normalizeComparableAnswer = (value: unknown): string => {

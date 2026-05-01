@@ -7347,12 +7347,23 @@ export async function createApp(options: CreateAppOptions = {}) {
       const quizId = typeof req.params?.quizId === 'string' ? req.params.quizId.trim() : '';
       if (!quizId) return res.status(400).json({ error: 'quizId is required' });
 
-      const runtimeRes = await supabaseAdmin
+      // Try to select with the answers column; fall back if column missing.
+      let runtimeRes = await supabaseAdmin
         .from('quiz_runtime_state')
-        .select('quiz_id,student_id,started_at,expires_at_ms,violation_count,current_question_index,updated_at')
+        .select('quiz_id,student_id,started_at,expires_at_ms,violation_count,current_question_index,answers,updated_at')
         .eq('quiz_id', quizId)
         .eq('student_id', caller.userId)
         .maybeSingle();
+
+      if (runtimeRes.error && /answers/i.test(String(runtimeRes.error.message))) {
+        // answers column does not exist yet — retry without it.
+        runtimeRes = await supabaseAdmin
+          .from('quiz_runtime_state')
+          .select('quiz_id,student_id,started_at,expires_at_ms,violation_count,current_question_index,updated_at')
+          .eq('quiz_id', quizId)
+          .eq('student_id', caller.userId)
+          .maybeSingle();
+      }
 
       if (runtimeRes.error) {
         if (isQuizRuntimeStateTableMissing(runtimeRes.error)) {
@@ -7384,23 +7395,40 @@ export async function createApp(options: CreateAppOptions = {}) {
       const currentQuestionIndex = Number.isFinite(Number(req.body?.currentQuestionIndex))
         ? Math.max(0, Number(req.body.currentQuestionIndex))
         : 0;
+      const answers =
+        req.body?.answers && typeof req.body.answers === 'object' && !Array.isArray(req.body.answers)
+          ? req.body.answers
+          : null;
 
-      const upsertRes = await supabaseAdmin
+      const baseRow = {
+        quiz_id: quizId,
+        student_id: caller.userId,
+        started_at: startedAt,
+        expires_at_ms: expiresAtMs,
+        violation_count: Math.max(0, violationCount),
+        current_question_index: currentQuestionIndex,
+        updated_at: new Date().toISOString(),
+      };
+
+      // Try to upsert WITH answers; gracefully fall back without if the column
+      // doesn't exist in this deployment (run migration 007 to enable it).
+      let upsertRes = await supabaseAdmin
         .from('quiz_runtime_state')
         .upsert(
-          {
-            quiz_id: quizId,
-            student_id: caller.userId,
-            started_at: startedAt,
-            expires_at_ms: expiresAtMs,
-            violation_count: Math.max(0, violationCount),
-            current_question_index: currentQuestionIndex,
-            updated_at: new Date().toISOString(),
-          },
+          answers !== null ? { ...baseRow, answers } : baseRow,
           { onConflict: 'quiz_id,student_id' }
         )
-        .select('quiz_id,student_id,started_at,expires_at_ms,violation_count,current_question_index,updated_at')
+        .select('quiz_id,student_id,started_at,expires_at_ms,violation_count,current_question_index,answers,updated_at')
         .single();
+
+      if (upsertRes.error && /answers/i.test(String(upsertRes.error.message))) {
+        // answers column missing — retry without it.
+        upsertRes = await supabaseAdmin
+          .from('quiz_runtime_state')
+          .upsert(baseRow, { onConflict: 'quiz_id,student_id' })
+          .select('quiz_id,student_id,started_at,expires_at_ms,violation_count,current_question_index,updated_at')
+          .single();
+      }
 
       if (upsertRes.error) {
         if (isQuizRuntimeStateTableMissing(upsertRes.error)) {
@@ -8828,13 +8856,17 @@ export async function createApp(options: CreateAppOptions = {}) {
               "**/tmp/**",
               "**/.replit",
               "**/replit.md",
-              // Backend-only files — Vite cannot hot-replace them so watching
-              // them forces a full page reload, which breaks mid-flow states
-              // such as the 2FA code-entry screen.
+              // Backend-only and non-source files — Vite cannot hot-replace
+              // them so watching them forces a full page reload, which breaks
+              // mid-flow states such as the 2FA code-entry screen.
               "**/server.ts",
               "**/server.js",
               "**/*.server.ts",
               "**/*.server.js",
+              "**/*.sql",
+              "**/migrations/**",
+              "**/*.md",
+              "**/*.json",
             ],
           },
         },

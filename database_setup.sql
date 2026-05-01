@@ -250,6 +250,21 @@ CREATE TABLE IF NOT EXISTS notifications (
 );
 
 -- ============================================================
+-- 12. QUIZ RUNTIME STATE  (progress + timer + answers persistence)
+-- ============================================================
+CREATE TABLE IF NOT EXISTS quiz_runtime_state (
+  quiz_id                UUID        NOT NULL,
+  student_id             UUID        NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
+  started_at             TIMESTAMPTZ,
+  expires_at_ms          BIGINT,
+  violation_count        INTEGER     NOT NULL DEFAULT 0,
+  current_question_index INTEGER     NOT NULL DEFAULT 0,
+  answers                JSONB       NOT NULL DEFAULT '{}'::jsonb,
+  updated_at             TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  PRIMARY KEY (quiz_id, student_id)
+);
+
+-- ============================================================
 -- INDEXES
 -- ============================================================
 CREATE INDEX IF NOT EXISTS idx_profiles_role           ON profiles(role);
