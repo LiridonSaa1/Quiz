@@ -1775,6 +1775,13 @@ export async function createApp(options: CreateAppOptions = {}) {
   const TWOFA_TTL_MS = 5 * 60 * 1000;
   const TWOFA_MAX_ATTEMPTS = 5;
 
+  // Tracks users who have already verified 2FA in the current server session.
+  // Keyed by userId; value is the expiry timestamp (12 h from verify time).
+  // This lets the /api/auth/2fa/required gate return false for verified users,
+  // so a page reload does NOT sign them out again.
+  const twoFaVerifiedUsers = new Map<string, number>();
+  const TWOFA_SESSION_TTL_MS = 12 * 60 * 60 * 1000; // 12 hours
+
   const isTwoFactorRequiredForRole = async (role: string): Promise<boolean> => {
     try {
       const settings: any = await getConfigSection("settings");
@@ -1792,8 +1799,23 @@ export async function createApp(options: CreateAppOptions = {}) {
     try {
       const caller = await getAuthUser(req);
       if (!caller) return res.status(401).json({ error: "Unauthorized" });
+
+      // If the role doesn't require 2FA at all, skip immediately.
       const required = await isTwoFactorRequiredForRole(caller.role);
-      res.json({ success: true, required });
+      if (!required) return res.json({ success: true, required: false });
+
+      // If 2FA IS required for this role, check whether this user has already
+      // completed verification in the current server session.  If so, treat
+      // them as verified so a page reload doesn't sign them out.
+      const verifiedExpiry = twoFaVerifiedUsers.get(caller.userId);
+      if (verifiedExpiry && verifiedExpiry > Date.now()) {
+        return res.json({ success: true, required: false });
+      }
+
+      // Expired entry — clean up.
+      if (verifiedExpiry !== undefined) twoFaVerifiedUsers.delete(caller.userId);
+
+      res.json({ success: true, required: true });
     } catch (e: any) {
       res.status(500).json({ error: e?.message || "Failed to check 2FA requirement" });
     }
@@ -1940,6 +1962,12 @@ export async function createApp(options: CreateAppOptions = {}) {
       }
 
       twoFactorCodes.delete(caller.userId);
+
+      // Mark this user as 2FA-verified in the server session so that the
+      // /api/auth/2fa/required gate lets them through on subsequent requests
+      // (e.g. after a page reload) without signing them out.
+      twoFaVerifiedUsers.set(caller.userId, Date.now() + TWOFA_SESSION_TTL_MS);
+
       res.json({ success: true });
     } catch (e: any) {
       res.status(500).json({ error: e?.message || "Failed to verify 2FA code" });
@@ -8800,6 +8828,13 @@ export async function createApp(options: CreateAppOptions = {}) {
               "**/tmp/**",
               "**/.replit",
               "**/replit.md",
+              // Backend-only files — Vite cannot hot-replace them so watching
+              // them forces a full page reload, which breaks mid-flow states
+              // such as the 2FA code-entry screen.
+              "**/server.ts",
+              "**/server.js",
+              "**/*.server.ts",
+              "**/*.server.js",
             ],
           },
         },
