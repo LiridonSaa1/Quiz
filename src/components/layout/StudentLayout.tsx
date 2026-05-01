@@ -121,8 +121,6 @@ export default function StudentLayout({ children }: { children: React.ReactNode 
 
   const handleLogout = async () => {
     await supabase.auth.signOut();
-    localStorage.removeItem('quizmaster_2fa_ok');
-    sessionStorage.removeItem('quizmaster_2fa_pending');
     navigate('/login');
   };
 

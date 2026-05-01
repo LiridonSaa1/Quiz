@@ -85,6 +85,9 @@ export default function App() {
   const [loading, setLoading] = useState(true);
   const [features, setFeatures] = useState<FeatureFlags>(defaultFeatureFlags);
   const [maintenanceMode, setMaintenanceMode] = useState(false);
+  // When 2FA is required but not yet completed, we store the pending userId here
+  // and render TwoFaChallengeGate instead of signing the user out.
+  const [twoFaGate, setTwoFaGate] = useState<{ userId: string } | null>(null);
 
   useEffect(() => {
     const checkBackend = async () => {
@@ -111,12 +114,6 @@ export default function App() {
         setLoading(false);
       }
     };
-
-    // Reset the "2FA in progress" sentinel on every fresh app mount (page load
-    // or reload). The flag is only meant to silence the App-level 2FA gate
-    // during the brief window of an active login attempt — it must NOT survive
-    // a refresh, otherwise users could bypass 2FA by reloading the panel.
-    sessionStorage.removeItem('quizmaster_2fa_pending');
 
     checkBackend();
     void loadPlatformRuntimeConfig();
@@ -244,28 +241,18 @@ export default function App() {
         const verifiedRole = normalizeUserRole(profile.role);
 
         // ── 2FA enforcement on refresh ──
-        // If 2FA is required for this role and the session-flag is missing,
-        // sign out so attackers can't bypass by reloading after a partial login.
-        // Skip when the Login page is actively negotiating the 2FA challenge —
-        // otherwise we race the login flow and kick the user out before they
-        // ever see the code-entry panel.
+        // Ask the server whether this role needs 2FA and whether the user
+        // has already verified in this session.  If verification is still
+        // required we do NOT sign the user out — instead we raise the
+        // TwoFaChallengeGate overlay (keeping the Supabase session alive so
+        // authFetch continues to work) and wait for the user to complete
+        // verification before setting the user profile.
         try {
-          // `_ok` lives in localStorage so it survives full page reloads
-          // (including Replit's preview iframe being re-created on HMR
-          // reconnect). `_pending` stays in sessionStorage and is cleared on
-          // every fresh App mount — that's how we still block bypass-by-reload
-          // *during* an in-progress login.
-          const twoFaOk = localStorage.getItem('quizmaster_2fa_ok') === '1';
-          const twoFaPending = sessionStorage.getItem('quizmaster_2fa_pending') === '1';
-          if (!twoFaOk && !twoFaPending) {
-            const reqRes = await authFetch('/api/auth/2fa/required');
-            const reqJson = await reqRes.json().catch(() => ({}));
-            if (reqRes.ok && reqJson?.required) {
-              await supabase.auth.signOut();
-              setUser(null);
-              toast.error('Please sign in again to complete two-factor verification.', { id: '2fa-required' });
-              return;
-            }
+          const reqRes = await authFetch('/api/auth/2fa/required');
+          const reqJson = await reqRes.json().catch(() => ({}));
+          if (reqRes.ok && reqJson?.required) {
+            setTwoFaGate({ userId });
+            return;
           }
         } catch (twoFaErr) {
           console.warn('[App] 2FA gate check failed (allowing session)', twoFaErr);
@@ -356,6 +343,23 @@ export default function App() {
 
   if (loading) {
     return <AppBootSkeleton />;
+  }
+
+  // 2FA gate: session is alive but the user hasn't completed 2FA verification.
+  // Render an overlay (no sign-out) so the user can enter their code.
+  if (twoFaGate) {
+    return (
+      <TwoFaChallengeGate
+        onVerified={() => {
+          setTwoFaGate(null);
+          void fetchProfile(twoFaGate.userId);
+        }}
+        onCancel={async () => {
+          await supabase.auth.signOut();
+          setTwoFaGate(null);
+        }}
+      />
+    );
   }
 
   if (maintenanceMode && user && user.role !== 'admin') {
@@ -482,5 +486,185 @@ function StudentRoutes({ features }: { features: FeatureFlags }) {
       <Route path="/profile" element={<StudentProfile />} />
       <Route path="*" element={<Navigate to="/not-found" replace />} />
     </Routes>
+  );
+}
+
+/* ─── 2FA challenge overlay ──────────────────────────────────────────────── */
+// Shown when the server confirms 2FA is required but the user hasn't verified
+// yet (e.g. after a server restart or a fresh session on a 2FA-enabled role).
+// The Supabase session is kept alive so authFetch keeps working.
+
+function TwoFaChallengeGate({ onVerified, onCancel }: {
+  onVerified: () => void;
+  onCancel: () => Promise<void>;
+}) {
+  const [code, setCode] = React.useState('');
+  const [verifying, setVerifying] = React.useState(false);
+  const [busy, setBusy] = React.useState(false);
+  const [maskedEmail, setMaskedEmail] = React.useState('');
+  const sentRef = React.useRef(false);
+
+  const sendChallenge = React.useCallback(async () => {
+    setBusy(true);
+    try {
+      const res = await authFetch('/api/auth/2fa/challenge', { method: 'POST' });
+      const json = await res.json().catch(() => ({}));
+      if (json.maskedEmail) setMaskedEmail(json.maskedEmail);
+      if (json.devCode) {
+        toast.message(`Your verification code: ${json.devCode}`, {
+          description: 'Enter this code below to continue',
+          duration: 30_000,
+        });
+      }
+    } catch { /* ignore */ } finally { setBusy(false); }
+  }, []);
+
+  React.useEffect(() => {
+    if (sentRef.current) return;
+    sentRef.current = true;
+    void sendChallenge();
+  }, [sendChallenge]);
+
+  const handleVerify = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!/^\d{6}$/.test(code)) { toast.error('Code must be 6 digits'); return; }
+    setVerifying(true);
+    try {
+      const res = await authFetch('/api/auth/2fa/verify', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ code }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok || !json?.success) throw new Error(json?.error || 'Verification failed');
+      toast.success('Verified — welcome back!');
+      onVerified();
+    } catch (err: any) {
+      toast.error(err.message || 'Verification failed');
+    } finally { setVerifying(false); }
+  };
+
+  const handleResend = async () => {
+    setCode('');
+    await sendChallenge();
+  };
+
+  return (
+    <div className="min-h-screen flex items-center justify-center bg-slate-950 p-4">
+      <Toaster position="top-right" richColors />
+      <div className="w-full max-w-sm">
+        {/* header */}
+        <div className="flex items-center gap-2.5 mb-8 justify-center">
+          <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-emerald-500 to-teal-600 flex items-center justify-center">
+            <svg className="w-4 h-4 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75L11.25 15 15 9.75m-3-7.036A11.959 11.959 0 013.598 6 11.955 11.955 0 003 9.749c0 5.592 3.824 10.29 9 11.623 5.176-1.332 9-6.03 9-11.622 0-1.31-.21-2.571-.598-3.751h-.152c-3.196 0-6.1-1.248-8.25-3.285z" />
+            </svg>
+          </div>
+          <span className="text-white font-bold text-base">Two-Factor Authentication</span>
+        </div>
+
+        {/* card */}
+        <div
+          className="rounded-3xl p-7"
+          style={{
+            background: 'linear-gradient(145deg,rgba(255,255,255,0.04),rgba(255,255,255,0.02))',
+            border: '1px solid rgba(255,255,255,0.07)',
+            boxShadow: '0 32px 64px rgba(0,0,0,0.4)',
+          }}
+        >
+          <div className="mb-5">
+            <p className="text-white font-semibold text-lg">Verify it&apos;s you</p>
+            <p className="text-slate-400 text-sm mt-1">
+              {maskedEmail
+                ? <>Code sent to <span className="text-slate-300">{maskedEmail}</span> — check the notification above.</>
+                : 'Your code appeared in the notification above.'}
+            </p>
+          </div>
+
+          <form onSubmit={handleVerify} className="space-y-5">
+            <div>
+              <label className="text-xs font-medium text-slate-500 uppercase tracking-widest block mb-1.5">
+                Verification Code
+              </label>
+              <div
+                className="flex items-center rounded-xl overflow-hidden"
+                style={{
+                  background: 'rgba(16,185,129,0.06)',
+                  border: '1px solid rgba(16,185,129,0.25)',
+                  boxShadow: '0 0 0 3px rgba(16,185,129,0.06)',
+                }}
+              >
+                <svg className="ml-4 w-4 h-4 shrink-0 text-emerald-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 5.25a3 3 0 013 3m3 0a6 6 0 01-7.029 5.912c-.563-.097-1.159.026-1.563.43L10.5 17.25H8.25v2.25H6v2.25H2.25v-2.818c0-.597.237-1.17.659-1.591l6.499-6.499c.404-.404.527-1 .43-1.563A6 6 0 1121.75 8.25z" />
+                </svg>
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  autoComplete="one-time-code"
+                  autoFocus
+                  maxLength={6}
+                  value={code}
+                  onChange={e => setCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                  placeholder="000000"
+                  className="flex-1 px-3 py-3.5 bg-transparent text-center text-xl font-bold tracking-[0.5em] text-white placeholder:text-slate-700 placeholder:tracking-[0.3em] focus:outline-none"
+                />
+              </div>
+              <p className="text-[11px] text-slate-500 text-center pt-1.5">
+                Code expires in 5 minutes — 5 attempts allowed
+              </p>
+            </div>
+
+            <button
+              type="submit"
+              disabled={verifying || code.length !== 6}
+              className="relative w-full py-3.5 rounded-xl font-semibold text-sm text-white flex items-center justify-center gap-2 overflow-hidden transition-all active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed"
+              style={{ background: 'linear-gradient(135deg,#10b981 0%,#059669 50%,#047857 100%)', boxShadow: '0 8px 24px rgba(5,150,105,0.4)' }}
+            >
+              <div className="absolute top-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-white/30 to-transparent" />
+              {verifying ? (
+                <>
+                  <svg className="animate-spin w-4 h-4" fill="none" viewBox="0 0 24 24">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                  </svg>
+                  Verifying…
+                </>
+              ) : (
+                <>
+                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75L11.25 15 15 9.75m-3-7.036A11.959 11.959 0 013.598 6 11.955 11.955 0 003 9.749c0 5.592 3.824 10.29 9 11.623 5.176-1.332 9-6.03 9-11.622 0-1.31-.21-2.571-.598-3.751h-.152c-3.196 0-6.1-1.248-8.25-3.285z" />
+                  </svg>
+                  Verify &amp; Continue
+                </>
+              )}
+            </button>
+
+            <div className="flex items-center justify-between pt-1">
+              <button
+                type="button"
+                onClick={() => void onCancel()}
+                className="inline-flex items-center gap-1.5 text-xs text-slate-500 hover:text-slate-300 transition-colors"
+              >
+                <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M10.5 19.5L3 12m0 0l7.5-7.5M3 12h18" />
+                </svg>
+                Sign out
+              </button>
+              <button
+                type="button"
+                onClick={() => void handleResend()}
+                disabled={busy}
+                className="inline-flex items-center gap-1.5 text-xs text-emerald-400 hover:text-emerald-300 disabled:opacity-50 transition-colors"
+              >
+                <svg className={`w-3 h-3 ${busy ? 'animate-spin' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0l3.181 3.183a8.25 8.25 0 0013.803-3.7M4.031 9.865a8.25 8.25 0 0113.803-3.7l3.181 3.182m0-4.991v4.99" />
+                </svg>
+                {busy ? 'Sending…' : 'Resend code'}
+              </button>
+            </div>
+          </form>
+        </div>
+      </div>
+    </div>
   );
 }

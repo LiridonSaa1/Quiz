@@ -1775,12 +1775,21 @@ export async function createApp(options: CreateAppOptions = {}) {
   const TWOFA_TTL_MS = 5 * 60 * 1000;
   const TWOFA_MAX_ATTEMPTS = 5;
 
-  // Tracks users who have already verified 2FA in the current server session.
-  // Keyed by userId; value is the expiry timestamp (12 h from verify time).
-  // This lets the /api/auth/2fa/required gate return false for verified users,
-  // so a page reload does NOT sign them out again.
-  const twoFaVerifiedUsers = new Map<string, number>();
+  // Fast in-memory verification cache.  { expiry, verifiedAt } lets the
+  // /required endpoint compare verifiedAt against the JWT iat so that an old
+  // verification from a previous login session is rejected on a fresh sign-in.
+  const twoFaVerifiedUsers = new Map<string, { expiry: number; verifiedAt: number }>();
   const TWOFA_SESSION_TTL_MS = 12 * 60 * 60 * 1000; // 12 hours
+
+  /** Extract the JWT iat claim (issued-at) in milliseconds from a Bearer token. */
+  const jwtIatMs = (token: string): number => {
+    try {
+      const parts = token.split(".");
+      if (parts.length !== 3) return 0;
+      const payload = JSON.parse(Buffer.from(parts[1], "base64url").toString("utf8"));
+      return ((payload.iat as number) || 0) * 1000;
+    } catch { return 0; }
+  };
 
   const isTwoFactorRequiredForRole = async (role: string): Promise<boolean> => {
     try {
@@ -1804,12 +1813,20 @@ export async function createApp(options: CreateAppOptions = {}) {
       const required = await isTwoFactorRequiredForRole(caller.role);
       if (!required) return res.json({ success: true, required: false });
 
+      // Extract the JWT iat so we can verify the 2FA was completed in THIS
+      // session (not a previous one).  A fresh signInWithPassword creates a new
+      // token with a new iat, so any twofa_verified_at that pre-dates iat means
+      // the user must re-verify on this login.
+      const bearerToken = (req.headers["authorization"] || "").replace(/^Bearer /, "");
+      const sessionStartMs = jwtIatMs(bearerToken);
+
       // 1. Check the fast in-memory cache first (valid within this server process).
-      const verifiedExpiry = twoFaVerifiedUsers.get(caller.userId);
-      if (verifiedExpiry && verifiedExpiry > Date.now()) {
+      const cached = twoFaVerifiedUsers.get(caller.userId);
+      if (cached && cached.expiry > Date.now() && cached.verifiedAt >= sessionStartMs) {
         return res.json({ success: true, required: false });
       }
-      if (verifiedExpiry !== undefined) twoFaVerifiedUsers.delete(caller.userId);
+      // Stale or pre-session entry — evict it.
+      if (cached !== undefined) twoFaVerifiedUsers.delete(caller.userId);
 
       // 2. Fall back to Supabase user metadata — survives server restarts /
       //    process recycling so a reload after a server restart doesn't log
@@ -1817,11 +1834,15 @@ export async function createApp(options: CreateAppOptions = {}) {
       try {
         const { data: authData } = await supabaseAdmin.auth.admin.getUserById(caller.userId);
         const meta: any = authData?.user?.user_metadata || {};
-        const verifiedAt: number | undefined =
-          typeof meta.twofa_verified_at === "number" ? meta.twofa_verified_at : undefined;
-        if (verifiedAt && Date.now() - verifiedAt < TWOFA_SESSION_TTL_MS) {
+        const verifiedAt: number =
+          typeof meta.twofa_verified_at === "number" ? meta.twofa_verified_at : 0;
+        if (
+          verifiedAt &&
+          verifiedAt >= sessionStartMs &&
+          Date.now() - verifiedAt < TWOFA_SESSION_TTL_MS
+        ) {
           // Repopulate the in-memory cache so the next request is fast.
-          twoFaVerifiedUsers.set(caller.userId, verifiedAt + TWOFA_SESSION_TTL_MS);
+          twoFaVerifiedUsers.set(caller.userId, { expiry: verifiedAt + TWOFA_SESSION_TTL_MS, verifiedAt });
           return res.json({ success: true, required: false });
         }
       } catch {
@@ -1925,7 +1946,7 @@ export async function createApp(options: CreateAppOptions = {}) {
       const verifiedAt = Date.now();
 
       // Mark as verified in the fast in-memory cache.
-      twoFaVerifiedUsers.set(caller.userId, verifiedAt + TWOFA_SESSION_TTL_MS);
+      twoFaVerifiedUsers.set(caller.userId, { expiry: verifiedAt + TWOFA_SESSION_TTL_MS, verifiedAt });
 
       // Also persist to Supabase user metadata so the verification survives
       // server restarts — a page reload after a restart will no longer log the
