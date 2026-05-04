@@ -7452,6 +7452,67 @@ export async function createApp(options: CreateAppOptions = {}) {
     }
   });
 
+  // Student profile: get and update profile + stats.
+  app.get('/api/student/profile', async (req, res) => {
+    try {
+      const caller = await assertAuthenticated(req, res);
+      if (!caller) return;
+      if (caller.role !== 'student' && caller.role !== 'admin') {
+        return res.status(403).json({ error: 'Forbidden: student role required' });
+      }
+      const uid = caller.userId;
+      const [profileRes, enrolledRes, certificatesRes] = await Promise.all([
+        supabaseAdmin.from('profiles').select('*').eq('id', uid).maybeSingle(),
+        supabaseAdmin.from('courses').select('id').contains('student_ids', [uid]),
+        supabaseAdmin.from('certificates').select('id').eq('student_id', uid),
+      ]);
+      if (profileRes.error) throw profileRes.error;
+      const profileRow = (profileRes.data || {}) as Record<string, unknown>;
+      const enrolledCourseIds = (enrolledRes.data || []).map((c: any) => String(c.id));
+      const certCount = (certificatesRes.data || []).length;
+
+      let lessonsCompleted = 0;
+      if (enrolledCourseIds.length > 0) {
+        const { data: progressRows } = await supabaseAdmin
+          .from('lesson_progress')
+          .select('id')
+          .eq('student_id', uid)
+          .eq('completed', true);
+        lessonsCompleted = (progressRows || []).length;
+      }
+
+      let quizzesTaken = 0;
+      try {
+        const { data: attemptRows } = await supabaseAdmin
+          .from('quiz_attempts')
+          .select('id')
+          .eq('student_id', uid);
+        quizzesTaken = (attemptRows || []).length;
+      } catch { /* table may not exist */ }
+
+      return res.json({
+        success: true,
+        profile: {
+          displayName: String(profileRow.display_name || ''),
+          bio: String(profileRow.bio || ''),
+          phone: String(profileRow.phone || ''),
+          website: String(profileRow.website || ''),
+          avatarUrl: String(profileRow.avatar_url || ''),
+          email: String(profileRow.email || ''),
+          createdAt: String(profileRow.created_at || ''),
+        },
+        stats: {
+          coursesEnrolled: enrolledCourseIds.length,
+          lessonsCompleted,
+          quizzesTaken,
+          certificatesEarned: certCount,
+        },
+      });
+    } catch (e: any) {
+      return res.status(500).json({ error: e?.message || 'Failed to load student profile' });
+    }
+  });
+
   // Student lessons: only from enrolled courses (optionally one specific course).
   app.get('/api/student/lessons', async (req, res) => {
     try {

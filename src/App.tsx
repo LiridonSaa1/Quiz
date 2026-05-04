@@ -72,7 +72,6 @@ import StudentCertificates from './pages/student/Certificates';
 import StudentCommunity from './pages/student/Community';
 import StudentLiveClasses from './pages/student/LiveClasses';
 import StudentLiveSessionJoin from './pages/student/LiveSessionJoin';
-import StudentLiveSessionsList from './pages/student/LiveSessionsList';
 import StudentExams from './pages/student/Exams';
 import NotFound from './pages/NotFound';
 import { apiUrl, authFetch } from './lib/apiUrl';
@@ -441,7 +440,7 @@ function StudentRoutes({ features }: { features: FeatureFlags }) {
       <Route path="/certificates" element={<StudentCertificates />} />
       <Route path="/community" element={features.communityEnabled ? <StudentCommunity /> : <Navigate to="/not-found" replace />} />
       <Route path="/live-classes" element={features.liveSessionsEnabled ? <StudentLiveClasses /> : <Navigate to="/not-found" replace />} />
-      <Route path="/live-sessions" element={features.liveSessionsEnabled ? <StudentLiveSessionsList /> : <Navigate to="/not-found" replace />} />
+      <Route path="/live-sessions" element={features.liveSessionsEnabled ? <StudentLiveClasses /> : <Navigate to="/not-found" replace />} />
       <Route path="/live-sessions/:id" element={features.liveSessionsEnabled ? <StudentLiveSessionJoin /> : <Navigate to="/not-found" replace />} />
       <Route path="/exams" element={<StudentExams />} />
       <Route path="/quiz/:quizId" element={<QuizTaking />} />

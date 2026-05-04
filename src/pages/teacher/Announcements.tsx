@@ -95,7 +95,7 @@ export default function TeacherAnnouncements() {
   const fetchAll = async () => {
     setLoading(true);
     try {
-      const res = await fetch('/api/admin/announcements');
+      const res = await authFetch('/api/admin/announcements');
       const json = await res.json();
       if (json.success) setAnnouncements(json.announcements || []);
       else toast.error(json.error || 'Failed to load announcements');
@@ -217,7 +217,7 @@ export default function TeacherAnnouncements() {
       };
       const url = editing ? `/api/admin/announcements/${editing.id}` : '/api/admin/announcements';
       const method = editing ? 'PATCH' : 'POST';
-      const res = await fetch(url, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+      const res = await authFetch(url, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
       const json = await res.json();
       if (!json.success) throw new Error(json.error);
       toast.success(editing ? 'Announcement updated' : status === 'published' ? 'Announcement published!' : 'Draft saved');
@@ -231,7 +231,7 @@ export default function TeacherAnnouncements() {
     if (!confirm('Delete this announcement?')) return;
     setDeleting(id);
     try {
-      const res = await fetch(`/api/admin/announcements/${id}`, { method: 'DELETE' });
+      const res = await authFetch(`/api/admin/announcements/${id}`, { method: 'DELETE' });
       const json = await res.json();
       if (!json.success) throw new Error(json.error);
       toast.success('Announcement deleted');
@@ -242,7 +242,7 @@ export default function TeacherAnnouncements() {
 
   const quickPublish = async (a: Announcement) => {
     try {
-      const res = await fetch(`/api/admin/announcements/${a.id}`, {
+      const res = await authFetch(`/api/admin/announcements/${a.id}`, {
         method: 'PATCH', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ status: 'published' }),
       });
