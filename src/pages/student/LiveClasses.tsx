@@ -1,4 +1,5 @@
 import React, { useEffect, useState, useMemo } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { supabase } from '../../supabase';
 import StudentLayout from '../../components/layout/StudentLayout';
 import { motion, AnimatePresence } from 'motion/react';
@@ -42,6 +43,7 @@ const TABS: { key: 'all' | SessionStatus; label: string }[] = [
 ];
 
 export default function StudentLiveClasses() {
+  const navigate = useNavigate();
   const [sessions, setSessions] = useState<LiveSession[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
@@ -208,11 +210,12 @@ export default function StudentLiveClasses() {
                           </span>
                         </div>
                       </div>
-                      {isLive && s.meeting_url && (
-                        <a href={s.meeting_url} target="_blank" rel="noreferrer"
+                      {isLive && (
+                        <button
+                          onClick={() => navigate(`/student/live-sessions/${s.id}`)}
                           className="shrink-0 flex items-center gap-2 bg-gradient-to-r from-rose-500 to-pink-500 text-white text-xs font-bold px-4 py-2 rounded-xl hover:opacity-90 transition-all shadow-lg shadow-rose-200/60 active:scale-95">
-                          <Play className="w-3.5 h-3.5" /> Join
-                        </a>
+                          <Play className="w-3.5 h-3.5" /> Enter Room
+                        </button>
                       )}
                       {s.status === 'scheduled' && s.meeting_url && (
                         <a href={s.meeting_url} target="_blank" rel="noreferrer"
