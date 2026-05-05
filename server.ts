@@ -5915,12 +5915,27 @@ export async function createApp(options: CreateAppOptions = {}) {
       for (const cid of classIds) {
         const { data: classRow } = await supabaseAdmin
           .from('classes')
-          .select('student_ids')
+          .select('student_ids, course_id')
           .eq('id', cid)
           .maybeSingle();
-        ((classRow?.student_ids as string[]) || []).forEach((uid: string) => {
-          if (!inviteIds.includes(uid)) inviteIds.push(uid);
-        });
+        const classStudentIds: string[] = Array.isArray(classRow?.student_ids)
+          ? (classRow.student_ids as string[]).filter(Boolean)
+          : [];
+        if (classStudentIds.length > 0) {
+          classStudentIds.forEach((uid: string) => {
+            if (!inviteIds.includes(uid)) inviteIds.push(uid);
+          });
+        } else if (classRow?.course_id) {
+          // Fallback: class has no direct student_ids — use course's enrolled students
+          const { data: courseRow } = await supabaseAdmin
+            .from('courses')
+            .select('student_ids')
+            .eq('id', classRow.course_id)
+            .maybeSingle();
+          ((courseRow?.student_ids as string[]) || []).forEach((uid: string) => {
+            if (uid && !inviteIds.includes(uid)) inviteIds.push(uid);
+          });
+        }
       }
 
       if (inviteIds.length > 0) {

@@ -572,6 +572,7 @@ function NewSessionModal({
   });
   const [saving, setSaving] = useState(false);
   const [classes, setClasses] = useState<ClassOption[]>([]);
+  const [courseStudentMap, setCourseStudentMap] = useState<Map<string, string[]>>(new Map());
   const [selectedClassIds, setSelectedClassIds] = useState<string[]>([]);
   const [userSearch, setUserSearch] = useState('');
   const [searchResults, setSearchResults] = useState<UserOption[]>([]);
@@ -581,7 +582,11 @@ function NewSessionModal({
     new Set(
       selectedClassIds.flatMap((classId) => {
         const found = classes.find((c) => c.id === classId);
-        return Array.isArray(found?.student_ids) ? found.student_ids.map((sid) => String(sid)) : [];
+        if (!found) return [];
+        const directIds = Array.isArray(found.student_ids) ? found.student_ids.map((sid) => String(sid)).filter(Boolean) : [];
+        if (directIds.length > 0) return directIds;
+        const courseId = found.course_id ? String(found.course_id) : '';
+        return courseId ? (courseStudentMap.get(courseId) || []) : [];
       }),
     ),
   );
@@ -621,6 +626,7 @@ function NewSessionModal({
       const courseStudentMap = new Map<string, string[]>(
         coursesWithStudents.map((course) => [course.id, course.student_ids]),
       );
+      setCourseStudentMap(courseStudentMap);
       const classCountPerCourse = normalizedClasses.reduce((acc: Record<string, number>, cls: ClassOption) => {
         const courseId = cls.course_id ? String(cls.course_id) : '';
         if (courseId) acc[courseId] = (acc[courseId] || 0) + 1;
