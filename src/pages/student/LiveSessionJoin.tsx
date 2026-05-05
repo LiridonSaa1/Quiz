@@ -351,7 +351,7 @@ export default function StudentLiveSessionJoin() {
                 <div className="flex-1 relative">
                   <iframe
                     src={jitsiUrl}
-                    allow="camera; microphone; fullscreen; display-capture; autoplay; clipboard-write"
+                    allow="camera *; microphone *; fullscreen *; display-capture *; autoplay *; clipboard-write *"
                     className="w-full h-full border-0"
                     title="Live Session"
                   />

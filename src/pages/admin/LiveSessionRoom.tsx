@@ -288,7 +288,7 @@ export default function LiveSessionRoom() {
               {meetingActive ? (
                 <iframe
                   src={jitsiUrl}
-                  allow="camera; microphone; fullscreen; display-capture; autoplay; clipboard-write"
+                  allow="camera *; microphone *; fullscreen *; display-capture *; autoplay *; clipboard-write *"
                   className="w-full"
                   style={{ height: '520px', border: 'none' }}
                   title="Live Meeting"

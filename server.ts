@@ -1034,6 +1034,8 @@ export async function createApp(options: CreateAppOptions = {}) {
 
   // Allow SPA + API on different origins (Authorization header + preflight).
   app.use((req: Request, res: Response, next) => {
+    // Allow camera/mic/screen-capture in iframes (needed for Jitsi embeds)
+    res.setHeader("Permissions-Policy", "camera=*, microphone=*, display-capture=*, fullscreen=*");
     const origin = req.headers.origin as string | undefined;
     if (origin) {
       res.setHeader("Access-Control-Allow-Origin", origin);

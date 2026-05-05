@@ -112,6 +112,14 @@ function loadJitsiExternalAPI(
         TOOLBAR_BUTTONS: [], // Hide built-in toolbar; use our own
       },
     });
+    // After Jitsi creates its internal iframe, grant it camera/mic permissions
+    setTimeout(() => {
+      const jitsiIframe = container.querySelector('iframe');
+      if (jitsiIframe) {
+        jitsiIframe.setAttribute('allow', 'camera *; microphone *; fullscreen *; display-capture *; autoplay *; clipboard-write *');
+      }
+    }, 1500);
+
     onReady(api);
   };
 
