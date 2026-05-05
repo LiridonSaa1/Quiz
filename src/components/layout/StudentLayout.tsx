@@ -177,7 +177,7 @@ export default function StudentLayout({ children }: { children: React.ReactNode 
           </div>
         </div>
       </div>
-      <nav className="flex-1 px-3 py-4 space-y-5 overflow-y-auto">
+      <nav className="flex-1 px-3 py-4 space-y-5 overflow-y-auto scrollbar-none">
         {visibleSections.map((section) => (
           <div key={section.title} className="space-y-0.5">
             <h3 className="px-3 text-[9px] font-bold text-slate-500 uppercase tracking-widest mb-1.5">
