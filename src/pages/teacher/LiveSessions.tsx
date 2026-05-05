@@ -573,6 +573,8 @@ function NewSessionModal({
   const [saving, setSaving] = useState(false);
   const [classes, setClasses] = useState<ClassOption[]>([]);
   const [courseStudentMap, setCourseStudentMap] = useState<Map<string, string[]>>(new Map());
+  const [classStudentMap, setClassStudentMap] = useState<Record<string, string[]>>({});
+  const [resolvingStudents, setResolvingStudents] = useState(false);
   const [selectedClassIds, setSelectedClassIds] = useState<string[]>([]);
   const [userSearch, setUserSearch] = useState('');
   const [searchResults, setSearchResults] = useState<UserOption[]>([]);
@@ -581,6 +583,9 @@ function NewSessionModal({
   const selectedClassStudentIds = Array.from(
     new Set(
       selectedClassIds.flatMap((classId) => {
+        // Use server-resolved IDs if available
+        if (classStudentMap[classId]) return classStudentMap[classId];
+        // Fallback to locally-known class.student_ids → course students
         const found = classes.find((c) => c.id === classId);
         if (!found) return [];
         const directIds = Array.isArray(found.student_ids) ? found.student_ids.map((sid) => String(sid)).filter(Boolean) : [];
@@ -666,6 +671,31 @@ function NewSessionModal({
     const t = setTimeout(() => searchUsers(userSearch), 400);
     return () => clearTimeout(t);
   }, [userSearch, searchUsers]);
+
+  // When class selection changes, resolve student IDs from server
+  useEffect(() => {
+    if (selectedClassIds.length === 0) {
+      setClassStudentMap({});
+      return;
+    }
+    let cancelled = false;
+    const resolve = async () => {
+      setResolvingStudents(true);
+      try {
+        const res = await authFetch(
+          `/api/teacher/classes/students?classIds=${encodeURIComponent(selectedClassIds.join(','))}`,
+        );
+        const json = await res.json().catch(() => null);
+        if (!cancelled && json?.success && json.studentsByClass) {
+          setClassStudentMap((prev) => ({ ...prev, ...json.studentsByClass }));
+        }
+      } catch { /* ignore */ } finally {
+        if (!cancelled) setResolvingStudents(false);
+      }
+    };
+    resolve();
+    return () => { cancelled = true; };
+  }, [selectedClassIds]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -828,8 +858,11 @@ function NewSessionModal({
                   })}
                 </div>
                 {selectedClassIds.length > 0 && (
-                  <p className="mt-2 text-xs text-indigo-600 font-medium">
-                    {selectedClassIds.length} class{selectedClassIds.length > 1 ? 'es' : ''} selected · {selectedClassStudentIds.length} students from classes
+                  <p className="mt-2 text-xs text-indigo-600 font-medium flex items-center gap-1.5">
+                    {resolvingStudents && <Loader2 className="w-3 h-3 animate-spin" />}
+                    {selectedClassIds.length} class{selectedClassIds.length > 1 ? 'es' : ''} selected
+                    {' · '}
+                    {resolvingStudents ? 'counting students…' : `${selectedClassStudentIds.length} student${selectedClassStudentIds.length !== 1 ? 's' : ''} from classes`}
                   </p>
                 )}
               </div>

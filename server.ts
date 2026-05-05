@@ -6414,6 +6414,73 @@ export async function createApp(options: CreateAppOptions = {}) {
     } catch (e: unknown) { res.status(500).json({ error: (e as Error).message }); }
   });
 
+  // Resolve student IDs for a set of class IDs — tries all enrollment sources
+  app.get('/api/teacher/classes/students', async (req, res) => {
+    try {
+      const caller = await assertAuthenticated(req, res);
+      if (!caller) return;
+      if (caller.role !== 'teacher' && caller.role !== 'admin') return res.status(403).json({ error: 'Forbidden' });
+
+      const rawIds = typeof req.query.classIds === 'string' ? req.query.classIds : '';
+      const classIds = rawIds.split(',').map((s: string) => s.trim()).filter(Boolean);
+      if (classIds.length === 0) return res.json({ success: true, studentsByClass: {} });
+
+      const teacherIdCandidates = await getTeacherIdCandidates(caller.userId);
+      const scopedIds = teacherIdCandidates.length > 0 ? teacherIdCandidates : [caller.userId];
+
+      // Fetch the class rows for the requested IDs
+      const { data: classRows, error: classErr } = await supabaseAdmin
+        .from('classes')
+        .select('id, student_ids, course_id, teacher_id')
+        .in('id', classIds);
+      if (classErr) throw classErr;
+
+      // Collect unique course IDs so we can do one query
+      const courseIdSet = new Set<string>();
+      (classRows || []).forEach((cl: any) => {
+        if (cl.course_id) courseIdSet.add(String(cl.course_id));
+      });
+
+      // Fetch course student_ids for those courses (graceful on missing column)
+      const courseStudentMap = new Map<string, string[]>();
+      if (courseIdSet.size > 0) {
+        const { data: courseRows, error: courseErr } = await supabaseAdmin
+          .from('courses')
+          .select('id, student_ids')
+          .in('id', [...courseIdSet]);
+        if (!courseErr) {
+          (courseRows || []).forEach((c: any) => {
+            const ids = Array.isArray(c.student_ids) ? (c.student_ids as unknown[]).map(String).filter(Boolean) : [];
+            if (ids.length > 0) courseStudentMap.set(String(c.id), ids);
+          });
+        }
+      }
+
+      // Fetch all students linked to this teacher via profiles.teacher_id
+      const { data: linkedProfiles } = await supabaseAdmin
+        .from('profiles')
+        .select('id, teacher_id')
+        .in('teacher_id', scopedIds)
+        .eq('role', 'student');
+      const allTeacherStudentIds = (linkedProfiles || []).map((p: any) => String(p.id));
+
+      // Build per-class student ID list
+      const studentsByClass: Record<string, string[]> = {};
+      for (const cl of (classRows || [])) {
+        const classId = String(cl.id);
+        const directIds: string[] = Array.isArray(cl.student_ids)
+          ? (cl.student_ids as unknown[]).map(String).filter(Boolean)
+          : [];
+        const courseIds: string[] = cl.course_id ? (courseStudentMap.get(String(cl.course_id)) || []) : [];
+        const combined = Array.from(new Set([...directIds, ...courseIds]));
+        // If still empty, fall back to all students linked to the teacher
+        studentsByClass[classId] = combined.length > 0 ? combined : allTeacherStudentIds;
+      }
+
+      return res.json({ success: true, studentsByClass });
+    } catch (e: unknown) { res.status(500).json({ error: (e as Error).message }); }
+  });
+
   // List classes (teacher only)
   app.get('/api/teacher/classes', async (req, res) => {
     try {
