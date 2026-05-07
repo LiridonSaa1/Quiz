@@ -1,4 +1,5 @@
-import React, { useEffect, useState, useMemo, useCallback } from 'react';
+import React, { useEffect, useState, useMemo, useCallback, useRef } from 'react';
+import * as XLSX from 'xlsx';
 import { supabase } from '../../supabase';
 import TeacherLayout from '../../components/layout/TeacherLayout';
 import { motion } from 'motion/react';
@@ -256,19 +257,37 @@ export default function TeacherResults() {
     { label: 'Avg time (min)', value: stats.avgDuration || 0, gradient: 'from-sky-500 to-indigo-600', shadow: 'shadow-sky-500/25', icon: Clock },
   ];
 
+  const [exportOpen, setExportOpen] = useState(false);
+  const exportRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (exportRef.current && !exportRef.current.contains(e.target as Node)) setExportOpen(false);
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, []);
+
+  const getExportRows = () => filtered.map((a) => {
+    const st = students[a.studentId];
+    const dur = getDuration(a.startedAt, a.completedAt);
+    return {
+      Student: st?.name || '',
+      Email: st?.email || '',
+      Quiz: quizzes[a.quizId] || '',
+      'Score %': getPct(a),
+      Passed: a.passed ? 'Yes' : 'No',
+      'Correct / Total': `${a.correctAnswers ?? 0} / ${a.totalQuestions ?? 0}`,
+      Duration: dur !== null ? `${dur} min` : '',
+      Completed: a.completedAt ? format(new Date(a.completedAt), 'yyyy-MM-dd HH:mm') : '',
+    };
+  });
+
   const exportCsv = () => {
-    const headers = ['Student', 'Email', 'Quiz', 'Score %', 'Passed', 'Completed'];
-    const lines = filtered.map((a) => {
-      const st = students[a.studentId];
-      return [
-        `"${(st?.name || '').replace(/"/g, '""')}"`,
-        `"${(st?.email || '').replace(/"/g, '""')}"`,
-        `"${(quizzes[a.quizId] || '').replace(/"/g, '""')}"`,
-        String(getPct(a)),
-        a.passed ? 'Yes' : 'No',
-        a.completedAt ? format(new Date(a.completedAt), 'yyyy-MM-dd HH:mm') : '',
-      ].join(',');
-    });
+    const rows = getExportRows();
+    if (!rows.length) { toast.error('No data to export'); return; }
+    const headers = Object.keys(rows[0]);
+    const lines = rows.map(r => headers.map(h => `"${String((r as any)[h] ?? '').replace(/"/g, '""')}"`).join(','));
     const blob = new Blob([[headers.join(','), ...lines].join('\n')], { type: 'text/csv;charset=utf-8' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -277,6 +296,42 @@ export default function TeacherResults() {
     a.click();
     URL.revokeObjectURL(url);
     toast.success('Exported CSV');
+    setExportOpen(false);
+  };
+
+  const exportExcel = () => {
+    const rows = getExportRows();
+    if (!rows.length) { toast.error('No data to export'); return; }
+    const ws = XLSX.utils.json_to_sheet(rows);
+    const colWidths = Object.keys(rows[0]).map(k => ({ wch: Math.max(k.length, 14) }));
+    ws['!cols'] = colWidths;
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Quiz Results');
+    XLSX.writeFile(wb, `quiz-results-${format(new Date(), 'yyyy-MM-dd')}.xlsx`);
+    toast.success('Exported Excel');
+    setExportOpen(false);
+  };
+
+  const exportPdf = () => {
+    const rows = getExportRows();
+    if (!rows.length) { toast.error('No data to export'); return; }
+    const html = `<!DOCTYPE html><html><head><meta charset="utf-8"/><title>Quiz Results</title>
+      <style>body{font-family:Arial,sans-serif;font-size:12px;padding:20px;}
+      h1{font-size:18px;margin-bottom:16px;}
+      table{width:100%;border-collapse:collapse;}
+      th{background:#4f46e5;color:#fff;padding:8px 10px;text-align:left;font-size:11px;}
+      td{padding:7px 10px;border-bottom:1px solid #e2e8f0;}
+      tr:nth-child(even) td{background:#f8fafc;}
+      .pass{color:#16a34a;font-weight:bold;} .fail{color:#dc2626;font-weight:bold;}
+      </style></head><body>
+      <h1>Quiz Results — ${format(new Date(), 'yyyy-MM-dd')}</h1>
+      <table><thead><tr>${Object.keys(rows[0]).map(h => `<th>${h}</th>`).join('')}</tr></thead>
+      <tbody>${rows.map(r => `<tr>${Object.entries(r).map(([k, v]) =>
+        `<td${k === 'Passed' ? ` class="${v === 'Yes' ? 'pass' : 'fail'}"` : ''}>${v}</td>`
+      ).join('')}</tr>`).join('')}</tbody></table></body></html>`;
+    const w = window.open('', '_blank');
+    if (w) { w.document.write(html); w.document.close(); w.print(); }
+    setExportOpen(false);
   };
 
   return (
@@ -289,20 +344,32 @@ export default function TeacherResults() {
         statsGridClassName="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-4"
         stats={statItems}
         action={
-          <motion.button
-            type="button"
-            onClick={exportCsv}
-            whileHover={{ scale: 1.04, y: -2 }}
-            whileTap={{ scale: 0.97 }}
-            className="inline-flex items-center gap-2 px-5 py-3 rounded-2xl font-bold text-sm text-white shrink-0 transition-all"
-            style={{
-              background: 'linear-gradient(135deg, #818cf8 0%, #a78bfa 100%)',
-              boxShadow: '0 8px 32px rgba(139,92,246,0.45), 0 2px 8px rgba(0,0,0,0.15)',
-            }}
-          >
-            <Download className="w-4 h-4" />
-            Export CSV
-          </motion.button>
+          <div ref={exportRef} className="relative">
+            <motion.button
+              type="button"
+              onClick={() => setExportOpen(v => !v)}
+              whileHover={{ scale: 1.04, y: -2 }}
+              whileTap={{ scale: 0.97 }}
+              className="inline-flex items-center gap-2 px-5 py-3 rounded-2xl font-bold text-sm text-white shrink-0 transition-all"
+              style={{ background: 'linear-gradient(135deg, #818cf8 0%, #a78bfa 100%)', boxShadow: '0 8px 32px rgba(139,92,246,0.45), 0 2px 8px rgba(0,0,0,0.15)' }}
+            >
+              <Download className="w-4 h-4" />
+              Export <ChevronDown className="w-3.5 h-3.5" />
+            </motion.button>
+            {exportOpen && (
+              <div className="absolute right-0 top-full mt-2 w-48 bg-white rounded-2xl shadow-2xl border border-slate-100 overflow-hidden z-50">
+                <button onClick={exportCsv} className="flex items-center gap-2.5 w-full px-4 py-3 text-sm font-semibold text-slate-700 hover:bg-slate-50 transition">
+                  <FileText className="w-4 h-4 text-emerald-500" /> CSV
+                </button>
+                <button onClick={exportExcel} className="flex items-center gap-2.5 w-full px-4 py-3 text-sm font-semibold text-slate-700 hover:bg-slate-50 transition border-t border-slate-100">
+                  <BarChart3 className="w-4 h-4 text-indigo-500" /> Excel (.xlsx)
+                </button>
+                <button onClick={exportPdf} className="flex items-center gap-2.5 w-full px-4 py-3 text-sm font-semibold text-slate-700 hover:bg-slate-50 transition border-t border-slate-100">
+                  <Download className="w-4 h-4 text-red-500" /> PDF (Print)
+                </button>
+              </div>
+            )}
+          </div>
         }
         filterBar={
           <AdminListFilterBar>

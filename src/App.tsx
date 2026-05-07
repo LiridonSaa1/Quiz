@@ -59,6 +59,8 @@ import AdminDomain from './pages/admin/Domain';
 import AdminRoles from './pages/admin/Roles';
 import AdminProfile from './pages/admin/Profile';
 import AdminSecurityPage from './pages/admin/Security';
+import JoinClass from './pages/student/JoinClass';
+import Badges from './pages/student/Badges';
 import StudentDashboard from './pages/student/Dashboard';
 import StudentCourses from './pages/student/Courses';
 import StudentCourseDetail from './pages/student/CourseDetail';
@@ -446,6 +448,8 @@ function StudentRoutes({ features }: { features: FeatureFlags }) {
       <Route path="/live-sessions" element={features.liveSessionsEnabled ? <StudentLiveClasses /> : <Navigate to="/not-found" replace />} />
       <Route path="/live-sessions/:id" element={features.liveSessionsEnabled ? <StudentLiveSessionJoin /> : <Navigate to="/not-found" replace />} />
       <Route path="/live-quiz" element={<RealtimeQuizPlay />} />
+      <Route path="/join-class" element={<JoinClass />} />
+      <Route path="/badges" element={<Badges />} />
       <Route path="/exams" element={<StudentExams />} />
       <Route path="/quiz/:quizId" element={<QuizTaking />} />
       <Route path="/results/:attemptId" element={<QuizResults />} />

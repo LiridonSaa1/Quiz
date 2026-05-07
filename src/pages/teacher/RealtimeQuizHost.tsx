@@ -34,6 +34,8 @@ export default function RealtimeQuizHost() {
   const [selectedQuizId, setSelectedQuizId] = useState('');
   const [timerPerQuestion, setTimerPerQuestion] = useState(30);
   const [starting, setStarting] = useState(false);
+  const [teamsEnabled, setTeamsEnabled] = useState(false);
+  const [teamCount, setTeamCount] = useState(2);
 
   const [view, setView] = useState<HostView>('setup');
   const [sessionId, setSessionId] = useState('');
@@ -134,7 +136,7 @@ export default function RealtimeQuizHost() {
       const res = await authFetch('/api/teacher/realtime-quiz/start', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ quizId: selectedQuizId, timerPerQuestion }),
+        body: JSON.stringify({ quizId: selectedQuizId, timerPerQuestion, teamsEnabled, teamCount }),
       });
       const json = await res.json();
       if (!res.ok || !json.success) { toast.error(json.error || 'Failed to start.'); return; }
@@ -223,7 +225,7 @@ export default function RealtimeQuizHost() {
                   )}
                 </div>
 
-                <div className="mb-8">
+                <div className="mb-5">
                   <label className="mb-2 block text-sm font-semibold text-slate-700">
                     Timer per question: <span className="text-violet-600 font-bold">{timerPerQuestion}s</span>
                   </label>
@@ -233,6 +235,52 @@ export default function RealtimeQuizHost() {
                   <div className="mt-1 flex justify-between text-xs text-slate-400">
                     <span>10s</span><span>60s</span><span>120s</span>
                   </div>
+                </div>
+
+                <div className="mb-8 rounded-2xl border border-violet-100 bg-violet-50 p-4">
+                  <div className="flex items-center justify-between mb-3">
+                    <div>
+                      <p className="text-sm font-semibold text-slate-700">Team vs Team Mode</p>
+                      <p className="text-xs text-slate-500 mt-0.5">Split students into competing teams automatically</p>
+                    </div>
+                    <button type="button"
+                      onClick={() => setTeamsEnabled(v => !v)}
+                      className={cn(
+                        'relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200',
+                        teamsEnabled ? 'bg-violet-600' : 'bg-slate-200'
+                      )}
+                    >
+                      <span className={cn(
+                        'pointer-events-none inline-block h-5 w-5 rounded-full bg-white shadow ring-0 transition-transform duration-200',
+                        teamsEnabled ? 'translate-x-5' : 'translate-x-0'
+                      )} />
+                    </button>
+                  </div>
+                  {teamsEnabled && (
+                    <div>
+                      <label className="mb-1.5 block text-xs font-semibold text-slate-600">
+                        Number of teams: <span className="text-violet-600 font-bold">{teamCount}</span>
+                      </label>
+                      <div className="flex gap-2">
+                        {[2, 3, 4, 5, 6].map(n => (
+                          <button key={n} type="button"
+                            onClick={() => setTeamCount(n)}
+                            className={cn(
+                              'flex-1 py-2 rounded-xl text-sm font-bold border-2 transition-all',
+                              teamCount === n ? 'border-violet-500 bg-violet-600 text-white' : 'border-slate-200 bg-white text-slate-600 hover:border-violet-300'
+                            )}
+                          >{n}</button>
+                        ))}
+                      </div>
+                      <div className="mt-2 flex gap-2 flex-wrap">
+                        {['Red','Blue','Green','Yellow','Purple','Orange'].slice(0, teamCount).map(t => (
+                          <span key={t} className="rounded-full bg-white px-3 py-1 text-xs font-bold text-slate-700 border border-slate-200 shadow-sm">
+                            Team {t}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  )}
                 </div>
 
                 <button

@@ -1,5 +1,6 @@
 import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
+import { useVoiceReading } from '../../hooks/useVoiceReading';
 import { supabase } from '../../supabase';
 import { Quiz, Question, QuizAttempt } from '../../types';
 import { 
@@ -9,7 +10,9 @@ import {
   Send, 
   AlertCircle,
   CheckCircle2,
-  XCircle
+  XCircle,
+  Volume2,
+  VolumeX,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { cn } from '../../lib/utils';
@@ -20,6 +23,26 @@ import { isDirectVideoFileUrl, isLikelyVideoLink, toEmbedVideoUrl } from '../../
 import { questionBodyFromRow } from '../../lib/questionText';
 import { fetchStudentAccessibleQuizById } from '../../lib/studentQuizAccess';
 import { authFetch } from '../../lib/apiUrl';
+
+function VoiceButton({ text }: { text: string }) {
+  const { isReading, isSupported, toggle } = useVoiceReading();
+  if (!isSupported) return null;
+  return (
+    <button
+      type="button"
+      onClick={() => toggle(text)}
+      title={isReading ? 'Stop reading' : 'Read question aloud'}
+      className={cn(
+        'shrink-0 flex items-center justify-center w-10 h-10 rounded-xl border-2 transition-all mt-1',
+        isReading
+          ? 'border-indigo-400 bg-indigo-50 text-indigo-600 shadow-md shadow-indigo-100 animate-pulse'
+          : 'border-slate-200 bg-white text-slate-400 hover:border-indigo-300 hover:text-indigo-500'
+      )}
+    >
+      {isReading ? <Volume2 className="w-4 h-4" /> : <Volume2 className="w-4 h-4" />}
+    </button>
+  );
+}
 
 function QuizMediaDisplay({ url, mediaType }: { url: string; mediaType?: string }) {
   const treatAsVideo = mediaType === 'video' || (mediaType !== 'image' && isLikelyVideoLink(url));
@@ -888,7 +911,10 @@ export default function QuizTaking() {
                     {currentQuestion.text}
                   </div>
                 ) : (
-                  <h2 className="text-2xl font-bold text-slate-900 leading-tight">{currentQuestion.text}</h2>
+                  <div className="flex items-start gap-3">
+                    <h2 className="flex-1 text-2xl font-bold text-slate-900 leading-tight">{currentQuestion.text}</h2>
+                    <VoiceButton text={currentQuestion.text} />
+                  </div>
                 )}
 
                 {/* Options or answer — skipped for display-only instruction blocks */}

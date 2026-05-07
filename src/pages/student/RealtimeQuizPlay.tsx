@@ -6,10 +6,11 @@ import { toast } from 'sonner';
 import { motion, AnimatePresence } from 'motion/react';
 import {
   Zap, Trophy, Clock, CheckCircle2, XCircle, Crown,
-  Loader2, ChevronLeft, Radio, Users, Star,
+  Loader2, ChevronLeft, Radio, Users, Star, Volume2,
 } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import StudentLayout from '../../components/layout/StudentLayout';
+import { useVoiceReading } from '../../hooks/useVoiceReading';
 
 interface CurrentQuestion {
   index: number; body: string; options: string[];
@@ -51,6 +52,9 @@ export default function RealtimeQuizPlay() {
   const [feedbackResult, setFeedbackResult] = useState<{ isCorrect: boolean; pointsEarned: number; correctAnswer: string } | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [questionKey, setQuestionKey] = useState(0);
+  const [teamName, setTeamName] = useState<string | null>(null);
+  const [teamsEnabled, setTeamsEnabledState] = useState(false);
+  const voice = useVoiceReading();
 
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const realtimeRef = useRef<ReturnType<typeof supabase.channel> | null>(null);
@@ -172,6 +176,8 @@ export default function RealtimeQuizPlay() {
       setSessionState({ sessionId: json.sessionId, quizTitle: json.quizTitle, status: json.status, totalQuestions: json.totalQuestions });
       setScore(json.score ?? 0);
       if (json.submittedAnswers) setSubmittedAnswers(json.submittedAnswers);
+      if (json.teamName) setTeamName(json.teamName);
+      if (json.teamsEnabled) setTeamsEnabledState(json.teamsEnabled);
       subscribeToSession(json.sessionId);
 
       if (json.status === 'waiting') {
@@ -287,6 +293,12 @@ export default function RealtimeQuizPlay() {
                   <p className="text-violet-300 text-sm">Playing as</p>
                   <p className="text-xl font-bold text-white">{displayName}</p>
                 </div>
+                {teamsEnabled && teamName && (
+                  <div className="mt-3 rounded-2xl bg-white/10 px-5 py-3">
+                    <p className="text-xs text-violet-300 mb-1">Your Team</p>
+                    <p className="text-lg font-black text-white">🛡 Team {teamName}</p>
+                  </div>
+                )}
                 <div className="mt-6 flex items-center justify-center gap-2 text-emerald-300">
                   <span className="h-2 w-2 rounded-full bg-emerald-400 animate-pulse" />
                   <span className="text-sm font-medium">Waiting for teacher to start…</span>
@@ -326,9 +338,30 @@ export default function RealtimeQuizPlay() {
                 </span>
               </div>
 
+              {teamsEnabled && teamName && (
+                <div className="mb-3 flex items-center justify-center">
+                  <span className="rounded-full bg-white/20 px-4 py-1.5 text-sm font-bold text-white">
+                    🛡 Team {teamName}
+                  </span>
+                </div>
+              )}
+
               {/* Question body */}
-              <div className="mb-6 rounded-3xl bg-white/10 p-6 backdrop-blur-sm border border-white/10">
-                <p className="text-xl font-bold text-white leading-relaxed text-center">{currentQuestion.body}</p>
+              <div className="mb-6 rounded-3xl bg-white/10 p-6 backdrop-blur-sm border border-white/10 relative">
+                <p className="text-xl font-bold text-white leading-relaxed text-center pr-10">{currentQuestion.body}</p>
+                {voice.isSupported && (
+                  <button
+                    type="button"
+                    onClick={() => voice.toggle(currentQuestion.body)}
+                    className={cn(
+                      'absolute top-3 right-3 flex h-9 w-9 items-center justify-center rounded-xl transition-all',
+                      voice.isReading ? 'bg-violet-400 text-white animate-pulse' : 'bg-white/20 text-white/70 hover:bg-white/30'
+                    )}
+                    title={voice.isReading ? 'Stop reading' : 'Read question'}
+                  >
+                    <Volume2 className="h-4 w-4" />
+                  </button>
+                )}
               </div>
 
               {/* Options */}

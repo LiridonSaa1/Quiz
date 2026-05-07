@@ -14,6 +14,7 @@ import {
   School, Plus, Search, Filter, Users, BookOpen, CalendarDays,
   MoreHorizontal, X, Pencil, Trash2, Eye,
   Clock, CheckCircle2, AlertCircle, Archive, TrendingUp,
+  Link2, Copy, Check,
 } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import StyledSelect from '../../components/ui/StyledSelect';
@@ -88,6 +89,7 @@ export default function TeacherClasses() {
   const [submitting, setSubmitting] = useState(false);
   const [viewClass, setViewClass] = useState<ClassRecord | null>(null);
   const [activeMenu, setActiveMenu] = useState<string | null>(null);
+  const [copiedInvite, setCopiedInvite] = useState<string | null>(null);
 
   useEffect(() => {
     const init = async () => {
@@ -405,6 +407,25 @@ export default function TeacherClasses() {
                           title="View details"
                         >
                           <Eye className="w-4 h-4" />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={async () => {
+                            try {
+                              const res = await authFetch(`/api/teacher/classes/${cls.id}/invite-code`);
+                              const json = await res.json();
+                              if (!res.ok || !json.success) { toast.error('Could not get invite link'); return; }
+                              const url = `${window.location.origin}/student/join-class?code=${json.inviteCode}`;
+                              await navigator.clipboard.writeText(url);
+                              setCopiedInvite(cls.id);
+                              toast.success('Invite link copied!');
+                              setTimeout(() => setCopiedInvite(null), 2500);
+                            } catch { toast.error('Failed to copy link'); }
+                          }}
+                          className="p-2 rounded-lg text-slate-400 hover:text-emerald-600 hover:bg-emerald-50 transition-all"
+                          title="Copy invite link"
+                        >
+                          {copiedInvite === cls.id ? <Check className="w-4 h-4 text-emerald-500" /> : <Link2 className="w-4 h-4" />}
                         </button>
                         <button
                           type="button"

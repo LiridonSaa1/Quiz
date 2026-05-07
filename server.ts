@@ -8257,6 +8257,11 @@ export async function createApp(options: CreateAppOptions = {}) {
     participants: Map<string, RQParticipant>;
     createdAt: number;
     autoNextTimer?: ReturnType<typeof setTimeout>;
+    teamsEnabled: boolean;
+    teamCount: number;
+    teamNames: string[];
+    participantTeams: Record<string, string>;
+    teamScores: Record<string, number>;
   }
 
   const rqSessions = new Map<string, RQSession>();
@@ -8281,6 +8286,50 @@ export async function createApp(options: CreateAppOptions = {}) {
     [...session.participants.values()]
       .sort((a, b) => b.score - a.score)
       .map((p, i) => ({ rank: i + 1, userId: p.userId, displayName: p.displayName, score: p.score }));
+
+  // ─── ACHIEVEMENT BADGE SYSTEM ─────────────────────────────────────────────────
+  interface RQBadgeDef { id: string; name: string; description: string; icon: string; color: string; rarity: string; }
+  const BADGE_DEFS: RQBadgeDef[] = [
+    { id: 'first_quiz',     name: 'Quiz Taker',         description: 'Completed your first quiz',                icon: '🎯', color: 'from-blue-400 to-blue-600',     rarity: 'common' },
+    { id: 'perfect_score',  name: 'Perfectionist',      description: 'Got 100% on a quiz',                       icon: '⭐', color: 'from-amber-400 to-yellow-500',  rarity: 'rare' },
+    { id: 'speed_demon',    name: 'Speed Demon',        description: 'Answered a live question in under 5s',     icon: '⚡', color: 'from-violet-500 to-purple-600', rarity: 'rare' },
+    { id: 'live_player',    name: 'Live Participant',   description: 'Joined a live quiz session',               icon: '📡', color: 'from-emerald-400 to-teal-500',  rarity: 'common' },
+    { id: 'champion',       name: 'Champion',           description: 'Finished #1 in a live quiz',               icon: '🏆', color: 'from-amber-500 to-orange-500',  rarity: 'epic' },
+    { id: 'quiz_marathon',  name: 'Marathon Runner',    description: 'Completed 5 quizzes',                      icon: '🏃', color: 'from-sky-400 to-indigo-500',    rarity: 'uncommon' },
+    { id: 'high_achiever',  name: 'High Achiever',      description: 'Scored 90%+ on a quiz',                   icon: '🌟', color: 'from-rose-400 to-pink-500',     rarity: 'uncommon' },
+    { id: 'consistent',     name: 'Consistent Learner', description: 'Passed 3 quizzes in a row',               icon: '🔥', color: 'from-orange-400 to-red-500',    rarity: 'uncommon' },
+  ];
+  const studentBadges      = new Map<string, Set<string>>();
+  const studentQuizCount   = new Map<string, number>();
+  const studentPassStreak  = new Map<string, number>();
+
+  const awardBadge = (userId: string, badgeId: string) => {
+    if (!studentBadges.has(userId)) studentBadges.set(userId, new Set());
+    studentBadges.get(userId)!.add(badgeId);
+  };
+
+  const checkAndAwardBadges = (
+    userId: string,
+    opts: { score?: number; total?: number; isLive?: boolean; rank?: number; answerTimeMs?: number }
+  ) => {
+    const count = (studentQuizCount.get(userId) ?? 0) + 1;
+    studentQuizCount.set(userId, count);
+    if (count === 1) awardBadge(userId, 'first_quiz');
+    if (count >= 5)  awardBadge(userId, 'quiz_marathon');
+    const pct = opts.total && opts.total > 0 ? (opts.score ?? 0) / opts.total * 100 : 0;
+    if (pct >= 90)  awardBadge(userId, 'high_achiever');
+    if (pct >= 100) awardBadge(userId, 'perfect_score');
+    if (opts.isLive) {
+      awardBadge(userId, 'live_player');
+      if (opts.rank === 1) awardBadge(userId, 'champion');
+      if (opts.answerTimeMs !== undefined && opts.answerTimeMs < 5000) awardBadge(userId, 'speed_demon');
+    }
+    const prevStreak = studentPassStreak.get(userId) ?? 0;
+    const newStreak = pct >= 50 ? prevStreak + 1 : 0;
+    studentPassStreak.set(userId, newStreak);
+    if (newStreak >= 3) awardBadge(userId, 'consistent');
+  };
+  // ─── END ACHIEVEMENT BADGE SYSTEM ────────────────────────────────────────────
 
   const rqSessionPublic = (session: RQSession) => ({
     id: session.id,
@@ -8389,6 +8438,13 @@ export async function createApp(options: CreateAppOptions = {}) {
       const sessionId = `rqs_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
       const pin = generatePin();
 
+      const { teamsEnabled, teamCount } = req.body as { quizId?: string; timerPerQuestion?: number; teamsEnabled?: boolean; teamCount?: number };
+      const tCount = Math.min(6, Math.max(2, Number(teamCount) || 2));
+      const defaultTeamNames = ['Red', 'Blue', 'Green', 'Yellow', 'Purple', 'Orange'];
+      const teamNames = defaultTeamNames.slice(0, tCount);
+      const teamScores: Record<string, number> = {};
+      teamNames.forEach(n => { teamScores[n] = 0; });
+
       const session: RQSession = {
         id: sessionId,
         quizId,
@@ -8401,6 +8457,11 @@ export async function createApp(options: CreateAppOptions = {}) {
         questions: rqQuestions,
         participants: new Map(),
         createdAt: Date.now(),
+        teamsEnabled: Boolean(teamsEnabled),
+        teamCount: tCount,
+        teamNames,
+        participantTeams: {},
+        teamScores,
       };
       rqSessions.set(sessionId, session);
       rqPins.set(pin, sessionId);
@@ -8561,6 +8622,14 @@ export async function createApp(options: CreateAppOptions = {}) {
         participant.displayName = name;
       }
 
+      if (session.teamsEnabled && !session.participantTeams[caller.userId]) {
+        const teamMemberCounts = session.teamNames.map(t =>
+          Object.values(session.participantTeams).filter(v => v === t).length
+        );
+        const minIdx = teamMemberCounts.indexOf(Math.min(...teamMemberCounts));
+        session.participantTeams[caller.userId] = session.teamNames[minIdx];
+      }
+
       const currentQ = rqCurrentQuestionForStudent(session);
       res.json({
         success: true,
@@ -8573,6 +8642,8 @@ export async function createApp(options: CreateAppOptions = {}) {
           Object.entries(participant.answers).map(([k, v]) => [k, v.optionText])
         ),
         score: participant.score,
+        teamName: session.teamsEnabled ? (session.participantTeams[caller.userId] ?? null) : null,
+        teamsEnabled: session.teamsEnabled,
       });
     } catch (err) {
       res.status(500).json({ error: 'Failed to join session.' });
@@ -8658,10 +8729,29 @@ export async function createApp(options: CreateAppOptions = {}) {
       };
       participant.score += pointsEarned;
 
-      // Broadcast leaderboard update
-      await rqBroadcast(session.id, 'leaderboard_updated', { leaderboard: rqLeaderboard(session) });
+      if (session.teamsEnabled && session.participantTeams[caller.userId]) {
+        const team = session.participantTeams[caller.userId];
+        session.teamScores[team] = (session.teamScores[team] ?? 0) + pointsEarned;
+      }
 
-      res.json({ success: true, isCorrect, pointsEarned, correctAnswer: q.correctAnswer, score: participant.score });
+      const answeredMs = session.questionStartedAt ? Date.now() - session.questionStartedAt : 99999;
+      checkAndAwardBadges(caller.userId, { isLive: true, answerTimeMs: answeredMs });
+
+      const teamLeaderboard = session.teamsEnabled
+        ? session.teamNames.map(t => ({ team: t, score: session.teamScores[t] ?? 0 })).sort((a, b) => b.score - a.score)
+        : null;
+
+      await rqBroadcast(session.id, 'leaderboard_updated', {
+        leaderboard: rqLeaderboard(session),
+        teamLeaderboard,
+        teamScores: session.teamScores,
+      });
+
+      res.json({
+        success: true, isCorrect, pointsEarned, correctAnswer: q.correctAnswer, score: participant.score,
+        teamScore: session.teamsEnabled && session.participantTeams[caller.userId]
+          ? session.teamScores[session.participantTeams[caller.userId]] : null,
+      });
     } catch (err) {
       res.status(500).json({ error: 'Failed to submit answer.' });
     }
@@ -8676,6 +8766,86 @@ export async function createApp(options: CreateAppOptions = {}) {
     } catch (err) {
       res.status(500).json({ error: 'Failed to get leaderboard.' });
     }
+  });
+
+  // ─── INVITE CODE SYSTEM ─────────────────────────────────────────────────────
+  const classInviteCodes = new Map<string, string>();   // code → classId
+  const classIdToCodes   = new Map<string, string>();   // classId → code
+
+  const generateInviteCode = (classId: string): string => {
+    if (classIdToCodes.has(classId)) return classIdToCodes.get(classId)!;
+    const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+    let code = '';
+    do { code = Array.from({ length: 8 }, () => chars[Math.floor(Math.random() * chars.length)]).join(''); }
+    while (classInviteCodes.has(code));
+    classInviteCodes.set(code, classId);
+    classIdToCodes.set(classId, code);
+    return code;
+  };
+
+  app.get('/api/teacher/classes/:classId/invite-code', async (req: Request, res: Response) => {
+    try {
+      const caller = await assertAuthenticated(req, res);
+      if (!caller) return;
+      const { classId } = req.params;
+      const code = generateInviteCode(classId);
+      const domain = process.env.REPLIT_DEV_DOMAIN || '';
+      const link = domain ? `https://${domain}/student/join-class?code=${code}` : `/student/join-class?code=${code}`;
+      res.json({ success: true, code, link });
+    } catch { res.status(500).json({ error: 'Failed to generate invite code.' }); }
+  });
+
+  app.get('/api/classes/invite/:code', async (req: Request, res: Response) => {
+    try {
+      const caller = await assertAuthenticated(req, res);
+      if (!caller) return;
+      const code = String(req.params.code).toUpperCase().trim();
+      const classId = classInviteCodes.get(code);
+      if (!classId) return res.status(404).json({ error: 'Invalid or expired invite code.' });
+      const { data: cls, error: clsErr } = await supabaseAdmin.from('classes').select('*').eq('id', classId).maybeSingle();
+      if (clsErr || !cls) return res.status(404).json({ error: 'Class not found.' });
+      const studentIds = Array.isArray((cls as any).student_ids) ? (cls as any).student_ids : [];
+      let courseName: string | undefined;
+      if ((cls as any).course_id) {
+        const { data: course } = await supabaseAdmin.from('courses').select('title').eq('id', (cls as any).course_id).maybeSingle();
+        courseName = (course as any)?.title;
+      }
+      res.json({ success: true, class: {
+        id: (cls as any).id, name: (cls as any).name, description: (cls as any).description,
+        status: (cls as any).status, capacity: (cls as any).capacity ?? 30,
+        studentCount: studentIds.length, courseName,
+      }});
+    } catch { res.status(500).json({ error: 'Failed to look up class.' }); }
+  });
+
+  app.post('/api/student/classes/join-by-code', async (req: Request, res: Response) => {
+    try {
+      const caller = await assertAuthenticated(req, res);
+      if (!caller) return;
+      const { code } = req.body as { code?: string };
+      if (!code) return res.status(400).json({ error: 'Code is required.' });
+      const classId = classInviteCodes.get(String(code).toUpperCase().trim());
+      if (!classId) return res.status(404).json({ error: 'Invalid or expired invite code.' });
+      const { data: cls, error: clsErr } = await supabaseAdmin.from('classes').select('*').eq('id', classId).maybeSingle();
+      if (clsErr || !cls) return res.status(404).json({ error: 'Class not found.' });
+      const currentIds: string[] = Array.isArray((cls as any).student_ids) ? (cls as any).student_ids : [];
+      if (currentIds.includes(caller.userId)) return res.json({ success: true, message: 'Already enrolled.' });
+      const { error: updateErr } = await supabaseAdmin.from('classes').update({ student_ids: [...currentIds, caller.userId] }).eq('id', classId);
+      if (updateErr) throw updateErr;
+      res.json({ success: true, message: 'Joined class successfully.' });
+    } catch { res.status(500).json({ error: 'Failed to join class.' }); }
+  });
+  // ─── END INVITE CODE SYSTEM ──────────────────────────────────────────────────
+
+  // Student: get earned badges
+  app.get('/api/student/badges', async (req: Request, res: Response) => {
+    try {
+      const caller = await assertAuthenticated(req, res);
+      if (!caller) return;
+      const earned = studentBadges.get(caller.userId) ?? new Set<string>();
+      const badges = BADGE_DEFS.map(b => ({ ...b, earned: earned.has(b.id), earnedAt: earned.has(b.id) ? new Date().toISOString() : null }));
+      res.json({ success: true, badges, earnedCount: earned.size, totalCount: BADGE_DEFS.length });
+    } catch { res.status(500).json({ error: 'Failed to get badges.' }); }
   });
 
   // ─── END REAL-TIME LIVE QUIZ ──────────────────────────────────────────────────
