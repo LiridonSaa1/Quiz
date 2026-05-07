@@ -454,11 +454,9 @@ export default function RealtimeQuizPlay() {
                 <h2 className={cn('text-4xl font-black', feedbackResult.isCorrect ? 'text-emerald-300' : 'text-red-300')}>
                   {feedbackResult.isCorrect ? 'Correct!' : timeLeft === 0 ? "Time's Up!" : 'Wrong!'}
                 </h2>
-                {feedbackResult.isCorrect ? (
+                {feedbackResult.isCorrect && (
                   <p className="mt-3 text-2xl font-bold text-white">+{feedbackResult.pointsEarned} points</p>
-                ) : feedbackResult.correctAnswer ? (
-                  <p className="mt-3 text-violet-200 text-sm">Correct answer: <strong className="text-white">{feedbackResult.correctAnswer}</strong></p>
-                ) : null}
+                )}
                 <div className="mt-6 rounded-2xl bg-white/10 px-6 py-4">
                   <p className="text-sm text-violet-300">Total Score</p>
                   <p className="text-3xl font-black text-white">{score}</p>
