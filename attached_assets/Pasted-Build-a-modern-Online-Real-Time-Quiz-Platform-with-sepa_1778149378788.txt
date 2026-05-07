@@ -1,0 +1,147 @@
+Build a modern Online Real-Time Quiz Platform with separate roles for Admin, Teacher, and Student.
+
+The system must support:
+
+AUTHENTICATION
+- Login/Register system
+- JWT/Auth session
+- Teachers can create classes
+- Students can join classes using invite code or invite link
+- Each student belongs to one or multiple classes
+- Role-based permissions
+
+REAL-TIME QUIZ SYSTEM
+- Teacher creates quizzes with:
+  - Multiple choice questions
+  - Correct answers
+  - Timer per question
+  - Total quiz timer
+  - Points per question
+- Teacher can select a class and start the quiz LIVE
+- Students inside that class receive the quiz instantly in real time
+- Use WebSockets / Socket.IO / Supabase Realtime / Firebase Realtime
+
+LIVE QUIZ FLOW
+- When teacher clicks “Start Quiz”:
+  - All connected students automatically enter the quiz session
+  - Quiz starts simultaneously for everyone
+  - Each question has:
+    - countdown timer
+    - progress bar
+    - auto-next when timer ends
+- If a student refreshes the page:
+  - DO NOT send them back to question 1
+  - Restore them to the exact current question
+  - Restore remaining timer
+  - Restore submitted answers
+- Quiz progress must persist in database in real time
+
+IMPORTANT DATABASE LOGIC
+Do NOT save live progress directly in quizzes table.
+
+Create separate tables for:
+- realtime_quiz_sessions
+- realtime_quiz_participants
+- realtime_quiz_answers
+- realtime_quiz_results
+
+Store:
+- current_question_index
+- current_timer
+- student_score
+- submitted_answers
+- joined_at
+- finished_at
+- connection_status
+
+Each student must have isolated progress tracking.
+
+ANTI-CHEAT FEATURES
+- Prevent answering after timer ends
+- Prevent duplicate submissions
+- Lock previous questions after next question starts
+- Detect disconnected users
+- Auto-submit unanswered questions when timer ends
+
+TEACHER LIVE DASHBOARD
+Teacher can see in real time:
+- who joined
+- who disconnected
+- current question
+- leaderboard
+- live scores
+- quiz progress
+- active participants count
+
+STUDENT UI
+- Modern clean UI
+- Fullscreen quiz mode
+- Mobile responsive
+- Real-time timer animation
+- Progress indicator
+- Instant answer feedback (optional)
+
+ADMIN PANEL
+- Manage users
+- Manage classes
+- Manage quizzes
+- Analytics dashboard
+- Quiz history
+- Student performance reports
+
+TECH STACK
+Frontend:
+- Next.js / React
+- TailwindCSS
+- Zustand or Redux
+- Socket.IO client
+
+Backend:
+- Node.js + Express OR Laravel API
+- Socket.IO server
+- PostgreSQL / Supabase
+
+ADDITIONAL FEATURES
+- Real-time leaderboard
+- Quiz PIN system like Kahoot
+- Randomized questions
+- Randomized answers
+- Rejoin active quiz session
+- Auto-save every answer
+- Quiz history per student
+- Export results PDF/Excel
+- Dark mode
+
+UI/UX
+Make the design modern like:
+- Kahoot
+- Quizizz
+- Mentimeter
+
+Use:
+- smooth animations
+- glassmorphism cards
+- modern charts
+- gradient UI
+- beautiful dashboard
+- responsive tables
+- loading skeletons
+- toast notifications
+
+ARCHITECTURE REQUIREMENTS
+- Use scalable architecture
+- Use reusable components
+- Separate realtime state from normal quiz data
+- Optimize websocket events
+- Prevent race conditions
+- Use server-side validation
+- Use secure APIs
+
+BONUS FEATURES
+- AI-generated quizzes
+- Voice reading questions
+- Live chat during quiz
+- Team vs Team mode
+- Quiz replay
+- Ranking system
+- Achievement badges
