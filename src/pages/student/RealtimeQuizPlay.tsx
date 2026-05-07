@@ -63,6 +63,11 @@ export default function RealtimeQuizPlay() {
   const realtimeRef = useRef<ReturnType<typeof supabase.channel> | null>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const autoSubmitRef = useRef(false);
+  // Tracks which question index is currently displayed so pollState
+  // can skip timer/animation resets when the question hasn't changed.
+  const currentQIdxRef = useRef<number | null>(null);
+
+  useEffect(() => { currentQIdxRef.current = currentQuestion?.index ?? null; }, [currentQuestion]);
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
@@ -133,14 +138,25 @@ export default function RealtimeQuizPlay() {
       if (json.status === 'ended') {
         if (json.leaderboard) setLeaderboard(json.leaderboard);
         setView('ended');
+        if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; }
+        if (timerRef.current) { clearInterval(timerRef.current); timerRef.current = null; }
       } else if (json.status === 'active' && json.currentQuestion) {
         const q = json.currentQuestion as CurrentQuestion;
-        setCurrentQuestion({ ...q, options: (q.options ?? []).map(normalizeOption) });
-        setQuestionKey(prev => prev + 1);
-        startTimer(q.remainingSeconds ?? q.timerSeconds);
         const alreadyAnswered = json.submittedAnswers?.[q.index] !== undefined;
-        setSelectedOption(alreadyAnswered ? json.submittedAnswers[q.index] : null);
-        if (!alreadyAnswered) setView('question');
+        // Only reset timer + re-animate when the question index actually changed
+        if (q.index !== currentQIdxRef.current) {
+          setCurrentQuestion({ ...q, options: (q.options ?? []).map(normalizeOption) });
+          setQuestionKey(prev => prev + 1);
+          setSelectedOption(alreadyAnswered ? (json.submittedAnswers?.[q.index] ?? null) : null);
+          setFeedbackResult(null);
+          autoSubmitRef.current = false;
+          if (!alreadyAnswered) {
+            startTimer(q.remainingSeconds ?? q.timerSeconds);
+            setView('question');
+          } else {
+            setView('feedback');
+          }
+        }
       }
     } catch (_) {}
   }, [startTimer]);
@@ -183,17 +199,30 @@ export default function RealtimeQuizPlay() {
       if (json.teamsEnabled) setTeamsEnabledState(json.teamsEnabled);
       subscribeToSession(json.sessionId);
 
+      // Always start a poll so we stay in sync regardless of session state
+      if (pollRef.current) clearInterval(pollRef.current);
+      pollRef.current = setInterval(() => pollState(json.sessionId), 3000);
+
       if (json.status === 'waiting') {
         setView('lobby');
-        pollRef.current = setInterval(() => pollState(json.sessionId), 3000);
       } else if (json.status === 'active' && json.currentQuestion) {
         const q = json.currentQuestion as CurrentQuestion;
-        setCurrentQuestion({ ...q, options: (q.options ?? []).map(normalizeOption) });
+        const normalized = { ...q, options: (q.options ?? []).map(normalizeOption) };
+        setCurrentQuestion(normalized);
         setQuestionKey(prev => prev + 1);
-        startTimer(q.remainingSeconds ?? q.timerSeconds);
-        setView('question');
+        const alreadyAnswered = json.submittedAnswers?.[q.index] !== undefined;
+        if (!alreadyAnswered) {
+          startTimer(q.remainingSeconds ?? q.timerSeconds);
+          setView('question');
+        } else {
+          // Student already answered this question — show waiting state
+          setSelectedOption(json.submittedAnswers[q.index]);
+          setFeedbackResult({ isCorrect: false, pointsEarned: 0, correctAnswer: '' });
+          setView('feedback');
+        }
       } else if (json.status === 'ended') {
         setView('ended');
+        if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; }
       }
     } catch (e) { toast.error('Network error.'); }
     finally { setJoining(false); }
@@ -217,6 +246,10 @@ export default function RealtimeQuizPlay() {
         setFeedbackResult({ isCorrect: json.isCorrect, pointsEarned: json.pointsEarned, correctAnswer: json.correctAnswer });
         setView('feedback');
         if (timerRef.current) clearInterval(timerRef.current);
+        // Ensure poll is running so we detect session_ended even if Realtime is missed
+        if (!pollRef.current) {
+          pollRef.current = setInterval(() => pollState(sessionId), 3000);
+        }
       } else {
         toast.error(json.error || 'Failed to submit.');
         setSelectedOption(null);
