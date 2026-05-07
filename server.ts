@@ -8414,16 +8414,24 @@ export async function createApp(options: CreateAppOptions = {}) {
       const rawQs = qRows ?? [];
 
       const liveTypes = new Set(['multiple-choice', 'true-false']);
+      // Normalize an option (could be {id,text} object or plain string) to plain text
+      const normalizeRqOption = (o: any): string =>
+        o && typeof o === 'object' ? String(o.text ?? o.label ?? '') : String(o ?? '');
       const rqQuestions: RQQuestion[] = rawQs
         .filter((r: any) => liveTypes.has(r.type))
         .map((r: any, idx: number) => {
-          const opts: string[] = Array.isArray(r.options) ? r.options : [];
+          const rawOpts: any[] = Array.isArray(r.options) ? r.options : [];
+          const opts: string[] = rawOpts.map(normalizeRqOption);
+          // correctAnswer may be stored as an option ID (e.g. "opt_abc") — resolve to text
+          const rawCorrect = String(r.correct_answer ?? '');
+          const matchedOpt = rawOpts.find((o: any) => o && typeof o === 'object' && o.id === rawCorrect);
+          const correctAnswer = matchedOpt ? normalizeRqOption(matchedOpt) : rawCorrect;
           return {
             id: r.id,
             index: idx,
             body: String(r.question_text ?? r.text ?? ''),
             options: opts,
-            correctAnswer: String(r.correct_answer ?? ''),
+            correctAnswer,
             points: typeof r.points === 'number' ? r.points : 1,
             timerSeconds: typeof timerPerQuestion === 'number' && timerPerQuestion > 0
               ? timerPerQuestion : 30,
