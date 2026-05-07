@@ -57,9 +57,19 @@ const studentNavSections = [
     title: 'EXTRA',
     items: [
       { icon: Award, label: 'Certificates', path: '/student/certificates' },
+    ]
+  },
+  {
+    title: 'COMPETE',
+    items: [
       { icon: Trophy, label: 'Badges', path: '/student/badges' },
-      { icon: MessageSquare, label: 'Community', path: '/student/community' },
       { icon: Zap, label: 'Live Quiz', path: '/student/live-quiz' },
+    ]
+  },
+  {
+    title: 'INTERACTION',
+    items: [
+      { icon: MessageSquare, label: 'Community', path: '/student/community' },
       { icon: Video, label: 'Live Classes', path: '/student/live-classes' },
       { icon: Radio, label: 'Live Sessions', path: '/student/live-sessions' },
     ]
