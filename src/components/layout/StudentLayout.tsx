@@ -25,7 +25,6 @@ import {
   GraduationCap,
   ScrollText,
   Zap,
-  Link2,
   Trophy,
 } from 'lucide-react';
 
@@ -59,7 +58,6 @@ const studentNavSections = [
     items: [
       { icon: Award, label: 'Certificates', path: '/student/certificates' },
       { icon: Trophy, label: 'Badges', path: '/student/badges' },
-      { icon: Link2, label: 'Join a Class', path: '/student/join-class' },
       { icon: MessageSquare, label: 'Community', path: '/student/community' },
       { icon: Zap, label: 'Live Quiz', path: '/student/live-quiz' },
       { icon: Video, label: 'Live Classes', path: '/student/live-classes' },
