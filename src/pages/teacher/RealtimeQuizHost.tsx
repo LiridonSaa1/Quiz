@@ -28,6 +28,12 @@ interface SessionState {
 const normalizeOption = (opt: any): string =>
   opt && typeof opt === 'object' ? String(opt.text ?? opt.label ?? '') : String(opt ?? '');
 
+// Resolve correctAnswer from option ID → text (quiz builder stores IDs like "opt_abc")
+const resolveCorrectAnswer = (rawOptions: any[], correctAnswer: string): string => {
+  const match = rawOptions.find((o: any) => o && typeof o === 'object' && o.id === correctAnswer);
+  return match ? normalizeOption(match) : normalizeOption(correctAnswer);
+};
+
 type HostView = 'setup' | 'lobby' | 'active' | 'ended';
 
 export default function RealtimeQuizHost() {
@@ -84,7 +90,12 @@ export default function RealtimeQuizHost() {
       setLeaderboard(json.leaderboard ?? []);
       if (json.currentQuestion) {
         const q = json.currentQuestion;
-        setCurrentQuestion({ ...q, options: (q.options ?? []).map(normalizeOption) });
+        const rawOptions = q.options ?? [];
+        setCurrentQuestion({
+          ...q,
+          options: rawOptions.map(normalizeOption),
+          correctAnswer: resolveCorrectAnswer(rawOptions, String(q.correctAnswer ?? '')),
+        });
       }
       if (json.session.status === 'ended' && view !== 'ended') {
         setView('ended');
@@ -411,25 +422,38 @@ export default function RealtimeQuizHost() {
 
                     <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                       {currentQuestion.options.map((opt, i) => {
-                        const colors = ['from-blue-500 to-blue-600', 'from-red-500 to-red-600', 'from-yellow-500 to-yellow-600', 'from-green-500 to-green-600'];
+                        const baseColors = ['from-blue-500 to-blue-600', 'from-red-500 to-red-600', 'from-yellow-500 to-yellow-600', 'from-slate-500 to-slate-600'];
                         const isCorrect = opt === currentQuestion.correctAnswer;
                         return (
                           <div key={i} className={cn(
-                            'flex items-center gap-3 rounded-2xl p-4 text-white font-semibold',
-                            'bg-gradient-to-r', colors[i % colors.length],
-                            isCorrect && 'ring-4 ring-white ring-offset-2'
+                            'flex items-center gap-3 rounded-2xl p-4 font-semibold transition-all',
+                            isCorrect
+                              ? 'bg-gradient-to-r from-emerald-400 to-emerald-600 text-white ring-4 ring-emerald-300 ring-offset-2 shadow-lg shadow-emerald-200'
+                              : cn('bg-gradient-to-r text-white opacity-60', baseColors[i % baseColors.length])
                           )}>
                             <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-white/20 text-sm font-black">
                               {['A','B','C','D'][i]}
                             </span>
-                            <span className="text-sm leading-snug">{opt}</span>
-                            {isCorrect && <Check className="ml-auto h-5 w-5 shrink-0" />}
+                            <span className="text-sm leading-snug flex-1">{opt}</span>
+                            {isCorrect && (
+                              <span className="ml-auto flex items-center gap-1 bg-white/30 rounded-lg px-2 py-0.5 text-xs font-black shrink-0">
+                                <Check className="h-3.5 w-3.5" /> CORRECT
+                              </span>
+                            )}
                           </div>
                         );
                       })}
                     </div>
 
-                    <div className="mt-5 flex items-center justify-between">
+                    {/* Time's up banner */}
+                    {timeLeft === 0 && (
+                      <div className="mt-4 flex items-center justify-center gap-2 rounded-xl bg-amber-50 border border-amber-200 px-4 py-2.5">
+                        <Loader2 className="h-4 w-4 animate-spin text-amber-500" />
+                        <span className="text-sm font-semibold text-amber-700">Time's up — advancing to next question…</span>
+                      </div>
+                    )}
+
+                    <div className="mt-4 flex items-center justify-between">
                       <p className="text-sm text-slate-500">
                         <span className="font-bold text-slate-800">{answeredCount}</span> / {participants.length} answered
                       </p>
