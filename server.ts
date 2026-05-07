@@ -8576,7 +8576,7 @@ export async function createApp(options: CreateAppOptions = {}) {
   });
 
   // Teacher: list completed quiz reports
-  app.get('/api/teacher/realtime-quiz/reports', async (req: Request, res: Response) => {
+  app.get('/api/teacher/rq-reports', async (req: Request, res: Response) => {
     try {
       const caller = await assertAuthenticated(req, res);
       if (!caller) return;
@@ -8601,7 +8601,7 @@ export async function createApp(options: CreateAppOptions = {}) {
   });
 
   // Teacher: get single report detail
-  app.get('/api/teacher/realtime-quiz/reports/:sessionId', async (req: Request, res: Response) => {
+  app.get('/api/teacher/rq-reports/:sessionId', async (req: Request, res: Response) => {
     try {
       const caller = await assertAuthenticated(req, res);
       if (!caller) return;

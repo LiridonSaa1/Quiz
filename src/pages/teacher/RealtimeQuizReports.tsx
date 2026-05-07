@@ -58,7 +58,7 @@ export default function RealtimeQuizReports() {
   useEffect(() => {
     (async () => {
       try {
-        const res = await authFetch('/api/teacher/realtime-quiz/reports');
+        const res = await authFetch('/api/teacher/rq-reports');
         const json = await res.json();
         if (json.success) setReports(json.reports);
       } finally {
@@ -70,7 +70,7 @@ export default function RealtimeQuizReports() {
   const openDetail = async (id: string) => {
     setDetailLoading(true);
     try {
-      const res = await authFetch(`/api/teacher/realtime-quiz/reports/${id}`);
+      const res = await authFetch(`/api/teacher/rq-reports/${id}`);
       const json = await res.json();
       if (json.success) setSelected(json.report);
     } finally {
