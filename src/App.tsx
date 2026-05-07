@@ -20,6 +20,7 @@ import StudentManagement from './pages/teacher/StudentManagement';
 import QuizManagement from './pages/teacher/QuizManagement';
 import QuizBuilder from './pages/teacher/QuizBuilder';
 import RealtimeQuizHost from './pages/teacher/RealtimeQuizHost';
+import RealtimeQuizReports from './pages/teacher/RealtimeQuizReports';
 import RealtimeQuizPlay from './pages/student/RealtimeQuizPlay';
 import QuizTaking from './pages/student/QuizTaking';
 import QuizResults from './pages/student/QuizResults';
@@ -409,6 +410,7 @@ function TeacherRoutes({ features }: { features: FeatureFlags }) {
       <Route path="/quizzes/new" element={<QuizBuilder />} />
       <Route path="/quizzes/edit/:quizId" element={<QuizBuilder />} />
       <Route path="/live-quiz" element={<RealtimeQuizHost />} />
+      <Route path="/live-quiz/reports" element={<RealtimeQuizReports />} />
       <Route path="/exams" element={<TeacherExams />} />
       <Route path="/results" element={<TeacherResults />} />
       <Route path="/modules" element={<TeacherModules />} />

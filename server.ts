@@ -8267,6 +8267,48 @@ export async function createApp(options: CreateAppOptions = {}) {
   const rqSessions = new Map<string, RQSession>();
   const rqPins = new Map<string, string>(); // pin → sessionId
 
+  interface RQReportParticipant {
+    rank: number; userId: string; displayName: string;
+    score: number; correctAnswers: number; totalAnswers: number; accuracy: number;
+  }
+  interface RQReportQuestion {
+    index: number; body: string; correctAnswer: string; options: string[];
+    totalAnswered: number; correctCount: number; accuracy: number;
+  }
+  interface RQReport {
+    id: string; quizId: string; quizTitle: string; hostId: string; pin: string;
+    totalQuestions: number; participantCount: number;
+    endedAt: number; createdAt: number;
+    leaderboard: RQReportParticipant[];
+    questionStats: RQReportQuestion[];
+  }
+  const rqCompletedSessions = new Map<string, RQReport>();
+
+  const buildRQReport = (session: RQSession): RQReport => {
+    const parts = [...session.participants.values()];
+    const leaderboard: RQReportParticipant[] = parts
+      .map(p => {
+        const totalAnswers = Object.keys(p.answers).length;
+        const correctAnswers = Object.values(p.answers).filter(a => a.isCorrect).length;
+        return { userId: p.userId, displayName: p.displayName, score: p.score,
+          correctAnswers, totalAnswers,
+          accuracy: totalAnswers > 0 ? Math.round((correctAnswers / totalAnswers) * 100) : 0, rank: 0 };
+      })
+      .sort((a, b) => b.score - a.score)
+      .map((p, i) => ({ ...p, rank: i + 1 }));
+    const questionStats: RQReportQuestion[] = session.questions.map(q => {
+      const answers = parts.map(p => p.answers[q.index]).filter(Boolean);
+      const correctCount = answers.filter(a => a.isCorrect).length;
+      return { index: q.index, body: q.body, correctAnswer: q.correctAnswer,
+        options: q.options, totalAnswered: answers.length, correctCount,
+        accuracy: answers.length > 0 ? Math.round((correctCount / answers.length) * 100) : 0 };
+    });
+    return { id: session.id, quizId: session.quizId, quizTitle: session.quizTitle,
+      hostId: session.hostId, pin: session.pin, totalQuestions: session.questions.length,
+      participantCount: parts.length, endedAt: Date.now(), createdAt: session.createdAt,
+      leaderboard, questionStats };
+  };
+
   const generatePin = (): string => {
     let pin: string;
     do { pin = String(Math.floor(100000 + Math.random() * 900000)); }
@@ -8373,6 +8415,7 @@ export async function createApp(options: CreateAppOptions = {}) {
       if (nextIndex >= s.questions.length) {
         s.status = 'ended';
         rqPins.delete(s.pin);
+        rqCompletedSessions.set(s.id, buildRQReport(s));
         const board = rqLeaderboard(s);
         await rqBroadcast(sessionId, 'session_ended', { leaderboard: board });
       } else {
@@ -8532,6 +8575,47 @@ export async function createApp(options: CreateAppOptions = {}) {
     }
   });
 
+  // Teacher: list completed quiz reports
+  app.get('/api/teacher/realtime-quiz/reports', async (req: Request, res: Response) => {
+    try {
+      const caller = await assertAuthenticated(req, res);
+      if (!caller) return;
+      const reports = [...rqCompletedSessions.values()]
+        .filter(r => r.hostId === caller.userId || caller.role === 'admin')
+        .sort((a, b) => b.endedAt - a.endedAt)
+        .map(r => ({
+          id: r.id, quizId: r.quizId, quizTitle: r.quizTitle, pin: r.pin,
+          totalQuestions: r.totalQuestions, participantCount: r.participantCount,
+          endedAt: r.endedAt, createdAt: r.createdAt,
+          avgScore: r.leaderboard.length > 0
+            ? Math.round(r.leaderboard.reduce((s, p) => s + p.score, 0) / r.leaderboard.length)
+            : 0,
+          avgAccuracy: r.leaderboard.length > 0
+            ? Math.round(r.leaderboard.reduce((s, p) => s + p.accuracy, 0) / r.leaderboard.length)
+            : 0,
+        }));
+      res.json({ success: true, reports });
+    } catch (err) {
+      res.status(500).json({ error: 'Failed to fetch reports.' });
+    }
+  });
+
+  // Teacher: get single report detail
+  app.get('/api/teacher/realtime-quiz/reports/:sessionId', async (req: Request, res: Response) => {
+    try {
+      const caller = await assertAuthenticated(req, res);
+      if (!caller) return;
+      const report = rqCompletedSessions.get(req.params.sessionId);
+      if (!report) return res.status(404).json({ error: 'Report not found.' });
+      if (report.hostId !== caller.userId && caller.role !== 'admin') {
+        return res.status(403).json({ error: 'Access denied.' });
+      }
+      res.json({ success: true, report });
+    } catch (err) {
+      res.status(500).json({ error: 'Failed to fetch report.' });
+    }
+  });
+
   // Teacher: next question
   app.patch('/api/teacher/realtime-quiz/:sessionId/next', async (req: Request, res: Response) => {
     try {
@@ -8562,6 +8646,7 @@ export async function createApp(options: CreateAppOptions = {}) {
         if (nextIndex >= session.questions.length) {
           session.status = 'ended';
           rqPins.delete(session.pin);
+          rqCompletedSessions.set(session.id, buildRQReport(session));
           const board = rqLeaderboard(session);
           await rqBroadcast(session.id, 'session_ended', { leaderboard: board });
           return res.json({ success: true, status: 'ended', leaderboard: board });
@@ -8596,6 +8681,7 @@ export async function createApp(options: CreateAppOptions = {}) {
       if (session.autoNextTimer) clearTimeout(session.autoNextTimer);
       session.status = 'ended';
       rqPins.delete(session.pin);
+      rqCompletedSessions.set(session.id, buildRQReport(session));
       const board = rqLeaderboard(session);
       await rqBroadcast(session.id, 'session_ended', { leaderboard: board });
       res.json({ success: true, leaderboard: board });
