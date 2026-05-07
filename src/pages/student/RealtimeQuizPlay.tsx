@@ -23,6 +23,9 @@ interface SessionState {
 }
 type PlayView = 'pin' | 'lobby' | 'question' | 'feedback' | 'ended';
 
+const normalizeOption = (opt: any): string =>
+  opt && typeof opt === 'object' ? String(opt.text ?? opt.label ?? '') : String(opt ?? '');
+
 const OPTION_COLORS = [
   { bg: 'bg-gradient-to-br from-blue-500 to-blue-600', hover: 'hover:from-blue-400 hover:to-blue-500', ring: 'ring-blue-300' },
   { bg: 'bg-gradient-to-br from-red-500 to-red-600', hover: 'hover:from-red-400 hover:to-red-500', ring: 'ring-red-300' },
@@ -94,7 +97,7 @@ export default function RealtimeQuizPlay() {
         const elapsed = q.startedAt ? (Date.now() - q.startedAt) / 1000 : 0;
         const remaining = Math.max(0, q.timerSeconds - elapsed);
         const question: CurrentQuestion = {
-          index: q.index, body: q.body, options: q.options ?? [],
+          index: q.index, body: q.body, options: (q.options ?? []).map(normalizeOption),
           points: q.points, timerSeconds: q.timerSeconds, remainingSeconds: remaining, type: 'multiple-choice',
         };
         setCurrentQuestion(question);
@@ -132,7 +135,7 @@ export default function RealtimeQuizPlay() {
         setView('ended');
       } else if (json.status === 'active' && json.currentQuestion) {
         const q = json.currentQuestion as CurrentQuestion;
-        setCurrentQuestion(q);
+        setCurrentQuestion({ ...q, options: (q.options ?? []).map(normalizeOption) });
         setQuestionKey(prev => prev + 1);
         startTimer(q.remainingSeconds ?? q.timerSeconds);
         const alreadyAnswered = json.submittedAnswers?.[q.index] !== undefined;
@@ -185,7 +188,7 @@ export default function RealtimeQuizPlay() {
         pollRef.current = setInterval(() => pollState(json.sessionId), 3000);
       } else if (json.status === 'active' && json.currentQuestion) {
         const q = json.currentQuestion as CurrentQuestion;
-        setCurrentQuestion(q);
+        setCurrentQuestion({ ...q, options: (q.options ?? []).map(normalizeOption) });
         setQuestionKey(prev => prev + 1);
         startTimer(q.remainingSeconds ?? q.timerSeconds);
         setView('question');

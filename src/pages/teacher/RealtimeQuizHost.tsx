@@ -25,6 +25,9 @@ interface SessionState {
   questionStartedAt: number | null;
 }
 
+const normalizeOption = (opt: any): string =>
+  opt && typeof opt === 'object' ? String(opt.text ?? opt.label ?? '') : String(opt ?? '');
+
 type HostView = 'setup' | 'lobby' | 'active' | 'ended';
 
 export default function RealtimeQuizHost() {
@@ -79,7 +82,10 @@ export default function RealtimeQuizHost() {
       setSession(json.session);
       setParticipants(json.participants ?? []);
       setLeaderboard(json.leaderboard ?? []);
-      if (json.currentQuestion) setCurrentQuestion(json.currentQuestion);
+      if (json.currentQuestion) {
+        const q = json.currentQuestion;
+        setCurrentQuestion({ ...q, options: (q.options ?? []).map(normalizeOption) });
+      }
       if (json.session.status === 'ended' && view !== 'ended') {
         setView('ended');
         if (pollRef.current) clearInterval(pollRef.current);
