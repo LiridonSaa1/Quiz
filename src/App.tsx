@@ -19,6 +19,8 @@ import TeacherCourseForm from './pages/teacher/CourseForm';
 import StudentManagement from './pages/teacher/StudentManagement';
 import QuizManagement from './pages/teacher/QuizManagement';
 import QuizBuilder from './pages/teacher/QuizBuilder';
+import RealtimeQuizHost from './pages/teacher/RealtimeQuizHost';
+import RealtimeQuizPlay from './pages/student/RealtimeQuizPlay';
 import QuizTaking from './pages/student/QuizTaking';
 import QuizResults from './pages/student/QuizResults';
 import StudentProfile from './pages/student/Profile';
@@ -404,6 +406,7 @@ function TeacherRoutes({ features }: { features: FeatureFlags }) {
       <Route path="/quizzes" element={<QuizManagement />} />
       <Route path="/quizzes/new" element={<QuizBuilder />} />
       <Route path="/quizzes/edit/:quizId" element={<QuizBuilder />} />
+      <Route path="/live-quiz" element={<RealtimeQuizHost />} />
       <Route path="/exams" element={<TeacherExams />} />
       <Route path="/results" element={<TeacherResults />} />
       <Route path="/modules" element={<TeacherModules />} />
@@ -442,6 +445,7 @@ function StudentRoutes({ features }: { features: FeatureFlags }) {
       <Route path="/live-classes" element={features.liveSessionsEnabled ? <StudentLiveClasses /> : <Navigate to="/not-found" replace />} />
       <Route path="/live-sessions" element={features.liveSessionsEnabled ? <StudentLiveClasses /> : <Navigate to="/not-found" replace />} />
       <Route path="/live-sessions/:id" element={features.liveSessionsEnabled ? <StudentLiveSessionJoin /> : <Navigate to="/not-found" replace />} />
+      <Route path="/live-quiz" element={<RealtimeQuizPlay />} />
       <Route path="/exams" element={<StudentExams />} />
       <Route path="/quiz/:quizId" element={<QuizTaking />} />
       <Route path="/results/:attemptId" element={<QuizResults />} />

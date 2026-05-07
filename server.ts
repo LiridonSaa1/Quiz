@@ -8215,6 +8215,471 @@ export async function createApp(options: CreateAppOptions = {}) {
     }
   };
 
+  // ─── REAL-TIME LIVE QUIZ SYSTEM (Kahoot-style) ───────────────────────────────
+
+  interface RQQuestion {
+    id: string;
+    index: number;
+    body: string;
+    options: string[];
+    correctAnswer: string;
+    points: number;
+    timerSeconds: number;
+    type: string;
+  }
+
+  interface RQAnswer {
+    optionText: string;
+    isCorrect: boolean;
+    pointsEarned: number;
+    answeredAt: number;
+  }
+
+  interface RQParticipant {
+    userId: string;
+    displayName: string;
+    score: number;
+    answers: Record<number, RQAnswer>;
+    status: 'connected' | 'disconnected';
+    joinedAt: number;
+  }
+
+  interface RQSession {
+    id: string;
+    quizId: string;
+    quizTitle: string;
+    hostId: string;
+    pin: string;
+    status: 'waiting' | 'active' | 'ended';
+    currentQuestionIndex: number;
+    questionStartedAt: number | null;
+    questions: RQQuestion[];
+    participants: Map<string, RQParticipant>;
+    createdAt: number;
+    autoNextTimer?: ReturnType<typeof setTimeout>;
+  }
+
+  const rqSessions = new Map<string, RQSession>();
+  const rqPins = new Map<string, string>(); // pin → sessionId
+
+  const generatePin = (): string => {
+    let pin: string;
+    do { pin = String(Math.floor(100000 + Math.random() * 900000)); }
+    while (rqPins.has(pin));
+    return pin;
+  };
+
+  const rqBroadcast = async (sessionId: string, event: string, payload: unknown) => {
+    try {
+      await (supabaseAdmin as any)
+        .channel(`quiz:${sessionId}`)
+        .send({ type: 'broadcast', event, payload });
+    } catch (_) { /* non-critical */ }
+  };
+
+  const rqLeaderboard = (session: RQSession) =>
+    [...session.participants.values()]
+      .sort((a, b) => b.score - a.score)
+      .map((p, i) => ({ rank: i + 1, userId: p.userId, displayName: p.displayName, score: p.score }));
+
+  const rqSessionPublic = (session: RQSession) => ({
+    id: session.id,
+    quizId: session.quizId,
+    quizTitle: session.quizTitle,
+    pin: session.pin,
+    status: session.status,
+    currentQuestionIndex: session.currentQuestionIndex,
+    questionStartedAt: session.questionStartedAt,
+    totalQuestions: session.questions.length,
+    participantCount: session.participants.size,
+  });
+
+  const rqCurrentQuestionForStudent = (session: RQSession) => {
+    if (session.status !== 'active') return null;
+    const q = session.questions[session.currentQuestionIndex];
+    if (!q) return null;
+    const elapsed = session.questionStartedAt ? (Date.now() - session.questionStartedAt) / 1000 : 0;
+    const remaining = Math.max(0, q.timerSeconds - elapsed);
+    return {
+      index: q.index,
+      body: q.body,
+      options: q.options,
+      points: q.points,
+      timerSeconds: q.timerSeconds,
+      remainingSeconds: remaining,
+      type: q.type,
+    };
+  };
+
+  const rqScheduleAutoNext = (sessionId: string) => {
+    const session = rqSessions.get(sessionId);
+    if (!session || session.status !== 'active') return;
+    const q = session.questions[session.currentQuestionIndex];
+    if (!q) return;
+    if (session.autoNextTimer) clearTimeout(session.autoNextTimer);
+    session.autoNextTimer = setTimeout(async () => {
+      const s = rqSessions.get(sessionId);
+      if (!s || s.status !== 'active') return;
+      const nextIndex = s.currentQuestionIndex + 1;
+      if (nextIndex >= s.questions.length) {
+        s.status = 'ended';
+        rqPins.delete(s.pin);
+        const board = rqLeaderboard(s);
+        await rqBroadcast(sessionId, 'session_ended', { leaderboard: board });
+      } else {
+        s.currentQuestionIndex = nextIndex;
+        s.questionStartedAt = Date.now();
+        const nq = s.questions[nextIndex];
+        await rqBroadcast(sessionId, 'question_started', {
+          index: nq.index,
+          body: nq.body,
+          options: nq.options,
+          points: nq.points,
+          timerSeconds: nq.timerSeconds,
+          startedAt: s.questionStartedAt,
+        });
+        rqScheduleAutoNext(sessionId);
+      }
+    }, q.timerSeconds * 1000 + 500);
+  };
+
+  // Teacher: start a live quiz session
+  app.post('/api/teacher/realtime-quiz/start', async (req: Request, res: Response) => {
+    try {
+      const caller = await assertAuthenticated(req, res);
+      if (!caller) return;
+      if (caller.role !== 'teacher' && caller.role !== 'admin') {
+        return res.status(403).json({ error: 'Teacher or admin role required.' });
+      }
+      const { quizId, timerPerQuestion } = req.body as { quizId?: string; timerPerQuestion?: number };
+      if (!quizId) return res.status(400).json({ error: 'quizId is required.' });
+
+      const { data: quizRow, error: qErr } = await supabaseAdmin
+        .from('quizzes').select('id, title, time_limit').eq('id', quizId).maybeSingle();
+      if (qErr) throw qErr;
+      if (!quizRow) return res.status(404).json({ error: 'Quiz not found.' });
+
+      const { data: qRows, error: qqErr } = await supabaseAdmin
+        .from('questions').select('*').eq('quiz_id', quizId).order('order', { ascending: true });
+      if (qqErr) throw qqErr;
+      const rawQs = qRows ?? [];
+
+      const liveTypes = new Set(['multiple-choice', 'true-false']);
+      const rqQuestions: RQQuestion[] = rawQs
+        .filter((r: any) => liveTypes.has(r.type))
+        .map((r: any, idx: number) => {
+          const opts: string[] = Array.isArray(r.options) ? r.options : [];
+          return {
+            id: r.id,
+            index: idx,
+            body: String(r.question_text ?? r.text ?? ''),
+            options: opts,
+            correctAnswer: String(r.correct_answer ?? ''),
+            points: typeof r.points === 'number' ? r.points : 1,
+            timerSeconds: typeof timerPerQuestion === 'number' && timerPerQuestion > 0
+              ? timerPerQuestion : 30,
+            type: r.type,
+          };
+        });
+
+      if (rqQuestions.length === 0) {
+        return res.status(400).json({ error: 'Quiz has no multiple-choice or true/false questions suitable for live play.' });
+      }
+
+      const sessionId = `rqs_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+      const pin = generatePin();
+
+      const session: RQSession = {
+        id: sessionId,
+        quizId,
+        quizTitle: String((quizRow as any).title ?? 'Untitled Quiz'),
+        hostId: caller.userId,
+        pin,
+        status: 'waiting',
+        currentQuestionIndex: 0,
+        questionStartedAt: null,
+        questions: rqQuestions,
+        participants: new Map(),
+        createdAt: Date.now(),
+      };
+      rqSessions.set(sessionId, session);
+      rqPins.set(pin, sessionId);
+
+      // Auto-clean sessions after 3 hours
+      setTimeout(() => {
+        const s = rqSessions.get(sessionId);
+        if (s) { rqPins.delete(s.pin); rqSessions.delete(sessionId); }
+      }, 3 * 60 * 60 * 1000);
+
+      res.json({ success: true, sessionId, pin, quizTitle: session.quizTitle, totalQuestions: rqQuestions.length });
+    } catch (err) {
+      console.error('[rq] start error:', err);
+      res.status(500).json({ error: 'Failed to start session.' });
+    }
+  });
+
+  // Teacher: get session host state
+  app.get('/api/teacher/realtime-quiz/:sessionId', async (req: Request, res: Response) => {
+    try {
+      const caller = await assertAuthenticated(req, res);
+      if (!caller) return;
+      const session = rqSessions.get(req.params.sessionId);
+      if (!session) return res.status(404).json({ error: 'Session not found.' });
+      if (session.hostId !== caller.userId && caller.role !== 'admin') {
+        return res.status(403).json({ error: 'Access denied.' });
+      }
+      const q = session.questions[session.currentQuestionIndex] ?? null;
+      const elapsed = session.questionStartedAt ? (Date.now() - session.questionStartedAt) / 1000 : 0;
+      res.json({
+        success: true,
+        session: rqSessionPublic(session),
+        currentQuestion: q ? {
+          index: q.index, body: q.body, options: q.options, correctAnswer: q.correctAnswer,
+          points: q.points, timerSeconds: q.timerSeconds, type: q.type,
+          remainingSeconds: Math.max(0, q.timerSeconds - elapsed),
+        } : null,
+        participants: [...session.participants.values()].map(p => ({
+          userId: p.userId, displayName: p.displayName, score: p.score,
+          status: p.status, answeredCurrent: p.answers[session.currentQuestionIndex] !== undefined,
+        })),
+        leaderboard: rqLeaderboard(session),
+      });
+    } catch (err) {
+      res.status(500).json({ error: 'Failed to get session.' });
+    }
+  });
+
+  // Teacher: list active sessions
+  app.get('/api/teacher/realtime-quiz/sessions/list', async (req: Request, res: Response) => {
+    try {
+      const caller = await assertAuthenticated(req, res);
+      if (!caller) return;
+      const sessions = [...rqSessions.values()]
+        .filter(s => s.hostId === caller.userId || caller.role === 'admin')
+        .map(rqSessionPublic);
+      res.json({ success: true, sessions });
+    } catch (err) {
+      res.status(500).json({ error: 'Failed to list sessions.' });
+    }
+  });
+
+  // Teacher: next question
+  app.patch('/api/teacher/realtime-quiz/:sessionId/next', async (req: Request, res: Response) => {
+    try {
+      const caller = await assertAuthenticated(req, res);
+      if (!caller) return;
+      const session = rqSessions.get(req.params.sessionId);
+      if (!session) return res.status(404).json({ error: 'Session not found.' });
+      if (session.hostId !== caller.userId && caller.role !== 'admin') {
+        return res.status(403).json({ error: 'Access denied.' });
+      }
+
+      if (session.status === 'waiting') {
+        session.status = 'active';
+        session.currentQuestionIndex = 0;
+        session.questionStartedAt = Date.now();
+        const q = session.questions[0];
+        await rqBroadcast(session.id, 'question_started', {
+          index: q.index, body: q.body, options: q.options, points: q.points,
+          timerSeconds: q.timerSeconds, startedAt: session.questionStartedAt,
+        });
+        rqScheduleAutoNext(session.id);
+        return res.json({ success: true, status: 'active', questionIndex: 0 });
+      }
+
+      if (session.status === 'active') {
+        if (session.autoNextTimer) clearTimeout(session.autoNextTimer);
+        const nextIndex = session.currentQuestionIndex + 1;
+        if (nextIndex >= session.questions.length) {
+          session.status = 'ended';
+          rqPins.delete(session.pin);
+          const board = rqLeaderboard(session);
+          await rqBroadcast(session.id, 'session_ended', { leaderboard: board });
+          return res.json({ success: true, status: 'ended', leaderboard: board });
+        }
+        session.currentQuestionIndex = nextIndex;
+        session.questionStartedAt = Date.now();
+        const nq = session.questions[nextIndex];
+        await rqBroadcast(session.id, 'question_started', {
+          index: nq.index, body: nq.body, options: nq.options, points: nq.points,
+          timerSeconds: nq.timerSeconds, startedAt: session.questionStartedAt,
+        });
+        rqScheduleAutoNext(session.id);
+        return res.json({ success: true, status: 'active', questionIndex: nextIndex });
+      }
+
+      res.status(400).json({ error: 'Session is already ended.' });
+    } catch (err) {
+      res.status(500).json({ error: 'Failed to advance question.' });
+    }
+  });
+
+  // Teacher: end session
+  app.post('/api/teacher/realtime-quiz/:sessionId/end', async (req: Request, res: Response) => {
+    try {
+      const caller = await assertAuthenticated(req, res);
+      if (!caller) return;
+      const session = rqSessions.get(req.params.sessionId);
+      if (!session) return res.status(404).json({ error: 'Session not found.' });
+      if (session.hostId !== caller.userId && caller.role !== 'admin') {
+        return res.status(403).json({ error: 'Access denied.' });
+      }
+      if (session.autoNextTimer) clearTimeout(session.autoNextTimer);
+      session.status = 'ended';
+      rqPins.delete(session.pin);
+      const board = rqLeaderboard(session);
+      await rqBroadcast(session.id, 'session_ended', { leaderboard: board });
+      res.json({ success: true, leaderboard: board });
+    } catch (err) {
+      res.status(500).json({ error: 'Failed to end session.' });
+    }
+  });
+
+  // Student: join by PIN
+  app.post('/api/student/realtime-quiz/join', async (req: Request, res: Response) => {
+    try {
+      const caller = await assertAuthenticated(req, res);
+      if (!caller) return;
+      const { pin, displayName } = req.body as { pin?: string; displayName?: string };
+      if (!pin) return res.status(400).json({ error: 'PIN is required.' });
+      const sessionId = rqPins.get(String(pin).trim());
+      if (!sessionId) return res.status(404).json({ error: 'Invalid PIN. No active quiz found.' });
+      const session = rqSessions.get(sessionId);
+      if (!session) return res.status(404).json({ error: 'Session not found.' });
+      if (session.status === 'ended') return res.status(400).json({ error: 'This quiz session has already ended.' });
+
+      const name = String(displayName ?? 'Student').slice(0, 40);
+      let participant = session.participants.get(caller.userId);
+      if (!participant) {
+        participant = { userId: caller.userId, displayName: name, score: 0, answers: {}, status: 'connected', joinedAt: Date.now() };
+        session.participants.set(caller.userId, participant);
+        await rqBroadcast(sessionId, 'participant_joined', {
+          displayName: name, participantCount: session.participants.size,
+        });
+      } else {
+        participant.status = 'connected';
+        participant.displayName = name;
+      }
+
+      const currentQ = rqCurrentQuestionForStudent(session);
+      res.json({
+        success: true,
+        sessionId,
+        quizTitle: session.quizTitle,
+        status: session.status,
+        totalQuestions: session.questions.length,
+        currentQuestion: currentQ,
+        submittedAnswers: Object.fromEntries(
+          Object.entries(participant.answers).map(([k, v]) => [k, v.optionText])
+        ),
+        score: participant.score,
+      });
+    } catch (err) {
+      res.status(500).json({ error: 'Failed to join session.' });
+    }
+  });
+
+  // Student: get current state (rejoin)
+  app.get('/api/student/realtime-quiz/:sessionId/state', async (req: Request, res: Response) => {
+    try {
+      const caller = await assertAuthenticated(req, res);
+      if (!caller) return;
+      const session = rqSessions.get(req.params.sessionId);
+      if (!session) return res.status(404).json({ error: 'Session not found.' });
+      const participant = session.participants.get(caller.userId);
+      if (!participant) return res.status(403).json({ error: 'You have not joined this session.' });
+      if (participant.status === 'disconnected') participant.status = 'connected';
+
+      const currentQ = rqCurrentQuestionForStudent(session);
+      const board = session.status === 'ended' ? rqLeaderboard(session) : null;
+      res.json({
+        success: true,
+        sessionId: session.id,
+        quizTitle: session.quizTitle,
+        status: session.status,
+        totalQuestions: session.questions.length,
+        currentQuestion: currentQ,
+        submittedAnswers: Object.fromEntries(
+          Object.entries(participant.answers).map(([k, v]) => [k, v.optionText])
+        ),
+        score: participant.score,
+        leaderboard: board,
+      });
+    } catch (err) {
+      res.status(500).json({ error: 'Failed to get state.' });
+    }
+  });
+
+  // Student: submit answer
+  app.post('/api/student/realtime-quiz/:sessionId/answer', async (req: Request, res: Response) => {
+    try {
+      const caller = await assertAuthenticated(req, res);
+      if (!caller) return;
+      const session = rqSessions.get(req.params.sessionId);
+      if (!session) return res.status(404).json({ error: 'Session not found.' });
+      if (session.status !== 'active') return res.status(400).json({ error: 'Quiz is not active.' });
+
+      const participant = session.participants.get(caller.userId);
+      if (!participant) return res.status(403).json({ error: 'You have not joined this session.' });
+
+      const { questionIndex, optionText } = req.body as { questionIndex?: number; optionText?: string };
+      if (typeof questionIndex !== 'number') return res.status(400).json({ error: 'questionIndex required.' });
+      if (questionIndex !== session.currentQuestionIndex) {
+        return res.status(400).json({ error: 'This question is no longer active.' });
+      }
+      if (participant.answers[questionIndex] !== undefined) {
+        return res.status(400).json({ error: 'Already answered this question.' });
+      }
+
+      const q = session.questions[questionIndex];
+      if (!q) return res.status(400).json({ error: 'Invalid question.' });
+
+      // Anti-cheat: check timer
+      if (session.questionStartedAt) {
+        const elapsed = (Date.now() - session.questionStartedAt) / 1000;
+        if (elapsed > q.timerSeconds + 1) {
+          return res.status(400).json({ error: 'Time is up for this question.' });
+        }
+      }
+
+      const isCorrect = String(optionText ?? '').trim() === String(q.correctAnswer ?? '').trim();
+      let pointsEarned = 0;
+      if (isCorrect && session.questionStartedAt) {
+        const elapsed = (Date.now() - session.questionStartedAt) / 1000;
+        const speedBonus = Math.max(0, 1 - elapsed / q.timerSeconds);
+        pointsEarned = Math.round(q.points * (0.5 + 0.5 * speedBonus));
+      }
+
+      participant.answers[questionIndex] = {
+        optionText: String(optionText ?? ''),
+        isCorrect,
+        pointsEarned,
+        answeredAt: Date.now(),
+      };
+      participant.score += pointsEarned;
+
+      // Broadcast leaderboard update
+      await rqBroadcast(session.id, 'leaderboard_updated', { leaderboard: rqLeaderboard(session) });
+
+      res.json({ success: true, isCorrect, pointsEarned, correctAnswer: q.correctAnswer, score: participant.score });
+    } catch (err) {
+      res.status(500).json({ error: 'Failed to submit answer.' });
+    }
+  });
+
+  // Public leaderboard
+  app.get('/api/realtime-quiz/:sessionId/leaderboard', async (req: Request, res: Response) => {
+    try {
+      const session = rqSessions.get(req.params.sessionId);
+      if (!session) return res.status(404).json({ error: 'Session not found.' });
+      res.json({ success: true, leaderboard: rqLeaderboard(session), status: session.status });
+    } catch (err) {
+      res.status(500).json({ error: 'Failed to get leaderboard.' });
+    }
+  });
+
+  // ─── END REAL-TIME LIVE QUIZ ──────────────────────────────────────────────────
+
   const addDiscussionNotification = async (userId: string, title: string, message: string, actionUrl: string) => {
     await supabaseAdmin.from('notifications').insert({
       user_id: userId,

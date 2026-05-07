@@ -5,7 +5,7 @@ import {
   LayoutDashboard, BookOpen, Users, FileText, BarChart3, LogOut,
   Menu, X, Layers, PlayCircle, School, ClipboardList, CalendarCheck,
   Award, Video, MessageSquare, Megaphone, FileBarChart, User,
-  GraduationCap, ScrollText, ChevronRight, PanelLeftClose, PanelLeftOpen
+  GraduationCap, ScrollText, ChevronRight, PanelLeftClose, PanelLeftOpen, Zap
 } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import NotificationCenter from '../NotificationCenter';
@@ -44,6 +44,7 @@ const NAV_SECTIONS = [
   {
     title: 'Interaction',
     items: [
+      { icon: Zap,          label: 'Live Quiz',      path: '/teacher/live-quiz' },
       { icon: Video,        label: 'Live Sessions',  path: '/teacher/live-sessions' },
       { icon: MessageSquare,label: 'Community',      path: '/teacher/community' },
       { icon: Megaphone,    label: 'Announcements',  path: '/teacher/announcements' },
