@@ -18,12 +18,33 @@ const pool = process.env.DATABASE_URL
       ssl: { rejectUnauthorized: false },
     })
   : null as any;
+const stripProfilesJoin = (sql: string): string =>
+  sql.replace(
+    /LEFT JOIN profiles (\w+) ON \1\.id = \w+\.\w+/gi,
+    (_match, alias) =>
+      `LEFT JOIN (SELECT NULL::uuid AS id, NULL::text AS display_name, NULL::text AS email) ${alias} ON false`,
+  );
+
 const poolQuery = async (sql: string, params?: any[]) => {
   if (!pool) throw new Error('Database pool not available');
   const client = await pool.connect();
   try {
     await client.query('SET search_path TO public');
-    return await client.query(sql, params);
+    try {
+      return await client.query(sql, params);
+    } catch (e: any) {
+      // If the profiles table doesn't exist in the direct DB connection,
+      // retry with dummy null-returning subqueries instead of the JOIN.
+      if (
+        typeof e?.message === 'string' &&
+        e.message.includes('relation') &&
+        e.message.includes('profiles')
+      ) {
+        const safeSql = stripProfilesJoin(sql);
+        if (safeSql !== sql) return await client.query(safeSql, params);
+      }
+      throw e;
+    }
   } finally {
     client.release();
   }
