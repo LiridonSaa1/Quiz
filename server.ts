@@ -9975,8 +9975,6 @@ async function runDiscussionMigration(): Promise<boolean> {
   } catch (err: any) {
     console.error('[migration] discussion table setup failed:', err?.message || err);
     return false;
-  } finally {
-    await pool.end().catch(() => {});
   }
 }
 
