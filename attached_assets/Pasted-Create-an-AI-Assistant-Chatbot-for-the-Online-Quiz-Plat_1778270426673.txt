@@ -1,0 +1,115 @@
+Create an AI Assistant Chatbot for the Online Quiz Platform that acts like a smart helper for both Teachers and Students.
+
+The chatbot must understand the current page the user is on and provide contextual guidance, onboarding, and step-by-step instructions automatically.
+
+CHATBOT PURPOSE
+The AI assistant should help users understand how to use the platform without needing tutorials.
+
+The chatbot must:
+- Detect if the logged-in user is a Teacher or Student
+- Detect which page/module the user is currently viewing
+- Give live tips and guidance based on the current screen
+- Explain buttons, forms, actions, and workflows
+- Automatically appear when the user seems confused or inactive
+
+TEACHER ASSISTANCE EXAMPLES
+
+If teacher asks:
+“How do I create a quiz?”
+
+The chatbot responds:
+1. Click “Quizzes” in the sidebar
+2. Click the “Create Quiz” button
+3. Enter the quiz title
+4. Add quiz description
+5. Add questions and answers
+6. Set timer and points
+7. Click “Publish Quiz”
+
+If teacher is on Quiz Page:
+- Highlight important buttons
+- Show tooltip animations
+- Guide user step-by-step
+
+If teacher asks:
+“How do I start a live quiz?”
+
+The chatbot responds:
+1. Open your class
+2. Select a created quiz
+3. Click “Start Live Quiz”
+4. Share the PIN code with students
+5. Wait for students to join
+6. Click “Start Session”
+
+STUDENT ASSISTANCE EXAMPLES
+
+If student asks:
+“How do I join a class?”
+
+Bot responds:
+1. Click “Join Class”
+2. Enter invite code
+3. Click “Join”
+4. Wait for teacher approval if required
+
+If student asks:
+“How do I see my scores?”
+
+Bot responds:
+1. Open Dashboard
+2. Click “Results”
+3. Select completed quiz
+4. View points, ranking, and answers
+
+SMART AI FEATURES
+- Detect user inactivity
+- Detect repeated failed actions
+- Suggest next actions
+- Context-aware responses
+- Multi-language support
+- Voice assistant support
+- Typing animation
+- Modern floating chatbot UI
+
+CONTEXT AWARENESS
+The chatbot must know:
+- Current page
+- Current role
+- Current quiz state
+- Current class
+- User activity
+- Errors occurring on screen
+
+UI/UX
+- Floating AI assistant bubble
+- Modern glassmorphism design
+- Smooth animations
+- Expandable chat window
+- Tooltip onboarding mode
+- Dark/light mode
+
+ADVANCED FEATURES
+- AI-generated quiz suggestions
+- Explain quiz analytics
+- Help teachers improve questions
+- Recommend easier or harder questions
+- Smart onboarding for new users
+- Interactive walkthroughs
+
+TECHNOLOGY
+- OpenAI API integration
+- Context-aware prompts
+- Real-time frontend assistant
+- Speech-to-text support
+- Text-to-speech responses
+- Vector memory for previous conversations
+
+IMPORTANT
+The chatbot should behave like a real platform assistant, not just a normal chat app.
+
+It must guide users visually and contextually like:
+- Intercom
+- Notion AI onboarding
+- Duolingo assistant
+- Modern SaaS onboarding systems

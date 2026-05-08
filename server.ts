@@ -957,6 +957,74 @@ export async function createApp(options: CreateAppOptions = {}) {
     return { message, stack: stack === "N/A" ? "" : stack, currentUrl };
   };
 
+  app.post("/api/ai/chat", async (req, res) => {
+    try {
+      const body = req.body || {};
+      const message = String(body.message || "").trim();
+      const role = String(body.role || "student").trim();
+      const page = String(body.page || "Platform").trim();
+      const path = String(body.path || "").trim();
+      const history: { role: string; content: string }[] = Array.isArray(body.history) ? body.history : [];
+
+      if (!message) return res.status(400).json({ error: "message is required" });
+
+      const apiKey = (process.env.GEMINI_API_KEY || "").trim();
+      if (!apiKey) return res.status(503).json({ error: "AI not configured. Add GEMINI_API_KEY to Secrets." });
+
+      const { GoogleGenAI } = await import("@google/genai");
+      const ai = new GoogleGenAI({ apiKey });
+
+      const roleContext: Record<string, string> = {
+        teacher: `You are an expert teaching assistant for an online educational platform. The teacher is currently on the "${page}" page (path: ${path || "unknown"}).
+You help teachers:
+- Create and manage quizzes, courses, modules, and lessons
+- Start live quiz sessions and live video sessions
+- Track student progress and view results
+- Manage assignments, attendance, and certificates
+- Use platform features effectively
+When giving step-by-step instructions, number each step clearly. Be concise but thorough. Use a warm, professional tone.`,
+        student: `You are a friendly learning assistant for an online educational platform. The student is currently on the "${page}" page (path: ${path || "unknown"}).
+You help students:
+- Take quizzes and understand their scores
+- Join live classes and live quiz sessions
+- Track their learning progress
+- Submit assignments and view certificates
+- Navigate and use the platform effectively
+When giving instructions, number each step clearly. Be encouraging and supportive. Use simple, clear language.`,
+        admin: `You are an expert platform administrator assistant for an online educational platform. The admin is currently on the "${page}" page (path: ${path || "unknown"}).
+You help admins:
+- Manage students, teachers, courses, and classes
+- Configure platform settings, branding, and features
+- Understand analytics and reports
+- Set up roles, permissions, and security (including 2FA)
+- Handle payments, invoices, and certificates
+When giving instructions, number each step clearly. Be precise and technical when needed.`,
+      };
+
+      const systemPrompt = roleContext[role] || roleContext.student;
+
+      const historyText = history
+        .slice(-8)
+        .map((m) => `${m.role === "user" ? "User" : "Assistant"}: ${m.content}`)
+        .join("\n");
+
+      const fullPrompt = `${systemPrompt}
+
+${historyText ? `Conversation so far:\n${historyText}\n\n` : ""}User: ${message}
+Assistant:`;
+
+      const result = await ai.models.generateContent({
+        model: "gemini-2.0-flash",
+        contents: fullPrompt,
+      });
+
+      const reply = (result.text || "").trim() || "I'm sorry, I couldn't generate a response. Please try again.";
+      res.json({ success: true, reply });
+    } catch (e: any) {
+      res.status(500).json({ error: e?.message || "Failed to process chat message" });
+    }
+  });
+
   app.post("/api/ai/fix-suggestion", async (req, res) => {
     try {
       const body = req.body || {};
