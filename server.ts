@@ -8194,27 +8194,32 @@ export async function createApp(options: CreateAppOptions = {}) {
   };
 
   const awardDiscussionBadges = async (userId: string) => {
-    const [{ data: stats }, { data: badgeRows }] = await Promise.all([
-      supabaseAdmin.from('discussion_user_stats').select('*').eq('user_id', userId).maybeSingle(),
-      supabaseAdmin.from('discussion_badges').select('*'),
-    ]);
-    if (!stats || !Array.isArray(badgeRows) || badgeRows.length === 0) return;
-    const pending: Array<{ user_id: string; badge_id: string }> = [];
-    for (const badge of badgeRows) {
-      const key = String((badge as any).key || '');
-      const threshold = asInt((badge as any).threshold, 1);
-      const answersCount = asInt((stats as any).answers_count, 0);
-      const bestAnswers = asInt((stats as any).best_answers_count, 0);
-      const helpfulReceived = asInt((stats as any).helpful_reactions_received, 0);
-      const shouldGrant =
-        (key === 'first_answer' && answersCount >= threshold) ||
-        (key === 'helpful_contributor' && helpfulReceived >= threshold) ||
-        (key === 'mentor' && bestAnswers >= threshold);
-      if (shouldGrant) pending.push({ user_id: userId, badge_id: String((badge as any).id || '') });
-    }
-    if (pending.length > 0) {
-      await supabaseAdmin.from('discussion_user_badges').upsert(pending, { onConflict: 'user_id,badge_id' });
-    }
+    try {
+      const [statsRes, badgesRes] = await Promise.all([
+        pool.query(`SELECT * FROM discussion_user_stats WHERE user_id = $1`, [userId]),
+        pool.query(`SELECT * FROM discussion_badges`),
+      ]);
+      const stats = statsRes.rows[0];
+      const badgeRows = badgesRes.rows;
+      if (!stats || badgeRows.length === 0) return;
+      for (const badge of badgeRows) {
+        const key = String(badge.key || '');
+        const threshold = asInt(badge.threshold, 1);
+        const answersCount = asInt(stats.answers_count, 0);
+        const bestAnswers = asInt(stats.best_answers_count, 0);
+        const helpfulReceived = asInt(stats.helpful_reactions_received, 0);
+        const shouldGrant =
+          (key === 'first_answer' && answersCount >= threshold) ||
+          (key === 'helpful_contributor' && helpfulReceived >= threshold) ||
+          (key === 'mentor' && bestAnswers >= threshold);
+        if (shouldGrant) {
+          await pool.query(
+            `INSERT INTO discussion_user_badges (user_id, badge_id) VALUES ($1, $2) ON CONFLICT (user_id, badge_id) DO NOTHING`,
+            [userId, String(badge.id || '')]
+          ).catch(() => {});
+        }
+      }
+    } catch { /* silent */ }
   };
 
   // ─── REAL-TIME LIVE QUIZ SYSTEM (Kahoot-style) ───────────────────────────────
@@ -8964,17 +8969,45 @@ export async function createApp(options: CreateAppOptions = {}) {
     return { col: 'created_at', asc: false };
   };
 
-  const missingLessonDiscussionTable = (error: any) => {
-    const hay = `${error?.message || ''} ${error?.details || ''} ${error?.hint || ''}`.toLowerCase();
-    if (!hay.includes('lesson_discussion_questions')) return false;
-    return /schema cache|could not find|does not exist|42p01|relation/i.test(hay);
-  };
-  const discussionSetupError =
-    'Lesson discussion tables are not installed yet. Run sql/run_in_supabase_editor.sql in Supabase SQL Editor.';
 
   app.get('/api/student/community', async (_req, res) => {
     res.json({ success: true, posts: [], deprecated: true, message: 'Use lesson discussion endpoints.' });
   });
+
+  // Helper: fetch a question row with author info via pg
+  const pgGetQuestion = async (questionId: string) => {
+    const r = await pool.query(
+      `SELECT q.*, json_build_object('id',p.id,'display_name',p.display_name,'email',p.email) AS author
+       FROM lesson_discussion_questions q
+       LEFT JOIN profiles p ON p.id = q.author_id
+       WHERE q.id = $1 AND q.deleted_at IS NULL`,
+      [questionId]
+    );
+    return r.rows[0] || null;
+  };
+  const pgGetAnswer = async (answerId: string) => {
+    const r = await pool.query(
+      `SELECT a.*, json_build_object('id',p.id,'display_name',p.display_name,'email',p.email) AS author
+       FROM lesson_discussion_answers a
+       LEFT JOIN profiles p ON p.id = a.author_id
+       WHERE a.id = $1`,
+      [answerId]
+    );
+    return r.rows[0] || null;
+  };
+  const pgUpsertStats = async (userId: string, delta: { answers?: number; reputation?: number; best_answers?: number; helpful?: number }) => {
+    await pool.query(
+      `INSERT INTO discussion_user_stats (user_id, answers_count, reputation, best_answers_count, helpful_reactions_received, updated_at)
+       VALUES ($1, $2, $3, $4, $5, now())
+       ON CONFLICT (user_id) DO UPDATE SET
+         answers_count = discussion_user_stats.answers_count + $2,
+         reputation = discussion_user_stats.reputation + $3,
+         best_answers_count = discussion_user_stats.best_answers_count + $4,
+         helpful_reactions_received = discussion_user_stats.helpful_reactions_received + $5,
+         updated_at = now()`,
+      [userId, delta.answers ?? 0, delta.reputation ?? 0, delta.best_answers ?? 0, delta.helpful ?? 0]
+    );
+  };
 
   app.get('/api/student/lessons/:lessonId/discussions', async (req, res) => {
     try {
@@ -8986,20 +9019,23 @@ export async function createApp(options: CreateAppOptions = {}) {
       const sort = String(req.query.sort || 'recent').trim();
       const limit = Math.min(50, Math.max(1, asInt(req.query.limit, 20)));
       const cursor = String(req.query.cursor || '').trim();
-
       const order = resolveQuestionOrdering(sort);
-      let query = supabaseAdmin
-        .from('lesson_discussion_questions')
-        .select('*, author:profiles!author_id(id,display_name,email)')
-        .eq('lesson_id', lessonId)
-        .is('deleted_at', null)
-        .order('is_pinned', { ascending: false })
-        .order(order.col, { ascending: order.asc })
-        .limit(limit + 1);
-      if (cursor) query = query.lt(order.col, cursor);
-      const { data, error } = await query;
-      if (error) throw error;
-      let rows = (data || []) as any[];
+      const orderDir = order.asc ? 'ASC' : 'DESC';
+      const params: unknown[] = [lessonId, limit + 1];
+      let cursorClause = '';
+      if (cursor) {
+        params.push(cursor);
+        cursorClause = `AND q.${order.col} < $${params.length}`;
+      }
+      const sql = `
+        SELECT q.*, json_build_object('id',p.id,'display_name',p.display_name,'email',p.email) AS author
+        FROM lesson_discussion_questions q
+        LEFT JOIN profiles p ON p.id = q.author_id
+        WHERE q.lesson_id = $1 AND q.deleted_at IS NULL ${cursorClause}
+        ORDER BY q.is_pinned DESC, q.${order.col} ${orderDir}
+        LIMIT $2`;
+      const result = await pool.query(sql, params);
+      let rows = result.rows as any[];
       if (sort === 'unanswered') rows = rows.filter((row) => asInt(row?.answers_count, 0) === 0);
       if (q) rows = rows.filter((row) => `${row?.title || ''} ${row?.body || ''}`.toLowerCase().includes(q));
       const hasMore = rows.length > limit;
@@ -9007,9 +9043,6 @@ export async function createApp(options: CreateAppOptions = {}) {
       const nextCursor = hasMore ? String(pageRows[pageRows.length - 1]?.[order.col] || '') : null;
       res.json({ success: true, questions: pageRows, hasMore, nextCursor });
     } catch (e: any) {
-      if (missingLessonDiscussionTable(e)) {
-        return res.json({ success: true, questions: [], hasMore: false, nextCursor: null, disabled: true });
-      }
       res.status(500).json({ error: e.message || 'Failed to load lesson discussions' });
     }
   });
@@ -9023,26 +9056,15 @@ export async function createApp(options: CreateAppOptions = {}) {
       const title = String(req.body?.title || '').trim();
       const body = String(req.body?.body || '').trim();
       if (!lessonId || !title || !body) return res.status(400).json({ error: 'lessonId, title, and body are required' });
-      const { data, error } = await supabaseAdmin
-        .from('lesson_discussion_questions')
-        .insert({
-          lesson_id: lessonId,
-          author_id: caller.userId,
-          title,
-          body,
-          is_pinned: false,
-          created_at: new Date().toISOString(),
-          updated_at: new Date().toISOString(),
-          last_activity_at: new Date().toISOString(),
-        })
-        .select('*, author:profiles!author_id(id,display_name,email)')
-        .single();
-      if (error) throw error;
-      res.json({ success: true, question: data });
+      const now = new Date().toISOString();
+      const r = await pool.query(
+        `INSERT INTO lesson_discussion_questions (lesson_id, author_id, title, body, is_pinned, created_at, updated_at, last_activity_at)
+         VALUES ($1,$2,$3,$4,false,$5,$5,$5) RETURNING *`,
+        [lessonId, caller.userId, title, body, now]
+      );
+      const question = await pgGetQuestion(String(r.rows[0]?.id || ''));
+      res.json({ success: true, question: question || r.rows[0] });
     } catch (e: any) {
-      if (missingLessonDiscussionTable(e)) {
-        return res.status(503).json({ error: 'Lesson discussion tables are not installed yet. Run sql/run_in_supabase_editor.sql in Supabase SQL Editor.' });
-      }
       res.status(500).json({ error: e.message || 'Failed to create question' });
     }
   });
@@ -9052,22 +9074,33 @@ export async function createApp(options: CreateAppOptions = {}) {
       const caller = await assertAuthenticated(req, res);
       if (!caller) return;
       const questionId = String(req.params.questionId || '').trim();
-      const [{ data: question, error: qErr }, { data: answers, error: aErr }] = await Promise.all([
-        supabaseAdmin.from('lesson_discussion_questions').select('*, author:profiles!author_id(id,display_name,email)').eq('id', questionId).is('deleted_at', null).maybeSingle(),
-        supabaseAdmin.from('lesson_discussion_answers').select('*, author:profiles!author_id(id,display_name,email)').eq('question_id', questionId).is('deleted_at', null).order('is_best', { ascending: false }).order('helpful_score', { ascending: false }).order('created_at', { ascending: true }),
+      const [question, answersRes] = await Promise.all([
+        pgGetQuestion(questionId),
+        pool.query(
+          `SELECT a.*, json_build_object('id',p.id,'display_name',p.display_name,'email',p.email) AS author
+           FROM lesson_discussion_answers a
+           LEFT JOIN profiles p ON p.id = a.author_id
+           WHERE a.question_id = $1 AND a.deleted_at IS NULL
+           ORDER BY a.is_best DESC, a.helpful_score DESC, a.created_at ASC`,
+          [questionId]
+        ),
       ]);
-      if (qErr) throw qErr;
-      if (aErr) throw aErr;
-      const answerIds = (answers || []).map((a: any) => String(a.id)).filter(Boolean);
-      const { data: replies, error: rErr } = answerIds.length
-        ? await supabaseAdmin.from('lesson_discussion_replies').select('*, author:profiles!author_id(id,display_name,email)').in('answer_id', answerIds).is('deleted_at', null).order('created_at', { ascending: true })
-        : { data: [], error: null };
-      if (rErr) throw rErr;
-      res.json({ success: true, question, answers: answers || [], replies: replies || [] });
-    } catch (e: any) {
-      if (missingLessonDiscussionTable(e)) {
-        return res.json({ success: true, question: null, answers: [], replies: [], disabled: true });
+      const answers = answersRes.rows as any[];
+      const answerIds = answers.map((a) => String(a.id)).filter(Boolean);
+      let replies: any[] = [];
+      if (answerIds.length) {
+        const rr = await pool.query(
+          `SELECT r.*, json_build_object('id',p.id,'display_name',p.display_name,'email',p.email) AS author
+           FROM lesson_discussion_replies r
+           LEFT JOIN profiles p ON p.id = r.author_id
+           WHERE r.answer_id = ANY($1::uuid[]) AND r.deleted_at IS NULL
+           ORDER BY r.created_at ASC`,
+          [answerIds]
+        );
+        replies = rr.rows;
       }
+      res.json({ success: true, question, answers, replies });
+    } catch (e: any) {
       res.status(500).json({ error: e.message || 'Failed to load thread' });
     }
   });
@@ -9077,22 +9110,20 @@ export async function createApp(options: CreateAppOptions = {}) {
       const caller = await assertAuthenticated(req, res);
       if (!caller) return;
       const questionId = String(req.params.questionId || '').trim();
-      const { data: current, error: currentErr } = await supabaseAdmin.from('lesson_discussion_questions').select('*').eq('id', questionId).maybeSingle();
-      if (currentErr) throw currentErr;
+      const current = await pgGetQuestion(questionId);
       if (!current) return res.status(404).json({ error: 'Question not found' });
-      if (String((current as any).author_id || '') !== caller.userId && !canModerateDiscussion(caller.role)) {
+      if (String(current.author_id || '') !== caller.userId && !canModerateDiscussion(caller.role)) {
         return res.status(403).json({ error: 'Forbidden' });
       }
-      const updates: Record<string, unknown> = { updated_at: new Date().toISOString() };
-      if (typeof req.body?.title === 'string') updates.title = String(req.body.title).trim();
-      if (typeof req.body?.body === 'string') updates.body = String(req.body.body).trim();
-      const { data, error } = await supabaseAdmin.from('lesson_discussion_questions').update(updates).eq('id', questionId).select('*, author:profiles!author_id(id,display_name,email)').single();
-      if (error) throw error;
-      res.json({ success: true, question: data });
+      const sets: string[] = ['updated_at = now()'];
+      const params: unknown[] = [];
+      if (typeof req.body?.title === 'string') { params.push(String(req.body.title).trim()); sets.push(`title = $${params.length}`); }
+      if (typeof req.body?.body === 'string') { params.push(String(req.body.body).trim()); sets.push(`body = $${params.length}`); }
+      params.push(questionId);
+      await pool.query(`UPDATE lesson_discussion_questions SET ${sets.join(', ')} WHERE id = $${params.length}`, params);
+      const question = await pgGetQuestion(questionId);
+      res.json({ success: true, question });
     } catch (e: any) {
-      if (missingLessonDiscussionTable(e)) {
-        return res.status(503).json({ error: discussionSetupError });
-      }
       res.status(500).json({ error: e.message || 'Failed to update question' });
     }
   });
@@ -9102,19 +9133,15 @@ export async function createApp(options: CreateAppOptions = {}) {
       const caller = await assertAuthenticated(req, res);
       if (!caller) return;
       const questionId = String(req.params.questionId || '').trim();
-      const { data: current, error: currentErr } = await supabaseAdmin.from('lesson_discussion_questions').select('id,author_id').eq('id', questionId).maybeSingle();
-      if (currentErr) throw currentErr;
-      if (!current) return res.status(404).json({ error: 'Question not found' });
-      if (String((current as any).author_id || '') !== caller.userId && !canModerateDiscussion(caller.role)) {
+      const current = await pool.query(`SELECT id, author_id FROM lesson_discussion_questions WHERE id = $1`, [questionId]);
+      const row = current.rows[0];
+      if (!row) return res.status(404).json({ error: 'Question not found' });
+      if (String(row.author_id || '') !== caller.userId && !canModerateDiscussion(caller.role)) {
         return res.status(403).json({ error: 'Forbidden' });
       }
-      const { error } = await supabaseAdmin.from('lesson_discussion_questions').update({ deleted_at: new Date().toISOString(), updated_at: new Date().toISOString() }).eq('id', questionId);
-      if (error) throw error;
+      await pool.query(`UPDATE lesson_discussion_questions SET deleted_at = now(), updated_at = now() WHERE id = $1`, [questionId]);
       res.json({ success: true });
     } catch (e: any) {
-      if (missingLessonDiscussionTable(e)) {
-        return res.status(503).json({ error: discussionSetupError });
-      }
       res.status(500).json({ error: e.message || 'Failed to delete question' });
     }
   });
@@ -9126,37 +9153,25 @@ export async function createApp(options: CreateAppOptions = {}) {
       const questionId = String(req.params.questionId || '').trim();
       const body = String(req.body?.body || '').trim();
       if (!body) return res.status(400).json({ error: 'body is required' });
-      const { data: question } = await supabaseAdmin.from('lesson_discussion_questions').select('id,author_id,answers_count').eq('id', questionId).maybeSingle();
-      const { data, error } = await supabaseAdmin
-        .from('lesson_discussion_answers')
-        .insert({ question_id: questionId, author_id: caller.userId, body, created_at: new Date().toISOString(), updated_at: new Date().toISOString() })
-        .select('*, author:profiles!author_id(id,display_name,email)')
-        .single();
-      if (error) throw error;
-      const currentQuestionAnswers = asInt((question as any)?.answers_count, 0);
-      await supabaseAdmin.from('lesson_discussion_questions').update({
-        answers_count: currentQuestionAnswers + 1,
-        last_activity_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
-      }).eq('id', questionId);
-      const { data: existingStats } = await supabaseAdmin.from('discussion_user_stats').select('*').eq('user_id', caller.userId).maybeSingle();
-      await supabaseAdmin.from('discussion_user_stats').upsert({
-        user_id: caller.userId,
-        answers_count: asInt((existingStats as any)?.answers_count, 0) + 1,
-        reputation: asInt((existingStats as any)?.reputation, 0) + 2,
-        helpful_reactions_received: asInt((existingStats as any)?.helpful_reactions_received, 0),
-        best_answers_count: asInt((existingStats as any)?.best_answers_count, 0),
-        updated_at: new Date().toISOString(),
-      }, { onConflict: 'user_id' });
-      if (question && String((question as any).author_id || '') && String((question as any).author_id || '') !== caller.userId) {
-        await addDiscussionNotification(String((question as any).author_id || ''), 'New answer to your question', body, `/student/community?question=${questionId}`);
+      const qRes = await pool.query(`SELECT id, author_id, answers_count FROM lesson_discussion_questions WHERE id = $1`, [questionId]);
+      const question = qRes.rows[0];
+      const aRes = await pool.query(
+        `INSERT INTO lesson_discussion_answers (question_id, author_id, body, created_at, updated_at)
+         VALUES ($1,$2,$3,now(),now()) RETURNING *`,
+        [questionId, caller.userId, body]
+      );
+      const answer = await pgGetAnswer(String(aRes.rows[0]?.id || ''));
+      await pool.query(
+        `UPDATE lesson_discussion_questions SET answers_count = answers_count + 1, last_activity_at = now(), updated_at = now() WHERE id = $1`,
+        [questionId]
+      );
+      await pgUpsertStats(caller.userId, { answers: 1, reputation: 2 });
+      if (question && String(question.author_id || '') && String(question.author_id || '') !== caller.userId) {
+        await addDiscussionNotification(String(question.author_id || ''), 'New answer to your question', body, `/student/community?question=${questionId}`);
       }
       await awardDiscussionBadges(caller.userId);
-      res.json({ success: true, answer: data });
+      res.json({ success: true, answer: answer || aRes.rows[0] });
     } catch (e: any) {
-      if (missingLessonDiscussionTable(e)) {
-        return res.status(503).json({ error: discussionSetupError });
-      }
       res.status(500).json({ error: e.message || 'Failed to add answer' });
     }
   });
@@ -9171,29 +9186,28 @@ export async function createApp(options: CreateAppOptions = {}) {
       if (!body) return res.status(400).json({ error: 'body is required' });
       let depth = 0;
       if (parentReplyId) {
-        const { data: parent } = await supabaseAdmin.from('lesson_discussion_replies').select('depth').eq('id', parentReplyId).maybeSingle();
-        depth = Math.min(3, asInt((parent as any)?.depth, 0) + 1);
+        const pr = await pool.query(`SELECT depth FROM lesson_discussion_replies WHERE id = $1`, [parentReplyId]);
+        depth = Math.min(3, asInt(pr.rows[0]?.depth, 0) + 1);
       }
-      const { data: answer } = await supabaseAdmin.from('lesson_discussion_answers').select('id,author_id,question_id,replies_count').eq('id', answerId).maybeSingle();
-      const { data, error } = await supabaseAdmin
-        .from('lesson_discussion_replies')
-        .insert({
-          answer_id: answerId,
-          author_id: caller.userId,
-          body,
-          parent_reply_id: parentReplyId,
-          depth,
-          created_at: new Date().toISOString(),
-          updated_at: new Date().toISOString(),
-        })
-        .select('*, author:profiles!author_id(id,display_name,email)')
-        .single();
-      if (error) throw error;
-      await supabaseAdmin.from('lesson_discussion_answers').update({ replies_count: asInt((answer as any)?.replies_count, 0) + 1, updated_at: new Date().toISOString() }).eq('id', answerId);
-      if (answer && String((answer as any).author_id || '') && String((answer as any).author_id || '') !== caller.userId) {
-        await addDiscussionNotification(String((answer as any).author_id || ''), 'New reply to your answer', body, `/student/community?question=${String((answer as any).question_id || '')}`);
+      const aRes = await pool.query(`SELECT id, author_id, question_id, replies_count FROM lesson_discussion_answers WHERE id = $1`, [answerId]);
+      const answer = aRes.rows[0];
+      const rRes = await pool.query(
+        `INSERT INTO lesson_discussion_replies (answer_id, author_id, body, parent_reply_id, depth, created_at, updated_at)
+         VALUES ($1,$2,$3,$4,$5,now(),now()) RETURNING *`,
+        [answerId, caller.userId, body, parentReplyId, depth]
+      );
+      const replyRow = rRes.rows[0];
+      // Attach author
+      const fullReply = await pool.query(
+        `SELECT r.*, json_build_object('id',p.id,'display_name',p.display_name,'email',p.email) AS author
+         FROM lesson_discussion_replies r LEFT JOIN profiles p ON p.id = r.author_id WHERE r.id = $1`,
+        [String(replyRow?.id || '')]
+      );
+      await pool.query(`UPDATE lesson_discussion_answers SET replies_count = replies_count + 1, updated_at = now() WHERE id = $1`, [answerId]);
+      if (answer && String(answer.author_id || '') && String(answer.author_id || '') !== caller.userId) {
+        await addDiscussionNotification(String(answer.author_id || ''), 'New reply to your answer', body, `/student/community?question=${String(answer.question_id || '')}`);
       }
-      res.json({ success: true, reply: data });
+      res.json({ success: true, reply: fullReply.rows[0] || replyRow });
     } catch (e: any) {
       res.status(500).json({ error: e.message || 'Failed to add reply' });
     }
@@ -9206,29 +9220,18 @@ export async function createApp(options: CreateAppOptions = {}) {
       if (!canMarkBestAnswer(caller.role)) return res.status(403).json({ error: 'Forbidden' });
       const questionId = String(req.params.questionId || '').trim();
       const answerId = String(req.params.answerId || '').trim();
-      await supabaseAdmin.from('lesson_discussion_answers').update({ is_best: false, updated_at: new Date().toISOString() }).eq('question_id', questionId);
-      const { data: answer, error: answerErr } = await supabaseAdmin.from('lesson_discussion_answers').update({ is_best: true, updated_at: new Date().toISOString() }).eq('id', answerId).select('id,author_id').single();
-      if (answerErr) throw answerErr;
-      const { data, error } = await supabaseAdmin.from('lesson_discussion_questions').update({ best_answer_id: answerId, updated_at: new Date().toISOString() }).eq('id', questionId).select('*').single();
-      if (error) throw error;
-      if (answer && String((answer as any).author_id || '')) {
-        const targetUser = String((answer as any).author_id || '');
-        const { data: existingStats } = await supabaseAdmin.from('discussion_user_stats').select('*').eq('user_id', targetUser).maybeSingle();
-        await supabaseAdmin.from('discussion_user_stats').upsert({
-          user_id: targetUser,
-          answers_count: asInt((existingStats as any)?.answers_count, 0),
-          best_answers_count: asInt((existingStats as any)?.best_answers_count, 0) + 1,
-          helpful_reactions_received: asInt((existingStats as any)?.helpful_reactions_received, 0),
-          reputation: asInt((existingStats as any)?.reputation, 0) + 10,
-          updated_at: new Date().toISOString(),
-        }, { onConflict: 'user_id' });
-        await awardDiscussionBadges(String((answer as any).author_id || ''));
+      await pool.query(`UPDATE lesson_discussion_answers SET is_best = false, updated_at = now() WHERE question_id = $1`, [questionId]);
+      await pool.query(`UPDATE lesson_discussion_answers SET is_best = true, updated_at = now() WHERE id = $1`, [answerId]);
+      const answerRow = await pool.query(`SELECT id, author_id FROM lesson_discussion_answers WHERE id = $1`, [answerId]);
+      await pool.query(`UPDATE lesson_discussion_questions SET best_answer_id = $1, updated_at = now() WHERE id = $2`, [answerId, questionId]);
+      const question = await pgGetQuestion(questionId);
+      const answerAuthorId = String(answerRow.rows[0]?.author_id || '');
+      if (answerAuthorId) {
+        await pgUpsertStats(answerAuthorId, { best_answers: 1, reputation: 10 });
+        await awardDiscussionBadges(answerAuthorId);
       }
-      res.json({ success: true, question: data });
+      res.json({ success: true, question });
     } catch (e: any) {
-      if (missingLessonDiscussionTable(e)) {
-        return res.status(503).json({ error: discussionSetupError });
-      }
       res.status(500).json({ error: e.message || 'Failed to mark best answer' });
     }
   });
@@ -9240,13 +9243,10 @@ export async function createApp(options: CreateAppOptions = {}) {
       if (!canModerateDiscussion(caller.role)) return res.status(403).json({ error: 'Forbidden' });
       const questionId = String(req.params.questionId || '').trim();
       const isPinned = Boolean(req.body?.is_pinned ?? true);
-      const { data, error } = await supabaseAdmin.from('lesson_discussion_questions').update({ is_pinned: isPinned, updated_at: new Date().toISOString() }).eq('id', questionId).select('*').single();
-      if (error) throw error;
-      res.json({ success: true, question: data });
+      await pool.query(`UPDATE lesson_discussion_questions SET is_pinned = $1, updated_at = now() WHERE id = $2`, [isPinned, questionId]);
+      const question = await pgGetQuestion(questionId);
+      res.json({ success: true, question });
     } catch (e: any) {
-      if (missingLessonDiscussionTable(e)) {
-        return res.status(503).json({ error: discussionSetupError });
-      }
       res.status(500).json({ error: e.message || 'Failed to pin question' });
     }
   });
@@ -9259,13 +9259,12 @@ export async function createApp(options: CreateAppOptions = {}) {
       const targetId = String(req.body?.target_id || '').trim();
       const reactionType = String(req.body?.reaction_type || 'like').trim();
       if (!targetType || !targetId) return res.status(400).json({ error: 'target_type and target_id are required' });
-      const { data, error } = await supabaseAdmin
-        .from('lesson_discussion_reactions')
-        .insert({ user_id: caller.userId, target_type: targetType, target_id: targetId, reaction_type: reactionType })
-        .select()
-        .single();
-      if (error) throw error;
-      res.json({ success: true, reaction: data });
+      const r = await pool.query(
+        `INSERT INTO lesson_discussion_reactions (user_id, target_type, target_id, reaction_type)
+         VALUES ($1,$2,$3,$4) ON CONFLICT DO NOTHING RETURNING *`,
+        [caller.userId, targetType, targetId, reactionType]
+      );
+      res.json({ success: true, reaction: r.rows[0] || null });
     } catch (e: any) {
       res.status(500).json({ error: e.message || 'Failed to add reaction' });
     }
@@ -9278,8 +9277,10 @@ export async function createApp(options: CreateAppOptions = {}) {
       const targetType = String(req.body?.target_type || '').trim();
       const targetId = String(req.body?.target_id || '').trim();
       const reactionType = String(req.body?.reaction_type || 'like').trim();
-      const { error } = await supabaseAdmin.from('lesson_discussion_reactions').delete().eq('user_id', caller.userId).eq('target_type', targetType).eq('target_id', targetId).eq('reaction_type', reactionType);
-      if (error) throw error;
+      await pool.query(
+        `DELETE FROM lesson_discussion_reactions WHERE user_id=$1 AND target_type=$2 AND target_id=$3 AND reaction_type=$4`,
+        [caller.userId, targetType, targetId, reactionType]
+      );
       res.json({ success: true });
     } catch (e: any) {
       res.status(500).json({ error: e.message || 'Failed to remove reaction' });
@@ -9295,18 +9296,12 @@ export async function createApp(options: CreateAppOptions = {}) {
       const reason = String(req.body?.reason || '').trim();
       const details = req.body?.details ? String(req.body.details) : null;
       if (!targetType || !targetId || !reason) return res.status(400).json({ error: 'target_type, target_id and reason are required' });
-      const { data, error } = await supabaseAdmin.from('lesson_discussion_reports').insert({
-        reporter_id: caller.userId,
-        target_type: targetType,
-        target_id: targetId,
-        reason,
-        details,
-        status: 'open',
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
-      }).select().single();
-      if (error) throw error;
-      res.json({ success: true, report: data });
+      const r = await pool.query(
+        `INSERT INTO lesson_discussion_reports (reporter_id, target_type, target_id, reason, details, status, created_at, updated_at)
+         VALUES ($1,$2,$3,$4,$5,'open',now(),now()) RETURNING *`,
+        [caller.userId, targetType, targetId, reason, details]
+      );
+      res.json({ success: true, report: r.rows[0] });
     } catch (e: any) {
       res.status(500).json({ error: e.message || 'Failed to submit report' });
     }
@@ -9317,12 +9312,16 @@ export async function createApp(options: CreateAppOptions = {}) {
       const caller = await assertAuthenticated(req, res);
       if (!caller) return;
       if (!canModerateDiscussion(caller.role)) return res.status(403).json({ error: 'Forbidden' });
-      const { data, error } = await supabaseAdmin
-        .from('lesson_discussion_reports')
-        .select('*, reporter:profiles!reporter_id(id,display_name,email), reviewer:profiles!reviewed_by(id,display_name,email)')
-        .order('created_at', { ascending: false });
-      if (error) throw error;
-      res.json({ success: true, reports: data || [] });
+      const r = await pool.query(
+        `SELECT rp.*,
+           json_build_object('id',rep.id,'display_name',rep.display_name,'email',rep.email) AS reporter,
+           json_build_object('id',rev.id,'display_name',rev.display_name,'email',rev.email) AS reviewer
+         FROM lesson_discussion_reports rp
+         LEFT JOIN profiles rep ON rep.id = rp.reporter_id
+         LEFT JOIN profiles rev ON rev.id = rp.reviewed_by
+         ORDER BY rp.created_at DESC`
+      );
+      res.json({ success: true, reports: r.rows });
     } catch (e: any) {
       res.status(500).json({ error: e.message || 'Failed to load reports' });
     }
@@ -9338,31 +9337,21 @@ export async function createApp(options: CreateAppOptions = {}) {
       const actionType = String(req.body?.action_type || '').trim();
       const reason = req.body?.reason ? String(req.body.reason) : null;
       if (!targetType || !targetId || !actionType) return res.status(400).json({ error: 'target_type, target_id, action_type are required' });
+      const deletedAt = actionType === 'restore' ? null : new Date().toISOString();
       if (targetType === 'question') {
-        const deletedAt = actionType === 'restore' ? null : new Date().toISOString();
-        await supabaseAdmin.from('lesson_discussion_questions').update({ deleted_at: deletedAt, is_locked: actionType === 'lock', updated_at: new Date().toISOString() }).eq('id', targetId);
+        await pool.query(`UPDATE lesson_discussion_questions SET deleted_at=$1, is_locked=$2, updated_at=now() WHERE id=$3`, [deletedAt, actionType === 'lock', targetId]);
+      } else if (targetType === 'answer') {
+        await pool.query(`UPDATE lesson_discussion_answers SET deleted_at=$1, updated_at=now() WHERE id=$2`, [deletedAt, targetId]);
+      } else if (targetType === 'reply') {
+        await pool.query(`UPDATE lesson_discussion_replies SET deleted_at=$1, updated_at=now() WHERE id=$2`, [deletedAt, targetId]);
       }
-      if (targetType === 'answer') {
-        const deletedAt = actionType === 'restore' ? null : new Date().toISOString();
-        await supabaseAdmin.from('lesson_discussion_answers').update({ deleted_at: deletedAt, updated_at: new Date().toISOString() }).eq('id', targetId);
-      }
-      if (targetType === 'reply') {
-        const deletedAt = actionType === 'restore' ? null : new Date().toISOString();
-        await supabaseAdmin.from('lesson_discussion_replies').update({ deleted_at: deletedAt, updated_at: new Date().toISOString() }).eq('id', targetId);
-      }
-      await supabaseAdmin.from('discussion_moderation_actions').insert({
-        actor_id: caller.userId,
-        target_type: targetType,
-        target_id: targetId,
-        action_type: actionType,
-        reason,
-        metadata: req.body?.metadata || {},
-      });
+      await pool.query(
+        `INSERT INTO discussion_moderation_actions (actor_id, target_type, target_id, action_type, reason, metadata)
+         VALUES ($1,$2,$3,$4,$5,$6)`,
+        [caller.userId, targetType, targetId, actionType, reason, JSON.stringify(req.body?.metadata || {})]
+      ).catch(() => {});
       res.json({ success: true });
     } catch (e: any) {
-      if (missingLessonDiscussionTable(e)) {
-        return res.status(503).json({ error: discussionSetupError });
-      }
       res.status(500).json({ error: e.message || 'Failed to moderate content' });
     }
   });
@@ -9372,13 +9361,13 @@ export async function createApp(options: CreateAppOptions = {}) {
       const caller = await assertAuthenticated(req, res);
       if (!caller) return;
       if (caller.role !== 'admin') return res.status(403).json({ error: 'Forbidden: admin role required' });
-      const { data, error } = await supabaseAdmin
-        .from('discussion_moderation_actions')
-        .select('*, actor:profiles!actor_id(id,display_name,email)')
-        .order('created_at', { ascending: false })
-        .limit(200);
-      if (error) throw error;
-      res.json({ success: true, actions: data || [] });
+      const r = await pool.query(
+        `SELECT ma.*, json_build_object('id',p.id,'display_name',p.display_name,'email',p.email) AS actor
+         FROM discussion_moderation_actions ma
+         LEFT JOIN profiles p ON p.id = ma.actor_id
+         ORDER BY ma.created_at DESC LIMIT 200`
+      );
+      res.json({ success: true, actions: r.rows });
     } catch (e: any) {
       res.status(500).json({ error: e.message || 'Failed to load moderation actions' });
     }
@@ -9388,15 +9377,19 @@ export async function createApp(options: CreateAppOptions = {}) {
     try {
       const caller = await assertAuthenticated(req, res);
       if (!caller) return;
-      const [{ data: stats }, { data: badges }] = await Promise.all([
-        supabaseAdmin.from('discussion_user_stats').select('*').eq('user_id', caller.userId).maybeSingle(),
-        supabaseAdmin
-          .from('discussion_user_badges')
-          .select('awarded_at,badge:discussion_badges!badge_id(id,key,label,description)')
-          .eq('user_id', caller.userId)
-          .order('awarded_at', { ascending: false }),
+      const [statsRes, badgesRes] = await Promise.all([
+        pool.query(`SELECT * FROM discussion_user_stats WHERE user_id = $1`, [caller.userId]),
+        pool.query(
+          `SELECT ub.awarded_at,
+             json_build_object('id',b.id,'key',b.key,'label',b.label,'description',b.description) AS badge
+           FROM discussion_user_badges ub
+           JOIN discussion_badges b ON b.id = ub.badge_id
+           WHERE ub.user_id = $1
+           ORDER BY ub.awarded_at DESC`,
+          [caller.userId]
+        ),
       ]);
-      res.json({ success: true, stats: stats || null, badges: badges || [] });
+      res.json({ success: true, stats: statsRes.rows[0] || null, badges: badgesRes.rows });
     } catch (e: any) {
       res.status(500).json({ error: e.message || 'Failed to load discussion stats' });
     }
@@ -9909,6 +9902,44 @@ alter table public.lesson_discussion_questions
 
 `;
 
+const DISCUSSION_RLS_SQL = `
+alter table public.lesson_discussion_questions enable row level security;
+alter table public.lesson_discussion_answers enable row level security;
+alter table public.lesson_discussion_replies enable row level security;
+alter table public.lesson_discussion_reactions enable row level security;
+alter table public.lesson_discussion_reports enable row level security;
+alter table public.discussion_user_stats enable row level security;
+alter table public.discussion_badges enable row level security;
+alter table public.discussion_user_badges enable row level security;
+
+do $$ begin
+  if not exists (select 1 from pg_policies where tablename = 'lesson_discussion_questions' and policyname = 'ldq_auth_all') then
+    create policy ldq_auth_all on public.lesson_discussion_questions for all using (true) with check (true);
+  end if;
+  if not exists (select 1 from pg_policies where tablename = 'lesson_discussion_answers' and policyname = 'lda_auth_all') then
+    create policy lda_auth_all on public.lesson_discussion_answers for all using (true) with check (true);
+  end if;
+  if not exists (select 1 from pg_policies where tablename = 'lesson_discussion_replies' and policyname = 'ldr_auth_all') then
+    create policy ldr_auth_all on public.lesson_discussion_replies for all using (true) with check (true);
+  end if;
+  if not exists (select 1 from pg_policies where tablename = 'lesson_discussion_reactions' and policyname = 'ldreact_auth_all') then
+    create policy ldreact_auth_all on public.lesson_discussion_reactions for all using (true) with check (true);
+  end if;
+  if not exists (select 1 from pg_policies where tablename = 'lesson_discussion_reports' and policyname = 'ldrep_auth_all') then
+    create policy ldrep_auth_all on public.lesson_discussion_reports for all using (true) with check (true);
+  end if;
+  if not exists (select 1 from pg_policies where tablename = 'discussion_user_stats' and policyname = 'dus_auth_all') then
+    create policy dus_auth_all on public.discussion_user_stats for all using (true) with check (true);
+  end if;
+  if not exists (select 1 from pg_policies where tablename = 'discussion_badges' and policyname = 'db_auth_read') then
+    create policy db_auth_read on public.discussion_badges for select using (true);
+  end if;
+  if not exists (select 1 from pg_policies where tablename = 'discussion_user_badges' and policyname = 'dub_auth_all') then
+    create policy dub_auth_all on public.discussion_user_badges for all using (true) with check (true);
+  end if;
+end $$;
+`;
+
 let _discussionTablesReady = false;
 
 async function runDiscussionMigration(): Promise<boolean> {
@@ -9923,15 +9954,20 @@ async function runDiscussionMigration(): Promise<boolean> {
     const check = await pool.query(
       `SELECT to_regclass('public.lesson_discussion_questions') AS tbl`
     );
-    if (check.rows[0]?.tbl) {
-      _discussionTablesReady = true;
-      console.log('[migration] discussion tables already exist ✓');
-      return true;
+    if (!check.rows[0]?.tbl) {
+      console.log('[migration] creating discussion tables…');
+      await pool.query(DISCUSSION_MIGRATION_SQL);
+      console.log('[migration] discussion tables created ✓');
+    } else {
+      console.log('[migration] discussion tables already exist — ensuring RLS policies…');
     }
-    console.log('[migration] creating discussion tables…');
-    await pool.query(DISCUSSION_MIGRATION_SQL);
+    // Always apply RLS + policies (idempotent) and reload schema
+    await pool.query(DISCUSSION_RLS_SQL).catch((e: any) => {
+      console.warn('[migration] RLS policy setup warning:', e?.message);
+    });
+    await pool.query(`NOTIFY pgrst, 'reload schema'`).catch(() => {});
     _discussionTablesReady = true;
-    console.log('[migration] discussion tables created ✓');
+    console.log('[migration] discussion setup complete ✓');
     return true;
   } catch (err: any) {
     console.error('[migration] discussion table setup failed:', err?.message || err);

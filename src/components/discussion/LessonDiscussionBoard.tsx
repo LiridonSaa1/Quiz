@@ -133,16 +133,22 @@ export default function LessonDiscussionBoard({ lessonId, canModerate = false, t
     );
   };
 
-  const loadQuestions = async (append = false) => {
+  const loadQuestions = async (append = false, retryCount = 0) => {
     try {
       setLoading(!append);
       const json = await listLessonQuestions(lessonId, { q, sort, cursor: append ? cursor || undefined : undefined, limit: 20 });
       const disabled = Boolean(json?.disabled);
-      setDiscussionDisabled(disabled);
       if (disabled) {
+        // Schema cache may still be warming up — auto-retry up to 5 times with backoff
+        if (retryCount < 5) {
+          setTimeout(() => void loadQuestions(append, retryCount + 1), 1200 * (retryCount + 1));
+          return;
+        }
+        setDiscussionDisabled(true);
         loadLocalQuestions();
         return;
       }
+      setDiscussionDisabled(false);
       const incoming = Array.isArray(json?.questions) ? json.questions : [];
       setQuestions((prev) => (append ? [...prev, ...incoming] : incoming));
       setHasMore(Boolean(json?.hasMore));
@@ -150,6 +156,10 @@ export default function LessonDiscussionBoard({ lessonId, canModerate = false, t
       if (!append && incoming[0]?.id) setActiveQuestionId(String(incoming[0].id));
     } catch (e: any) {
       if (isDiscussionSetupError(e?.message)) {
+        if (retryCount < 5) {
+          setTimeout(() => void loadQuestions(append, retryCount + 1), 1200 * (retryCount + 1));
+          return;
+        }
         setDiscussionDisabled(true);
         loadLocalQuestions();
         return;
