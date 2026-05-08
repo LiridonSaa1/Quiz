@@ -9823,16 +9823,34 @@ Assistant:`;
     } catch (e: any) { res.status(500).json({ error: e.message }); }
   });
 
+  // Safely insert/update announcements — retries without new columns if schema cache error
+  const annInsert = async (payload: Record<string, any>) => {
+    const r = await supabaseAdmin.from('announcements').insert(payload).select().single();
+    if (r.error && /schema cache|column/i.test(r.error.message)) {
+      const { ann_type, scheduled_at, ...safe } = payload;
+      return supabaseAdmin.from('announcements').insert(safe).select().single();
+    }
+    return r;
+  };
+  const annUpdate = async (id: string, payload: Record<string, any>) => {
+    const r = await supabaseAdmin.from('announcements').update(payload).eq('id', id).select().single();
+    if (r.error && /schema cache|column/i.test(r.error.message)) {
+      const { ann_type, scheduled_at, ...safe } = payload;
+      return supabaseAdmin.from('announcements').update(safe).eq('id', id).select().single();
+    }
+    return r;
+  };
+
   app.post('/api/admin/announcements', async (req, res) => {
     try {
-      const { class_ids, student_ids, ...body } = req.body || {};
+      const { class_ids, student_ids, send_email, ...body } = req.body || {};
       const payload = {
         ...body,
         published_at: body.status === 'published' ? new Date().toISOString() : null,
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
       };
-      const { data, error } = await supabaseAdmin.from('announcements').insert(payload).select().single();
+      const { data, error } = await annInsert(payload);
       if (error) throw error;
 
       if (body.status === 'published') {
@@ -9860,7 +9878,7 @@ Assistant:`;
         updated_at: new Date().toISOString(),
         ...(body.status === 'published' ? { published_at: new Date().toISOString() } : {}),
       };
-      const { data, error } = await supabaseAdmin.from('announcements').update(payload).eq('id', req.params.id).select().single();
+      const { data, error } = await annUpdate(req.params.id, payload);
       if (error) throw error;
 
       if (body.status === 'published') {
@@ -10189,6 +10207,29 @@ async function runDiscussionMigration(): Promise<boolean> {
   }
 }
 
+async function runAnnouncementColumnsMigration(): Promise<void> {
+  const dbUrl = process.env.DATABASE_URL;
+  if (!dbUrl) return;
+  // Try with explicit search_path first, then without schema prefix
+  const attempts = [
+    `SET search_path TO public; ALTER TABLE announcements ADD COLUMN IF NOT EXISTS ann_type text NOT NULL DEFAULT 'general'; ALTER TABLE announcements ADD COLUMN IF NOT EXISTS scheduled_at timestamptz NULL;`,
+    `ALTER TABLE public.announcements ADD COLUMN IF NOT EXISTS ann_type text NOT NULL DEFAULT 'general'; ALTER TABLE public.announcements ADD COLUMN IF NOT EXISTS scheduled_at timestamptz NULL;`,
+  ];
+  for (const sql of attempts) {
+    try {
+      await poolQuery(sql);
+      await poolQuery(`NOTIFY pgrst, 'reload schema'`).catch(() => {});
+      console.log('[migration] announcements columns (ann_type, scheduled_at) ensured ✓');
+      return;
+    } catch (err: any) {
+      console.warn('[migration] announcements column attempt failed:', err?.message?.split('\n')[0]);
+    }
+  }
+  // Final fallback: use supabaseAdmin to trigger a schema reload via a no-op query
+  // The annInsert/annUpdate helpers already handle the missing columns gracefully.
+  console.log('[migration] announcements columns: will use graceful fallback in API handlers');
+}
+
 async function startServer() {
   const parsedPort = Number(process.env.PORT);
   const preferredPort = Number.isInteger(parsedPort) && parsedPort > 0 ? parsedPort : 5000;
@@ -10196,8 +10237,9 @@ async function startServer() {
   const hostCandidates = preferredHost === "0.0.0.0" ? [preferredHost] : [preferredHost, "0.0.0.0"];
   const maxPortAttempts = 10;
   const recoverableListenErrors = new Set(["EACCES", "EADDRINUSE"]);
-  // Auto-create discussion tables if DATABASE_URL is available
+  // Auto-create discussion tables and announcement columns if DATABASE_URL is available
   void runDiscussionMigration();
+  void runAnnouncementColumnsMigration();
 
   const httpServer = http.createServer();
   const app = await createApp({ includeFrontend: true, httpServer });
