@@ -3847,8 +3847,9 @@ export async function createApp(options: CreateAppOptions = {}) {
       const caller = await assertAuthenticated(req, res);
       if (!caller) return;
 
-      const userId = typeof req.query.userId === "string" ? req.query.userId.trim() : "";
-      if (!userId) return res.status(400).json({ error: "userId is required" });
+      const userId = typeof req.query.userId === "string" && req.query.userId.trim()
+        ? req.query.userId.trim()
+        : caller.userId;
       if (!canAccessTeacherCourses(caller, userId)) {
         return res.status(403).json({ error: "Forbidden" });
       }
