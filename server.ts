@@ -12,6 +12,9 @@ import { fileURLToPath } from "url";
 import { createClient } from '@supabase/supabase-js';
 import pkg from 'pg';
 const { Pool } = pkg;
+const pool = process.env.DATABASE_URL
+  ? new Pool({ connectionString: process.env.DATABASE_URL, ssl: { rejectUnauthorized: false } })
+  : null as any;
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -9949,7 +9952,6 @@ async function runDiscussionMigration(): Promise<boolean> {
     console.log('[migration] DATABASE_URL not set — skipping discussion table auto-setup');
     return false;
   }
-  const pool = new Pool({ connectionString: dbUrl, ssl: { rejectUnauthorized: false } });
   try {
     // Check if table already exists
     const check = await pool.query(
