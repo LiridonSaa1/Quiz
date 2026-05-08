@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { toast } from 'sonner';
-import { MessageSquare, Pin, Search, ThumbsUp, Database, RefreshCw } from 'lucide-react';
+import { MessageSquare, Pin, Search, ThumbsUp, Database, RefreshCw, Clock, User } from 'lucide-react';
 import { formatDistanceToNow } from 'date-fns';
 import { supabase } from '../../supabase';
 import {
@@ -333,11 +333,11 @@ export default function LessonDiscussionBoard({ lessonId, canModerate = false, t
           ) : (
             <div className="space-y-3">
               <div className="rounded-2xl border border-slate-200 p-4">
-                <div className="flex items-center justify-between gap-3">
-                  <h3 className="font-bold text-slate-900">{activeQuestion.title}</h3>
+                <div className="flex items-start justify-between gap-3">
+                  <h3 className="font-bold text-slate-900 leading-snug">{activeQuestion.title}</h3>
                   {canModerate ? (
                     <button
-                      className="text-xs rounded-md border border-slate-300 px-2 py-1 hover:bg-slate-50"
+                      className="shrink-0 text-xs rounded-md border border-slate-300 px-2 py-1 hover:bg-slate-50"
                       onClick={async () => {
                         try {
                           await pinQuestion(String(activeQuestion.id), !Boolean(activeQuestion.is_pinned));
@@ -351,7 +351,24 @@ export default function LessonDiscussionBoard({ lessonId, canModerate = false, t
                     </button>
                   ) : null}
                 </div>
-                <p className="text-sm text-slate-600 mt-2">{activeQuestion.body}</p>
+                <div className="flex items-center gap-3 mt-2 mb-3">
+                  <span className="inline-flex items-center gap-1 text-xs font-semibold text-slate-700">
+                    <User className="w-3 h-3 text-indigo-400" />
+                    {activeQuestion?.author?.display_name || 'Anonymous'}
+                  </span>
+                  {activeQuestion.created_at && (
+                    <span className="inline-flex items-center gap-1 text-xs text-slate-400">
+                      <Clock className="w-3 h-3" />
+                      {formatDistanceToNow(new Date(activeQuestion.created_at), { addSuffix: true })}
+                    </span>
+                  )}
+                  {activeQuestion.is_pinned && (
+                    <span className="inline-flex items-center gap-1 text-xs text-indigo-600 font-medium">
+                      <Pin className="w-3 h-3" /> Pinned
+                    </span>
+                  )}
+                </div>
+                <p className="text-sm text-slate-600">{activeQuestion.body}</p>
               </div>
 
               <div className="rounded-2xl border border-slate-200 p-3 space-y-2">
@@ -400,10 +417,24 @@ export default function LessonDiscussionBoard({ lessonId, canModerate = false, t
               </div>
 
               {answers.map((answer) => (
-                <div key={answer.id} className={`rounded-2xl border p-3 ${answer.is_best ? 'border-emerald-300 bg-emerald-50/40' : 'border-slate-200'}`}>
-                  <div className="flex items-center justify-between gap-2">
-                    <p className="text-sm font-semibold text-slate-900">{answer?.author?.display_name || 'Anonymous'}</p>
-                    <div className="flex items-center gap-2">
+                <div key={answer.id} className={`rounded-2xl border p-4 ${answer.is_best ? 'border-emerald-300 bg-emerald-50/40' : 'border-slate-200'}`}>
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="flex items-center gap-3 flex-wrap">
+                      <span className="inline-flex items-center gap-1 text-sm font-semibold text-slate-900">
+                        <User className="w-3.5 h-3.5 text-indigo-400" />
+                        {answer?.author?.display_name || 'Anonymous'}
+                      </span>
+                      {answer.created_at && (
+                        <span className="inline-flex items-center gap-1 text-xs text-slate-400">
+                          <Clock className="w-3 h-3" />
+                          {formatDistanceToNow(new Date(answer.created_at), { addSuffix: true })}
+                        </span>
+                      )}
+                      {answer.is_best && (
+                        <span className="text-xs font-semibold text-emerald-700 bg-emerald-100 px-2 py-0.5 rounded-full">Best answer</span>
+                      )}
+                    </div>
+                    <div className="flex items-center gap-2 shrink-0">
                       <button onClick={() => void reactToDiscussion('answer', String(answer.id), 'helpful')} className="text-xs inline-flex items-center gap-1 border border-slate-300 rounded-md px-2 py-1 hover:bg-slate-50">
                         <ThumbsUp className="w-3 h-3" /> Helpful
                       </button>
@@ -425,13 +456,23 @@ export default function LessonDiscussionBoard({ lessonId, canModerate = false, t
                       ) : null}
                     </div>
                   </div>
-                  <p className="text-sm text-slate-700 mt-1">{answer.body}</p>
-                  {answer.is_best ? <p className="text-xs text-emerald-700 mt-1 font-semibold">Best answer</p> : null}
+                  <p className="text-sm text-slate-700 mt-2">{answer.body}</p>
 
-                  <div className="mt-2 space-y-2">
+                  <div className="mt-3 space-y-2">
                     {(groupedReplies[String(answer.id)] || []).slice(0, 6).map((reply) => (
-                      <div key={reply.id} className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm">
-                        <p className="font-medium text-slate-700">{reply?.author?.display_name || 'Anonymous'}</p>
+                      <div key={reply.id} className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm">
+                        <div className="flex items-center gap-3 mb-1">
+                          <span className="inline-flex items-center gap-1 font-semibold text-slate-700">
+                            <User className="w-3 h-3 text-slate-400" />
+                            {reply?.author?.display_name || 'Anonymous'}
+                          </span>
+                          {reply.created_at && (
+                            <span className="inline-flex items-center gap-1 text-xs text-slate-400">
+                              <Clock className="w-3 h-3" />
+                              {formatDistanceToNow(new Date(reply.created_at), { addSuffix: true })}
+                            </span>
+                          )}
+                        </div>
                         <p className="text-slate-600">{reply.body}</p>
                       </div>
                     ))}
