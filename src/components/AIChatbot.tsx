@@ -2,9 +2,54 @@ import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { useLocation } from 'react-router-dom';
 import { Sparkles, X, Send, Loader2, ChevronDown, RotateCcw, Bot } from 'lucide-react';
 import { cn } from '../lib/utils';
-import { authFetch } from '../lib/apiUrl';
+import { GoogleGenAI } from '@google/genai';
 
 type Role = 'teacher' | 'student' | 'admin';
+
+function getGeminiKey(): string {
+  // Vite injects GEMINI_API_KEY via define in vite.config.ts as process.env.GEMINI_API_KEY
+  const k1 = (process.env.GEMINI_API_KEY as string | undefined) || '';
+  const k2 = (import.meta.env?.VITE_GEMINI_API_KEY as string | undefined) || '';
+  return String(k1 || k2).trim();
+}
+
+async function askGemini(prompt: string): Promise<string> {
+  const key = getGeminiKey();
+  if (!key) throw new Error('NO_KEY');
+  const ai = new GoogleGenAI({ apiKey: key });
+  const res = await ai.models.generateContent({ model: 'gemini-2.0-flash', contents: prompt });
+  return (res.text ?? '').trim();
+}
+
+function buildChatPrompt(
+  role: Role,
+  page: string,
+  path: string,
+  history: { role: 'user' | 'assistant'; content: string }[],
+  message: string,
+): string {
+  const ctx: Record<Role, string> = {
+    teacher: `You are an expert AI teaching assistant for an online educational platform called QuizMaster. The teacher is on the "${page}" page (${path}).
+You help teachers: create quizzes, courses, modules, lessons; start live quiz and video sessions; track student progress; manage assignments, attendance, certificates.
+Give numbered step-by-step instructions when asked how to do something. Be concise, warm, and professional. Do NOT use markdown bold (**text**) — use plain text only.`,
+    student: `You are a friendly AI learning assistant for an online educational platform called QuizMaster. The student is on the "${page}" page (${path}).
+You help students: take quizzes and view scores; join live classes and live quizzes; track progress; submit assignments; view certificates and badges.
+Give numbered step-by-step instructions. Be encouraging and use simple language. Do NOT use markdown bold (**text**) — use plain text only.`,
+    admin: `You are an expert AI platform assistant for an online educational platform called QuizMaster. The admin is on the "${page}" page (${path}).
+You help admins: manage students, teachers, courses, classes; configure settings, branding, features; understand analytics; set roles and permissions; handle payments.
+Give numbered step-by-step instructions. Be precise and clear. Do NOT use markdown bold (**text**) — use plain text only.`,
+  };
+
+  const historyText = history
+    .slice(-8)
+    .map((m) => `${m.role === 'user' ? 'User' : 'Assistant'}: ${m.content}`)
+    .join('\n');
+
+  return `${ctx[role]}
+
+${historyText ? `Conversation so far:\n${historyText}\n\n` : ''}User: ${message}
+Assistant:`;
+}
 
 interface Message {
   role: 'user' | 'assistant';
@@ -287,31 +332,19 @@ export default function AIChatbot({ userRole }: AIChatbotProps) {
     setLoading(true);
 
     try {
-      const history = newMessages.slice(-10).map((m) => ({
-        role: m.role,
-        content: m.content,
-      }));
-
-      const res = await authFetch('/api/ai/chat', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          message: trimmed,
-          history: history.slice(0, -1),
-          role: userRole,
-          page: pageLabel,
-          path: location.pathname,
-        }),
-      });
-
-      const json = await res.json();
-      const reply = json.reply || "I'm sorry, I couldn't process that. Please try again.";
-      setMessages((prev) => [...prev, { role: 'assistant', content: reply, timestamp: new Date() }]);
-    } catch {
-      setMessages((prev) => [
-        ...prev,
-        { role: 'assistant', content: "Connection error. Please check your internet and try again.", timestamp: new Date() },
-      ]);
+      const history = newMessages.slice(-10).map((m) => ({ role: m.role, content: m.content }));
+      const prompt = buildChatPrompt(userRole, pageLabel, location.pathname, history.slice(0, -1), trimmed);
+      const reply = await askGemini(prompt);
+      setMessages((prev) => [...prev, {
+        role: 'assistant',
+        content: reply || "I couldn't generate a response. Please try again.",
+        timestamp: new Date(),
+      }]);
+    } catch (e: any) {
+      const msg = e?.message?.includes('GEMINI_API_KEY')
+        ? 'AI is not configured yet. Please add the GEMINI_API_KEY to Secrets.'
+        : 'Something went wrong. Please try again in a moment.';
+      setMessages((prev) => [...prev, { role: 'assistant', content: msg, timestamp: new Date() }]);
     } finally {
       setLoading(false);
     }
