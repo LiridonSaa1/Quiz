@@ -194,11 +194,32 @@ export default function NotificationCenter() {
     return () => { active = false; if (channelRef.current) { supabase.removeChannel(channelRef.current); channelRef.current = null; } };
   }, [fetchNotifications]);
 
-  // Shake bell when new notifications arrive
+  // Shake bell + play sound when new notifications arrive
   useEffect(() => {
     if (unreadCount > prevUnread.current && prevUnread.current !== undefined) {
       setShaking(true);
       setTimeout(() => setShaking(false), 800);
+      // Soft notification chime using Web Audio API
+      try {
+        const ctx = new (window.AudioContext || (window as any).webkitAudioContext)();
+        const playTone = (freq: number, startTime: number, duration: number, gain: number) => {
+          const osc = ctx.createOscillator();
+          const gainNode = ctx.createGain();
+          osc.connect(gainNode);
+          gainNode.connect(ctx.destination);
+          osc.type = 'sine';
+          osc.frequency.setValueAtTime(freq, startTime);
+          gainNode.gain.setValueAtTime(0, startTime);
+          gainNode.gain.linearRampToValueAtTime(gain, startTime + 0.02);
+          gainNode.gain.exponentialRampToValueAtTime(0.001, startTime + duration);
+          osc.start(startTime);
+          osc.stop(startTime + duration);
+        };
+        const t = ctx.currentTime;
+        playTone(880, t, 0.18, 0.12);
+        playTone(1100, t + 0.12, 0.18, 0.09);
+        playTone(1320, t + 0.24, 0.25, 0.07);
+      } catch { /* audio not available */ }
     }
     prevUnread.current = unreadCount;
   }, [unreadCount]);

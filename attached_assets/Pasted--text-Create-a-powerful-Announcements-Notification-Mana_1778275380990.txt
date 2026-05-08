@@ -1,0 +1,143 @@
+```text
+Create a powerful Announcements & Notification Management System for the Online Quiz and School Platform.
+
+The system must allow Teachers and Admins to send announcements, alerts, and notifications to specific classes or all students.
+
+ANNOUNCEMENT FEATURES
+Teachers/Admins can create announcements for:
+- Holiday notices
+- Teacher delays
+- Class cancellations
+- Exam reminders
+- Homework reminders
+- Important school updates
+- Emergency notifications
+- Event announcements
+- Religious holidays like Bajram, Christmas, etc.
+
+CREATE ANNOUNCEMENT FORM
+The form must include:
+- Announcement title
+- Description/message
+- Announcement type
+- Priority level
+- Schedule send date/time
+- Attachments/images/files
+- Notification channels
+
+CLASS TARGETING
+- Teacher can select one or multiple classes
+- Only students inside selected classes receive the notification
+- Support:
+  - Single class
+  - Multiple classes
+  - Entire school
+
+When teacher selects a class:
+- Automatically send announcement to all students in that class
+- Fetch student data dynamically from database
+
+COMMUNICATION CHANNELS
+The system must support:
+- In-app notifications
+- Email notifications
+- WhatsApp notifications
+- Viber notifications
+- Push notifications
+- SMS notifications (optional)
+
+IMPORTANT:
+Student contact information must be automatically retrieved from each student's profile:
+- Full name
+- Email
+- Phone number
+- WhatsApp number
+- Viber number
+
+PERSONALIZED AI MESSAGES
+Use AI to generate personalized messages for every student individually.
+
+Example:
+“Hello John,
+Tomorrow classes will be suspended due to Bajram holiday. Enjoy the holiday with your family.”
+
+Each student receives:
+- Personalized name
+- Personalized greeting
+- Custom AI-generated message
+
+HOLIDAY ANNOUNCEMENTS
+Add quick templates for:
+- Bajram holidays
+- National holidays
+- School vacation
+- Weather emergency
+- Teacher absence
+- Delayed classes
+
+REAL-TIME FEATURES
+- Students receive notifications instantly
+- Live notification counter
+- Real-time toast alerts
+- Notification sound
+- Read/unread status
+- Seen timestamp
+
+ANNOUNCEMENT HISTORY
+Teachers/Admins can:
+- View sent announcements
+- Edit announcements
+- Delete announcements
+- Resend announcements
+- Track delivery status
+- Track who viewed the announcement
+
+ANALYTICS
+Show:
+- Delivered notifications
+- Failed notifications
+- Open rates
+- Read rates
+- WhatsApp delivered status
+- Email open tracking
+
+UI/UX DESIGN
+Build a modern SaaS notification center with:
+- Beautiful cards
+- Announcement timeline
+- Notification dropdown
+- Real-time animations
+- Mobile responsive design
+- Modern admin dashboard
+- Dark/light mode
+
+AUTOMATION FEATURES
+- Scheduled announcements
+- Recurring announcements
+- Auto-reminders
+- Smart holiday templates
+- AI-generated announcement suggestions
+
+TECHNOLOGY
+Frontend:
+- React / Next.js
+- TailwindCSS
+- Real-time notifications with Socket.IO
+
+Backend:
+- Node.js / Laravel API
+- PostgreSQL / Supabase
+
+INTEGRATIONS
+- Email API integration
+- WhatsApp API integration
+- Viber Bot integration
+- Firebase push notifications
+
+IMPORTANT SYSTEM RULES
+- Notifications must only go to selected classes
+- Messages must be personalized per student
+- Prevent duplicate sends
+- Queue notifications in background jobs
+- Support large-scale sending efficiently
+```

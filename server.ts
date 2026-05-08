@@ -9692,6 +9692,7 @@ Assistant:`;
     audience,
     classIds,
     studentIds,
+    sendEmail = false,
   }: {
     title: string;
     content: string;
@@ -9699,7 +9700,8 @@ Assistant:`;
     audience: string;
     classIds: string[];
     studentIds: string[];
-  }) => {
+    sendEmail?: boolean;
+  }): Promise<number> => {
     const recipientIds = new Set<string>();
     studentIds.forEach((sid) => recipientIds.add(sid));
 
@@ -9712,14 +9714,17 @@ Assistant:`;
       ((classRow?.student_ids as string[]) || []).forEach((uid: string) => recipientIds.add(String(uid)));
     }
 
-    let profilesById = new Map<string, string>();
+    let profilesById = new Map<string, { role: string; email: string; name: string }>();
 
     if (recipientIds.size > 0) {
       const { data: invitedProfiles } = await supabaseAdmin
         .from('profiles')
-        .select('id, role')
+        .select('id, role, email, display_name')
         .in('id', [...recipientIds]);
-      profilesById = new Map((invitedProfiles || []).map((p: any) => [String(p.id), String(p.role || '').toLowerCase()]));
+      profilesById = new Map((invitedProfiles || []).map((p: any) => [
+        String(p.id),
+        { role: String(p.role || '').toLowerCase(), email: String(p.email || ''), name: String(p.display_name || p.email || '') },
+      ]));
     } else {
       const normalizedAudience = String(audience || 'all').toLowerCase();
       const targetRoles = normalizedAudience === 'students'
@@ -9730,18 +9735,22 @@ Assistant:`;
 
       const { data: audienceProfiles } = await supabaseAdmin
         .from('profiles')
-        .select('id, role')
+        .select('id, role, email, display_name')
         .in('role', targetRoles);
 
-      profilesById = new Map((audienceProfiles || []).map((p: any) => [String(p.id), String(p.role || '').toLowerCase()]));
+      profilesById = new Map((audienceProfiles || []).map((p: any) => [
+        String(p.id),
+        { role: String(p.role || '').toLowerCase(), email: String(p.email || ''), name: String(p.display_name || p.email || '') },
+      ]));
       profilesById.forEach((_, uid) => recipientIds.add(uid));
     }
 
-    if (recipientIds.size === 0) return;
+    if (recipientIds.size === 0) return 0;
 
     const createdAt = new Date().toISOString();
     const notifRows = [...recipientIds].map((uid) => {
-      const role = profilesById.get(uid) || 'student';
+      const profile = profilesById.get(uid);
+      const role = profile?.role || 'student';
       const actionUrl =
         role === 'teacher'
           ? '/teacher/announcements'
@@ -9760,6 +9769,47 @@ Assistant:`;
     });
 
     await supabaseAdmin.from('notifications').insert(notifRows);
+
+    // Send email via Brevo if enabled
+    if (sendEmail) {
+      try {
+        if (isEmailConfigured()) {
+          const shortContent = String(content || '').slice(0, 800);
+          const emailSubject = `📢 ${String(title || 'New Announcement')}`;
+          const htmlContent = `<!doctype html><html><body style="margin:0;padding:0;background:#f8fafc;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f8fafc;padding:32px 16px;">
+<tr><td align="center"><table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:520px;background:#ffffff;border:1px solid #e2e8f0;border-radius:16px;overflow:hidden;">
+<tr><td style="background:linear-gradient(135deg,#6366f1,#8b5cf6);padding:24px 28px;">
+<div style="font-size:22px;margin-bottom:4px;">📢</div>
+<h1 style="margin:0;font-size:20px;color:#ffffff;font-weight:700;">${String(title || 'New Announcement')}</h1>
+<div style="font-size:12px;color:rgba(255,255,255,0.7);margin-top:4px;text-transform:uppercase;letter-spacing:0.5px;">${priority === 'urgent' ? '🚨 Urgent' : priority === 'important' ? '⚠️ Important' : '📌 Notice'}</div>
+</td></tr>
+<tr><td style="padding:24px 28px;">
+<div style="font-size:14px;line-height:1.7;color:#475569;white-space:pre-wrap;">${shortContent}</div>
+</td></tr>
+<tr><td style="padding:12px 28px 24px;border-top:1px solid #f1f5f9;">
+<div style="font-size:11px;color:#94a3b8;">This announcement was sent via QuizMaster. You received it because you are a member of this platform.</div>
+</td></tr>
+</table></td></tr></table>
+</body></html>`;
+          const textContent = `${String(title || 'New Announcement')}\n\n${shortContent}`;
+
+          // Send emails in small batches to avoid timeout
+          const recipients = [...recipientIds]
+            .map(uid => profilesById.get(uid))
+            .filter((p): p is { role: string; email: string; name: string } => !!(p?.email));
+
+          const emailPromises = recipients.map(p =>
+            sendEmail({ to: p.email, toName: p.name, subject: emailSubject, htmlContent, textContent }).catch(() => null)
+          );
+          await Promise.allSettled(emailPromises);
+        }
+      } catch (emailErr) {
+        console.warn('[announcements] Email sending skipped:', emailErr);
+      }
+    }
+
+    return recipientIds.size;
   };
 
   app.get('/api/admin/announcements', async (req, res) => {
@@ -9795,6 +9845,7 @@ Assistant:`;
           audience: String(body.target_audience || 'all'),
           classIds,
           studentIds,
+          sendEmail: Boolean(body.send_email),
         });
       }
       res.json({ success: true, announcement: data });
@@ -9803,7 +9854,7 @@ Assistant:`;
 
   app.patch('/api/admin/announcements/:id', async (req, res) => {
     try {
-      const { class_ids, student_ids, ...body } = req.body || {};
+      const { class_ids, student_ids, send_email, ...body } = req.body || {};
       const payload = {
         ...body,
         updated_at: new Date().toISOString(),
@@ -9822,6 +9873,7 @@ Assistant:`;
           audience: String((body.target_audience ?? data?.target_audience) || 'all'),
           classIds,
           studentIds,
+          sendEmail: Boolean(send_email),
         });
       }
       res.json({ success: true, announcement: data });
@@ -9833,6 +9885,27 @@ Assistant:`;
       const { error } = await supabaseAdmin.from('announcements').delete().eq('id', req.params.id);
       if (error) throw error;
       res.json({ success: true });
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  app.post('/api/admin/announcements/:id/resend', async (req, res) => {
+    try {
+      const { data: ann, error } = await supabaseAdmin
+        .from('announcements')
+        .select('*')
+        .eq('id', req.params.id)
+        .maybeSingle();
+      if (error) throw error;
+      if (!ann) return res.status(404).json({ error: 'Announcement not found' });
+      const count = await sendAnnouncementNotifications({
+        title: String(ann.title || ''),
+        content: String(ann.content || ''),
+        priority: String(ann.priority || 'normal'),
+        audience: String(ann.target_audience || 'all'),
+        classIds: [],
+        studentIds: [],
+      });
+      res.json({ success: true, count });
     } catch (e: any) { res.status(500).json({ error: e.message }); }
   });
 
