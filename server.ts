@@ -13,7 +13,11 @@ import { createClient } from '@supabase/supabase-js';
 import pkg from 'pg';
 const { Pool } = pkg;
 const pool = process.env.DATABASE_URL
-  ? new Pool({ connectionString: process.env.DATABASE_URL, ssl: { rejectUnauthorized: false } })
+  ? new Pool({
+      connectionString: process.env.DATABASE_URL,
+      ssl: { rejectUnauthorized: false },
+      options: '--search_path=public',
+    })
   : null as any;
 
 const __filename = fileURLToPath(import.meta.url);
