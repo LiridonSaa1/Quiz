@@ -16,9 +16,18 @@ const pool = process.env.DATABASE_URL
   ? new Pool({
       connectionString: process.env.DATABASE_URL,
       ssl: { rejectUnauthorized: false },
-      options: '--search_path=public',
     })
   : null as any;
+const poolQuery = async (sql: string, params?: any[]) => {
+  if (!pool) throw new Error('Database pool not available');
+  const client = await pool.connect();
+  try {
+    await client.query('SET search_path TO public');
+    return await client.query(sql, params);
+  } finally {
+    client.release();
+  }
+};
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -8204,8 +8213,8 @@ export async function createApp(options: CreateAppOptions = {}) {
   const awardDiscussionBadges = async (userId: string) => {
     try {
       const [statsRes, badgesRes] = await Promise.all([
-        pool.query(`SELECT * FROM discussion_user_stats WHERE user_id = $1`, [userId]),
-        pool.query(`SELECT * FROM discussion_badges`),
+        poolQuery(`SELECT * FROM discussion_user_stats WHERE user_id = $1`, [userId]),
+        poolQuery(`SELECT * FROM discussion_badges`),
       ]);
       const stats = statsRes.rows[0];
       const badgeRows = badgesRes.rows;
@@ -8221,7 +8230,7 @@ export async function createApp(options: CreateAppOptions = {}) {
           (key === 'helpful_contributor' && helpfulReceived >= threshold) ||
           (key === 'mentor' && bestAnswers >= threshold);
         if (shouldGrant) {
-          await pool.query(
+          await poolQuery(
             `INSERT INTO discussion_user_badges (user_id, badge_id) VALUES ($1, $2) ON CONFLICT (user_id, badge_id) DO NOTHING`,
             [userId, String(badge.id || '')]
           ).catch(() => {});
@@ -8984,7 +8993,7 @@ export async function createApp(options: CreateAppOptions = {}) {
 
   // Helper: fetch a question row with author info via pg
   const pgGetQuestion = async (questionId: string) => {
-    const r = await pool.query(
+    const r = await poolQuery(
       `SELECT q.*, json_build_object('id',p.id,'display_name',p.display_name,'email',p.email) AS author
        FROM lesson_discussion_questions q
        LEFT JOIN profiles p ON p.id = q.author_id
@@ -8994,7 +9003,7 @@ export async function createApp(options: CreateAppOptions = {}) {
     return r.rows[0] || null;
   };
   const pgGetAnswer = async (answerId: string) => {
-    const r = await pool.query(
+    const r = await poolQuery(
       `SELECT a.*, json_build_object('id',p.id,'display_name',p.display_name,'email',p.email) AS author
        FROM lesson_discussion_answers a
        LEFT JOIN profiles p ON p.id = a.author_id
@@ -9004,7 +9013,7 @@ export async function createApp(options: CreateAppOptions = {}) {
     return r.rows[0] || null;
   };
   const pgUpsertStats = async (userId: string, delta: { answers?: number; reputation?: number; best_answers?: number; helpful?: number }) => {
-    await pool.query(
+    await poolQuery(
       `INSERT INTO discussion_user_stats (user_id, answers_count, reputation, best_answers_count, helpful_reactions_received, updated_at)
        VALUES ($1, $2, $3, $4, $5, now())
        ON CONFLICT (user_id) DO UPDATE SET
@@ -9042,7 +9051,7 @@ export async function createApp(options: CreateAppOptions = {}) {
         WHERE q.lesson_id = $1 AND q.deleted_at IS NULL ${cursorClause}
         ORDER BY q.is_pinned DESC, q.${order.col} ${orderDir}
         LIMIT $2`;
-      const result = await pool.query(sql, params);
+      const result = await poolQuery(sql, params);
       let rows = result.rows as any[];
       if (sort === 'unanswered') rows = rows.filter((row) => asInt(row?.answers_count, 0) === 0);
       if (q) rows = rows.filter((row) => `${row?.title || ''} ${row?.body || ''}`.toLowerCase().includes(q));
@@ -9065,7 +9074,7 @@ export async function createApp(options: CreateAppOptions = {}) {
       const body = String(req.body?.body || '').trim();
       if (!lessonId || !title || !body) return res.status(400).json({ error: 'lessonId, title, and body are required' });
       const now = new Date().toISOString();
-      const r = await pool.query(
+      const r = await poolQuery(
         `INSERT INTO lesson_discussion_questions (lesson_id, author_id, title, body, is_pinned, created_at, updated_at, last_activity_at)
          VALUES ($1,$2,$3,$4,false,$5,$5,$5) RETURNING *`,
         [lessonId, caller.userId, title, body, now]
@@ -9084,7 +9093,7 @@ export async function createApp(options: CreateAppOptions = {}) {
       const questionId = String(req.params.questionId || '').trim();
       const [question, answersRes] = await Promise.all([
         pgGetQuestion(questionId),
-        pool.query(
+        poolQuery(
           `SELECT a.*, json_build_object('id',p.id,'display_name',p.display_name,'email',p.email) AS author
            FROM lesson_discussion_answers a
            LEFT JOIN profiles p ON p.id = a.author_id
@@ -9097,7 +9106,7 @@ export async function createApp(options: CreateAppOptions = {}) {
       const answerIds = answers.map((a) => String(a.id)).filter(Boolean);
       let replies: any[] = [];
       if (answerIds.length) {
-        const rr = await pool.query(
+        const rr = await poolQuery(
           `SELECT r.*, json_build_object('id',p.id,'display_name',p.display_name,'email',p.email) AS author
            FROM lesson_discussion_replies r
            LEFT JOIN profiles p ON p.id = r.author_id
@@ -9128,7 +9137,7 @@ export async function createApp(options: CreateAppOptions = {}) {
       if (typeof req.body?.title === 'string') { params.push(String(req.body.title).trim()); sets.push(`title = $${params.length}`); }
       if (typeof req.body?.body === 'string') { params.push(String(req.body.body).trim()); sets.push(`body = $${params.length}`); }
       params.push(questionId);
-      await pool.query(`UPDATE lesson_discussion_questions SET ${sets.join(', ')} WHERE id = $${params.length}`, params);
+      await poolQuery(`UPDATE lesson_discussion_questions SET ${sets.join(', ')} WHERE id = $${params.length}`, params);
       const question = await pgGetQuestion(questionId);
       res.json({ success: true, question });
     } catch (e: any) {
@@ -9141,13 +9150,13 @@ export async function createApp(options: CreateAppOptions = {}) {
       const caller = await assertAuthenticated(req, res);
       if (!caller) return;
       const questionId = String(req.params.questionId || '').trim();
-      const current = await pool.query(`SELECT id, author_id FROM lesson_discussion_questions WHERE id = $1`, [questionId]);
+      const current = await poolQuery(`SELECT id, author_id FROM lesson_discussion_questions WHERE id = $1`, [questionId]);
       const row = current.rows[0];
       if (!row) return res.status(404).json({ error: 'Question not found' });
       if (String(row.author_id || '') !== caller.userId && !canModerateDiscussion(caller.role)) {
         return res.status(403).json({ error: 'Forbidden' });
       }
-      await pool.query(`UPDATE lesson_discussion_questions SET deleted_at = now(), updated_at = now() WHERE id = $1`, [questionId]);
+      await poolQuery(`UPDATE lesson_discussion_questions SET deleted_at = now(), updated_at = now() WHERE id = $1`, [questionId]);
       res.json({ success: true });
     } catch (e: any) {
       res.status(500).json({ error: e.message || 'Failed to delete question' });
@@ -9161,15 +9170,15 @@ export async function createApp(options: CreateAppOptions = {}) {
       const questionId = String(req.params.questionId || '').trim();
       const body = String(req.body?.body || '').trim();
       if (!body) return res.status(400).json({ error: 'body is required' });
-      const qRes = await pool.query(`SELECT id, author_id, answers_count FROM lesson_discussion_questions WHERE id = $1`, [questionId]);
+      const qRes = await poolQuery(`SELECT id, author_id, answers_count FROM lesson_discussion_questions WHERE id = $1`, [questionId]);
       const question = qRes.rows[0];
-      const aRes = await pool.query(
+      const aRes = await poolQuery(
         `INSERT INTO lesson_discussion_answers (question_id, author_id, body, created_at, updated_at)
          VALUES ($1,$2,$3,now(),now()) RETURNING *`,
         [questionId, caller.userId, body]
       );
       const answer = await pgGetAnswer(String(aRes.rows[0]?.id || ''));
-      await pool.query(
+      await poolQuery(
         `UPDATE lesson_discussion_questions SET answers_count = answers_count + 1, last_activity_at = now(), updated_at = now() WHERE id = $1`,
         [questionId]
       );
@@ -9194,24 +9203,24 @@ export async function createApp(options: CreateAppOptions = {}) {
       if (!body) return res.status(400).json({ error: 'body is required' });
       let depth = 0;
       if (parentReplyId) {
-        const pr = await pool.query(`SELECT depth FROM lesson_discussion_replies WHERE id = $1`, [parentReplyId]);
+        const pr = await poolQuery(`SELECT depth FROM lesson_discussion_replies WHERE id = $1`, [parentReplyId]);
         depth = Math.min(3, asInt(pr.rows[0]?.depth, 0) + 1);
       }
-      const aRes = await pool.query(`SELECT id, author_id, question_id, replies_count FROM lesson_discussion_answers WHERE id = $1`, [answerId]);
+      const aRes = await poolQuery(`SELECT id, author_id, question_id, replies_count FROM lesson_discussion_answers WHERE id = $1`, [answerId]);
       const answer = aRes.rows[0];
-      const rRes = await pool.query(
+      const rRes = await poolQuery(
         `INSERT INTO lesson_discussion_replies (answer_id, author_id, body, parent_reply_id, depth, created_at, updated_at)
          VALUES ($1,$2,$3,$4,$5,now(),now()) RETURNING *`,
         [answerId, caller.userId, body, parentReplyId, depth]
       );
       const replyRow = rRes.rows[0];
       // Attach author
-      const fullReply = await pool.query(
+      const fullReply = await poolQuery(
         `SELECT r.*, json_build_object('id',p.id,'display_name',p.display_name,'email',p.email) AS author
          FROM lesson_discussion_replies r LEFT JOIN profiles p ON p.id = r.author_id WHERE r.id = $1`,
         [String(replyRow?.id || '')]
       );
-      await pool.query(`UPDATE lesson_discussion_answers SET replies_count = replies_count + 1, updated_at = now() WHERE id = $1`, [answerId]);
+      await poolQuery(`UPDATE lesson_discussion_answers SET replies_count = replies_count + 1, updated_at = now() WHERE id = $1`, [answerId]);
       if (answer && String(answer.author_id || '') && String(answer.author_id || '') !== caller.userId) {
         await addDiscussionNotification(String(answer.author_id || ''), 'New reply to your answer', body, `/student/community?question=${String(answer.question_id || '')}`);
       }
@@ -9228,10 +9237,10 @@ export async function createApp(options: CreateAppOptions = {}) {
       if (!canMarkBestAnswer(caller.role)) return res.status(403).json({ error: 'Forbidden' });
       const questionId = String(req.params.questionId || '').trim();
       const answerId = String(req.params.answerId || '').trim();
-      await pool.query(`UPDATE lesson_discussion_answers SET is_best = false, updated_at = now() WHERE question_id = $1`, [questionId]);
-      await pool.query(`UPDATE lesson_discussion_answers SET is_best = true, updated_at = now() WHERE id = $1`, [answerId]);
-      const answerRow = await pool.query(`SELECT id, author_id FROM lesson_discussion_answers WHERE id = $1`, [answerId]);
-      await pool.query(`UPDATE lesson_discussion_questions SET best_answer_id = $1, updated_at = now() WHERE id = $2`, [answerId, questionId]);
+      await poolQuery(`UPDATE lesson_discussion_answers SET is_best = false, updated_at = now() WHERE question_id = $1`, [questionId]);
+      await poolQuery(`UPDATE lesson_discussion_answers SET is_best = true, updated_at = now() WHERE id = $1`, [answerId]);
+      const answerRow = await poolQuery(`SELECT id, author_id FROM lesson_discussion_answers WHERE id = $1`, [answerId]);
+      await poolQuery(`UPDATE lesson_discussion_questions SET best_answer_id = $1, updated_at = now() WHERE id = $2`, [answerId, questionId]);
       const question = await pgGetQuestion(questionId);
       const answerAuthorId = String(answerRow.rows[0]?.author_id || '');
       if (answerAuthorId) {
@@ -9251,7 +9260,7 @@ export async function createApp(options: CreateAppOptions = {}) {
       if (!canModerateDiscussion(caller.role)) return res.status(403).json({ error: 'Forbidden' });
       const questionId = String(req.params.questionId || '').trim();
       const isPinned = Boolean(req.body?.is_pinned ?? true);
-      await pool.query(`UPDATE lesson_discussion_questions SET is_pinned = $1, updated_at = now() WHERE id = $2`, [isPinned, questionId]);
+      await poolQuery(`UPDATE lesson_discussion_questions SET is_pinned = $1, updated_at = now() WHERE id = $2`, [isPinned, questionId]);
       const question = await pgGetQuestion(questionId);
       res.json({ success: true, question });
     } catch (e: any) {
@@ -9267,7 +9276,7 @@ export async function createApp(options: CreateAppOptions = {}) {
       const targetId = String(req.body?.target_id || '').trim();
       const reactionType = String(req.body?.reaction_type || 'like').trim();
       if (!targetType || !targetId) return res.status(400).json({ error: 'target_type and target_id are required' });
-      const r = await pool.query(
+      const r = await poolQuery(
         `INSERT INTO lesson_discussion_reactions (user_id, target_type, target_id, reaction_type)
          VALUES ($1,$2,$3,$4) ON CONFLICT DO NOTHING RETURNING *`,
         [caller.userId, targetType, targetId, reactionType]
@@ -9285,7 +9294,7 @@ export async function createApp(options: CreateAppOptions = {}) {
       const targetType = String(req.body?.target_type || '').trim();
       const targetId = String(req.body?.target_id || '').trim();
       const reactionType = String(req.body?.reaction_type || 'like').trim();
-      await pool.query(
+      await poolQuery(
         `DELETE FROM lesson_discussion_reactions WHERE user_id=$1 AND target_type=$2 AND target_id=$3 AND reaction_type=$4`,
         [caller.userId, targetType, targetId, reactionType]
       );
@@ -9304,7 +9313,7 @@ export async function createApp(options: CreateAppOptions = {}) {
       const reason = String(req.body?.reason || '').trim();
       const details = req.body?.details ? String(req.body.details) : null;
       if (!targetType || !targetId || !reason) return res.status(400).json({ error: 'target_type, target_id and reason are required' });
-      const r = await pool.query(
+      const r = await poolQuery(
         `INSERT INTO lesson_discussion_reports (reporter_id, target_type, target_id, reason, details, status, created_at, updated_at)
          VALUES ($1,$2,$3,$4,$5,'open',now(),now()) RETURNING *`,
         [caller.userId, targetType, targetId, reason, details]
@@ -9320,7 +9329,7 @@ export async function createApp(options: CreateAppOptions = {}) {
       const caller = await assertAuthenticated(req, res);
       if (!caller) return;
       if (!canModerateDiscussion(caller.role)) return res.status(403).json({ error: 'Forbidden' });
-      const r = await pool.query(
+      const r = await poolQuery(
         `SELECT rp.*,
            json_build_object('id',rep.id,'display_name',rep.display_name,'email',rep.email) AS reporter,
            json_build_object('id',rev.id,'display_name',rev.display_name,'email',rev.email) AS reviewer
@@ -9347,13 +9356,13 @@ export async function createApp(options: CreateAppOptions = {}) {
       if (!targetType || !targetId || !actionType) return res.status(400).json({ error: 'target_type, target_id, action_type are required' });
       const deletedAt = actionType === 'restore' ? null : new Date().toISOString();
       if (targetType === 'question') {
-        await pool.query(`UPDATE lesson_discussion_questions SET deleted_at=$1, is_locked=$2, updated_at=now() WHERE id=$3`, [deletedAt, actionType === 'lock', targetId]);
+        await poolQuery(`UPDATE lesson_discussion_questions SET deleted_at=$1, is_locked=$2, updated_at=now() WHERE id=$3`, [deletedAt, actionType === 'lock', targetId]);
       } else if (targetType === 'answer') {
-        await pool.query(`UPDATE lesson_discussion_answers SET deleted_at=$1, updated_at=now() WHERE id=$2`, [deletedAt, targetId]);
+        await poolQuery(`UPDATE lesson_discussion_answers SET deleted_at=$1, updated_at=now() WHERE id=$2`, [deletedAt, targetId]);
       } else if (targetType === 'reply') {
-        await pool.query(`UPDATE lesson_discussion_replies SET deleted_at=$1, updated_at=now() WHERE id=$2`, [deletedAt, targetId]);
+        await poolQuery(`UPDATE lesson_discussion_replies SET deleted_at=$1, updated_at=now() WHERE id=$2`, [deletedAt, targetId]);
       }
-      await pool.query(
+      await poolQuery(
         `INSERT INTO discussion_moderation_actions (actor_id, target_type, target_id, action_type, reason, metadata)
          VALUES ($1,$2,$3,$4,$5,$6)`,
         [caller.userId, targetType, targetId, actionType, reason, JSON.stringify(req.body?.metadata || {})]
@@ -9369,7 +9378,7 @@ export async function createApp(options: CreateAppOptions = {}) {
       const caller = await assertAuthenticated(req, res);
       if (!caller) return;
       if (caller.role !== 'admin') return res.status(403).json({ error: 'Forbidden: admin role required' });
-      const r = await pool.query(
+      const r = await poolQuery(
         `SELECT ma.*, json_build_object('id',p.id,'display_name',p.display_name,'email',p.email) AS actor
          FROM discussion_moderation_actions ma
          LEFT JOIN profiles p ON p.id = ma.actor_id
@@ -9386,8 +9395,8 @@ export async function createApp(options: CreateAppOptions = {}) {
       const caller = await assertAuthenticated(req, res);
       if (!caller) return;
       const [statsRes, badgesRes] = await Promise.all([
-        pool.query(`SELECT * FROM discussion_user_stats WHERE user_id = $1`, [caller.userId]),
-        pool.query(
+        poolQuery(`SELECT * FROM discussion_user_stats WHERE user_id = $1`, [caller.userId]),
+        poolQuery(
           `SELECT ub.awarded_at,
              json_build_object('id',b.id,'key',b.key,'label',b.label,'description',b.description) AS badge
            FROM discussion_user_badges ub
@@ -9958,21 +9967,21 @@ async function runDiscussionMigration(): Promise<boolean> {
   }
   try {
     // Check if table already exists
-    const check = await pool.query(
+    const check = await poolQuery(
       `SELECT to_regclass('public.lesson_discussion_questions') AS tbl`
     );
     if (!check.rows[0]?.tbl) {
       console.log('[migration] creating discussion tables…');
-      await pool.query(DISCUSSION_MIGRATION_SQL);
+      await poolQuery(DISCUSSION_MIGRATION_SQL);
       console.log('[migration] discussion tables created ✓');
     } else {
       console.log('[migration] discussion tables already exist — ensuring RLS policies…');
     }
     // Always apply RLS + policies (idempotent) and reload schema
-    await pool.query(DISCUSSION_RLS_SQL).catch((e: any) => {
+    await poolQuery(DISCUSSION_RLS_SQL).catch((e: any) => {
       console.warn('[migration] RLS policy setup warning:', e?.message);
     });
-    await pool.query(`NOTIFY pgrst, 'reload schema'`).catch(() => {});
+    await poolQuery(`NOTIFY pgrst, 'reload schema'`).catch(() => {});
     _discussionTablesReady = true;
     console.log('[migration] discussion setup complete ✓');
     return true;
