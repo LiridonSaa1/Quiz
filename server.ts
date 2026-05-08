@@ -10,6 +10,8 @@ import http from "http";
 import path from "path";
 import { fileURLToPath } from "url";
 import { createClient } from '@supabase/supabase-js';
+import pkg from 'pg';
+const { Pool } = pkg;
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -9789,6 +9791,156 @@ export async function createApp(options: CreateAppOptions = {}) {
   return app;
 }
 
+// ── AUTO-MIGRATION: discussion tables ────────────────────────────────────────
+const DISCUSSION_MIGRATION_SQL = `
+create extension if not exists pgcrypto;
+
+create table if not exists public.lesson_discussion_questions (
+  id uuid primary key default gen_random_uuid(),
+  lesson_id uuid not null,
+  author_id uuid not null,
+  title text not null,
+  body text not null,
+  is_pinned boolean not null default false,
+  is_locked boolean not null default false,
+  best_answer_id uuid null,
+  answers_count integer not null default 0,
+  reactions_count integer not null default 0,
+  helpful_score integer not null default 0,
+  last_activity_at timestamptz not null default now(),
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  deleted_at timestamptz null
+);
+
+create table if not exists public.lesson_discussion_answers (
+  id uuid primary key default gen_random_uuid(),
+  question_id uuid not null references public.lesson_discussion_questions(id) on delete cascade,
+  author_id uuid not null,
+  body text not null,
+  is_best boolean not null default false,
+  replies_count integer not null default 0,
+  reactions_count integer not null default 0,
+  helpful_score integer not null default 0,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  deleted_at timestamptz null
+);
+
+create table if not exists public.lesson_discussion_replies (
+  id uuid primary key default gen_random_uuid(),
+  answer_id uuid not null references public.lesson_discussion_answers(id) on delete cascade,
+  author_id uuid not null,
+  parent_reply_id uuid null references public.lesson_discussion_replies(id) on delete cascade,
+  body text not null,
+  depth smallint not null default 0,
+  reactions_count integer not null default 0,
+  helpful_score integer not null default 0,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  deleted_at timestamptz null
+);
+
+create table if not exists public.lesson_discussion_reactions (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null,
+  target_type text not null,
+  target_id uuid not null,
+  reaction_type text not null,
+  created_at timestamptz not null default now(),
+  unique(user_id, target_type, target_id, reaction_type)
+);
+
+create table if not exists public.lesson_discussion_reports (
+  id uuid primary key default gen_random_uuid(),
+  reporter_id uuid not null,
+  target_type text not null,
+  target_id uuid not null,
+  reason text not null,
+  details text null,
+  status text not null default 'open',
+  reviewed_by uuid null,
+  reviewed_at timestamptz null,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create table if not exists public.discussion_user_stats (
+  user_id uuid primary key,
+  reputation integer not null default 0,
+  answers_count integer not null default 0,
+  best_answers_count integer not null default 0,
+  helpful_reactions_received integer not null default 0,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create table if not exists public.discussion_badges (
+  id uuid primary key default gen_random_uuid(),
+  key text not null unique,
+  label text not null,
+  description text not null,
+  threshold integer not null default 1,
+  created_at timestamptz not null default now()
+);
+
+create table if not exists public.discussion_user_badges (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null,
+  badge_id uuid not null references public.discussion_badges(id) on delete cascade,
+  awarded_at timestamptz not null default now(),
+  unique (user_id, badge_id)
+);
+
+create index if not exists idx_ldq_lesson_recent on public.lesson_discussion_questions (lesson_id, created_at desc);
+create index if not exists idx_ldq_lesson_activity on public.lesson_discussion_questions (lesson_id, last_activity_at desc);
+create index if not exists idx_lda_question on public.lesson_discussion_answers (question_id, created_at asc);
+create index if not exists idx_ldr_answer on public.lesson_discussion_replies (answer_id, created_at asc);
+
+insert into public.discussion_badges (key, label, description, threshold)
+values
+  ('first_answer', 'First Answer', 'Posted your first answer', 1),
+  ('helpful_contributor', 'Helpful Contributor', 'Received helpful reactions', 10),
+  ('mentor', 'Mentor', 'Got multiple best answers', 5)
+on conflict (key) do nothing;
+
+alter table public.lesson_discussion_questions
+  add column if not exists best_answer_id uuid null;
+
+`;
+
+let _discussionTablesReady = false;
+
+async function runDiscussionMigration(): Promise<boolean> {
+  const dbUrl = process.env.DATABASE_URL;
+  if (!dbUrl) {
+    console.log('[migration] DATABASE_URL not set — skipping discussion table auto-setup');
+    return false;
+  }
+  const pool = new Pool({ connectionString: dbUrl, ssl: { rejectUnauthorized: false } });
+  try {
+    // Check if table already exists
+    const check = await pool.query(
+      `SELECT to_regclass('public.lesson_discussion_questions') AS tbl`
+    );
+    if (check.rows[0]?.tbl) {
+      _discussionTablesReady = true;
+      console.log('[migration] discussion tables already exist ✓');
+      return true;
+    }
+    console.log('[migration] creating discussion tables…');
+    await pool.query(DISCUSSION_MIGRATION_SQL);
+    _discussionTablesReady = true;
+    console.log('[migration] discussion tables created ✓');
+    return true;
+  } catch (err: any) {
+    console.error('[migration] discussion table setup failed:', err?.message || err);
+    return false;
+  } finally {
+    await pool.end().catch(() => {});
+  }
+}
+
 async function startServer() {
   const parsedPort = Number(process.env.PORT);
   const preferredPort = Number.isInteger(parsedPort) && parsedPort > 0 ? parsedPort : 5000;
@@ -9796,6 +9948,9 @@ async function startServer() {
   const hostCandidates = preferredHost === "0.0.0.0" ? [preferredHost] : [preferredHost, "0.0.0.0"];
   const maxPortAttempts = 10;
   const recoverableListenErrors = new Set(["EACCES", "EADDRINUSE"]);
+  // Auto-create discussion tables if DATABASE_URL is available
+  void runDiscussionMigration();
+
   const httpServer = http.createServer();
   const app = await createApp({ includeFrontend: true, httpServer });
   httpServer.on("request", app);

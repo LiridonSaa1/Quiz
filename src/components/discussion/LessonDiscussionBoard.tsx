@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { toast } from 'sonner';
-import { MessageSquare, Pin, Search, ThumbsUp } from 'lucide-react';
+import { MessageSquare, Pin, Search, ThumbsUp, Database, RefreshCw } from 'lucide-react';
 import { formatDistanceToNow } from 'date-fns';
 import { supabase } from '../../supabase';
 import {
@@ -22,6 +22,37 @@ type LocalDiscussionStore = {
   answers: any[];
   replies: any[];
 };
+
+function DiscussionSetupBanner({ onRetry }: { onRetry: () => void }) {
+  const [retrying, setRetrying] = useState(false);
+  const handleRetry = async () => {
+    setRetrying(true);
+    await new Promise(r => setTimeout(r, 800));
+    onRetry();
+    setRetrying(false);
+  };
+  return (
+    <div className="rounded-2xl border border-slate-200 bg-slate-50 p-8 text-center">
+      <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-slate-100">
+        <Database className="h-7 w-7 text-slate-400" />
+      </div>
+      <p className="text-base font-bold text-slate-700">Discussions are being set up</p>
+      <p className="mt-1 text-sm text-slate-500 max-w-sm mx-auto">
+        The discussion tables are being installed. This only takes a moment — please refresh and try again.
+      </p>
+      <button
+        type="button"
+        onClick={handleRetry}
+        disabled={retrying}
+        className="mt-4 inline-flex items-center gap-2 rounded-xl bg-indigo-600 px-5 py-2.5 text-sm font-semibold text-white shadow hover:bg-indigo-700 disabled:opacity-60 transition"
+      >
+        <RefreshCw className={`h-4 w-4 ${retrying ? 'animate-spin' : ''}`} />
+        {retrying ? 'Checking…' : 'Try Again'}
+      </button>
+      <p className="mt-3 text-xs text-slate-400">Your locally saved posts are still here and will sync when ready.</p>
+    </div>
+  );
+}
 
 type Props = {
   lessonId: string;
@@ -214,10 +245,7 @@ export default function LessonDiscussionBoard({ lessonId, canModerate = false, t
       ) : null}
 
       {discussionDisabled ? (
-        <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-center">
-          <p className="text-sm font-semibold text-amber-700">Discussion is running in local mode for now.</p>
-          <p className="text-xs text-amber-600 mt-1">Posts are saved in this browser until Supabase discussion tables are installed.</p>
-        </div>
+        <DiscussionSetupBanner onRetry={() => void loadQuestions(false)} />
       ) : (
       <div className="grid grid-cols-1 md:grid-cols-[320px_1fr] gap-5">
         <div className="space-y-3">
