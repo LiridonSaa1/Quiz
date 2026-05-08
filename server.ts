@@ -9012,6 +9012,36 @@ export async function createApp(options: CreateAppOptions = {}) {
     res.json({ success: true, posts: [], deprecated: true, message: 'Use lesson discussion endpoints.' });
   });
 
+  // Fetch profiles from Supabase and enrich rows whose author.display_name is missing.
+  const supabaseEnrichAuthors = async (rows: any[]): Promise<any[]> => {
+    if (!rows.length) return rows;
+    const missingIds = [...new Set(
+      rows
+        .filter((r: any) => !r?.author?.display_name)
+        .map((r: any) => String(r?.author_id || ''))
+        .filter(Boolean),
+    )];
+    if (!missingIds.length) return rows;
+    try {
+      const { data } = await supabaseAdmin
+        .from('profiles')
+        .select('id, display_name, email')
+        .in('id', missingIds);
+      if (!data?.length) return rows;
+      const profileMap = new Map((data as any[]).map((p: any) => [String(p.id), p]));
+      return rows.map((row: any) => {
+        if (row?.author?.display_name) return row;
+        const authorId = String(row?.author_id || '');
+        if (!authorId) return row;
+        const profile = profileMap.get(authorId);
+        if (!profile) return row;
+        return { ...row, author: { id: profile.id, display_name: profile.display_name, email: profile.email } };
+      });
+    } catch {
+      return rows;
+    }
+  };
+
   // Helper: fetch a question row with author info via pg
   const pgGetQuestion = async (questionId: string) => {
     const r = await poolQuery(
@@ -9021,7 +9051,9 @@ export async function createApp(options: CreateAppOptions = {}) {
        WHERE q.id = $1 AND q.deleted_at IS NULL`,
       [questionId]
     );
-    return r.rows[0] || null;
+    if (!r.rows[0]) return null;
+    const enriched = await supabaseEnrichAuthors([r.rows[0]]);
+    return enriched[0] || null;
   };
   const pgGetAnswer = async (answerId: string) => {
     const r = await poolQuery(
@@ -9031,7 +9063,9 @@ export async function createApp(options: CreateAppOptions = {}) {
        WHERE a.id = $1`,
       [answerId]
     );
-    return r.rows[0] || null;
+    if (!r.rows[0]) return null;
+    const enriched = await supabaseEnrichAuthors([r.rows[0]]);
+    return enriched[0] || null;
   };
   const pgUpsertStats = async (userId: string, delta: { answers?: number; reputation?: number; best_answers?: number; helpful?: number }) => {
     await poolQuery(
@@ -9077,8 +9111,9 @@ export async function createApp(options: CreateAppOptions = {}) {
       if (sort === 'unanswered') rows = rows.filter((row) => asInt(row?.answers_count, 0) === 0);
       if (q) rows = rows.filter((row) => `${row?.title || ''} ${row?.body || ''}`.toLowerCase().includes(q));
       const hasMore = rows.length > limit;
-      const pageRows = hasMore ? rows.slice(0, limit) : rows;
-      const nextCursor = hasMore ? String(pageRows[pageRows.length - 1]?.[order.col] || '') : null;
+      let pageRows = hasMore ? rows.slice(0, limit) : rows;
+      pageRows = await supabaseEnrichAuthors(pageRows);
+      const nextCursor = hasMore ? String(rows.slice(0, limit)[rows.slice(0, limit).length - 1]?.[order.col] || '') : null;
       res.json({ success: true, questions: pageRows, hasMore, nextCursor });
     } catch (e: any) {
       res.status(500).json({ error: e.message || 'Failed to load lesson discussions' });
@@ -9123,7 +9158,8 @@ export async function createApp(options: CreateAppOptions = {}) {
           [questionId]
         ),
       ]);
-      const answers = answersRes.rows as any[];
+      let answers = answersRes.rows as any[];
+      answers = await supabaseEnrichAuthors(answers);
       const answerIds = answers.map((a) => String(a.id)).filter(Boolean);
       let replies: any[] = [];
       if (answerIds.length) {
@@ -9135,7 +9171,7 @@ export async function createApp(options: CreateAppOptions = {}) {
            ORDER BY r.created_at ASC`,
           [answerIds]
         );
-        replies = rr.rows;
+        replies = await supabaseEnrichAuthors(rr.rows);
       }
       res.json({ success: true, question, answers, replies });
     } catch (e: any) {
