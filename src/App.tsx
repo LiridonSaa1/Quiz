@@ -83,6 +83,7 @@ import { apiUrl, authFetch } from './lib/apiUrl';
 import { isProfileAccessAllowed } from './lib/profileAccess';
 import { normalizeUserRole } from './lib/userRole';
 import { defaultFeatureFlags, extractFeatureFlags, FeatureFlags } from './lib/platformFeatures';
+import ChatBot from './components/ChatBot';
 
 export default function App() {
   const [user, setUser] = useState<UserProfile | null>(null);
@@ -358,6 +359,7 @@ export default function App() {
         <Route path="/student/*" element={user?.role === 'student' ? <StudentRoutes features={features} /> : <Navigate to="/login" />} />
         <Route path="*" element={<Navigate to="/not-found" replace />} />
       </Routes>
+      {user && <ChatBot userRole={user.role} />}
     </Router>
   );
 }
