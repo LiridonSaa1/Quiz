@@ -33,11 +33,16 @@ export default defineConfig(({mode}) => {
       allowedHosts: true,
       hmr: disableHmr
         ? false
-        : {
+        : hmrHost
+        ? {
             host: hmrHost,
             port: hmrPort,
             clientPort: hmrClientPort,
-            protocol: 'ws',
+            protocol: 'wss',
+          }
+        : {
+            clientPort: 443,
+            protocol: 'wss',
           },
       proxy: {
         '/api': {

@@ -10090,6 +10090,132 @@ Assistant:`;
     }
   }
 
+  // Student: get own submission for an assignment
+  app.get('/api/student/assignments/:assignmentId/submission', async (req: Request, res: Response) => {
+    try {
+      const caller = await assertAuthenticated(req, res);
+      if (!caller) return;
+      const { assignmentId } = req.params;
+      const { data, error } = await supabaseAdmin
+        .from('assignment_submissions')
+        .select('*')
+        .eq('assignment_id', assignmentId)
+        .eq('student_id', caller.userId)
+        .maybeSingle();
+      if (error && !/does not exist|schema cache/i.test(error.message)) throw error;
+      res.json({ success: true, submission: data || null });
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  // Student: submit (or resubmit) an assignment
+  app.post('/api/student/assignments/:assignmentId/submit', async (req: Request, res: Response) => {
+    try {
+      const caller = await assertAuthenticated(req, res);
+      if (!caller) return;
+      const { assignmentId } = req.params;
+      const { content } = req.body;
+
+      const { data: assignment } = await supabaseAdmin
+        .from('assignments')
+        .select('id, due_date, allow_late_submission, status')
+        .eq('id', assignmentId)
+        .maybeSingle();
+
+      if (!assignment || assignment.status !== 'published') {
+        return res.status(400).json({ error: 'Assignment not available' });
+      }
+
+      const isLate = assignment.due_date ? new Date() > new Date(assignment.due_date) : false;
+      if (isLate && !assignment.allow_late_submission) {
+        return res.status(400).json({ error: 'Deadline has passed and late submissions are not allowed' });
+      }
+
+      const existing = await supabaseAdmin
+        .from('assignment_submissions')
+        .select('id')
+        .eq('assignment_id', assignmentId)
+        .eq('student_id', caller.userId)
+        .maybeSingle();
+
+      let data: any, error: any;
+      if (existing.data?.id) {
+        ({ data, error } = await supabaseAdmin
+          .from('assignment_submissions')
+          .update({ content, status: 'submitted', submitted_at: new Date().toISOString(), is_late: isLate, updated_at: new Date().toISOString() })
+          .eq('id', existing.data.id)
+          .select()
+          .single());
+      } else {
+        ({ data, error } = await supabaseAdmin
+          .from('assignment_submissions')
+          .insert({ assignment_id: assignmentId, student_id: caller.userId, content, status: 'submitted', is_late: isLate })
+          .select()
+          .single());
+      }
+      if (error) throw error;
+      res.json({ success: true, submission: data });
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  // Teacher: list submissions for an assignment
+  app.get('/api/teacher/assignments/:assignmentId/submissions', async (req: Request, res: Response) => {
+    try {
+      const caller = await assertAuthenticated(req, res);
+      if (!caller) return;
+      const { assignmentId } = req.params;
+
+      const { data: submissions, error } = await supabaseAdmin
+        .from('assignment_submissions')
+        .select('*')
+        .eq('assignment_id', assignmentId)
+        .order('submitted_at', { ascending: false });
+
+      if (error && !/does not exist|schema cache/i.test(error.message)) throw error;
+
+      const studentIds = [...new Set((submissions || []).map((s: any) => s.student_id))];
+      let profileMap: Record<string, any> = {};
+      if (studentIds.length > 0) {
+        const { data: profiles } = await supabaseAdmin
+          .from('profiles')
+          .select('id, display_name, email, avatar_url')
+          .in('id', studentIds);
+        (profiles || []).forEach((p: any) => { profileMap[p.id] = p; });
+      }
+
+      const enriched = (submissions || []).map((s: any) => ({
+        ...s,
+        student: profileMap[s.student_id] || { display_name: 'Unknown', email: '' },
+      }));
+      res.json({ success: true, submissions: enriched });
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  // Teacher: grade a submission
+  app.patch('/api/teacher/assignments/submissions/:subId/grade', async (req: Request, res: Response) => {
+    try {
+      const caller = await assertAuthenticated(req, res);
+      if (!caller) return;
+      const { subId } = req.params;
+      const { grade, feedback } = req.body;
+
+      const { data, error } = await supabaseAdmin
+        .from('assignment_submissions')
+        .update({
+          grade: grade !== undefined && grade !== '' ? Number(grade) : null,
+          feedback: feedback || null,
+          status: 'graded',
+          graded_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', subId)
+        .select()
+        .single();
+
+      if (error) throw error;
+      res.json({ success: true, submission: data });
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
   return app;
 }
 
@@ -10338,133 +10464,6 @@ async function runAssignmentSubmissionsMigration() {
     console.warn('[migration] assignments extra columns:', err?.message?.split('\n')[0]);
   }
 }
-
-// Student: get own submission for an assignment
-app.get('/api/student/assignments/:assignmentId/submission', async (req: Request, res: Response) => {
-  try {
-    const caller = await assertAuthenticated(req, res);
-    if (!caller) return;
-    const { assignmentId } = req.params;
-    const { data, error } = await supabaseAdmin
-      .from('assignment_submissions')
-      .select('*')
-      .eq('assignment_id', assignmentId)
-      .eq('student_id', caller.userId)
-      .maybeSingle();
-    if (error && !/does not exist|schema cache/i.test(error.message)) throw error;
-    res.json({ success: true, submission: data || null });
-  } catch (e: any) { res.status(500).json({ error: e.message }); }
-});
-
-// Student: submit (or resubmit) an assignment
-app.post('/api/student/assignments/:assignmentId/submit', async (req: Request, res: Response) => {
-  try {
-    const caller = await assertAuthenticated(req, res);
-    if (!caller) return;
-    const { assignmentId } = req.params;
-    const { content } = req.body;
-
-    const { data: assignment } = await supabaseAdmin
-      .from('assignments')
-      .select('id, due_date, allow_late_submission, status')
-      .eq('id', assignmentId)
-      .maybeSingle();
-
-    if (!assignment || assignment.status !== 'published') {
-      return res.status(400).json({ error: 'Assignment not available' });
-    }
-
-    const isLate = assignment.due_date ? new Date() > new Date(assignment.due_date) : false;
-    if (isLate && !assignment.allow_late_submission) {
-      return res.status(400).json({ error: 'Deadline has passed and late submissions are not allowed' });
-    }
-
-    const { data: existing } = await supabaseAdmin
-      .from('assignment_submissions')
-      .select('id')
-      .eq('assignment_id', assignmentId)
-      .eq('student_id', caller.userId)
-      .maybeSingle();
-
-    const payload: any = {
-      assignment_id: assignmentId,
-      student_id: caller.userId,
-      content: content || '',
-      status: 'submitted',
-      is_late: isLate,
-      submitted_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
-    };
-
-    let result;
-    if (existing?.id) {
-      result = await supabaseAdmin.from('assignment_submissions').update(payload).eq('id', existing.id).select().single();
-    } else {
-      result = await supabaseAdmin.from('assignment_submissions').insert({ ...payload, created_at: new Date().toISOString() }).select().single();
-    }
-    if (result.error) throw result.error;
-    res.json({ success: true, submission: result.data });
-  } catch (e: any) { res.status(500).json({ error: e.message }); }
-});
-
-// Teacher: get all submissions for an assignment
-app.get('/api/teacher/assignments/:assignmentId/submissions', async (req: Request, res: Response) => {
-  try {
-    const caller = await assertAuthenticated(req, res);
-    if (!caller) return;
-    const { assignmentId } = req.params;
-
-    const { data: submissions, error } = await supabaseAdmin
-      .from('assignment_submissions')
-      .select('*')
-      .eq('assignment_id', assignmentId)
-      .order('submitted_at', { ascending: false });
-
-    if (error && !/does not exist|schema cache/i.test(error.message)) throw error;
-
-    const studentIds = [...new Set((submissions || []).map((s: any) => s.student_id))];
-    let profileMap: Record<string, any> = {};
-    if (studentIds.length > 0) {
-      const { data: profiles } = await supabaseAdmin
-        .from('profiles')
-        .select('id, display_name, email, avatar_url')
-        .in('id', studentIds);
-      (profiles || []).forEach((p: any) => { profileMap[p.id] = p; });
-    }
-
-    const enriched = (submissions || []).map((s: any) => ({
-      ...s,
-      student: profileMap[s.student_id] || { display_name: 'Unknown', email: '' },
-    }));
-    res.json({ success: true, submissions: enriched });
-  } catch (e: any) { res.status(500).json({ error: e.message }); }
-});
-
-// Teacher: grade a submission
-app.patch('/api/teacher/assignments/submissions/:subId/grade', async (req: Request, res: Response) => {
-  try {
-    const caller = await assertAuthenticated(req, res);
-    if (!caller) return;
-    const { subId } = req.params;
-    const { grade, feedback } = req.body;
-
-    const { data, error } = await supabaseAdmin
-      .from('assignment_submissions')
-      .update({
-        grade: grade !== undefined && grade !== '' ? Number(grade) : null,
-        feedback: feedback || null,
-        status: 'graded',
-        graded_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
-      })
-      .eq('id', subId)
-      .select()
-      .single();
-
-    if (error) throw error;
-    res.json({ success: true, submission: data });
-  } catch (e: any) { res.status(500).json({ error: e.message }); }
-});
 
 async function startServer() {
   const parsedPort = Number(process.env.PORT);
