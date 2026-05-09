@@ -7,17 +7,12 @@ import { notifyEvent, type NotifyContext, type NotifyEventKey } from "./src/lib/
 import express, { Request, Response } from "express";
 import { appendFile, mkdir, readFile as readFileFs, writeFile } from "fs/promises";
 import http from "http";
+import { createRequire } from "module";
 import path from "path";
 import { fileURLToPath } from "url";
 import { createClient } from '@supabase/supabase-js';
-import pkg from 'pg';
-const { Pool } = pkg;
-const pool = process.env.DATABASE_URL
-  ? new Pool({
-      connectionString: process.env.DATABASE_URL,
-      ssl: { rejectUnauthorized: false },
-    })
-  : null as any;
+const require = createRequire(import.meta.url);
+let poolPromise: Promise<any> | null = null;
 const stripProfilesJoin = (sql: string): string =>
   sql.replace(
     /LEFT JOIN profiles (\w+) ON \1\.id = \w+\.\w+/gi,
@@ -25,7 +20,34 @@ const stripProfilesJoin = (sql: string): string =>
       `LEFT JOIN (SELECT NULL::uuid AS id, NULL::text AS display_name, NULL::text AS email) ${alias} ON false`,
   );
 
+const getPool = async () => {
+  const connectionString = process.env.DATABASE_URL?.trim();
+  if (!connectionString) return null;
+
+  if (!poolPromise) {
+    poolPromise = Promise.resolve().then(() => {
+      const pgModule = require("pg");
+      const Pool = pgModule?.Pool ?? pgModule?.default?.Pool;
+      if (!Pool) {
+        throw new Error("pg Pool export not available");
+      }
+      return new Pool({
+        connectionString,
+        ssl: { rejectUnauthorized: false },
+      });
+    });
+  }
+
+  try {
+    return await poolPromise;
+  } catch (error) {
+    poolPromise = null;
+    throw error;
+  }
+};
+
 const poolQuery = async (sql: string, params?: any[]) => {
+  const pool = await getPool();
   if (!pool) throw new Error('Database pool not available');
   const client = await pool.connect();
   try {
@@ -10003,6 +10025,133 @@ Assistant:`;
     } catch (e: any) { res.status(500).json({ error: e.message }); }
   });
 
+  // Student: get own submission for an assignment
+  app.get('/api/student/assignments/:assignmentId/submission', async (req: Request, res: Response) => {
+    try {
+      const caller = await assertAuthenticated(req, res);
+      if (!caller) return;
+      const { assignmentId } = req.params;
+      const { data, error } = await supabaseAdmin
+        .from('assignment_submissions')
+        .select('*')
+        .eq('assignment_id', assignmentId)
+        .eq('student_id', caller.userId)
+        .maybeSingle();
+      if (error && !/does not exist|schema cache/i.test(error.message)) throw error;
+      res.json({ success: true, submission: data || null });
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  // Student: submit (or resubmit) an assignment
+  app.post('/api/student/assignments/:assignmentId/submit', async (req: Request, res: Response) => {
+    try {
+      const caller = await assertAuthenticated(req, res);
+      if (!caller) return;
+      const { assignmentId } = req.params;
+      const { content } = req.body;
+
+      const { data: assignment } = await supabaseAdmin
+        .from('assignments')
+        .select('id, due_date, allow_late_submission, status')
+        .eq('id', assignmentId)
+        .maybeSingle();
+
+      if (!assignment || assignment.status !== 'published') {
+        return res.status(400).json({ error: 'Assignment not available' });
+      }
+
+      const isLate = assignment.due_date ? new Date() > new Date(assignment.due_date) : false;
+      if (isLate && !assignment.allow_late_submission) {
+        return res.status(400).json({ error: 'Deadline has passed and late submissions are not allowed' });
+      }
+
+      const { data: existing } = await supabaseAdmin
+        .from('assignment_submissions')
+        .select('id')
+        .eq('assignment_id', assignmentId)
+        .eq('student_id', caller.userId)
+        .maybeSingle();
+
+      const payload: any = {
+        assignment_id: assignmentId,
+        student_id: caller.userId,
+        content: content || '',
+        status: 'submitted',
+        is_late: isLate,
+        submitted_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      };
+
+      let result;
+      if (existing?.id) {
+        result = await supabaseAdmin.from('assignment_submissions').update(payload).eq('id', existing.id).select().single();
+      } else {
+        result = await supabaseAdmin.from('assignment_submissions').insert({ ...payload, created_at: new Date().toISOString() }).select().single();
+      }
+      if (result.error) throw result.error;
+      res.json({ success: true, submission: result.data });
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  // Teacher: get all submissions for an assignment
+  app.get('/api/teacher/assignments/:assignmentId/submissions', async (req: Request, res: Response) => {
+    try {
+      const caller = await assertAuthenticated(req, res);
+      if (!caller) return;
+      const { assignmentId } = req.params;
+
+      const { data: submissions, error } = await supabaseAdmin
+        .from('assignment_submissions')
+        .select('*')
+        .eq('assignment_id', assignmentId)
+        .order('submitted_at', { ascending: false });
+
+      if (error && !/does not exist|schema cache/i.test(error.message)) throw error;
+
+      const studentIds = [...new Set((submissions || []).map((s: any) => s.student_id))];
+      let profileMap: Record<string, any> = {};
+      if (studentIds.length > 0) {
+        const { data: profiles } = await supabaseAdmin
+          .from('profiles')
+          .select('id, display_name, email, avatar_url')
+          .in('id', studentIds);
+        (profiles || []).forEach((p: any) => { profileMap[p.id] = p; });
+      }
+
+      const enriched = (submissions || []).map((s: any) => ({
+        ...s,
+        student: profileMap[s.student_id] || { display_name: 'Unknown', email: '' },
+      }));
+      res.json({ success: true, submissions: enriched });
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  // Teacher: grade a submission
+  app.patch('/api/teacher/assignments/submissions/:subId/grade', async (req: Request, res: Response) => {
+    try {
+      const caller = await assertAuthenticated(req, res);
+      if (!caller) return;
+      const { subId } = req.params;
+      const { grade, feedback } = req.body;
+
+      const { data, error } = await supabaseAdmin
+        .from('assignment_submissions')
+        .update({
+          grade: grade !== undefined && grade !== '' ? Number(grade) : null,
+          feedback: feedback || null,
+          status: 'graded',
+          graded_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', subId)
+        .select()
+        .single();
+
+      if (error) throw error;
+      res.json({ success: true, submission: data });
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
   app.use((err: any, req: Request, res: Response, next: any) => {
     if (!err) return next();
     const status = Number(err?.status || err?.statusCode || 500);
@@ -10308,7 +10457,8 @@ async function runAnnouncementColumnsMigration(): Promise<void> {
 
 // ─── Assignment Submissions Migration ────────────────────────────────────────
 async function runAssignmentSubmissionsMigration() {
-  if (!poolQuery) return;
+  const dbUrl = process.env.DATABASE_URL?.trim();
+  if (!dbUrl) return;
   try {
     await poolQuery(`
       CREATE TABLE IF NOT EXISTS assignment_submissions (
@@ -10338,133 +10488,6 @@ async function runAssignmentSubmissionsMigration() {
     console.warn('[migration] assignments extra columns:', err?.message?.split('\n')[0]);
   }
 }
-
-// Student: get own submission for an assignment
-app.get('/api/student/assignments/:assignmentId/submission', async (req: Request, res: Response) => {
-  try {
-    const caller = await assertAuthenticated(req, res);
-    if (!caller) return;
-    const { assignmentId } = req.params;
-    const { data, error } = await supabaseAdmin
-      .from('assignment_submissions')
-      .select('*')
-      .eq('assignment_id', assignmentId)
-      .eq('student_id', caller.userId)
-      .maybeSingle();
-    if (error && !/does not exist|schema cache/i.test(error.message)) throw error;
-    res.json({ success: true, submission: data || null });
-  } catch (e: any) { res.status(500).json({ error: e.message }); }
-});
-
-// Student: submit (or resubmit) an assignment
-app.post('/api/student/assignments/:assignmentId/submit', async (req: Request, res: Response) => {
-  try {
-    const caller = await assertAuthenticated(req, res);
-    if (!caller) return;
-    const { assignmentId } = req.params;
-    const { content } = req.body;
-
-    const { data: assignment } = await supabaseAdmin
-      .from('assignments')
-      .select('id, due_date, allow_late_submission, status')
-      .eq('id', assignmentId)
-      .maybeSingle();
-
-    if (!assignment || assignment.status !== 'published') {
-      return res.status(400).json({ error: 'Assignment not available' });
-    }
-
-    const isLate = assignment.due_date ? new Date() > new Date(assignment.due_date) : false;
-    if (isLate && !assignment.allow_late_submission) {
-      return res.status(400).json({ error: 'Deadline has passed and late submissions are not allowed' });
-    }
-
-    const { data: existing } = await supabaseAdmin
-      .from('assignment_submissions')
-      .select('id')
-      .eq('assignment_id', assignmentId)
-      .eq('student_id', caller.userId)
-      .maybeSingle();
-
-    const payload: any = {
-      assignment_id: assignmentId,
-      student_id: caller.userId,
-      content: content || '',
-      status: 'submitted',
-      is_late: isLate,
-      submitted_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
-    };
-
-    let result;
-    if (existing?.id) {
-      result = await supabaseAdmin.from('assignment_submissions').update(payload).eq('id', existing.id).select().single();
-    } else {
-      result = await supabaseAdmin.from('assignment_submissions').insert({ ...payload, created_at: new Date().toISOString() }).select().single();
-    }
-    if (result.error) throw result.error;
-    res.json({ success: true, submission: result.data });
-  } catch (e: any) { res.status(500).json({ error: e.message }); }
-});
-
-// Teacher: get all submissions for an assignment
-app.get('/api/teacher/assignments/:assignmentId/submissions', async (req: Request, res: Response) => {
-  try {
-    const caller = await assertAuthenticated(req, res);
-    if (!caller) return;
-    const { assignmentId } = req.params;
-
-    const { data: submissions, error } = await supabaseAdmin
-      .from('assignment_submissions')
-      .select('*')
-      .eq('assignment_id', assignmentId)
-      .order('submitted_at', { ascending: false });
-
-    if (error && !/does not exist|schema cache/i.test(error.message)) throw error;
-
-    const studentIds = [...new Set((submissions || []).map((s: any) => s.student_id))];
-    let profileMap: Record<string, any> = {};
-    if (studentIds.length > 0) {
-      const { data: profiles } = await supabaseAdmin
-        .from('profiles')
-        .select('id, display_name, email, avatar_url')
-        .in('id', studentIds);
-      (profiles || []).forEach((p: any) => { profileMap[p.id] = p; });
-    }
-
-    const enriched = (submissions || []).map((s: any) => ({
-      ...s,
-      student: profileMap[s.student_id] || { display_name: 'Unknown', email: '' },
-    }));
-    res.json({ success: true, submissions: enriched });
-  } catch (e: any) { res.status(500).json({ error: e.message }); }
-});
-
-// Teacher: grade a submission
-app.patch('/api/teacher/assignments/submissions/:subId/grade', async (req: Request, res: Response) => {
-  try {
-    const caller = await assertAuthenticated(req, res);
-    if (!caller) return;
-    const { subId } = req.params;
-    const { grade, feedback } = req.body;
-
-    const { data, error } = await supabaseAdmin
-      .from('assignment_submissions')
-      .update({
-        grade: grade !== undefined && grade !== '' ? Number(grade) : null,
-        feedback: feedback || null,
-        status: 'graded',
-        graded_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
-      })
-      .eq('id', subId)
-      .select()
-      .single();
-
-    if (error) throw error;
-    res.json({ success: true, submission: data });
-  } catch (e: any) { res.status(500).json({ error: e.message }); }
-});
 
 async function startServer() {
   const parsedPort = Number(process.env.PORT);
