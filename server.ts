@@ -10041,9 +10041,10 @@ Assistant:`;
 
   app.use((req, res, next) => {
     if (req.path.startsWith("/api")) {
+      console.error(`[404] No API route matched: ${req.method} ${req.path}`);
       return res.status(404).json({
         error:
-          "No API route matched. Start the app with npm run dev (tsx server.ts) and open the app at the URL printed in the terminal (same host/port as the API). If you set VITE_API_BASE_URL, it must match that URL (e.g. if the server says port 5002, use http://localhost:5002 — not a stale port). Restart the server after git pull.",
+          `No API route matched for ${req.method} ${req.path}. Start the app with npm run dev (tsx server.ts) and open the app at the URL printed in the terminal (same host/port as the API). If you set VITE_API_BASE_URL, it must match that URL (e.g. if the server says port 5002, use http://localhost:5002 — not a stale port). Restart the server after git pull.`,
         method: req.method,
         path: req.path,
       });

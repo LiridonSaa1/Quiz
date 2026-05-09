@@ -34,6 +34,9 @@ export async function readApiError(res: Response): Promise<string> {
   const text = await res.text();
   try {
     const json = text ? JSON.parse(text) : {};
+    if (res.status === 404 && json?.path) {
+      console.error(`[authFetch] 404 — no API route for: ${json.method ?? '?'} ${json.path}`);
+    }
     if (json && typeof json.error === 'string' && json.error) {
       return normalizeErrorMessage(json.error);
     }
