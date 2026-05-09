@@ -9812,6 +9812,60 @@ Assistant:`;
     return recipientIds.size;
   };
 
+  // ── Student: read published announcements ──────────────────────────────────
+  app.get('/api/student/announcements', async (req, res) => {
+    try {
+      const caller = await assertAuthenticated(req, res);
+      if (!caller) return;
+
+      // Fetch all classes the student belongs to
+      const { data: classRows } = await supabaseAdmin
+        .from('classes')
+        .select('id')
+        .contains('student_ids', [caller.userId]);
+      const myClassIds = (classRows || []).map((c: { id: string }) => c.id);
+
+      // Fetch published announcements visible to students
+      let query = supabaseAdmin
+        .from('announcements')
+        .select('*, author:profiles!author_id(id,display_name,email)')
+        .eq('status', 'published')
+        .in('target_audience', ['all', 'students'])
+        .order('created_at', { ascending: false });
+
+      const { data, error } = await query;
+      if (error) throw error;
+
+      // Filter out expired ones
+      const now = new Date();
+      const visible = (data || []).filter((a: any) => {
+        if (a.expires_at && new Date(a.expires_at) < now) return false;
+        return true;
+      });
+
+      res.json({ success: true, announcements: visible, classIds: myClassIds });
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  // Count unread (for badge) — returns { count }
+  app.get('/api/student/announcements/unread-count', async (req, res) => {
+    try {
+      const caller = await assertAuthenticated(req, res);
+      if (!caller) return;
+
+      const now = new Date().toISOString();
+      const { count, error } = await supabaseAdmin
+        .from('announcements')
+        .select('id', { count: 'exact', head: true })
+        .eq('status', 'published')
+        .in('target_audience', ['all', 'students'])
+        .or(`expires_at.is.null,expires_at.gt.${now}`);
+
+      if (error) throw error;
+      res.json({ success: true, count: count ?? 0 });
+    } catch (e: any) { res.json({ success: false, count: 0 }); }
+  });
+
   app.get('/api/admin/announcements', async (req, res) => {
     try {
       const { data, error } = await supabaseAdmin

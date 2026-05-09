@@ -78,6 +78,7 @@ import StudentCommunity from './pages/student/Community';
 import StudentLiveClasses from './pages/student/LiveClasses';
 import StudentLiveSessionJoin from './pages/student/LiveSessionJoin';
 import StudentExams from './pages/student/Exams';
+import StudentAnnouncements from './pages/student/Announcements';
 import NotFound from './pages/NotFound';
 import { apiUrl, authFetch } from './lib/apiUrl';
 import { isProfileAccessAllowed } from './lib/profileAccess';
@@ -455,6 +456,7 @@ function StudentRoutes({ features }: { features: FeatureFlags }) {
       <Route path="/join-class" element={<JoinClass />} />
       <Route path="/badges" element={<Badges />} />
       <Route path="/exams" element={<StudentExams />} />
+      <Route path="/announcements" element={features.announcementsEnabled ? <StudentAnnouncements /> : <Navigate to="/not-found" replace />} />
       <Route path="/quiz/:quizId" element={<QuizTaking />} />
       <Route path="/results/:attemptId" element={<QuizResults />} />
       <Route path="/profile" element={<StudentProfile />} />

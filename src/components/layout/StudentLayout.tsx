@@ -27,6 +27,7 @@ import {
   ScrollText,
   Zap,
   Trophy,
+  Megaphone,
 } from 'lucide-react';
 
 const studentNavSections = [
@@ -57,7 +58,8 @@ const studentNavSections = [
   {
     title: 'EXTRA',
     items: [
-      { icon: Award, label: 'Certificates', path: '/student/certificates' },
+      { icon: Award,      label: 'Certificates',   path: '/student/certificates'   },
+      { icon: Megaphone,  label: 'Announcements',  path: '/student/announcements'  },
     ]
   },
   {
@@ -88,6 +90,7 @@ interface NavItemDef { icon: React.ElementType; label: string; path: string; }
 export default function StudentLayout({ children }: { children: React.ReactNode }) {
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [liveSessionCount, setLiveSessionCount] = useState(0);
+  const [urgentAnnCount, setUrgentAnnCount] = useState(0);
   const [features, setFeatures] = useState<FeatureFlags>(defaultFeatureFlags);
   const branding = useBranding();
   const location = useLocation();
@@ -134,6 +137,24 @@ export default function StudentLayout({ children }: { children: React.ReactNode 
     return () => clearInterval(interval);
   }, [features.liveSessionsEnabled]);
 
+  // Poll for urgent announcements badge
+  useEffect(() => {
+    if (!features.announcementsEnabled) { setUrgentAnnCount(0); return; }
+    const check = async () => {
+      try {
+        const res = await authFetch('/api/student/announcements');
+        const json = await res.json();
+        if (json.success) {
+          const urgent = (json.announcements || []).filter((a: any) => a.priority === 'urgent').length;
+          setUrgentAnnCount(urgent);
+        }
+      } catch { /* silent */ }
+    };
+    check();
+    const interval = setInterval(check, 60000);
+    return () => clearInterval(interval);
+  }, [features.announcementsEnabled]);
+
   const handleLogout = async () => {
     await supabase.auth.signOut();
     navigate('/login');
@@ -145,6 +166,7 @@ export default function StudentLayout({ children }: { children: React.ReactNode 
       items: section.items.filter((item) => {
         if (!features.communityEnabled && item.path === '/student/community') return false;
         if (!features.liveSessionsEnabled && (item.path === '/student/live-sessions' || item.path === '/student/live-classes')) return false;
+        if (!features.announcementsEnabled && item.path === '/student/announcements') return false;
         return true;
       }),
     }))
@@ -152,7 +174,13 @@ export default function StudentLayout({ children }: { children: React.ReactNode 
 
   const NavItem = ({ item, onClick }: { item: NavItemDef; onClick?: () => void }) => {
     const isLiveSessions = item.path === '/student/live-sessions';
-    const showBadge = isLiveSessions && liveSessionCount > 0;
+    const isAnnouncements = item.path === '/student/announcements';
+    const badge = isLiveSessions && liveSessionCount > 0
+      ? liveSessionCount
+      : isAnnouncements && urgentAnnCount > 0
+      ? urgentAnnCount
+      : 0;
+    const badgeColor = isAnnouncements ? 'bg-amber-500' : 'bg-rose-500';
     return (
     <Link
       to={item.path}
@@ -166,9 +194,9 @@ export default function StudentLayout({ children }: { children: React.ReactNode 
     >
       <item.icon className="w-4 h-4 shrink-0" />
       <span className="flex-1">{item.label}</span>
-      {showBadge && (
-        <span className="inline-flex items-center justify-center min-w-[18px] h-[18px] px-1 bg-rose-500 text-white text-[10px] font-bold rounded-full animate-pulse">
-          {liveSessionCount}
+      {badge > 0 && (
+        <span className={cn('inline-flex items-center justify-center min-w-[18px] h-[18px] px-1 text-white text-[10px] font-bold rounded-full animate-pulse', badgeColor)}>
+          {badge}
         </span>
       )}
     </Link>
