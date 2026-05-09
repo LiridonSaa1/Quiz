@@ -5,7 +5,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import { formatDistanceToNow, format, isPast } from 'date-fns';
 import {
   Megaphone, Search, Clock, AlertTriangle, Info, Zap,
-  Globe, GraduationCap, Tag, Calendar, ChevronDown, ChevronUp,
+  Globe, GraduationCap, Tag, Calendar, ChevronDown, ChevronUp, X,
 } from 'lucide-react';
 import { cn } from '../../lib/utils';
 
@@ -32,10 +32,38 @@ interface Announcement {
   author?: { id: string; display_name: string; email: string } | null;
 }
 
-const PRIORITY_CFG: Record<Priority, { label: string; bg: string; text: string; border: string; icon: React.ElementType; pill: string }> = {
-  normal:    { label: 'Normal',    bg: 'bg-slate-50',   text: 'text-slate-600',  border: 'border-slate-200', icon: Info,          pill: 'bg-slate-100 text-slate-600'   },
-  important: { label: 'Important', bg: 'bg-amber-50',   text: 'text-amber-700',  border: 'border-amber-200', icon: AlertTriangle, pill: 'bg-amber-100 text-amber-700'   },
-  urgent:    { label: 'Urgent',    bg: 'bg-rose-50',    text: 'text-rose-700',   border: 'border-rose-300',  icon: Zap,           pill: 'bg-rose-100 text-rose-700'     },
+const PRIORITY_CFG: Record<Priority, {
+  label: string;
+  headerGradient: string;
+  border: string;
+  icon: React.ElementType;
+  pill: string;
+  glow: string;
+}> = {
+  normal: {
+    label: 'Normal',
+    headerGradient: 'from-slate-600 to-slate-700',
+    border: 'border-slate-200',
+    icon: Info,
+    pill: 'bg-white/20 text-white',
+    glow: '',
+  },
+  important: {
+    label: 'Important',
+    headerGradient: 'from-amber-500 to-orange-600',
+    border: 'border-amber-200',
+    icon: AlertTriangle,
+    pill: 'bg-white/20 text-white',
+    glow: 'shadow-amber-100',
+  },
+  urgent: {
+    label: 'Urgent',
+    headerGradient: 'from-rose-500 to-red-600',
+    border: 'border-rose-200',
+    icon: Zap,
+    pill: 'bg-white/20 text-white',
+    glow: 'shadow-rose-100',
+  },
 };
 
 const ANN_TYPE_CFG: Record<AnnType, { label: string; emoji: string }> = {
@@ -56,91 +84,132 @@ const AUD_CFG: Record<Audience, { label: string; icon: React.ElementType }> = {
   teachers: { label: 'Teachers', icon: GraduationCap },
 };
 
-function AnnouncementCard({ ann }: { ann: Announcement }) {
-  const [expanded, setExpanded] = useState(false);
+function AnnouncementModal({ ann, onClose }: { ann: Announcement; onClose: () => void }) {
   const priCfg  = PRIORITY_CFG[ann.priority];
   const typeCfg = ANN_TYPE_CFG[ann.ann_type || 'general'];
   const PriIcon = priCfg.icon;
-  const AudIcon = AUD_CFG[ann.target_audience].icon;
   const isExpired = ann.expires_at && isPast(new Date(ann.expires_at));
-  const isLong = ann.content.length > 200;
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm"
+      onClick={onClose}
+    >
+      <motion.div
+        initial={{ opacity: 0, scale: 0.95, y: 12 }}
+        animate={{ opacity: 1, scale: 1, y: 0 }}
+        exit={{ opacity: 0, scale: 0.95, y: 12 }}
+        transition={{ duration: 0.18 }}
+        className="bg-white rounded-2xl shadow-2xl w-full max-w-lg overflow-hidden"
+        onClick={e => e.stopPropagation()}
+      >
+        <div className={cn('px-6 py-5 bg-gradient-to-br', priCfg.headerGradient)}>
+          <div className="flex items-start justify-between gap-3">
+            <div className="flex items-center gap-3">
+              <span className="text-3xl">{typeCfg.emoji}</span>
+              <div>
+                <div className="flex items-center gap-2 mb-0.5">
+                  <span className={cn('inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-bold', priCfg.pill)}>
+                    <PriIcon className="w-3 h-3" />{priCfg.label}
+                  </span>
+                  {ann.ann_type && ann.ann_type !== 'general' && (
+                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-white/15 text-white">
+                      {typeCfg.label}
+                    </span>
+                  )}
+                </div>
+                <h2 className="text-lg font-bold text-white leading-snug">{ann.title}</h2>
+              </div>
+            </div>
+            <button
+              onClick={onClose}
+              className="p-1.5 rounded-lg bg-white/10 hover:bg-white/20 transition-colors text-white shrink-0"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+        </div>
+
+        <div className="px-6 py-5">
+          <p className="text-sm text-slate-700 leading-relaxed whitespace-pre-wrap">{ann.content}</p>
+        </div>
+
+        <div className="px-6 pb-5 flex flex-wrap items-center gap-3 text-xs text-slate-400 border-t border-slate-100 pt-4">
+          {ann.author && <span className="font-semibold text-slate-600">{ann.author.display_name}</span>}
+          <span className="flex items-center gap-1">
+            <Clock className="w-3.5 h-3.5" />
+            {ann.published_at
+              ? formatDistanceToNow(new Date(ann.published_at), { addSuffix: true })
+              : formatDistanceToNow(new Date(ann.created_at), { addSuffix: true })}
+          </span>
+          {ann.expires_at && !isExpired && (
+            <span className="flex items-center gap-1 text-amber-500">
+              <Calendar className="w-3.5 h-3.5" />
+              Expires {format(new Date(ann.expires_at), 'MMM d, yyyy')}
+            </span>
+          )}
+          {isExpired && (
+            <span className="px-2 py-0.5 rounded-full bg-slate-100 text-slate-400">Expired</span>
+          )}
+        </div>
+      </motion.div>
+    </div>
+  );
+}
+
+function AnnouncementCard({ ann, onClick }: { ann: Announcement; onClick: () => void }) {
+  const priCfg  = PRIORITY_CFG[ann.priority];
+  const typeCfg = ANN_TYPE_CFG[ann.ann_type || 'general'];
+  const PriIcon = priCfg.icon;
+  const isExpired = ann.expires_at && isPast(new Date(ann.expires_at));
+  const preview = ann.content.length > 120 ? ann.content.slice(0, 120) + '…' : ann.content;
 
   return (
     <motion.div
       layout
-      initial={{ opacity: 0, y: 12 }}
+      initial={{ opacity: 0, y: 16 }}
       animate={{ opacity: 1, y: 0 }}
-      exit={{ opacity: 0, y: -8 }}
+      exit={{ opacity: 0, scale: 0.95 }}
+      whileHover={{ y: -3, transition: { duration: 0.15 } }}
+      onClick={onClick}
       className={cn(
-        'rounded-2xl border p-5 transition-all',
-        priCfg.bg, priCfg.border,
-        ann.priority === 'urgent' && 'shadow-md shadow-rose-100',
+        'rounded-2xl border overflow-hidden cursor-pointer shadow-sm hover:shadow-md transition-shadow',
+        priCfg.border,
+        priCfg.glow && `shadow-sm ${priCfg.glow}`,
       )}
     >
-      <div className="flex items-start gap-4">
-        {/* Emoji icon */}
-        <div className={cn(
-          'w-12 h-12 rounded-xl flex items-center justify-center text-2xl shrink-0',
-          ann.priority === 'urgent' ? 'bg-rose-100' : ann.priority === 'important' ? 'bg-amber-100' : 'bg-white border border-slate-200',
-        )}>
-          {typeCfg.emoji}
-        </div>
-
+      <div className={cn('px-4 py-3 bg-gradient-to-br flex items-center gap-3', priCfg.headerGradient)}>
+        <span className="text-2xl">{typeCfg.emoji}</span>
         <div className="flex-1 min-w-0">
-          {/* Badges row */}
-          <div className="flex flex-wrap items-center gap-1.5 mb-2">
-            <span className={cn('inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold', priCfg.pill)}>
-              <PriIcon className="w-3 h-3" />{priCfg.label}
-            </span>
-            {ann.ann_type && ann.ann_type !== 'general' && (
-              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-indigo-50 text-indigo-600">
-                <Tag className="w-3 h-3" />{typeCfg.label}
-              </span>
-            )}
-            <span className="inline-flex items-center gap-1 text-xs text-slate-400">
-              <AudIcon className="w-3 h-3" />{AUD_CFG[ann.target_audience].label}
+          <div className="flex items-center gap-1.5 mb-0.5">
+            <span className={cn('inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full text-xs font-bold', priCfg.pill)}>
+              <PriIcon className="w-2.5 h-2.5" />{priCfg.label}
             </span>
             {isExpired && (
-              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-slate-100 text-slate-400 line-through">
-                Expired
-              </span>
+              <span className="px-1.5 py-0.5 rounded-full bg-white/10 text-white/60 text-xs line-through">Expired</span>
             )}
           </div>
+          <h3 className="text-sm font-bold text-white leading-snug line-clamp-2">{ann.title}</h3>
+        </div>
+      </div>
 
-          {/* Title */}
-          <h3 className={cn('font-bold text-base leading-snug', priCfg.text)}>{ann.title}</h3>
+      <div className="px-4 py-3 bg-white flex-1">
+        <p className="text-xs text-slate-500 leading-relaxed">{preview}</p>
 
-          {/* Content */}
-          <div className="mt-2 text-sm text-slate-600 leading-relaxed whitespace-pre-wrap">
-            {isLong && !expanded ? ann.content.slice(0, 200) + '…' : ann.content}
-          </div>
-          {isLong && (
-            <button
-              onClick={() => setExpanded(p => !p)}
-              className="mt-1.5 flex items-center gap-1 text-xs font-medium text-indigo-600 hover:text-indigo-800 transition-colors"
-            >
-              {expanded ? <><ChevronUp className="w-3.5 h-3.5" /> Show less</> : <><ChevronDown className="w-3.5 h-3.5" /> Read more</>}
-            </button>
-          )}
-
-          {/* Meta row */}
-          <div className="flex flex-wrap items-center gap-3 mt-3 text-xs text-slate-400">
-            {ann.author && (
-              <span className="font-medium text-slate-500">{ann.author.display_name}</span>
-            )}
-            <span className="flex items-center gap-1">
-              <Clock className="w-3.5 h-3.5" />
+        <div className="flex items-center justify-between mt-3 pt-3 border-t border-slate-100">
+          <div className="flex items-center gap-1.5 text-xs text-slate-400">
+            <Clock className="w-3 h-3" />
+            <span>
               {ann.published_at
                 ? formatDistanceToNow(new Date(ann.published_at), { addSuffix: true })
                 : formatDistanceToNow(new Date(ann.created_at), { addSuffix: true })}
             </span>
-            {ann.expires_at && !isExpired && (
-              <span className="flex items-center gap-1 text-amber-500">
-                <Calendar className="w-3.5 h-3.5" />
-                Expires {format(new Date(ann.expires_at), 'MMM d, yyyy')}
-              </span>
-            )}
           </div>
+          {ann.ann_type && ann.ann_type !== 'general' && (
+            <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-xs font-medium bg-indigo-50 text-indigo-600">
+              <Tag className="w-2.5 h-2.5" />{typeCfg.label}
+            </span>
+          )}
         </div>
       </div>
     </motion.div>
@@ -153,6 +222,7 @@ export default function StudentAnnouncements() {
   const [search, setSearch] = useState('');
   const [priorityFilter, setPriorityFilter] = useState('all');
   const [typeFilter, setTypeFilter] = useState('all');
+  const [selected, setSelected] = useState<Announcement | null>(null);
 
   useEffect(() => {
     const load = async () => {
@@ -161,7 +231,7 @@ export default function StudentAnnouncements() {
         const res = await authFetch('/api/student/announcements');
         const json = await res.json();
         if (json.success) setAnnouncements(json.announcements || []);
-      } catch { /* silent */ }
+      } catch { }
       finally { setLoading(false); }
     };
     load();
@@ -178,14 +248,15 @@ export default function StudentAnnouncements() {
 
   return (
     <StudentLayout>
-      <div className="max-w-3xl mx-auto space-y-6">
+      <div className="max-w-7xl mx-auto space-y-6">
+
         {/* Header */}
-        <div className="flex items-start justify-between gap-4">
+        <div className="flex items-center gap-3">
+          <div className="w-10 h-10 bg-indigo-100 rounded-xl flex items-center justify-center shrink-0">
+            <Megaphone className="w-5 h-5 text-indigo-600" />
+          </div>
           <div>
-            <div className="flex items-center gap-2.5 mb-1">
-              <div className="w-9 h-9 bg-indigo-100 rounded-xl flex items-center justify-center">
-                <Megaphone className="w-5 h-5 text-indigo-600" />
-              </div>
+            <div className="flex items-center gap-2">
               <h1 className="text-2xl font-bold text-slate-900">Announcements</h1>
               {urgentCount > 0 && (
                 <span className="inline-flex items-center gap-1 px-2.5 py-1 bg-rose-100 text-rose-700 rounded-full text-xs font-bold animate-pulse">
@@ -193,8 +264,8 @@ export default function StudentAnnouncements() {
                 </span>
               )}
             </div>
-            <p className="text-slate-500 text-sm ml-11">
-              {announcements.length === 0 && !loading
+            <p className="text-slate-500 text-sm">
+              {loading ? 'Loading…' : announcements.length === 0
                 ? 'No announcements at the moment.'
                 : `${announcements.length} announcement${announcements.length !== 1 ? 's' : ''} from your school`}
             </p>
@@ -203,19 +274,19 @@ export default function StudentAnnouncements() {
 
         {/* Filters */}
         <div className="flex flex-wrap gap-3">
-          <div className="relative flex-1 min-w-[180px]">
+          <div className="relative flex-1 min-w-[200px]">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
             <input
               value={search}
               onChange={e => setSearch(e.target.value)}
               placeholder="Search announcements…"
-              className="w-full pl-9 pr-3 py-2 rounded-xl border border-slate-200 bg-white text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400 focus:border-transparent"
+              className="w-full pl-9 pr-3 py-2.5 rounded-xl border border-slate-200 bg-white text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400 focus:border-transparent"
             />
           </div>
           <select
             value={priorityFilter}
             onChange={e => setPriorityFilter(e.target.value)}
-            className="px-3 py-2 rounded-xl border border-slate-200 bg-white text-sm text-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-400"
+            className="px-3 py-2.5 rounded-xl border border-slate-200 bg-white text-sm text-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-400"
           >
             <option value="all">All Priorities</option>
             <option value="normal">Normal</option>
@@ -225,7 +296,7 @@ export default function StudentAnnouncements() {
           <select
             value={typeFilter}
             onChange={e => setTypeFilter(e.target.value)}
-            className="px-3 py-2 rounded-xl border border-slate-200 bg-white text-sm text-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-400"
+            className="px-3 py-2.5 rounded-xl border border-slate-200 bg-white text-sm text-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-400"
           >
             <option value="all">All Types</option>
             {Object.entries(ANN_TYPE_CFG).map(([k, v]) => (
@@ -234,16 +305,16 @@ export default function StudentAnnouncements() {
           </select>
         </div>
 
-        {/* List */}
+        {/* Grid */}
         {loading ? (
-          <div className="space-y-4">
-            {Array(4).fill(0).map((_, i) => (
-              <div key={i} className="h-32 rounded-2xl bg-slate-100 animate-pulse" />
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+            {Array(8).fill(0).map((_, i) => (
+              <div key={i} className="h-44 rounded-2xl bg-slate-100 animate-pulse" />
             ))}
           </div>
         ) : filtered.length === 0 ? (
-          <div className="flex flex-col items-center justify-center py-20 text-slate-400">
-            <Megaphone className="w-12 h-12 mb-3 opacity-30" />
+          <div className="flex flex-col items-center justify-center py-24 text-slate-400">
+            <Megaphone className="w-14 h-14 mb-3 opacity-20" />
             <p className="font-semibold text-base">No announcements</p>
             <p className="text-sm mt-1">
               {search || priorityFilter !== 'all' || typeFilter !== 'all'
@@ -253,14 +324,21 @@ export default function StudentAnnouncements() {
           </div>
         ) : (
           <AnimatePresence mode="popLayout">
-            <div className="space-y-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
               {filtered.map(ann => (
-                <AnnouncementCard key={ann.id} ann={ann} />
+                <AnnouncementCard key={ann.id} ann={ann} onClick={() => setSelected(ann)} />
               ))}
             </div>
           </AnimatePresence>
         )}
       </div>
+
+      {/* Detail modal */}
+      <AnimatePresence>
+        {selected && (
+          <AnnouncementModal ann={selected} onClose={() => setSelected(null)} />
+        )}
+      </AnimatePresence>
     </StudentLayout>
   );
 }
