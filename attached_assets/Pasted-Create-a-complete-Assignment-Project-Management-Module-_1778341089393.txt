@@ -1,0 +1,153 @@
+Create a complete Assignment & Project Management Module for the Online School and Quiz Platform.
+
+The Assignment System must allow Teachers to create, manage, review, and grade assignments in detail.
+
+ASSIGNMENT TYPES
+Support:
+- Homework
+- Projects
+- Exercises
+- Essays
+- Individual assignments
+- Group assignments
+- Research tasks
+- File/document submissions
+
+TEACHER FEATURES
+Teachers can:
+- Create assignments
+- Select assignment type
+- Add title and description
+- Add detailed instructions
+- Upload files/PDFs/images/videos
+- Set deadlines
+- Set maximum points/grade
+- Assign to one or multiple classes
+- Allow individual or group submissions
+- Edit or delete assignments
+- Schedule assignments
+
+ASSIGNMENT DETAILS PAGE
+The assignment details page must include:
+- Assignment title
+- Description
+- Instructions
+- Attached files
+- Due date countdown
+- Points/grade information
+- Submission status
+- Class assigned
+- Teacher information
+
+STUDENT FEATURES
+Students can:
+- View assignments
+- Read instructions
+- Upload:
+  - PDF
+  - DOCX
+  - ZIP
+  - Images
+  - Videos
+  - Multiple files
+- Submit text answers
+- Save draft before submission
+- Edit submission before deadline
+- View submission history
+- See remaining time before deadline
+
+GROUP ASSIGNMENTS
+For group assignments:
+- Students can create groups
+- Invite teammates
+- Shared submission area
+- Group chat/discussion
+- Teacher can grade entire group or individuals separately
+
+DEADLINE SYSTEM
+- Show live countdown timer
+- Mark late submissions automatically
+- Send reminders before deadline
+- Allow late submission option if enabled by teacher
+
+GRADING SYSTEM
+Teachers can:
+- Open each student submission
+- Preview files directly
+- Download submissions
+- Add grades/points
+- Add comments and feedback
+- Highlight mistakes
+- Approve/reject submissions
+
+AI FEATURES
+- AI feedback suggestions
+- AI plagiarism detection
+- AI grammar suggestions for essays
+- AI-generated grading assistance
+
+FINAL EVALUATION SYSTEM
+The system must automatically calculate:
+- Assignment grades
+- Project grades
+- Homework performance
+- Submission consistency
+- Participation score
+
+Generate:
+- Final student evaluation
+- Average score
+- Performance analytics
+- Progress reports
+- Ranking system
+
+ANALYTICS DASHBOARD
+Teachers can see:
+- Submitted assignments
+- Missing assignments
+- Late submissions
+- Average class performance
+- Top students
+- Weak students
+- Assignment completion rates
+
+NOTIFICATIONS
+Send notifications through:
+- In-app notifications
+- Email
+- WhatsApp/Viber (optional)
+
+Students receive:
+- New assignment alerts
+- Deadline reminders
+- Grade notifications
+- Feedback alerts
+
+UI/UX DESIGN
+Build a modern assignment management interface with:
+- Beautiful dashboard
+- Drag-and-drop file upload
+- Progress indicators
+- Submission cards
+- Timeline view
+- Mobile responsive design
+- Dark/light mode
+
+TECH STACK
+Frontend:
+- Next.js / React
+- TailwindCSS
+- Upload progress system
+
+Backend:
+- Node.js / Laravel API
+- PostgreSQL / Supabase
+- Cloud storage for uploads
+
+IMPORTANT
+- Secure file uploads
+- Prevent duplicate submissions
+- Auto-save drafts
+- Real-time status updates
+- Support large file uploads
+- Scalable architecture

@@ -13,17 +13,19 @@ import {
 import { supabase } from '../../supabase';
 import {
   ClipboardList, Plus, Search, Star,
-  X, Pencil, Trash2, CheckCircle2, Archive, FileText, AlertCircle
+  X, Pencil, Trash2, CheckCircle2, Archive, FileText, AlertCircle, Clock,
 } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { format, isPast, isToday } from 'date-fns';
+
 type AssignmentStatus = 'draft' | 'published' | 'closed';
-type AssignmentType = 'homework' | 'project' | 'essay' | 'quiz' | 'lab' | 'other';
+type AssignmentType = 'homework' | 'project' | 'essay' | 'quiz' | 'lab' | 'exercise' | 'research' | 'other';
 
 interface Assignment {
   id: string;
   title: string;
   description: string | null;
+  instructions: string | null;
   course_id: string | null;
   teacher_id: string | null;
   class_id: string | null;
@@ -31,6 +33,7 @@ interface Assignment {
   due_date: string | null;
   max_score: number;
   status: AssignmentStatus;
+  allow_late_submission: boolean;
   created_at: string;
   course?: { title: string } | null;
   teacher?: { display_name: string } | null;
@@ -48,21 +51,20 @@ const STATUS_CFG: Record<AssignmentStatus, { label: string; bg: string; text: st
 };
 
 const TYPE_CFG: Record<AssignmentType, { label: string; color: string; bg: string }> = {
-  homework: { label: 'Homework', color: 'text-blue-700',   bg: 'bg-blue-50'   },
-  project:  { label: 'Project',  color: 'text-violet-700', bg: 'bg-violet-50' },
-  essay:    { label: 'Essay',    color: 'text-rose-700',   bg: 'bg-rose-50'   },
-  quiz:     { label: 'Quiz',     color: 'text-amber-700',  bg: 'bg-amber-50'  },
-  lab:      { label: 'Lab',      color: 'text-teal-700',   bg: 'bg-teal-50'   },
-  other:    { label: 'Other',    color: 'text-slate-600',  bg: 'bg-slate-100' },
+  homework: { label: 'Homework',  color: 'text-blue-700',   bg: 'bg-blue-50'   },
+  project:  { label: 'Project',   color: 'text-violet-700', bg: 'bg-violet-50' },
+  essay:    { label: 'Essay',     color: 'text-rose-700',   bg: 'bg-rose-50'   },
+  quiz:     { label: 'Quiz',      color: 'text-amber-700',  bg: 'bg-amber-50'  },
+  lab:      { label: 'Lab',       color: 'text-teal-700',   bg: 'bg-teal-50'   },
+  exercise: { label: 'Exercise',  color: 'text-cyan-700',   bg: 'bg-cyan-50'   },
+  research: { label: 'Research',  color: 'text-indigo-700', bg: 'bg-indigo-50' },
+  other:    { label: 'Other',     color: 'text-slate-600',  bg: 'bg-slate-100' },
 };
 
 const AVATAR_COLORS = [
-  'from-amber-500 to-orange-600',
-  'from-violet-500 to-purple-600',
-  'from-blue-500 to-indigo-600',
-  'from-rose-500 to-pink-600',
-  'from-teal-500 to-cyan-600',
-  'from-emerald-500 to-green-600',
+  'from-amber-500 to-orange-600', 'from-violet-500 to-purple-600',
+  'from-blue-500 to-indigo-600',  'from-rose-500 to-pink-600',
+  'from-teal-500 to-cyan-600',    'from-emerald-500 to-green-600',
 ];
 const getAvatarColor = (str: string) => {
   let h = 0;
@@ -71,8 +73,9 @@ const getAvatarColor = (str: string) => {
 };
 
 const emptyForm = {
-  title: '', description: '', course_id: '', teacher_id: '', class_id: '',
-  type: 'homework' as AssignmentType, due_date: '', max_score: 100, status: 'draft' as AssignmentStatus,
+  title: '', description: '', instructions: '', course_id: '', teacher_id: '', class_id: '',
+  type: 'homework' as AssignmentType, due_date: '', max_score: 100,
+  status: 'draft' as AssignmentStatus, allow_late_submission: false,
 };
 
 export default function AdminAssignments() {
@@ -115,8 +118,7 @@ export default function AdminAssignments() {
         teacher: a.teacher_id ? { display_name: teacherMap[a.teacher_id] } : null,
         class_name: a.class_id ? classMap[a.class_id] || null : null,
       })));
-
-      setCourses((c || []).filter((course: any) => course));
+      setCourses((c || []).filter(Boolean));
       setTeachers(t || []);
       setClasses(cl || []);
     } catch {
@@ -130,36 +132,30 @@ export default function AdminAssignments() {
 
   const filtered = assignments.filter(a => {
     const q = search.toLowerCase();
-    const matchSearch = a.title.toLowerCase().includes(q) ||
-      (a.course?.title || '').toLowerCase().includes(q) ||
-      (a.class_name || '').toLowerCase().includes(q);
-    const matchStatus = statusFilter === 'all' || a.status === statusFilter;
-    const matchType = typeFilter === 'all' || a.type === typeFilter;
-    const matchCourse = courseFilter === 'all' || a.course_id === courseFilter;
-    return matchSearch && matchStatus && matchType && matchCourse;
+    return (
+      (a.title.toLowerCase().includes(q) || (a.course?.title || '').toLowerCase().includes(q) || (a.class_name || '').toLowerCase().includes(q)) &&
+      (statusFilter === 'all' || a.status === statusFilter) &&
+      (typeFilter === 'all' || a.type === typeFilter) &&
+      (courseFilter === 'all' || a.course_id === courseFilter)
+    );
   });
 
   const stats = [
-    { label: 'Total', value: assignments.length, gradient: 'from-indigo-500 to-indigo-600', shadow: 'shadow-indigo-500/25', icon: ClipboardList },
-    { label: 'Published', value: assignments.filter(a => a.status === 'published').length, gradient: 'from-emerald-500 to-emerald-600', shadow: 'shadow-emerald-500/25', icon: CheckCircle2 },
-    { label: 'Draft', value: assignments.filter(a => a.status === 'draft').length, gradient: 'from-slate-500 to-slate-600', shadow: 'shadow-slate-500/25', icon: FileText },
-    { label: 'Overdue', value: assignments.filter(a => a.due_date && isPast(new Date(a.due_date)) && !isToday(new Date(a.due_date)) && a.status === 'published').length, gradient: 'from-rose-500 to-pink-600', shadow: 'shadow-rose-500/25', icon: AlertCircle },
+    { label: 'Total',     value: assignments.length,                                                                                   gradient: 'from-indigo-500 to-indigo-600', shadow: 'shadow-indigo-500/25', icon: ClipboardList },
+    { label: 'Published', value: assignments.filter(a => a.status === 'published').length,                                             gradient: 'from-emerald-500 to-emerald-600', shadow: 'shadow-emerald-500/25', icon: CheckCircle2 },
+    { label: 'Draft',     value: assignments.filter(a => a.status === 'draft').length,                                                 gradient: 'from-slate-500 to-slate-600',   shadow: 'shadow-slate-500/25',   icon: FileText     },
+    { label: 'Overdue',   value: assignments.filter(a => a.due_date && isPast(new Date(a.due_date)) && !isToday(new Date(a.due_date)) && a.status === 'published').length, gradient: 'from-rose-500 to-pink-600', shadow: 'shadow-rose-500/25', icon: AlertCircle },
   ];
 
-  const openAdd = () => {
-    setEditId(null);
-    setForm(emptyForm);
-    setShowModal(true);
-  };
-
+  const openAdd = () => { setEditId(null); setForm(emptyForm); setShowModal(true); };
   const openEdit = (a: Assignment) => {
     setEditId(a.id);
     setForm({
-      title: a.title, description: a.description || '',
+      title: a.title, description: a.description || '', instructions: a.instructions || '',
       course_id: a.course_id || '', teacher_id: a.teacher_id || '',
       class_id: a.class_id || '', type: a.type,
       due_date: a.due_date ? a.due_date.substring(0, 10) : '',
-      max_score: a.max_score, status: a.status,
+      max_score: a.max_score, status: a.status, allow_late_submission: a.allow_late_submission || false,
     });
     setShowModal(true);
   };
@@ -169,31 +165,31 @@ export default function AdminAssignments() {
     setSaving(true);
     try {
       const payload: any = {
-        title: form.title.trim(),
-        description: form.description || null,
-        course_id: form.course_id || null,
-        teacher_id: form.teacher_id || null,
-        class_id: form.class_id || null,
-        type: form.type,
-        due_date: form.due_date || null,
-        max_score: Number(form.max_score),
-        status: form.status,
+        title: form.title.trim(), description: form.description || null,
+        instructions: form.instructions || null,
+        course_id: form.course_id || null, teacher_id: form.teacher_id || null,
+        class_id: form.class_id || null, type: form.type,
+        due_date: form.due_date || null, max_score: Number(form.max_score),
+        status: form.status, allow_late_submission: form.allow_late_submission,
         updated_at: new Date().toISOString(),
       };
-      if (editId) {
-        const { error } = await supabase.from('assignments').update(payload).eq('id', editId);
-        if (error) throw error;
-        toast.success('Assignment updated');
-      } else {
-        payload.created_at = new Date().toISOString();
-        const { error } = await supabase.from('assignments').insert(payload);
-        if (error) throw error;
-        toast.success('Assignment created');
+
+      const tryOp = async (p: any) => editId
+        ? supabase.from('assignments').update(p).eq('id', editId)
+        : supabase.from('assignments').insert({ ...p, created_at: new Date().toISOString() });
+
+      let result = await tryOp(payload);
+      if (result.error && /column|schema cache/i.test(result.error.message)) {
+        const { instructions, allow_late_submission, ...safe } = payload;
+        result = await tryOp(safe);
       }
+      if (result.error) throw result.error;
+
+      toast.success(editId ? 'Assignment updated' : 'Assignment created');
       setShowModal(false);
       fetchData();
     } catch (e: any) {
-      toast.error(e.message || 'Failed to save assignment');
+      toast.error(e.message || 'Failed to save');
     } finally {
       setSaving(false);
     }
@@ -210,9 +206,8 @@ export default function AdminAssignments() {
   };
 
   const getDueBadge = (due: string | null, status: AssignmentStatus) => {
-    if (!due) return null;
+    if (!due || status === 'closed') return null;
     const d = new Date(due);
-    if (status === 'closed') return null;
     if (isPast(d) && !isToday(d)) return <span className="text-xs text-rose-600 font-medium">Overdue</span>;
     if (isToday(d)) return <span className="text-xs text-amber-600 font-medium">Due today</span>;
     return null;
@@ -225,19 +220,10 @@ export default function AdminAssignments() {
         title="Assignments"
         description="Create and manage all course assignments."
         action={
-          <motion.button
-            type="button"
-            onClick={openAdd}
-            whileHover={{ scale: 1.04, y: -2 }}
-            whileTap={{ scale: 0.97 }}
-            className="inline-flex items-center gap-2 px-6 py-3 rounded-2xl font-bold text-sm text-white shrink-0 transition-all"
-            style={{
-              background: 'linear-gradient(135deg, #818cf8 0%, #a78bfa 100%)',
-              boxShadow: '0 8px 32px rgba(139,92,246,0.45), 0 2px 8px rgba(0,0,0,0.15)',
-            }}
-          >
-            <Plus className="w-4 h-4" />
-            New Assignment
+          <motion.button type="button" onClick={openAdd} whileHover={{ scale: 1.04, y: -2 }} whileTap={{ scale: 0.97 }}
+            className="inline-flex items-center gap-2 px-6 py-3 rounded-2xl font-bold text-sm text-white shrink-0"
+            style={{ background: 'linear-gradient(135deg,#818cf8 0%,#a78bfa 100%)', boxShadow: '0 8px 32px rgba(139,92,246,0.45)' }}>
+            <Plus className="w-4 h-4" />New Assignment
           </motion.button>
         }
         stats={stats}
@@ -245,12 +231,7 @@ export default function AdminAssignments() {
           <AdminListFilterBar>
             <div className="relative flex-1 min-w-[200px]">
               <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-indigo-400" />
-              <input
-                value={search}
-                onChange={e => setSearch(e.target.value)}
-                placeholder="Search assignments..."
-                className={ADMIN_LIST_SEARCH_INPUT}
-              />
+              <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search assignments..." className={ADMIN_LIST_SEARCH_INPUT} />
             </div>
             <select value={statusFilter} onChange={e => setStatusFilter(e.target.value)} className={ADMIN_LIST_SELECT}>
               <option value="all">All Status</option>
@@ -272,9 +253,7 @@ export default function AdminAssignments() {
         <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
           {loading ? (
             <div className={ADMIN_LIST_CARD_GRID}>
-              {Array(6).fill(0).map((_, i) => (
-                <div key={i} className="h-48 rounded-2xl bg-slate-100 animate-pulse" />
-              ))}
+              {Array(6).fill(0).map((_, i) => <div key={i} className="h-48 rounded-2xl bg-slate-100 animate-pulse" />)}
             </div>
           ) : filtered.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-20 gap-3 text-slate-400">
@@ -287,7 +266,7 @@ export default function AdminAssignments() {
               <div className={ADMIN_LIST_CARD_GRID}>
                 {filtered.map(a => {
                   const sc = STATUS_CFG[a.status];
-                  const tc = TYPE_CFG[a.type];
+                  const tc = TYPE_CFG[a.type] || TYPE_CFG.other;
                   const initials = a.title.substring(0, 2).toUpperCase();
                   const dueBadge = getDueBadge(a.due_date, a.status);
                   return (
@@ -302,9 +281,13 @@ export default function AdminAssignments() {
                           <div className="flex flex-wrap gap-2 mt-2">
                             <span className={cn('inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium', tc.bg, tc.color)}>{tc.label}</span>
                             <span className={cn('inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-medium', sc.bg, sc.text)}>
-                              <span className={cn('w-1.5 h-1.5 rounded-full', sc.dot)} />
-                              {sc.label}
+                              <span className={cn('w-1.5 h-1.5 rounded-full', sc.dot)} />{sc.label}
                             </span>
+                            {a.allow_late_submission && (
+                              <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-orange-50 text-orange-600">
+                                <Clock className="w-2.5 h-2.5 mr-1" />Late OK
+                              </span>
+                            )}
                           </div>
                         </div>
                         <div className="flex gap-1 shrink-0">
@@ -321,6 +304,12 @@ export default function AdminAssignments() {
                           <span className="text-slate-400 font-semibold uppercase tracking-wider">Course</span>
                           <span className="text-right truncate">{a.course?.title || '—'}</span>
                         </div>
+                        {a.teacher && (
+                          <div className="flex justify-between gap-2">
+                            <span className="text-slate-400 font-semibold uppercase tracking-wider">Teacher</span>
+                            <span className="text-right truncate">{a.teacher.display_name}</span>
+                          </div>
+                        )}
                         {a.class_name && (
                           <div className="flex justify-between gap-2">
                             <span className="text-slate-400 font-semibold uppercase tracking-wider">Class</span>
@@ -330,19 +319,13 @@ export default function AdminAssignments() {
                         <div className="flex justify-between gap-2 items-start">
                           <span className="text-slate-400 font-semibold uppercase tracking-wider shrink-0">Due</span>
                           <span className="text-right">
-                            {a.due_date ? (
-                              <>
-                                <span className="block">{format(new Date(a.due_date), 'MMM d, yyyy')}</span>
-                                {dueBadge}
-                              </>
-                            ) : '—'}
+                            {a.due_date ? <><span className="block">{format(new Date(a.due_date), 'MMM d, yyyy')}</span>{dueBadge}</> : '—'}
                           </span>
                         </div>
                         <div className="flex justify-between gap-2 items-center">
                           <span className="text-slate-400 font-semibold uppercase tracking-wider">Score</span>
                           <span className="inline-flex items-center gap-1 font-medium text-slate-800">
-                            <Star className="w-3.5 h-3.5 text-amber-400" />
-                            {a.max_score} pts
+                            <Star className="w-3.5 h-3.5 text-amber-400" />{a.max_score} pts
                           </span>
                         </div>
                       </div>
@@ -376,8 +359,14 @@ export default function AdminAssignments() {
               <div>
                 <label className="text-xs font-semibold text-slate-600 uppercase tracking-wide">Description</label>
                 <textarea value={form.description} onChange={e => setForm(f => ({ ...f, description: e.target.value }))}
-                  rows={3} className="mt-1 w-full px-3 py-2.5 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-500/30 resize-none"
-                  placeholder="Describe the assignment..." />
+                  rows={2} className="mt-1 w-full px-3 py-2.5 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-500/30 resize-none"
+                  placeholder="Brief overview..." />
+              </div>
+              <div>
+                <label className="text-xs font-semibold text-slate-600 uppercase tracking-wide">Instructions</label>
+                <textarea value={form.instructions} onChange={e => setForm(f => ({ ...f, instructions: e.target.value }))}
+                  rows={4} className="mt-1 w-full px-3 py-2.5 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-500/30 resize-none"
+                  placeholder="Detailed step-by-step instructions for students..." />
               </div>
               <div className="grid grid-cols-2 gap-3">
                 <div>
@@ -433,6 +422,15 @@ export default function AdminAssignments() {
                   {teachers.map(t => <option key={t.id} value={t.id}>{t.display_name}</option>)}
                 </select>
               </div>
+              <label className="flex items-center gap-3 cursor-pointer select-none">
+                <div
+                  onClick={() => setForm(f => ({ ...f, allow_late_submission: !f.allow_late_submission }))}
+                  className={cn('relative w-10 h-5 rounded-full transition-colors', form.allow_late_submission ? 'bg-amber-500' : 'bg-slate-200')}
+                >
+                  <span className={cn('absolute top-0.5 left-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform', form.allow_late_submission ? 'translate-x-5' : '')} />
+                </div>
+                <span className="text-sm font-medium text-slate-700">Allow late submission</span>
+              </label>
             </div>
             <div className="flex justify-end gap-3 p-5 border-t border-slate-100">
               <button onClick={() => setShowModal(false)} className="px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-100 rounded-lg transition-colors">Cancel</button>
