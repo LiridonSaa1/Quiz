@@ -16,7 +16,7 @@ import {
   Users, GraduationCap, Globe, AlertTriangle,
   Info, Zap, Send, FileText, Archive, Clock,
   Sparkles, RefreshCw, Calendar, Tag, ChevronDown,
-  PartyPopper, Star, BookOpen, Loader2, Mail,
+  PartyPopper, Loader2, Mail, CheckCircle2, XCircle, WifiOff,
 } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { authFetch } from '../../lib/apiUrl';
@@ -146,6 +146,71 @@ const emptyForm = {
   scheduled_at: '',
   send_email: false,
 };
+
+interface BrevoStatus { configured: boolean; connected: boolean; reason?: string; email?: string; plan?: string; senderEmail?: string; senderName?: string; }
+
+function BrevoStatusBanner() {
+  const [status, setStatus] = useState<BrevoStatus | null>(null);
+  const [checking, setChecking] = useState(true);
+
+  const check = async () => {
+    setChecking(true);
+    try {
+      const res = await authFetch('/api/admin/brevo/status');
+      const json = await res.json();
+      setStatus(json);
+    } catch { setStatus({ configured: false, connected: false, reason: 'Could not reach server' }); }
+    finally { setChecking(false); }
+  };
+
+  useEffect(() => { check(); }, []);
+
+  if (checking) return (
+    <div className="flex items-center gap-2 px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-400 animate-pulse">
+      <Mail className="w-4 h-4" /> Checking Brevo connection…
+    </div>
+  );
+
+  if (!status) return null;
+
+  if (status.connected) return (
+    <div className="flex items-center gap-2.5 px-4 py-2.5 bg-emerald-50 border border-emerald-200 rounded-xl text-xs">
+      <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+      <div className="flex-1 min-w-0">
+        <span className="font-bold text-emerald-700">Brevo i lidhur</span>
+        <span className="text-emerald-600 ml-2">Email dërgohet nga <strong>{status.senderEmail}</strong> ({status.senderName})</span>
+        {status.plan && <span className="ml-2 text-emerald-500">· Plan: {status.plan}</span>}
+      </div>
+      <button onClick={check} className="shrink-0 p-1 hover:bg-emerald-100 rounded-lg transition-all" title="Kontrollo sërisht">
+        <RefreshCw className="w-3.5 h-3.5 text-emerald-500" />
+      </button>
+    </div>
+  );
+
+  if (status.configured && !status.connected) return (
+    <div className="flex items-start gap-2.5 px-4 py-2.5 bg-amber-50 border border-amber-200 rounded-xl text-xs">
+      <WifiOff className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+      <div className="flex-1 min-w-0">
+        <span className="font-bold text-amber-700">Brevo i konfiguruar por i bllokuar</span>
+        <p className="text-amber-600 mt-0.5">{status.reason}</p>
+        <p className="text-amber-500 mt-0.5">Shko te <strong>Brevo → Security → Authorised IPs</strong> dhe shto IP-në e serverit.</p>
+      </div>
+      <button onClick={check} className="shrink-0 p-1 hover:bg-amber-100 rounded-lg transition-all">
+        <RefreshCw className="w-3.5 h-3.5 text-amber-500" />
+      </button>
+    </div>
+  );
+
+  return (
+    <div className="flex items-start gap-2.5 px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs">
+      <XCircle className="w-4 h-4 text-slate-400 shrink-0 mt-0.5" />
+      <div className="flex-1 min-w-0">
+        <span className="font-bold text-slate-600">Brevo nuk është konfiguruar</span>
+        <p className="text-slate-400 mt-0.5">Shto <code className="bg-slate-100 px-1 rounded">BREVO_API_KEY</code>, <code className="bg-slate-100 px-1 rounded">BREVO_SENDER_EMAIL</code> dhe <code className="bg-slate-100 px-1 rounded">BREVO_SENDER_NAME</code> në Secrets.</p>
+      </div>
+    </div>
+  );
+}
 
 export default function AdminAnnouncements() {
   const [announcements, setAnnouncements] = useState<Announcement[]>([]);
@@ -321,20 +386,23 @@ Write a warm, professional announcement message (3-4 paragraphs). Start with a g
           </motion.button>
         }
         filterBar={
-          <AdminListFilterBar>
-            <div className="relative flex-1 min-w-[200px]">
-              <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-indigo-400" />
-              <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search announcements..." className={ADMIN_LIST_SEARCH_INPUT} />
-            </div>
-            <select value={priorityFilter} onChange={e => setPriorityFilter(e.target.value)} className={ADMIN_LIST_SELECT}>
-              <option value="all">All Priorities</option>
-              {Object.entries(PRIORITY_CFG).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
-            </select>
-            <select value={statusFilter} onChange={e => setStatusFilter(e.target.value)} className={ADMIN_LIST_SELECT}>
-              <option value="all">All Status</option>
-              {Object.entries(STATUS_CFG).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
-            </select>
-          </AdminListFilterBar>
+          <div className="space-y-3">
+            <BrevoStatusBanner />
+            <AdminListFilterBar>
+              <div className="relative flex-1 min-w-[200px]">
+                <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-indigo-400" />
+                <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search announcements..." className={ADMIN_LIST_SEARCH_INPUT} />
+              </div>
+              <select value={priorityFilter} onChange={e => setPriorityFilter(e.target.value)} className={ADMIN_LIST_SELECT}>
+                <option value="all">All Priorities</option>
+                {Object.entries(PRIORITY_CFG).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
+              </select>
+              <select value={statusFilter} onChange={e => setStatusFilter(e.target.value)} className={ADMIN_LIST_SELECT}>
+                <option value="all">All Status</option>
+                {Object.entries(STATUS_CFG).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
+              </select>
+            </AdminListFilterBar>
+          </div>
         }
       >
         <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">

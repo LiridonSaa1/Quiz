@@ -9906,6 +9906,28 @@ Assistant:`;
     } catch (e: any) { res.status(500).json({ error: e.message }); }
   });
 
+  app.get('/api/admin/brevo/status', async (_req, res) => {
+    const configured = isEmailConfigured();
+    if (!configured) {
+      return res.json({ configured: false, connected: false, reason: 'BREVO_API_KEY, BREVO_SENDER_EMAIL or BREVO_SENDER_NAME is missing from environment secrets.' });
+    }
+    try {
+      const apiKey = process.env.BREVO_API_KEY || '';
+      const r = await fetch('https://api.brevo.com/v3/account', {
+        headers: { 'api-key': apiKey, 'accept': 'application/json' },
+      });
+      const json = await r.json() as any;
+      if (!r.ok) {
+        return res.json({ configured: true, connected: false, reason: json?.message || `Brevo returned ${r.status}` });
+      }
+      const senderEmail = process.env.BREVO_SENDER_EMAIL || '';
+      const senderName  = process.env.BREVO_SENDER_NAME  || '';
+      res.json({ configured: true, connected: true, email: json?.email, plan: json?.plan?.[0]?.title, senderEmail, senderName });
+    } catch (e: any) {
+      res.json({ configured: true, connected: false, reason: e.message });
+    }
+  });
+
   app.post('/api/admin/announcements/:id/resend', async (req, res) => {
     try {
       const { data: ann, error } = await supabaseAdmin
