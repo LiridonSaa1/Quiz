@@ -10113,7 +10113,7 @@ Assistant:`;
       const caller = await assertAuthenticated(req, res);
       if (!caller) return;
       const { assignmentId } = req.params;
-      const { content } = req.body;
+      const { content, file_urls, link_urls } = req.body;
 
       const { data: assignment } = await supabaseAdmin
         .from('assignments')
@@ -10137,23 +10137,80 @@ Assistant:`;
         .eq('student_id', caller.userId)
         .maybeSingle();
 
-      let data: any, error: any;
-      if (existing.data?.id) {
-        ({ data, error } = await supabaseAdmin
-          .from('assignment_submissions')
-          .update({ content, status: 'submitted', submitted_at: new Date().toISOString(), is_late: isLate, updated_at: new Date().toISOString() })
-          .eq('id', existing.data.id)
-          .select()
-          .single());
-      } else {
-        ({ data, error } = await supabaseAdmin
-          .from('assignment_submissions')
-          .insert({ assignment_id: assignmentId, student_id: caller.userId, content, status: 'submitted', is_late: isLate })
-          .select()
-          .single());
+      const safeFileUrls = Array.isArray(file_urls) ? file_urls : [];
+      const safeLinkUrls = Array.isArray(link_urls) ? link_urls : [];
+
+      const basePayload: any = {
+        content: content || null,
+        status: 'submitted',
+        submitted_at: new Date().toISOString(),
+        is_late: isLate,
+        updated_at: new Date().toISOString(),
+      };
+
+      const tryWithRichFields = async (id?: string) => {
+        const richPayload = { ...basePayload, file_urls: JSON.stringify(safeFileUrls), link_urls: JSON.stringify(safeLinkUrls) };
+        if (id) {
+          return supabaseAdmin.from('assignment_submissions').update(richPayload).eq('id', id).select().single();
+        }
+        return supabaseAdmin.from('assignment_submissions').insert({ assignment_id: assignmentId, student_id: caller.userId, ...richPayload }).select().single();
+      };
+
+      const tryWithBaseFields = async (id?: string) => {
+        if (id) {
+          return supabaseAdmin.from('assignment_submissions').update(basePayload).eq('id', id).select().single();
+        }
+        return supabaseAdmin.from('assignment_submissions').insert({ assignment_id: assignmentId, student_id: caller.userId, ...basePayload }).select().single();
+      };
+
+      let result = await tryWithRichFields(existing.data?.id);
+      if (result.error && /column|schema cache/i.test(result.error.message)) {
+        result = await tryWithBaseFields(existing.data?.id);
       }
-      if (error) throw error;
-      res.json({ success: true, submission: data });
+      if (result.error) throw result.error;
+      res.json({ success: true, submission: result.data });
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  app.post('/api/student/assignments/:assignmentId/save-draft', async (req: Request, res: Response) => {
+    try {
+      const caller = await assertAuthenticated(req, res);
+      if (!caller) return;
+      const { assignmentId } = req.params;
+      const { draft_content, draft_file_urls, draft_link_urls } = req.body;
+
+      const existing = await supabaseAdmin
+        .from('assignment_submissions')
+        .select('id')
+        .eq('assignment_id', assignmentId)
+        .eq('student_id', caller.userId)
+        .maybeSingle();
+
+      const draftPayload: any = {
+        draft_content: draft_content || null,
+        draft_file_urls: JSON.stringify(Array.isArray(draft_file_urls) ? draft_file_urls : []),
+        draft_link_urls: JSON.stringify(Array.isArray(draft_link_urls) ? draft_link_urls : []),
+        draft_saved_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      };
+
+      let result: any;
+      if (existing.data?.id) {
+        result = await supabaseAdmin.from('assignment_submissions').update(draftPayload).eq('id', existing.data.id).select().single();
+      } else {
+        result = await supabaseAdmin.from('assignment_submissions').insert({
+          assignment_id: assignmentId,
+          student_id: caller.userId,
+          status: 'submitted',
+          is_late: false,
+          ...draftPayload,
+        }).select().single();
+      }
+      if (result.error && /column|schema cache/i.test(result.error.message)) {
+        return res.json({ success: true, saved: false, reason: 'draft columns not yet migrated' });
+      }
+      if (result.error) throw result.error;
+      res.json({ success: true, saved: true, submission: result.data });
     } catch (e: any) { res.status(500).json({ error: e.message }); }
   });
 
@@ -10463,6 +10520,40 @@ async function runAssignmentSubmissionsMigration() {
   } catch (err: any) {
     console.warn('[migration] assignments extra columns:', err?.message?.split('\n')[0]);
   }
+  // New submission method columns
+  try {
+    await poolQuery(`ALTER TABLE assignment_submissions ADD COLUMN IF NOT EXISTS file_urls jsonb DEFAULT '[]'`);
+    await poolQuery(`ALTER TABLE assignment_submissions ADD COLUMN IF NOT EXISTS link_urls jsonb DEFAULT '[]'`);
+    await poolQuery(`ALTER TABLE assignment_submissions ADD COLUMN IF NOT EXISTS draft_content text`);
+    await poolQuery(`ALTER TABLE assignment_submissions ADD COLUMN IF NOT EXISTS draft_file_urls jsonb DEFAULT '[]'`);
+    await poolQuery(`ALTER TABLE assignment_submissions ADD COLUMN IF NOT EXISTS draft_link_urls jsonb DEFAULT '[]'`);
+    await poolQuery(`ALTER TABLE assignment_submissions ADD COLUMN IF NOT EXISTS draft_saved_at timestamptz`);
+    console.log('[migration] assignment_submissions rich columns ensured ✓');
+  } catch (err: any) {
+    console.warn('[migration] assignment_submissions rich columns:', err?.message?.split('\n')[0]);
+  }
+  try {
+    await poolQuery(`ALTER TABLE assignments ADD COLUMN IF NOT EXISTS submission_config jsonb`);
+    console.log('[migration] assignments submission_config ensured ✓');
+  } catch (err: any) {
+    console.warn('[migration] assignments submission_config:', err?.message?.split('\n')[0]);
+  }
+}
+
+async function ensureAssignmentFilesBucket(): Promise<void> {
+  try {
+    const { error } = await supabaseAdmin.storage.createBucket('assignment-files', {
+      public: true,
+      fileSizeLimit: 52428800,
+    });
+    if (error && !error.message.toLowerCase().includes('already exists')) {
+      console.warn('[storage] assignment-files bucket setup:', error.message);
+    } else {
+      console.log('[storage] assignment-files bucket ready ✓');
+    }
+  } catch (e: any) {
+    console.warn('[storage] assignment-files bucket failed:', e?.message);
+  }
 }
 
 async function startServer() {
@@ -10476,6 +10567,7 @@ async function startServer() {
   void runDiscussionMigration();
   void runAnnouncementColumnsMigration();
   void runAssignmentSubmissionsMigration();
+  void ensureAssignmentFilesBucket();
 
   const httpServer = http.createServer();
   const app = await createApp({ includeFrontend: true, httpServer });

@@ -15,6 +15,8 @@ import {
   ClipboardList, Plus, Search, Star,
   X, Pencil, Trash2, CheckCircle2, Archive, FileText, AlertCircle,
   Users, MessageSquare, ChevronDown, ChevronUp, Award, Clock,
+  Paperclip, Link2, ExternalLink, File, Image, Video,
+  Archive as ArchiveIcon, Code, FileSpreadsheet,
 } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { format, isPast, isToday, formatDistanceToNow } from 'date-fns';
@@ -42,10 +44,15 @@ interface Assignment {
   class_name?: string | null;
 }
 
+type FileEntry = { name: string; url: string; size: number; mime_type: string };
+type LinkEntry = { url: string; label: string };
+
 interface Submission {
   id: string;
   student_id: string;
   content: string;
+  file_urls: FileEntry[];
+  link_urls: LinkEntry[];
   status: 'submitted' | 'graded';
   grade: number | null;
   feedback: string | null;
@@ -54,6 +61,26 @@ interface Submission {
   is_late: boolean;
   student: { display_name: string; email: string; avatar_url?: string };
 }
+
+type SubmissionConfig = { allow_text: boolean; allow_files: boolean; allow_links: boolean; max_file_count: number; accepted_types: string[] };
+const DEFAULT_CFG: SubmissionConfig = { allow_text: true, allow_files: false, allow_links: false, max_file_count: 5, accepted_types: [] };
+
+function parseJsonField<T>(val: any, fallback: T): T {
+  if (Array.isArray(val)) return val as unknown as T;
+  if (typeof val === 'string') { try { return JSON.parse(val); } catch { return fallback; } }
+  return fallback;
+}
+
+function getFileIcon(mime: string) {
+  if (mime?.startsWith('image/')) return <Image className="w-4 h-4" />;
+  if (mime?.startsWith('video/')) return <Video className="w-4 h-4" />;
+  if (mime?.includes('pdf')) return <FileText className="w-4 h-4" />;
+  if (mime?.includes('zip') || mime?.includes('archive')) return <ArchiveIcon className="w-4 h-4" />;
+  if (mime?.includes('sheet') || mime?.includes('excel') || mime?.includes('csv')) return <FileSpreadsheet className="w-4 h-4" />;
+  if (mime?.includes('text') || mime?.includes('code')) return <Code className="w-4 h-4" />;
+  return <File className="w-4 h-4" />;
+}
+function formatBytes(b: number) { if (b < 1024) return `${b} B`; if (b < 1048576) return `${(b/1024).toFixed(1)} KB`; return `${(b/1048576).toFixed(1)} MB`; }
 
 interface Course { id: string; title: string }
 interface ClassRec { id: string; name: string }
@@ -90,6 +117,7 @@ const emptyForm = {
   title: '', description: '', instructions: '', course_id: '', class_id: '',
   type: 'homework' as AssignmentType, due_date: '', max_score: 100,
   status: 'draft' as AssignmentStatus, allow_late_submission: false,
+  submission_config: { ...DEFAULT_CFG },
 };
 
 function SubmissionsPanel({ assignment, onClose }: { assignment: Assignment; onClose: () => void }) {
@@ -209,12 +237,44 @@ function SubmissionsPanel({ assignment, onClose }: { assignment: Assignment; onC
                     className="overflow-hidden"
                   >
                     <div className="px-4 pb-4 space-y-3 border-t border-slate-100 pt-3">
-                      <div>
-                        <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-1">Student's Answer</p>
-                        <div className="bg-slate-50 rounded-lg p-3 text-sm text-slate-700 whitespace-pre-wrap max-h-40 overflow-y-auto">
-                          {sub.content || <span className="text-slate-400 italic">No text submitted</span>}
+                      {/* Text answer */}
+                      {sub.content && (
+                        <div>
+                          <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-1">Text Answer</p>
+                          <div className="bg-slate-50 rounded-lg p-3 text-sm text-slate-700 whitespace-pre-wrap max-h-40 overflow-y-auto">{sub.content}</div>
                         </div>
-                      </div>
+                      )}
+                      {/* Files */}
+                      {parseJsonField<FileEntry[]>(sub.file_urls, []).length > 0 && (
+                        <div>
+                          <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2 flex items-center gap-1"><Paperclip className="w-3 h-3" />Attached Files</p>
+                          <div className="space-y-1.5">
+                            {parseJsonField<FileEntry[]>(sub.file_urls, []).map((f, i) => (
+                              <a key={i} href={f.url} target="_blank" rel="noopener noreferrer" className="flex items-center gap-2.5 p-2 rounded-lg bg-slate-50 border border-slate-100 hover:border-blue-200 hover:bg-blue-50 transition-colors group">
+                                <span className="text-slate-500 group-hover:text-blue-500">{getFileIcon(f.mime_type)}</span>
+                                <div className="flex-1 min-w-0"><p className="text-xs font-semibold text-slate-700 truncate">{f.name}</p><p className="text-[10px] text-slate-400">{formatBytes(f.size)}</p></div>
+                                <ExternalLink className="w-3.5 h-3.5 text-slate-300 group-hover:text-blue-400" />
+                              </a>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                      {/* Links */}
+                      {parseJsonField<LinkEntry[]>(sub.link_urls, []).length > 0 && (
+                        <div>
+                          <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2 flex items-center gap-1"><Link2 className="w-3 h-3" />Submitted Links</p>
+                          <div className="space-y-1">
+                            {parseJsonField<LinkEntry[]>(sub.link_urls, []).map((l, i) => (
+                              <a key={i} href={l.url} target="_blank" rel="noopener noreferrer" className="flex items-center gap-2 text-xs text-violet-600 hover:text-violet-800 font-medium truncate">
+                                <ExternalLink className="w-3 h-3 shrink-0" />{l.label || l.url}
+                              </a>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                      {!sub.content && parseJsonField<FileEntry[]>(sub.file_urls, []).length === 0 && parseJsonField<LinkEntry[]>(sub.link_urls, []).length === 0 && (
+                        <p className="text-xs text-slate-400 italic">No submission content</p>
+                      )}
                       <div className="grid grid-cols-2 gap-3">
                         <div>
                           <label className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Grade (/{assignment.max_score})</label>
@@ -348,11 +408,20 @@ export default function TeacherAssignments() {
   const openAdd = () => { setEditId(null); setForm(emptyForm); setShowModal(true); };
   const openEdit = (a: Assignment) => {
     setEditId(a.id);
+    let cfg: SubmissionConfig = { ...DEFAULT_CFG };
+    if ((a as any).submission_config) {
+      try {
+        cfg = typeof (a as any).submission_config === 'string'
+          ? JSON.parse((a as any).submission_config)
+          : (a as any).submission_config;
+      } catch { }
+    }
     setForm({
       title: a.title, description: a.description || '', instructions: a.instructions || '',
       course_id: a.course_id || '', class_id: a.class_id || '', type: a.type,
       due_date: a.due_date ? a.due_date.substring(0, 10) : '', max_score: a.max_score,
       status: a.status, allow_late_submission: a.allow_late_submission || false,
+      submission_config: cfg,
     });
     setShowModal(true);
   };
@@ -369,6 +438,7 @@ export default function TeacherAssignments() {
         teacher_id: teacherId, type: form.type,
         due_date: form.due_date || null, max_score: Number(form.max_score),
         status: form.status, allow_late_submission: form.allow_late_submission,
+        submission_config: form.submission_config,
         updated_at: new Date().toISOString(),
       };
 
@@ -383,7 +453,7 @@ export default function TeacherAssignments() {
 
       let result = await tryInsert(payload);
       if (result.error && /column|schema cache/i.test(result.error.message)) {
-        const { instructions, allow_late_submission, ...safePayload } = payload;
+        const { instructions, allow_late_submission, submission_config, ...safePayload } = payload;
         result = await tryInsert(safePayload);
       }
       if (result.error) throw result.error;
@@ -629,6 +699,43 @@ export default function TeacherAssignments() {
                 </div>
                 <span className="text-sm font-medium text-slate-700">Allow late submission</span>
               </label>
+
+              {/* Submission Method Config */}
+              <div className="border border-slate-200 rounded-xl p-4 space-y-3">
+                <p className="text-xs font-bold text-slate-700 uppercase tracking-wide">Submission Methods</p>
+                <p className="text-xs text-slate-400">Choose which methods students can use to submit their work.</p>
+                <div className="space-y-2">
+                  {[
+                    { key: 'allow_text' as const, label: 'Text answer', desc: 'Students can type a written response', color: 'bg-blue-500' },
+                    { key: 'allow_files' as const, label: 'File uploads', desc: 'Students can upload documents, images, etc.', color: 'bg-teal-500' },
+                    { key: 'allow_links' as const, label: 'Link submissions', desc: 'Students can submit URLs (GitHub, Drive, etc.)', color: 'bg-violet-500' },
+                  ].map(opt => (
+                    <label key={opt.key} className="flex items-start gap-3 cursor-pointer group">
+                      <div
+                        onClick={() => setForm(f => ({ ...f, submission_config: { ...f.submission_config, [opt.key]: !f.submission_config[opt.key] } }))}
+                        className={cn('mt-0.5 relative w-9 h-5 rounded-full transition-colors shrink-0', form.submission_config[opt.key] ? opt.color : 'bg-slate-200')}
+                      >
+                        <span className={cn('absolute top-0.5 left-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform', form.submission_config[opt.key] ? 'translate-x-4' : '')} />
+                      </div>
+                      <div>
+                        <p className="text-sm font-medium text-slate-700">{opt.label}</p>
+                        <p className="text-xs text-slate-400">{opt.desc}</p>
+                      </div>
+                    </label>
+                  ))}
+                </div>
+                {form.submission_config.allow_files && (
+                  <div className="pt-2 border-t border-slate-100">
+                    <label className="text-xs font-semibold text-slate-600 uppercase tracking-wide">Max files per submission</label>
+                    <input
+                      type="number" min={1} max={20}
+                      value={form.submission_config.max_file_count}
+                      onChange={e => setForm(f => ({ ...f, submission_config: { ...f.submission_config, max_file_count: Math.min(20, Math.max(1, Number(e.target.value))) } }))}
+                      className="mt-1 w-24 px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-500/30"
+                    />
+                  </div>
+                )}
+              </div>
             </div>
             <div className="flex justify-end gap-3 p-5 border-t border-slate-100">
               <button type="button" onClick={() => setShowModal(false)} className="px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-100 rounded-lg">Cancel</button>

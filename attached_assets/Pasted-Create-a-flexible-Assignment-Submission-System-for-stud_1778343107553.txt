@@ -1,0 +1,116 @@
+Create a flexible Assignment Submission System for students with multiple submission methods.
+
+The submission system must support different types of assignments and allow teachers to choose how students can submit their work.
+
+SUBMISSION METHODS
+
+Teachers can enable one or multiple submission types:
+
+1. FILE ATTACHMENT SUBMISSION
+Students can upload:
+- PDF files
+- DOCX files
+- ZIP/RAR files
+- Images
+- Videos
+- PowerPoint files
+- Source code files
+
+Features:
+- Drag & Drop upload
+- Multiple file uploads
+- Upload progress bar
+- File preview
+- Remove/replace files before submission
+- Maximum file size limit
+
+2. TEXT INPUT SUBMISSION
+Students can write directly inside the platform.
+
+Features:
+- Rich text editor
+- Formatting tools
+- Bullet points
+- Code blocks
+- Auto-save drafts
+- Word counter
+
+Perfect for:
+- Essays
+- Written answers
+- Reports
+- Notes
+
+3. LINK SUBMISSION
+Students can submit:
+- GitHub links
+- Figma links
+- Google Drive links
+- YouTube links
+- Live website URLs
+
+Features:
+- URL validation
+- Link preview
+- Open in new tab
+
+4. COMBINED SUBMISSION
+Allow students to:
+- Upload files
+- Write text
+- Add links
+At the same time.
+
+TEACHER SETTINGS
+When creating an assignment, teacher can choose:
+- Allow file uploads
+- Allow text answers
+- Allow links
+- Allow multiple submission methods
+- Required submission type
+- Max file count
+- Accepted file types
+
+STUDENT SUBMISSION PAGE
+The submission page must include:
+- Assignment instructions
+- Deadline countdown
+- Submission status
+- Drag & Drop area
+- Text editor
+- Link input field
+- Save Draft button
+- Submit Assignment button
+
+SUBMISSION STATES
+- Draft
+- Submitted
+- Late Submission
+- Reviewed
+- Graded
+
+GRADING FEATURES
+Teachers can:
+- Open files directly
+- Read text submissions
+- Open links
+- Add feedback
+- Add grades
+- Return assignment for revision
+
+UI/UX
+- Modern clean design
+- Large upload area
+- Animated progress bars
+- Mobile responsive
+- Glassmorphism cards
+- Smooth transitions
+- Dark/light mode
+
+IMPORTANT
+- Auto-save every few seconds
+- Prevent accidental page close
+- Restore draft after refresh
+- Secure file uploads
+- Validate file types
+- Real-time upload progress
