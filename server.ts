@@ -9692,7 +9692,7 @@ Assistant:`;
     audience,
     classIds,
     studentIds,
-    sendEmail = false,
+    sendEmail: shouldSendEmail = false,
   }: {
     title: string;
     content: string;
@@ -9771,7 +9771,7 @@ Assistant:`;
     await supabaseAdmin.from('notifications').insert(notifRows);
 
     // Send email via Brevo if enabled
-    if (sendEmail) {
+    if (shouldSendEmail) {
       try {
         if (isEmailConfigured()) {
           const shortContent = String(content || '').slice(0, 800);
@@ -9917,7 +9917,7 @@ Assistant:`;
           audience: String(body.target_audience || 'all'),
           classIds,
           studentIds,
-          sendEmail: Boolean(body.send_email),
+          sendEmail: Boolean(send_email),
         });
       }
       res.json({ success: true, announcement: data });
