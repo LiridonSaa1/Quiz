@@ -1390,14 +1390,28 @@ Assistant:`;
     });
   };
 
+  const isAnyTableMissingError = (error: any) => {
+    if (!error) return false;
+    if (error.code === "PGRST205" || error.code === "42P01") return true;
+    const hay = `${error.message || ""} ${error.details || ""} ${error.hint || ""}`.toLowerCase();
+    return (
+      hay.includes("does not exist") ||
+      hay.includes("schema cache") ||
+      hay.includes("could not find the table") ||
+      hay.includes("relation") && hay.includes("does not exist")
+    );
+  };
+
   const fetchAllAttemptRows = async () => {
     const modern = await supabaseAdmin.from("quiz_attempts").select("*");
     if (!modern.error) return modern.data || [];
-    if (!isAttemptsTableMissing(modern.error)) throw modern.error;
+    if (!isAttemptsTableMissing(modern.error) && !isAnyTableMissingError(modern.error)) throw modern.error;
 
     const legacy = await supabaseAdmin.from("attempts").select("*");
-    if (legacy.error) throw legacy.error;
-    return legacy.data || [];
+    if (!legacy.error) return legacy.data || [];
+    // Both quiz_attempts and attempts tables are absent — return empty gracefully
+    if (isAnyTableMissingError(legacy.error)) return [];
+    throw legacy.error;
   };
 
   /** Missing-column errors from Postgres/PostgREST; retry with a narrower select. */
