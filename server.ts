@@ -10795,7 +10795,35 @@ async function startServer() {
   );
 }
 
+async function runAutoPublishModules() {
+  try {
+    const now = new Date().toISOString();
+    const { data, error } = await supabaseAdmin
+      .from('modules')
+      .select('id, title')
+      .lte('publish_at', now)
+      .neq('status', 'active');
+    if (error || !data || data.length === 0) return;
+    for (const mod of data) {
+      const { error: updErr } = await supabaseAdmin
+        .from('modules')
+        .update({ status: 'active', publish_at: null, updated_at: now })
+        .eq('id', mod.id);
+      if (updErr) {
+        console.error(`[auto-publish] Failed to publish module "${mod.title}":`, updErr.message);
+      } else {
+        console.log(`[auto-publish] Published module "${mod.title}" (${mod.id})`);
+      }
+    }
+  } catch (e: any) {
+    console.error('[auto-publish] Scheduler error:', e?.message);
+  }
+}
+
 if (!process.env.VERCEL) {
+  setInterval(() => { void runAutoPublishModules(); }, 60_000);
+  void runAutoPublishModules();
+
   setInterval(() => {
     void flushFailedTelegramAlerts();
   }, TELEGRAM_RETRY_INTERVAL_MS);
