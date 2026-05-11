@@ -174,7 +174,7 @@ export default function TeacherModules() {
       const normalizedModules = modulesData || [];
       const moduleIds = normalizedModules.map((m: any) => String(m.id)).filter(Boolean);
       const lessonCountByModule: Record<string, number> = {};
-      const quizCountByModule: Record<string, number> = {};
+      const quizCountByCourse: Record<string, number> = {};
 
       if (moduleIds.length > 0) {
         const { data: lessonRows, error: lessonErr } = await supabase
@@ -183,49 +183,45 @@ export default function TeacherModules() {
           .in('module_id', moduleIds);
         if (lessonErr) throw lessonErr;
 
-        const lessonIds: string[] = [];
-        const moduleByLessonId: Record<string, string> = {};
         (lessonRows || []).forEach((l: any) => {
           const moduleId = String(l?.module_id || '');
           const lessonId = String(l?.id || '');
           if (!moduleId || !lessonId) return;
           lessonCountByModule[moduleId] = (lessonCountByModule[moduleId] || 0) + 1;
-          moduleByLessonId[lessonId] = moduleId;
-          lessonIds.push(lessonId);
         });
+      }
 
-        if (lessonIds.length > 0) {
-          const withAvailability = await supabase
+      // Count quizzes by course_id (quizzes are linked to courses, not lessons/modules)
+      const courseLookupIds = courseList.map((c: any) => c.id).filter(Boolean);
+      if (courseLookupIds.length > 0) {
+        const withAvailability = await supabase
+          .from('quizzes')
+          .select('id, course_id, published, status')
+          .in('course_id', courseLookupIds);
+        let quizRows: any[] = [];
+        if (withAvailability.error) {
+          const fallback = await supabase
             .from('quizzes')
-            .select('id, lesson_id, published, status')
-            .in('lesson_id', lessonIds);
-          let quizRows: any[] = [];
-          if (withAvailability.error) {
-            const fallback = await supabase
-              .from('quizzes')
-              .select('id, lesson_id')
-              .in('lesson_id', lessonIds);
-            if (fallback.error) throw fallback.error;
-            quizRows = fallback.data || [];
-          } else {
-            quizRows = withAvailability.data || [];
-          }
-
-          const isAvailable = (q: any) => {
-            if (typeof q?.published === 'boolean') return q.published;
-            const status = String(q?.status || '').toLowerCase();
-            if (status) return status === 'published' || status === 'active';
-            return true;
-          };
-
-          (quizRows || []).forEach((q: any) => {
-            if (!isAvailable(q)) return;
-            const lessonId = String(q?.lesson_id || '');
-            const moduleId = moduleByLessonId[lessonId];
-            if (!moduleId) return;
-            quizCountByModule[moduleId] = (quizCountByModule[moduleId] || 0) + 1;
-          });
+            .select('id, course_id')
+            .in('course_id', courseLookupIds);
+          if (!fallback.error) quizRows = fallback.data || [];
+        } else {
+          quizRows = withAvailability.data || [];
         }
+
+        const isAvailable = (q: any) => {
+          if (typeof q?.published === 'boolean') return q.published;
+          const status = String(q?.status || '').toLowerCase();
+          if (status) return status === 'published' || status === 'active';
+          return true;
+        };
+
+        (quizRows || []).forEach((q: any) => {
+          if (!isAvailable(q)) return;
+          const cId = String(q?.course_id || '');
+          if (!cId) return;
+          quizCountByCourse[cId] = (quizCountByCourse[cId] || 0) + 1;
+        });
       }
 
       setModules((normalizedModules || []).map(m => ({
@@ -237,7 +233,7 @@ export default function TeacherModules() {
         order: m.order,
         status: normalizeModuleStatus(m.status),
         totalLessons: lessonCountByModule[String(m.id)] ?? m.total_lessons ?? 0,
-        totalQuizzes: quizCountByModule[String(m.id)] ?? m.total_quizzes ?? 0,
+        totalQuizzes: quizCountByCourse[String(m.course_id)] ?? m.total_quizzes ?? 0,
         createdAt: m.created_at,
         updatedAt: m.updated_at,
         publishAt: (m.publish_at as string | null | undefined) ?? null,

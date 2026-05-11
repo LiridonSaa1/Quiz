@@ -3684,7 +3684,7 @@ Assistant:`;
       const moduleIds = rows.map((m: any) => String(m?.id || "")).filter(Boolean);
 
       const lessonCountByModule: Record<string, number> = {};
-      const quizCountByModule: Record<string, number> = {};
+      const quizCountByCourse: Record<string, number> = {};
       if (moduleIds.length > 0) {
         const { data: lessonRows, error: lessonErr } = await supabaseAdmin
           .from("lessons")
@@ -3692,55 +3692,52 @@ Assistant:`;
           .in("module_id", moduleIds);
         if (lessonErr) throw lessonErr;
 
-        const lessonIds: string[] = [];
-        const moduleByLessonId: Record<string, string> = {};
         (lessonRows || []).forEach((l: any) => {
           const moduleId = String(l?.module_id || "");
           const lessonId = String(l?.id || "");
           if (!moduleId || !lessonId) return;
           lessonCountByModule[moduleId] = (lessonCountByModule[moduleId] || 0) + 1;
-          moduleByLessonId[lessonId] = moduleId;
-          lessonIds.push(lessonId);
         });
+      }
 
-        if (lessonIds.length > 0) {
-          const fetchQuizRows = async () => {
-            const withStatus = await supabaseAdmin
-              .from("quizzes")
-              .select("id,lesson_id,status")
-              .in("lesson_id", lessonIds);
-            if (!withStatus.error) return withStatus.data || [];
-            const fallback = await supabaseAdmin
-              .from("quizzes")
-              .select("id,lesson_id")
-              .in("lesson_id", lessonIds);
-            if (fallback.error) throw fallback.error;
-            return fallback.data || [];
-          };
+      // Count quizzes by course_id (quizzes are linked to courses, not lessons/modules)
+      if (courseIds.length > 0) {
+        const fetchQuizRows = async () => {
+          const withStatus = await supabaseAdmin
+            .from("quizzes")
+            .select("id,course_id,status")
+            .in("course_id", courseIds);
+          if (!withStatus.error) return withStatus.data || [];
+          const fallback = await supabaseAdmin
+            .from("quizzes")
+            .select("id,course_id")
+            .in("course_id", courseIds);
+          if (fallback.error) throw fallback.error;
+          return fallback.data || [];
+        };
 
-          const quizRows = await fetchQuizRows();
-          const isAvailable = (q: any) => {
-            const status = String(q?.status || "").toLowerCase();
-            if (status) return status === "published" || status === "active";
-            return true;
-          };
+        const quizRows = await fetchQuizRows();
+        const isAvailable = (q: any) => {
+          const status = String(q?.status || "").toLowerCase();
+          if (status) return status === "published" || status === "active";
+          return true;
+        };
 
-          (quizRows || []).forEach((q: any) => {
-            if (!isAvailable(q)) return;
-            const lessonId = String(q?.lesson_id || "");
-            const moduleId = moduleByLessonId[lessonId];
-            if (!moduleId) return;
-            quizCountByModule[moduleId] = (quizCountByModule[moduleId] || 0) + 1;
-          });
-        }
+        (quizRows || []).forEach((q: any) => {
+          if (!isAvailable(q)) return;
+          const cId = String(q?.course_id || "");
+          if (!cId) return;
+          quizCountByCourse[cId] = (quizCountByCourse[cId] || 0) + 1;
+        });
       }
 
       const enrichedRows = rows.map((m: any) => {
         const moduleId = String(m?.id || "");
+        const courseId = String(m?.course_id || "");
         return {
           ...m,
           total_lessons: lessonCountByModule[moduleId] ?? m?.total_lessons ?? 0,
-          total_quizzes: quizCountByModule[moduleId] ?? 0,
+          total_quizzes: quizCountByCourse[courseId] ?? 0,
         };
       });
       enrichedRows.sort((a: any, b: any) => (Number(a?.order) || 0) - (Number(b?.order) || 0));
