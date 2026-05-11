@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import AdminLayout from '../../components/layout/AdminLayout';
 import {
   Plus, Search, Layers, Trash2, Edit2,
-  BookOpen, X, Save, PlayCircle, ChevronRight, User,
+  BookOpen, X, Save, PlayCircle, ChevronRight, User, Calendar,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { Module } from '../../types';
@@ -85,6 +85,8 @@ export default function AdminModules() {
     description: '',
     order: 1,
     status: 'published' as 'published' | 'draft',
+    autoPublish: false,
+    publishAt: '',
   });
   const [formCourseId, setFormCourseId] = useState('');
   const [saving, setSaving] = useState(false);
@@ -142,7 +144,7 @@ export default function AdminModules() {
     setEditing(null);
     setFormCourseId(courseOptions[0]?.id || '');
     const maxOrder = modules.length > 0 ? Math.max(...modules.map(m => m.order)) + 1 : 1;
-    setForm({ title: '', description: '', order: maxOrder, status: 'published' });
+    setForm({ title: '', description: '', order: maxOrder, status: 'published', autoPublish: false, publishAt: '' });
     setShowModal(true);
   };
 
@@ -154,6 +156,8 @@ export default function AdminModules() {
       description: mod.description || '',
       order: mod.order,
       status: isPublishedStatus(mod.status) ? 'published' : 'draft',
+      autoPublish: false,
+      publishAt: '',
     });
     setShowModal(true);
   };
@@ -161,23 +165,25 @@ export default function AdminModules() {
   const closeModal = () => {
     setShowModal(false);
     setEditing(null);
-    setForm({ title: '', description: '', order: 1, status: 'published' });
+    setForm({ title: '', description: '', order: 1, status: 'published', autoPublish: false, publishAt: '' });
   };
 
   const handleSave = async () => {
     if (!form.title.trim()) { toast.error('Title is required'); return; }
     if (!formCourseId) { toast.error('Please select a course'); return; }
+    if (form.autoPublish && !form.publishAt) { toast.error('Please select a date and time for auto-publish'); return; }
     setSaving(true);
     try {
       const statusDb = form.status === 'draft' ? 'inactive' : 'active';
       const slug = slugify(form.title);
-      const payload = {
+      const payload: Record<string, unknown> = {
         title: form.title.trim(),
         description: form.description.trim() || null,
         course_id: formCourseId,
         status: statusDb,
         slug,
         order: Number(form.order) || 1,
+        ...(form.autoPublish && form.publishAt ? { publish_at: new Date(form.publishAt).toISOString() } : {}),
       };
 
       if (editing) {
@@ -669,6 +675,80 @@ export default function AdminModules() {
                       <option value="draft">Draft</option>
                     </select>
                   </div>
+                </div>
+
+                <div className={cn(
+                  'rounded-xl border transition-all duration-200',
+                  form.autoPublish
+                    ? 'border-violet-200 bg-violet-50/60'
+                    : 'border-slate-200 bg-slate-50/60'
+                )}>
+                  <label className="flex items-center gap-3 px-4 py-3 cursor-pointer select-none">
+                    <div className="relative">
+                      <input
+                        type="checkbox"
+                        checked={form.autoPublish}
+                        onChange={e => setForm(f => ({
+                          ...f,
+                          autoPublish: e.target.checked,
+                          status: e.target.checked ? 'published' : f.status,
+                          publishAt: e.target.checked ? f.publishAt : '',
+                        }))}
+                        className="sr-only"
+                      />
+                      <div className={cn(
+                        'w-10 h-5 rounded-full transition-colors duration-200',
+                        form.autoPublish ? 'bg-violet-500' : 'bg-slate-300'
+                      )}>
+                        <div className={cn(
+                          'absolute top-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform duration-200',
+                          form.autoPublish ? 'translate-x-5' : 'translate-x-0.5'
+                        )} />
+                      </div>
+                    </div>
+                    <div>
+                      <span className={cn(
+                        'text-sm font-semibold transition-colors',
+                        form.autoPublish ? 'text-violet-700' : 'text-slate-600'
+                      )}>
+                        Auto-publish
+                      </span>
+                      <p className="text-[11px] text-slate-400 mt-0.5">
+                        Publiko automatikisht në datën dhe orën e zgjedhur
+                      </p>
+                    </div>
+                  </label>
+
+                  <AnimatePresence>
+                    {form.autoPublish && (
+                      <motion.div
+                        initial={{ opacity: 0, height: 0 }}
+                        animate={{ opacity: 1, height: 'auto' }}
+                        exit={{ opacity: 0, height: 0 }}
+                        transition={{ duration: 0.2 }}
+                        className="overflow-hidden"
+                      >
+                        <div className="px-4 pb-4 pt-1">
+                          <label className="block text-xs font-semibold text-violet-600 mb-1.5">
+                            <Calendar className="inline w-3.5 h-3.5 mr-1 -mt-0.5" />
+                            Data dhe ora e publikimit
+                          </label>
+                          <input
+                            type="datetime-local"
+                            value={form.publishAt}
+                            min={new Date().toISOString().slice(0, 16)}
+                            onChange={e => setForm(f => ({ ...f, publishAt: e.target.value }))}
+                            className="w-full px-3.5 py-2.5 bg-white border border-violet-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-violet-500 transition-all text-slate-700"
+                          />
+                          {form.publishAt && (
+                            <p className="text-[11px] text-violet-500 mt-1.5 font-medium">
+                              ✓ Do të publikohet: {new Date(form.publishAt).toLocaleString('sq-AL', { dateStyle: 'full', timeStyle: 'short' })}
+                            </p>
+                          )}
+                        </div>
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
                 </div>
               </div>
 
