@@ -123,6 +123,7 @@ export default function AdminModules() {
         order: (m.order as number) || 1,
         status: isPublishedStatus(String(m.status)) ? 'published' : 'draft',
         totalLessons: (m.total_lessons as number) || 0,
+        publishAt: (m.publish_at as string | null | undefined) ?? null,
         createdAt: m.created_at as string,
         updatedAt: m.updated_at as string,
       })));
@@ -151,13 +152,17 @@ export default function AdminModules() {
   const openEdit = (mod: Module) => {
     setEditing(mod);
     setFormCourseId(mod.courseId);
+    const hasPublishAt = !!mod.publishAt;
+    const publishAtLocal = mod.publishAt
+      ? new Date(mod.publishAt).toISOString().slice(0, 16)
+      : '';
     setForm({
       title: mod.title,
       description: mod.description || '',
       order: mod.order,
       status: isPublishedStatus(mod.status) ? 'published' : 'draft',
-      autoPublish: false,
-      publishAt: '',
+      autoPublish: hasPublishAt,
+      publishAt: publishAtLocal,
     });
     setShowModal(true);
   };
