@@ -10722,6 +10722,34 @@ async function runAssignmentSubmissionsMigration() {
   }
 }
 
+async function runModulesPublishAtMigration(): Promise<void> {
+  // Try via direct DB pool first (works if DATABASE_URL points to the right DB)
+  try {
+    await poolQuery(`ALTER TABLE modules ADD COLUMN IF NOT EXISTS publish_at timestamptz NULL`);
+    console.log('[migration] modules.publish_at column ensured ✓');
+    return;
+  } catch {
+    // fall through to supabaseAdmin RPC attempt
+  }
+  // Fallback: probe via supabaseAdmin — select publish_at to see if column exists
+  try {
+    const probe = await supabaseAdmin.from('modules').select('publish_at').limit(1);
+    if (!probe.error) {
+      console.log('[migration] modules.publish_at column already exists ✓');
+      return;
+    }
+    // Column likely missing — attempt to add via RPC exec_sql (requires pg function)
+    const rpcResult = await (supabaseAdmin as any).rpc('exec_sql', {
+      sql: 'ALTER TABLE public.modules ADD COLUMN IF NOT EXISTS publish_at timestamptz NULL',
+    });
+    if (rpcResult.error) throw rpcResult.error;
+    console.log('[migration] modules.publish_at added via RPC ✓');
+  } catch (err: any) {
+    console.warn('[migration] modules.publish_at column could not be auto-created:', err?.message?.split('\n')[0]);
+    console.warn('[migration] Run manually: ALTER TABLE modules ADD COLUMN IF NOT EXISTS publish_at timestamptz NULL');
+  }
+}
+
 async function ensureAssignmentFilesBucket(): Promise<void> {
   try {
     const { error } = await supabaseAdmin.storage.createBucket('assignment-files', {
@@ -10749,6 +10777,7 @@ async function startServer() {
   void runDiscussionMigration();
   void runAnnouncementColumnsMigration();
   void runAssignmentSubmissionsMigration();
+  void runModulesPublishAtMigration();
   void ensureAssignmentFilesBucket();
 
   const httpServer = http.createServer();
