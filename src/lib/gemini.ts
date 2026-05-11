@@ -4,20 +4,34 @@ const QUIZ_PROMPT_MAX_CHARS = 16000;
 const IMAGE_IMPORT_NOTE_MAX_CHARS = 4000;
 
 const getApiKey = (): string => {
+  const replitKey = (process.env.AI_INTEGRATIONS_GEMINI_API_KEY as string | undefined) || '';
   const processKey = (process.env.GEMINI_API_KEY as string | undefined) || '';
   const viteKey = import.meta.env?.VITE_GEMINI_API_KEY || '';
-  return String(processKey || viteKey).trim();
+  return String(replitKey || processKey || viteKey).trim();
+};
+
+const getBaseUrl = (): string | undefined => {
+  return (process.env.AI_INTEGRATIONS_GEMINI_BASE_URL as string | undefined) || undefined;
 };
 
 const getClient = () => {
   const key = getApiKey();
   if (!key) throw new Error('GEMINI_API_KEY is not configured. Add it to your Secrets.');
-  return new GoogleGenAI({ apiKey: key });
+  const baseUrl = getBaseUrl();
+  return new GoogleGenAI(baseUrl
+    ? { apiKey: key, httpOptions: { apiVersion: '', baseUrl } }
+    : { apiKey: key }
+  );
 };
 
 const getOptionalClient = () => {
   const key = getApiKey();
-  return key ? new GoogleGenAI({ apiKey: key }) : null;
+  if (!key) return null;
+  const baseUrl = getBaseUrl();
+  return new GoogleGenAI(baseUrl
+    ? { apiKey: key, httpOptions: { apiVersion: '', baseUrl } }
+    : { apiKey: key }
+  );
 };
 
 async function ask(prompt: string): Promise<string> {

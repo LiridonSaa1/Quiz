@@ -990,11 +990,14 @@ export async function createApp(options: CreateAppOptions = {}) {
 
       if (!message) return res.status(400).json({ error: "message is required" });
 
-      const apiKey = (process.env.GEMINI_API_KEY || "").trim();
+      const apiKey = (process.env.AI_INTEGRATIONS_GEMINI_API_KEY || process.env.GEMINI_API_KEY || "").trim();
       if (!apiKey) return res.status(503).json({ error: "AI not configured. Add GEMINI_API_KEY to Secrets." });
 
       const { GoogleGenAI } = await import("@google/genai");
-      const ai = new GoogleGenAI({ apiKey });
+      const geminiBaseUrl = (process.env.AI_INTEGRATIONS_GEMINI_BASE_URL || "").trim();
+      const ai = geminiBaseUrl
+        ? new GoogleGenAI({ apiKey, httpOptions: { apiVersion: "", baseUrl: geminiBaseUrl } })
+        : new GoogleGenAI({ apiKey });
 
       const roleContext: Record<string, string> = {
         teacher: `You are an expert teaching assistant for an online educational platform. The teacher is currently on the "${page}" page (path: ${path || "unknown"}).
