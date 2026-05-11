@@ -28,7 +28,7 @@ function AnimatedCount({ value }: { value: number }) {
 const slugify = (text: string) =>
   text.toLowerCase().replace(/[^\w\s-]/g, '').replace(/\s+/g, '-').replace(/-+/g, '-').trim();
 
-const emptyForm = { title: '', description: '', order: 1, status: 'active' as 'active' | 'inactive' };
+const emptyForm = { title: '', description: '', order: 1, status: 'active' as 'active' | 'inactive', autoPublish: false, publishAt: '' };
 
 const normalizeModuleStatus = (s: string) => {
   if (s === 'published' || s === 'active') return 'active';
@@ -240,6 +240,7 @@ export default function TeacherModules() {
         totalQuizzes: quizCountByModule[String(m.id)] ?? m.total_quizzes ?? 0,
         createdAt: m.created_at,
         updatedAt: m.updated_at,
+        publishAt: (m.publish_at as string | null | undefined) ?? null,
       })));
     } catch {
       toast.error('Failed to load modules');
@@ -261,11 +262,17 @@ export default function TeacherModules() {
   const openEdit = (mod: Module) => {
     setEditing(mod);
     setFormCourseId(mod.courseId);
+    const hasPublishAt = !!mod.publishAt;
+    const publishAtLocal = mod.publishAt
+      ? new Date(mod.publishAt).toISOString().slice(0, 16)
+      : '';
     setForm({
       title: mod.title,
       description: mod.description || '',
       order: mod.order,
       status: normalizeModuleStatus(mod.status) as 'active' | 'inactive',
+      autoPublish: hasPublishAt,
+      publishAt: publishAtLocal,
     });
     setShowModal(true);
   };
@@ -287,14 +294,16 @@ export default function TeacherModules() {
         return;
       }
 
+      if (form.autoPublish && !form.publishAt) { toast.error('Please select a date and time for auto-publish'); setSaving(false); return; }
       const status: 'active' | 'inactive' = form.status === 'inactive' ? 'inactive' : 'active';
-      const body = {
+      const body: Record<string, unknown> = {
         course_id: formCourseId,
         title: form.title.trim(),
         slug: slugify(form.title),
         description: form.description.trim() || null,
         order: Number(form.order) || 1,
         status,
+        ...(form.autoPublish && form.publishAt ? { publish_at: new Date(form.publishAt).toISOString() } : { publish_at: null }),
       };
 
       if (editing) {
@@ -826,6 +835,79 @@ export default function TeacherModules() {
                       <option value="inactive">Inactive</option>
                     </select>
                   </div>
+                </div>
+
+                {/* Auto-publish toggle */}
+                <div className={cn(
+                  'rounded-xl border transition-all duration-200',
+                  form.autoPublish ? 'border-violet-200 bg-violet-50/60' : 'border-slate-200 bg-slate-50/60'
+                )}>
+                  <label className="flex items-center gap-3 px-4 py-3 cursor-pointer select-none">
+                    <div className="relative">
+                      <input
+                        type="checkbox"
+                        checked={form.autoPublish}
+                        onChange={e => setForm(f => ({
+                          ...f,
+                          autoPublish: e.target.checked,
+                          status: e.target.checked ? 'active' : f.status,
+                          publishAt: e.target.checked ? f.publishAt : '',
+                        }))}
+                        className="sr-only"
+                      />
+                      <div className={cn(
+                        'w-10 h-5 rounded-full transition-colors duration-200',
+                        form.autoPublish ? 'bg-violet-500' : 'bg-slate-300'
+                      )}>
+                        <div className={cn(
+                          'absolute top-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform duration-200',
+                          form.autoPublish ? 'translate-x-5' : 'translate-x-0.5'
+                        )} />
+                      </div>
+                    </div>
+                    <div>
+                      <span className={cn(
+                        'text-sm font-semibold transition-colors',
+                        form.autoPublish ? 'text-violet-700' : 'text-slate-600'
+                      )}>
+                        Auto-publish
+                      </span>
+                      <p className="text-[11px] text-slate-400 mt-0.5">
+                        Publiko automatikisht në datën dhe orën e zgjedhur
+                      </p>
+                    </div>
+                  </label>
+
+                  <AnimatePresence>
+                    {form.autoPublish && (
+                      <motion.div
+                        initial={{ opacity: 0, height: 0 }}
+                        animate={{ opacity: 1, height: 'auto' }}
+                        exit={{ opacity: 0, height: 0 }}
+                        transition={{ duration: 0.2 }}
+                        className="overflow-hidden"
+                      >
+                        <div className="px-4 pb-4 pt-1">
+                          <label className="block text-xs font-semibold text-violet-600 mb-1.5">
+                            <Calendar className="inline w-3.5 h-3.5 mr-1 -mt-0.5" />
+                            Data dhe ora e publikimit
+                          </label>
+                          <input
+                            type="datetime-local"
+                            value={form.publishAt}
+                            min={new Date().toISOString().slice(0, 16)}
+                            onChange={e => setForm(f => ({ ...f, publishAt: e.target.value }))}
+                            className="w-full px-3.5 py-2.5 bg-white border border-violet-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-violet-500 transition-all text-slate-700"
+                          />
+                          {form.publishAt && (
+                            <p className="text-[11px] text-violet-500 mt-1.5 font-medium">
+                              ✓ Do të publikohet: {new Date(form.publishAt).toLocaleString('sq-AL', { dateStyle: 'full', timeStyle: 'short' })}
+                            </p>
+                          )}
+                        </div>
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
                 </div>
               </div>
 

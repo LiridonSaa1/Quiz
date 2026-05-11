@@ -3888,6 +3888,9 @@ Assistant:`;
         status,
       };
       insertRow["order"] = order;
+      if (typeof req.body.publish_at === "string" && req.body.publish_at) {
+        insertRow.publish_at = req.body.publish_at;
+      }
 
       const { data, error } = await supabaseAdmin.from("modules").insert(insertRow).select().single();
       if (error) {
@@ -3935,6 +3938,11 @@ Assistant:`;
       if (typeof req.body.slug === "string") updates.slug = req.body.slug.trim() || null;
       if (req.body.order !== undefined) updates["order"] = Number(req.body.order) || 1;
       if (req.body.status === "active" || req.body.status === "inactive") updates.status = req.body.status;
+      if (typeof req.body.publish_at === "string" && req.body.publish_at) {
+        updates.publish_at = req.body.publish_at;
+      } else if (req.body.publish_at === null || req.body.publish_at === "") {
+        updates.publish_at = null;
+      }
       if (typeof req.body.course_id === "string") {
         const cg = await assertTeacherOwnsCourse(userId, req.body.course_id);
         if (!cg.ok) return res.status(403).json({ error: "Invalid course for this module." });
