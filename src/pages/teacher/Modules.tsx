@@ -846,7 +846,7 @@ export default function TeacherModules() {
                         onChange={e => setForm(f => ({
                           ...f,
                           autoPublish: e.target.checked,
-                          status: e.target.checked ? 'active' : f.status,
+                          status: e.target.checked ? 'inactive' : f.status,
                           publishAt: e.target.checked ? f.publishAt : '',
                         }))}
                         className="sr-only"
