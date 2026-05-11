@@ -10206,11 +10206,17 @@ Assistant:`;
     if (process.env.NODE_ENV !== "production") {
       const { createServer } = await import("vite");
       const isReplit = !!(process.env.REPL_ID || process.env.REPLIT_DEV_DOMAIN);
-      const hmrConfig: any = options.httpServer
-        ? { server: options.httpServer }
-        : true;
-      if (isReplit && hmrConfig && typeof hmrConfig === "object") {
-        hmrConfig.protocol = "wss";
+      let hmrConfig: any;
+      if (isReplit) {
+        const replitPort = Number(process.env.PORT) || 5000;
+        hmrConfig = {
+          ...(options.httpServer ? { server: options.httpServer } : {}),
+          protocol: "wss",
+          host: process.env.REPLIT_DEV_DOMAIN || undefined,
+          clientPort: replitPort,
+        };
+      } else {
+        hmrConfig = options.httpServer ? { server: options.httpServer } : true;
       }
       const vite = await createServer({
         server: {
