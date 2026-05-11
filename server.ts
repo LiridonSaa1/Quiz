@@ -4033,7 +4033,7 @@ Assistant:`;
       if (!canAccessTeacherCourses(caller, userId)) {
         return res.status(403).json({ error: "Forbidden" });
       }
-      const { course_id, module_id, title, slug, short_description, type, duration_minutes, order, status, is_free_preview } = req.body;
+      const { course_id, module_id, title, slug, short_description, type, duration_minutes, order, status, is_free_preview, publish_at } = req.body;
       if (!course_id || !module_id || typeof title !== "string" || !title.trim()) {
         return res.status(400).json({ error: "course_id, module_id and title are required" });
       }
@@ -4051,6 +4051,7 @@ Assistant:`;
         order: Number(order) || 1,
         status: status || "published",
         is_free_preview: Boolean(is_free_preview),
+        publish_at: publish_at ? new Date(publish_at).toISOString() : null,
       };
 
       const { data, error } = await supabaseAdmin.from("lessons").insert(payload).select().single();
@@ -4096,6 +4097,7 @@ Assistant:`;
       if (req.body.status !== undefined) updates.status = req.body.status;
       if (req.body.is_free_preview !== undefined) updates.is_free_preview = Boolean(req.body.is_free_preview);
       if (req.body.module_id !== undefined) updates.module_id = req.body.module_id;
+      if ('publish_at' in req.body) updates.publish_at = req.body.publish_at ? new Date(req.body.publish_at).toISOString() : null;
       if (req.body.course_id !== undefined) {
         const cg = await assertTeacherOwnsCourse(userId, req.body.course_id);
         if (!cg.ok) return res.status(403).json({ error: "Invalid course for this lesson." });
@@ -10747,6 +10749,31 @@ async function runModulesPublishAtMigration(): Promise<void> {
   }
 }
 
+async function runLessonsPublishAtMigration(): Promise<void> {
+  try {
+    await poolQuery(`ALTER TABLE lessons ADD COLUMN IF NOT EXISTS publish_at timestamptz NULL`);
+    console.log('[migration] lessons.publish_at column ensured ✓');
+    return;
+  } catch {
+    // fall through to supabaseAdmin probe
+  }
+  try {
+    const probe = await supabaseAdmin.from('lessons').select('publish_at').limit(1);
+    if (!probe.error) {
+      console.log('[migration] lessons.publish_at column already exists ✓');
+      return;
+    }
+    const rpcResult = await (supabaseAdmin as any).rpc('exec_sql', {
+      sql: 'ALTER TABLE public.lessons ADD COLUMN IF NOT EXISTS publish_at timestamptz NULL',
+    });
+    if (rpcResult.error) throw rpcResult.error;
+    console.log('[migration] lessons.publish_at added via RPC ✓');
+  } catch (err: any) {
+    console.warn('[migration] lessons.publish_at column could not be auto-created:', err?.message?.split('\n')[0]);
+    console.warn('[migration] Run manually: ALTER TABLE lessons ADD COLUMN IF NOT EXISTS publish_at timestamptz NULL');
+  }
+}
+
 async function ensureAssignmentFilesBucket(): Promise<void> {
   try {
     const { error } = await supabaseAdmin.storage.createBucket('assignment-files', {
@@ -10775,6 +10802,7 @@ async function startServer() {
   void runAnnouncementColumnsMigration();
   void runAssignmentSubmissionsMigration();
   void runModulesPublishAtMigration();
+  void runLessonsPublishAtMigration();
   void ensureAssignmentFilesBucket();
 
   const httpServer = http.createServer();
@@ -10832,6 +10860,31 @@ async function startServer() {
   );
 }
 
+async function runAutoPublishLessons() {
+  try {
+    const now = new Date().toISOString();
+    const { data, error } = await supabaseAdmin
+      .from('lessons')
+      .select('id, title')
+      .lte('publish_at', now)
+      .neq('status', 'published');
+    if (error || !data || data.length === 0) return;
+    for (const lesson of data) {
+      const { error: updErr } = await supabaseAdmin
+        .from('lessons')
+        .update({ status: 'published', publish_at: null, updated_at: now })
+        .eq('id', lesson.id);
+      if (updErr) {
+        console.error(`[auto-publish] Failed to publish lesson "${lesson.title}":`, updErr.message);
+      } else {
+        console.log(`[auto-publish] Published lesson "${lesson.title}" (${lesson.id})`);
+      }
+    }
+  } catch (e: any) {
+    console.error('[auto-publish] Lessons scheduler error:', e?.message);
+  }
+}
+
 async function runAutoPublishModules() {
   try {
     const now = new Date().toISOString();
@@ -10860,6 +10913,9 @@ async function runAutoPublishModules() {
 if (!process.env.VERCEL) {
   setInterval(() => { void runAutoPublishModules(); }, 60_000);
   void runAutoPublishModules();
+
+  setInterval(() => { void runAutoPublishLessons(); }, 60_000);
+  void runAutoPublishLessons();
 
   setInterval(() => {
     void flushFailedTelegramAlerts();

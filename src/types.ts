@@ -93,6 +93,7 @@ export interface Lesson {
   order: number;
   status: string;
   isFreePreview: boolean;
+  publishAt?: string | null;
   createdAt: string;
   updatedAt: string;
 }

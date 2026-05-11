@@ -6,7 +6,7 @@ import TeacherLayout from '../../components/layout/TeacherLayout';
 import {
   Plus, Search, PlayCircle, Trash2, Edit2, X, Save,
   BookOpen, Layers, Video, FileText, HelpCircle, Clock,
-  Lock, Unlock, ChevronRight
+  Lock, Unlock, ChevronRight, Calendar, AlertTriangle
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { Lesson } from '../../types';
@@ -19,11 +19,7 @@ function AnimatedCount({ value }: { value: number }) {
   const motionVal = useMotionValue(0);
   const spring = useSpring(motionVal, { stiffness: 120, damping: 20 });
   const display = useTransform(spring, (v) => Math.round(v).toString());
-
-  useEffect(() => {
-    motionVal.set(value);
-  }, [value, motionVal]);
-
+  useEffect(() => { motionVal.set(value); }, [value, motionVal]);
   return <motion.span>{display}</motion.span>;
 }
 
@@ -70,6 +66,8 @@ const emptyForm = {
   order: 1,
   status: 'published',
   isFreePreview: false,
+  autoPublish: false,
+  publishAt: '',
 };
 
 export default function TeacherLessons() {
@@ -90,6 +88,8 @@ export default function TeacherLessons() {
   const [formCourseId, setFormCourseId] = useState('');
   const [formModuleId, setFormModuleId] = useState('');
   const [saving, setSaving] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState<Lesson | null>(null);
+  const [deleting, setDeleting] = useState(false);
   const { can } = useTeacherPermissions();
 
   const fetchData = async () => {
@@ -98,7 +98,6 @@ export default function TeacherLessons() {
     if (!session) return;
     setUserId(session.user.id);
     try {
-      // Try backend API first (same approach as Modules page, handles all teacher_id variants)
       let courseList: any[] = [];
       let classRows: Array<{ id: string; name: string; course_id: string | null }> = [];
       const backendRes = await authFetch(`/api/teacher/courses?userId=${encodeURIComponent(session.user.id)}`);
@@ -108,14 +107,10 @@ export default function TeacherLessons() {
           courseList = backendJson.courses.map((c: any) => ({ id: c.id, title: c.title || c.name || '' }));
         }
       }
-      // Fallback: query Supabase directly using all possible teacher_id candidates
       if (courseList.length === 0) {
         const scopedIds = await resolveTeacherIdCandidates(session.user.id);
         const { data: coursesData, error: coursesError } = await supabase
-          .from('courses')
-          .select('id, title')
-          .in('teacher_id', scopedIds)
-          .order('created_at', { ascending: false });
+          .from('courses').select('id, title').in('teacher_id', scopedIds).order('created_at', { ascending: false });
         if (coursesError && (coursesError as any).code !== 'PGRST116') throw coursesError;
         courseList = coursesData || [];
       }
@@ -142,7 +137,6 @@ export default function TeacherLessons() {
 
       const courseIds = courseList.map((c: any) => c.id);
 
-      // Fetch modules via backend API first (bypasses RLS), same pattern as Modules page
       let modulesData: any[] | null = null;
       const modulesApiRes = await authFetch(`/api/teacher/modules?userId=${encodeURIComponent(session.user.id)}`);
       if (modulesApiRes.ok) {
@@ -157,7 +151,6 @@ export default function TeacherLessons() {
         modulesData = modulesSnap.data || [];
       }
 
-      // Fetch lessons via backend API (bypasses RLS)
       let lessonsData: any[] = [];
       const lessonsApiRes = await authFetch(`/api/teacher/lessons?userId=${encodeURIComponent(session.user.id)}`);
       if (lessonsApiRes.ok) {
@@ -166,7 +159,6 @@ export default function TeacherLessons() {
           lessonsData = lessonsJson.lessons.filter((l: any) => courseIds.includes(l.course_id));
         }
       } else {
-        // Fallback: direct Supabase query
         const lessonsSnap = await supabase.from('lessons').select('*').in('course_id', courseIds).order('order', { ascending: true });
         if (!lessonsSnap.error) lessonsData = lessonsSnap.data || [];
       }
@@ -184,10 +176,11 @@ export default function TeacherLessons() {
         order: l.order || 1,
         status: l.status || 'published',
         isFreePreview: l.is_free_preview || false,
+        publishAt: (l.publish_at as string | null | undefined) ?? null,
         createdAt: l.created_at,
         updatedAt: l.updated_at,
       })));
-    } catch (err: any) {
+    } catch {
       toast.error('Failed to load lessons');
     } finally {
       setLoading(false);
@@ -210,10 +203,14 @@ export default function TeacherLessons() {
     setShowModal(true);
   };
 
-  const openEdit = (lesson: Lesson) => {
+  const openEdit = (lesson: any) => {
     setEditing(lesson);
     setFormCourseId(lesson.courseId);
     setFormModuleId(lesson.moduleId);
+    const hasPublishAt = !!lesson.publishAt;
+    const publishAtLocal = lesson.publishAt
+      ? new Date(lesson.publishAt).toISOString().slice(0, 16)
+      : '';
     setForm({
       title: lesson.title,
       shortDescription: lesson.shortDescription || '',
@@ -222,6 +219,8 @@ export default function TeacherLessons() {
       order: lesson.order,
       status: lesson.status,
       isFreePreview: lesson.isFreePreview,
+      autoPublish: hasPublishAt,
+      publishAt: publishAtLocal,
     });
     setShowModal(true);
   };
@@ -242,9 +241,10 @@ export default function TeacherLessons() {
     if (!form.title.trim()) { toast.error('Title is required'); return; }
     if (!formCourseId) { toast.error('Please select a course'); return; }
     if (!formModuleId) { toast.error('Please select a module'); return; }
+    if (form.autoPublish && !form.publishAt) { toast.error('Please select a date and time for auto-publish'); return; }
     setSaving(true);
     try {
-      const payload = {
+      const payload: Record<string, unknown> = {
         userId,
         course_id: formCourseId,
         module_id: formModuleId,
@@ -256,6 +256,9 @@ export default function TeacherLessons() {
         order: Number(form.order) || 1,
         status: form.status,
         is_free_preview: form.isFreePreview,
+        ...(form.autoPublish && form.publishAt
+          ? { publish_at: new Date(form.publishAt).toISOString() }
+          : { publish_at: null }),
       };
 
       if (editing) {
@@ -282,14 +285,24 @@ export default function TeacherLessons() {
     }
   };
 
-  const handleDelete = async (id: string) => {
-    if (!window.confirm('Delete this lesson? This cannot be undone.')) return;
+  const handleDelete = (lesson: Lesson) => {
+    setDeleteTarget(lesson);
+  };
+
+  const confirmDelete = async () => {
+    if (!deleteTarget) return;
+    setDeleting(true);
     try {
-      const res = await authFetch(`/api/teacher/lessons/${id}?userId=${encodeURIComponent(userId)}`, { method: 'DELETE' });
+      const res = await authFetch(`/api/teacher/lessons/${deleteTarget.id}?userId=${encodeURIComponent(userId)}`, { method: 'DELETE' });
       if (!res.ok) throw new Error(await readApiError(res));
       toast.success('Lesson deleted');
+      setDeleteTarget(null);
       fetchData();
-    } catch (err: any) { toast.error(err.message || 'Failed to delete lesson'); }
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to delete lesson');
+    } finally {
+      setDeleting(false);
+    }
   };
 
   const handleToggleStatus = async (lesson: Lesson) => {
@@ -347,27 +360,14 @@ export default function TeacherLessons() {
         style={{ fontFamily: "'Inter', 'Poppins', system-ui, sans-serif" }}
       >
         <div className="relative overflow-hidden">
-          {/* Gradient blobs */}
           <div className="pointer-events-none absolute -top-24 -left-24 w-96 h-96 rounded-full bg-indigo-200/30 blur-3xl" />
           <div className="pointer-events-none absolute -top-12 right-0 w-80 h-80 rounded-full bg-violet-200/25 blur-3xl" />
           <div className="pointer-events-none absolute top-96 left-1/2 w-72 h-72 rounded-full bg-indigo-100/20 blur-3xl" />
 
           {/* Hero Header */}
-          <div
-            className="relative overflow-hidden"
-            style={{
-              background: 'linear-gradient(135deg, #312e81 0%, #4f46e5 40%, #7c3aed 80%, #6d28d9 100%)',
-            }}
-          >
-            <div
-              className="absolute inset-0 opacity-10"
-              style={{
-                backgroundImage: 'radial-gradient(circle, #fff 1px, transparent 1px)',
-                backgroundSize: '24px 24px',
-              }}
-            />
+          <div className="relative overflow-hidden" style={{ background: 'linear-gradient(135deg, #312e81 0%, #4f46e5 40%, #7c3aed 80%, #6d28d9 100%)' }}>
+            <div className="absolute inset-0 opacity-10" style={{ backgroundImage: 'radial-gradient(circle, #fff 1px, transparent 1px)', backgroundSize: '24px 24px' }} />
             <div className="pointer-events-none absolute -top-16 right-1/4 w-64 h-64 rounded-full bg-violet-400/20 blur-3xl" />
-
             <div className="relative px-6 sm:px-8 lg:px-10 py-10">
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-6">
                 <div>
@@ -376,27 +376,24 @@ export default function TeacherLessons() {
                     <ChevronRight className="w-3.5 h-3.5 text-indigo-500/50" />
                     <span className="text-indigo-200 tracking-wider uppercase">Lessons</span>
                   </nav>
-                  <h1 className="text-3xl sm:text-4xl font-extrabold text-white tracking-tight leading-tight">
-                    Lessons
-                  </h1>
+                  <h1 className="text-3xl sm:text-4xl font-extrabold text-white tracking-tight leading-tight">Lessons</h1>
                   <p className="text-indigo-200 text-sm mt-2 max-w-md">
                     Create and manage lesson content inside your modules to guide students through your courses.
                   </p>
                 </div>
-                {can('actions.teacher.lessons.manage') && <motion.button
-                  onClick={openCreate}
-                  disabled={courses.length === 0}
-                  whileHover={{ scale: 1.04, y: -2 }}
-                  whileTap={{ scale: 0.97 }}
-                  className="inline-flex items-center gap-2 px-6 py-3 rounded-2xl font-bold text-sm text-white shrink-0 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
-                  style={{
-                    background: 'linear-gradient(135deg, #818cf8 0%, #a78bfa 100%)',
-                    boxShadow: '0 8px 32px rgba(139,92,246,0.45), 0 2px 8px rgba(0,0,0,0.15)',
-                  }}
-                >
-                  <Plus className="w-4 h-4" />
-                  New Lesson
-                </motion.button>}
+                {can('actions.teacher.lessons.manage') && (
+                  <motion.button
+                    onClick={openCreate}
+                    disabled={courses.length === 0}
+                    whileHover={{ scale: 1.04, y: -2 }}
+                    whileTap={{ scale: 0.97 }}
+                    className="inline-flex items-center gap-2 px-6 py-3 rounded-2xl font-bold text-sm text-white shrink-0 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
+                    style={{ background: 'linear-gradient(135deg, #818cf8 0%, #a78bfa 100%)', boxShadow: '0 8px 32px rgba(139,92,246,0.45), 0 2px 8px rgba(0,0,0,0.15)' }}
+                  >
+                    <Plus className="w-4 h-4" />
+                    New Lesson
+                  </motion.button>
+                )}
               </div>
             </div>
           </div>
@@ -404,13 +401,8 @@ export default function TeacherLessons() {
           {/* Main Content */}
           <div className="px-6 sm:px-8 lg:px-10 py-8 space-y-8 bg-slate-50">
 
-            {/* No courses warning */}
             {!loading && courses.length === 0 && (
-              <motion.div
-                initial={{ opacity: 0, y: 8 }}
-                animate={{ opacity: 1, y: 0 }}
-                className="bg-amber-50 border border-amber-200 rounded-2xl p-5 flex items-start gap-3"
-              >
+              <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className="bg-amber-50 border border-amber-200 rounded-2xl p-5 flex items-start gap-3">
                 <BookOpen className="w-5 h-5 text-amber-500 mt-0.5 shrink-0" />
                 <div>
                   <p className="text-sm font-semibold text-amber-800">No courses found</p>
@@ -419,30 +411,15 @@ export default function TeacherLessons() {
               </motion.div>
             )}
 
-            {/* Premium Stat Cards */}
-            <motion.div
-              className="grid grid-cols-2 lg:grid-cols-4 gap-4"
-              initial="hidden"
-              animate="visible"
-              variants={{
-                hidden: {},
-                visible: { transition: { staggerChildren: 0.08 } },
-              }}
-            >
+            {/* Stats */}
+            <motion.div className="grid grid-cols-2 lg:grid-cols-4 gap-4" initial="hidden" animate="visible" variants={{ hidden: {}, visible: { transition: { staggerChildren: 0.08 } } }}>
               {stats.map((stat) => {
                 const Icon = stat.icon;
                 return (
                   <motion.div
                     key={stat.label}
-                    variants={{
-                      hidden: { opacity: 0, y: 20 },
-                      visible: { opacity: 1, y: 0, transition: { duration: 0.4, ease: 'easeOut' } },
-                    }}
-                    className={cn(
-                      'relative overflow-hidden rounded-2xl p-5 text-white shadow-lg',
-                      `bg-gradient-to-br ${stat.gradient}`,
-                      stat.shadow
-                    )}
+                    variants={{ hidden: { opacity: 0, y: 20 }, visible: { opacity: 1, y: 0, transition: { duration: 0.4, ease: 'easeOut' } } }}
+                    className={cn('relative overflow-hidden rounded-2xl p-5 text-white shadow-lg', `bg-gradient-to-br ${stat.gradient}`, stat.shadow)}
                     style={{ boxShadow: `0 8px 24px var(--tw-shadow-color, rgba(0,0,0,0.12))` }}
                   >
                     <div className="flex items-start justify-between">
@@ -460,221 +437,143 @@ export default function TeacherLessons() {
               })}
             </motion.div>
 
-            {/* Glassmorphism Filter Bar */}
+            {/* Filter Bar */}
             <motion.div
-              initial={{ opacity: 0, y: 12 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: 0.2, duration: 0.4 }}
+              initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.2, duration: 0.4 }}
               className="rounded-2xl border border-white/60 shadow-sm p-4 flex flex-wrap gap-3 items-center"
-              style={{
-                background: 'rgba(255,255,255,0.75)',
-                backdropFilter: 'blur(12px)',
-              }}
+              style={{ background: 'rgba(255,255,255,0.75)', backdropFilter: 'blur(12px)' }}
             >
               <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mr-1">Filters</p>
               <div className="relative flex-1 min-w-[180px]">
                 <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-indigo-400" />
                 <input
-                  type="text"
-                  placeholder="Search lessons..."
-                  value={search}
+                  type="text" placeholder="Search lessons..." value={search}
                   onChange={e => setSearch(e.target.value)}
                   className="w-full pl-11 pr-4 py-2.5 rounded-full text-sm border border-indigo-100 bg-white/80 focus:outline-none focus:ring-2 focus:ring-violet-400 focus:border-transparent transition-all shadow-sm placeholder-slate-400"
                 />
               </div>
-              <select
-                value={courseFilter}
-                onChange={e => { setCourseFilter(e.target.value); setClassFilter('all'); setModuleFilter('all'); }}
-                className="px-4 py-2.5 rounded-full text-sm border border-indigo-100 bg-white/80 focus:outline-none focus:ring-2 focus:ring-violet-400 focus:border-transparent transition-all shadow-sm text-slate-700"
-              >
+              <select value={courseFilter} onChange={e => { setCourseFilter(e.target.value); setClassFilter('all'); setModuleFilter('all'); }}
+                className="px-4 py-2.5 rounded-full text-sm border border-indigo-100 bg-white/80 focus:outline-none focus:ring-2 focus:ring-violet-400 focus:border-transparent transition-all shadow-sm text-slate-700">
                 <option value="all">All Courses</option>
                 {courses.map(c => <option key={c.id} value={c.id}>{c.name || c.title}</option>)}
               </select>
               {classes.length > 0 && (
-                <select
-                  value={classFilter}
-                  onChange={e => { setClassFilter(e.target.value); setModuleFilter('all'); }}
-                  className="px-4 py-2.5 rounded-full text-sm border border-indigo-100 bg-white/80 focus:outline-none focus:ring-2 focus:ring-violet-400 focus:border-transparent transition-all shadow-sm text-slate-700"
-                >
+                <select value={classFilter} onChange={e => { setClassFilter(e.target.value); setModuleFilter('all'); }}
+                  className="px-4 py-2.5 rounded-full text-sm border border-indigo-100 bg-white/80 focus:outline-none focus:ring-2 focus:ring-violet-400 focus:border-transparent transition-all shadow-sm text-slate-700">
                   <option value="all">All Classes</option>
                   {classes.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
                 </select>
               )}
-              <select
-                value={moduleFilter}
-                onChange={e => setModuleFilter(e.target.value)}
-                className="px-4 py-2.5 rounded-full text-sm border border-indigo-100 bg-white/80 focus:outline-none focus:ring-2 focus:ring-violet-400 focus:border-transparent transition-all shadow-sm text-slate-700"
-              >
+              <select value={moduleFilter} onChange={e => setModuleFilter(e.target.value)}
+                className="px-4 py-2.5 rounded-full text-sm border border-indigo-100 bg-white/80 focus:outline-none focus:ring-2 focus:ring-violet-400 focus:border-transparent transition-all shadow-sm text-slate-700">
                 <option value="all">All Modules</option>
-                {((classFilter !== 'all'
-                  ? (() => {
-                      const selectedClass = classes.find((c) => c.id === classFilter);
-                      return selectedClass?.course_id ? modules.filter(m => m.course_id === selectedClass.course_id) : [];
-                    })()
-                  : (courseFilter !== 'all' ? modules.filter(m => m.course_id === courseFilter) : modules)))
-                  .map(m => <option key={m.id} value={m.id}>{m.title}</option>)}
+                {(classFilter !== 'all'
+                  ? (() => { const sc = classes.find(c => c.id === classFilter); return sc?.course_id ? modules.filter(m => m.course_id === sc.course_id) : []; })()
+                  : courseFilter !== 'all' ? modules.filter(m => m.course_id === courseFilter) : modules
+                ).map(m => <option key={m.id} value={m.id}>{m.title}</option>)}
               </select>
-              <select
-                value={typeFilter}
-                onChange={e => setTypeFilter(e.target.value)}
-                className="px-4 py-2.5 rounded-full text-sm border border-indigo-100 bg-white/80 focus:outline-none focus:ring-2 focus:ring-violet-400 focus:border-transparent transition-all shadow-sm text-slate-700"
-              >
+              <select value={typeFilter} onChange={e => setTypeFilter(e.target.value)}
+                className="px-4 py-2.5 rounded-full text-sm border border-indigo-100 bg-white/80 focus:outline-none focus:ring-2 focus:ring-violet-400 focus:border-transparent transition-all shadow-sm text-slate-700">
                 <option value="all">All Types</option>
                 {LESSON_TYPES.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
               </select>
               {hasActiveFilters && (
-                <button
-                  onClick={() => { setSearch(''); setCourseFilter('all'); setClassFilter('all'); setModuleFilter('all'); setTypeFilter('all'); }}
-                  className="flex items-center gap-1.5 px-3 py-2 rounded-full text-xs font-semibold text-slate-500 hover:text-slate-800 hover:bg-slate-100 transition-all"
-                >
+                <button onClick={() => { setSearch(''); setCourseFilter('all'); setClassFilter('all'); setModuleFilter('all'); setTypeFilter('all'); }}
+                  className="flex items-center gap-1.5 px-3 py-2 rounded-full text-xs font-semibold text-slate-500 hover:text-slate-800 hover:bg-slate-100 transition-all">
                   <X className="w-3.5 h-3.5" /> Clear
                 </button>
               )}
             </motion.div>
 
-            {/* Lessons Grid / Empty State / Skeleton */}
+            {/* Lessons Grid */}
             {loading ? (
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-5">
-                {Array(6).fill(0).map((_, i) => (
-                  <div key={i} className="bg-white rounded-2xl border border-slate-100 h-52 animate-pulse" />
-                ))}
+                {Array(6).fill(0).map((_, i) => <div key={i} className="bg-white rounded-2xl border border-slate-100 h-52 animate-pulse" />)}
               </div>
             ) : filtered.length === 0 ? (
-              <motion.div
-                initial={{ opacity: 0, scale: 0.97 }}
-                animate={{ opacity: 1, scale: 1 }}
-                transition={{ duration: 0.4 }}
-                className="py-20 flex flex-col items-center justify-center bg-white rounded-2xl border border-dashed border-indigo-200 shadow-sm"
-              >
+              <motion.div initial={{ opacity: 0, scale: 0.97 }} animate={{ opacity: 1, scale: 1 }} transition={{ duration: 0.4 }}
+                className="py-20 flex flex-col items-center justify-center bg-white rounded-2xl border border-dashed border-indigo-200 shadow-sm">
                 <EmptyIllustration />
-                <h3 className="text-xl font-extrabold text-slate-800 mt-6 mb-2">
-                  {hasActiveFilters ? 'No results found' : 'No lessons yet'}
-                </h3>
+                <h3 className="text-xl font-extrabold text-slate-800 mt-6 mb-2">{hasActiveFilters ? 'No results found' : 'No lessons yet'}</h3>
                 <p className="text-slate-400 text-sm mb-8 max-w-xs text-center">
-                  {hasActiveFilters
-                    ? "Try adjusting your search or filters to find what you're looking for."
-                    : 'Create your first lesson to start building content inside your modules.'}
+                  {hasActiveFilters ? "Try adjusting your search or filters." : 'Create your first lesson to start building content inside your modules.'}
                 </p>
                 {courses.length > 0 && !hasActiveFilters && can('actions.teacher.lessons.manage') && (
-                  <motion.button
-                    onClick={openCreate}
-                    whileHover={{ scale: 1.04, y: -2 }}
-                    whileTap={{ scale: 0.97 }}
+                  <motion.button onClick={openCreate} whileHover={{ scale: 1.04, y: -2 }} whileTap={{ scale: 0.97 }}
                     className="inline-flex items-center gap-2 px-6 py-3 rounded-2xl font-bold text-sm text-white"
-                    style={{
-                      background: 'linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%)',
-                      boxShadow: '0 8px 24px rgba(99,102,241,0.35)',
-                    }}
-                  >
+                    style={{ background: 'linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%)', boxShadow: '0 8px 24px rgba(99,102,241,0.35)' }}>
                     <Plus className="w-4 h-4" /> Create Your First Lesson
                   </motion.button>
                 )}
               </motion.div>
             ) : (
-              <motion.div
-                className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-5"
-                initial="hidden"
-                animate="visible"
-                variants={{
-                  hidden: {},
-                  visible: { transition: { staggerChildren: 0.07 } },
-                }}
-              >
+              <motion.div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-5"
+                initial="hidden" animate="visible" variants={{ hidden: {}, visible: { transition: { staggerChildren: 0.07 } } }}>
                 {filtered.map((lesson) => {
                   const lt = getLessonType(lesson.type);
                   const isPublished = lesson.status === 'published';
                   return (
-                    <motion.div
-                      key={lesson.id}
-                      variants={{
-                        hidden: { opacity: 0, y: 20 },
-                        visible: { opacity: 1, y: 0, transition: { duration: 0.35, ease: 'easeOut' } },
-                      }}
+                    <motion.div key={lesson.id}
+                      variants={{ hidden: { opacity: 0, y: 20 }, visible: { opacity: 1, y: 0, transition: { duration: 0.35, ease: 'easeOut' } } }}
                       whileHover={{ y: -4, boxShadow: '0 20px 48px rgba(99,102,241,0.15)' }}
-                      className="group relative bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden flex flex-col transition-all duration-200"
-                    >
-                      {/* Colored top accent bar by lesson type */}
+                      className="group relative bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden flex flex-col transition-all duration-200">
                       <div className="h-1.5 w-full" style={{ background: lt.accentGradient }} />
-
                       <div className="p-5 flex flex-col flex-1">
-                        {/* Type icon + status toggle */}
                         <div className="flex items-start justify-between mb-3">
                           <div className={cn('w-11 h-11 rounded-xl flex items-center justify-center shrink-0', lt.bg)}>
                             <lt.icon className={cn('w-5 h-5', lt.color)} />
                           </div>
-                          {can('actions.teacher.lessons.manage') && <button
-                            onClick={() => handleToggleStatus(lesson)}
-                            className={cn(
-                              'inline-flex items-center gap-1.5 text-[11px] font-bold px-2.5 py-1 rounded-full transition-all',
-                              isPublished
-                                ? 'bg-emerald-50 text-emerald-700 hover:bg-emerald-100'
-                                : 'bg-amber-50 text-amber-700 hover:bg-amber-100'
-                            )}
-                          >
-                            <span className={cn('w-1.5 h-1.5 rounded-full', isPublished ? 'bg-emerald-500' : 'bg-amber-500')} />
-                            {isPublished ? 'Published' : 'Draft'}
-                          </button>}
+                          {can('actions.teacher.lessons.manage') && (
+                            <button onClick={() => handleToggleStatus(lesson)}
+                              className={cn('inline-flex items-center gap-1.5 text-[11px] font-bold px-2.5 py-1 rounded-full transition-all',
+                                isPublished ? 'bg-emerald-50 text-emerald-700 hover:bg-emerald-100' : 'bg-amber-50 text-amber-700 hover:bg-amber-100')}>
+                              <span className={cn('w-1.5 h-1.5 rounded-full', isPublished ? 'bg-emerald-500' : 'bg-amber-500')} />
+                              {isPublished ? 'Published' : 'Draft'}
+                            </button>
+                          )}
                         </div>
-
-                        {/* Title */}
                         <h3 className="text-sm font-bold text-slate-900 line-clamp-2 mb-1 leading-snug">{lesson.title}</h3>
-                        {lesson.shortDescription && (
-                          <p className="text-xs text-slate-400 line-clamp-2 mb-2">{lesson.shortDescription}</p>
-                        )}
-
-                        {/* Meta */}
+                        {lesson.shortDescription && <p className="text-xs text-slate-400 line-clamp-2 mb-2">{lesson.shortDescription}</p>}
                         <div className="mt-auto space-y-2 pt-3 border-t border-slate-50">
-                          {/* Module badge */}
                           <div className="flex items-center justify-between">
                             <span className="inline-flex items-center gap-1.5 px-2 py-1 bg-slate-100 text-slate-600 rounded-lg text-[11px] font-medium max-w-[130px] truncate">
                               <Layers className="w-3 h-3 shrink-0" />
                               <span className="truncate">{getModuleName(lesson.moduleId)}</span>
                             </span>
-                            {/* Duration */}
                             <span className="inline-flex items-center gap-1 text-xs text-slate-400">
                               <Clock className="w-3.5 h-3.5 text-slate-300" />
                               {lesson.durationMinutes} min
                             </span>
                           </div>
-
-                          {/* Free preview toggle */}
                           <div className="flex items-center gap-1">
-                            {can('actions.teacher.lessons.manage') && <button
-                              onClick={() => handleToggleFreePreview(lesson)}
-                              title={lesson.isFreePreview ? 'Remove free preview' : 'Set as free preview'}
-                              className={cn(
-                                'inline-flex items-center gap-1.5 text-[11px] font-semibold px-2.5 py-1 rounded-full transition-all',
-                                lesson.isFreePreview
-                                  ? 'bg-emerald-50 text-emerald-700 hover:bg-emerald-100'
-                                  : 'bg-slate-100 text-slate-400 hover:bg-slate-200'
-                              )}
-                            >
-                              {lesson.isFreePreview ? <Unlock className="w-3 h-3" /> : <Lock className="w-3 h-3" />}
-                              {lesson.isFreePreview ? 'Free Preview' : 'Locked'}
-                            </button>}
+                            {can('actions.teacher.lessons.manage') && (
+                              <button onClick={() => handleToggleFreePreview(lesson)}
+                                title={lesson.isFreePreview ? 'Remove free preview' : 'Set as free preview'}
+                                className={cn('inline-flex items-center gap-1.5 text-[11px] font-semibold px-2.5 py-1 rounded-full transition-all',
+                                  lesson.isFreePreview ? 'bg-emerald-50 text-emerald-700 hover:bg-emerald-100' : 'bg-slate-100 text-slate-400 hover:bg-slate-200')}>
+                                {lesson.isFreePreview ? <Unlock className="w-3 h-3" /> : <Lock className="w-3 h-3" />}
+                                {lesson.isFreePreview ? 'Free Preview' : 'Locked'}
+                              </button>
+                            )}
                           </div>
                         </div>
-
-                        {/* Actions */}
                         <div className="flex items-center gap-2 pt-3 sm:opacity-0 sm:group-hover:opacity-100 opacity-100 transition-all duration-200 sm:translate-y-1 sm:group-hover:translate-y-0">
-                          <Link
-                            to={`/teacher/lessons/${encodeURIComponent(lesson.id)}/content`}
-                            className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-xl text-xs font-semibold text-slate-700 bg-slate-100 hover:bg-slate-200 transition-all"
-                          >
+                          <Link to={`/teacher/lessons/${encodeURIComponent(lesson.id)}/content`}
+                            className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-xl text-xs font-semibold text-slate-700 bg-slate-100 hover:bg-slate-200 transition-all">
                             Manage Content
                           </Link>
-                          {can('actions.teacher.lessons.manage') && <button
-                            onClick={() => openEdit(lesson)}
-                            className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-xl text-xs font-semibold text-indigo-600 bg-indigo-50 hover:bg-indigo-100 transition-all"
-                          >
-                            <Edit2 className="w-3.5 h-3.5" /> Edit
-                          </button>}
-                          {can('actions.teacher.lessons.manage') && <button
-                            onClick={() => handleDelete(lesson.id)}
-                            className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-xl text-xs font-semibold text-red-500 bg-red-50 hover:bg-red-100 transition-all"
-                          >
-                            <Trash2 className="w-3.5 h-3.5" /> Delete
-                          </button>}
+                          {can('actions.teacher.lessons.manage') && (
+                            <button onClick={() => openEdit(lesson)}
+                              className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-xl text-xs font-semibold text-indigo-600 bg-indigo-50 hover:bg-indigo-100 transition-all">
+                              <Edit2 className="w-3.5 h-3.5" /> Edit
+                            </button>
+                          )}
+                          {can('actions.teacher.lessons.manage') && (
+                            <button onClick={() => handleDelete(lesson)}
+                              className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-xl text-xs font-semibold text-red-500 bg-red-50 hover:bg-red-100 transition-all">
+                              <Trash2 className="w-3.5 h-3.5" /> Delete
+                            </button>
+                          )}
                         </div>
                       </div>
                     </motion.div>
@@ -686,22 +585,15 @@ export default function TeacherLessons() {
         </div>
       </div>
 
-      {/* Modal — unchanged in functionality */}
+      {/* Edit/Create Modal */}
       <AnimatePresence>
         {showModal && (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4"
-          >
+          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
             <motion.div
-              initial={{ opacity: 0, scale: 0.95, y: 16 }}
-              animate={{ opacity: 1, scale: 1, y: 0 }}
-              exit={{ opacity: 0, scale: 0.95, y: 16 }}
-              transition={{ type: 'spring', duration: 0.4 }}
-              className="bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[90vh] flex flex-col"
-            >
+              initial={{ opacity: 0, scale: 0.95, y: 16 }} animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 16 }} transition={{ type: 'spring', duration: 0.4 }}
+              className="bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[90vh] flex flex-col">
 
               {/* Modal Header */}
               <div className="flex items-center justify-between p-6 border-b border-slate-100 shrink-0">
@@ -722,27 +614,20 @@ export default function TeacherLessons() {
               {/* Modal Body */}
               <div className="p-6 space-y-4 overflow-y-auto flex-1">
 
-                {/* Course + Module row */}
+                {/* Course + Module */}
                 <div className="grid grid-cols-2 gap-4">
                   <div>
                     <label className="block text-xs font-semibold text-slate-600 mb-1.5">Course <span className="text-red-500">*</span></label>
-                    <select
-                      value={formCourseId}
-                      onChange={e => handleCourseChange(e.target.value)}
-                      className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-violet-500 transition-all"
-                    >
+                    <select value={formCourseId} onChange={e => handleCourseChange(e.target.value)}
+                      className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-violet-500 transition-all">
                       <option value="">Select course...</option>
                       {courses.map(c => <option key={c.id} value={c.id}>{c.name || c.title}</option>)}
                     </select>
                   </div>
                   <div>
                     <label className="block text-xs font-semibold text-slate-600 mb-1.5">Module <span className="text-red-500">*</span></label>
-                    <select
-                      value={formModuleId}
-                      onChange={e => setFormModuleId(e.target.value)}
-                      className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-violet-500 transition-all"
-                      disabled={!formCourseId}
-                    >
+                    <select value={formModuleId} onChange={e => setFormModuleId(e.target.value)} disabled={!formCourseId}
+                      className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-violet-500 transition-all">
                       <option value="">Select module...</option>
                       {modulesForCourse(formCourseId).map(m => <option key={m.id} value={m.id}>{m.title}</option>)}
                     </select>
@@ -752,28 +637,18 @@ export default function TeacherLessons() {
                 {/* Title */}
                 <div>
                   <label className="block text-xs font-semibold text-slate-600 mb-1.5">Title <span className="text-red-500">*</span></label>
-                  <input
-                    type="text"
-                    value={form.title}
-                    onChange={e => setForm(f => ({ ...f, title: e.target.value }))}
+                  <input type="text" value={form.title} onChange={e => setForm(f => ({ ...f, title: e.target.value }))}
                     placeholder="e.g. Introduction to useState"
-                    className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-violet-500 transition-all"
-                  />
-                  {form.title && (
-                    <p className="text-[10px] text-slate-400 mt-1">Slug: <span className="font-mono">{slugify(form.title)}</span></p>
-                  )}
+                    className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-violet-500 transition-all" />
+                  {form.title && <p className="text-[10px] text-slate-400 mt-1">Slug: <span className="font-mono">{slugify(form.title)}</span></p>}
                 </div>
 
                 {/* Short Description */}
                 <div>
                   <label className="block text-xs font-semibold text-slate-600 mb-1.5">Short Description</label>
-                  <textarea
-                    rows={2}
-                    value={form.shortDescription}
-                    onChange={e => setForm(f => ({ ...f, shortDescription: e.target.value }))}
+                  <textarea rows={2} value={form.shortDescription} onChange={e => setForm(f => ({ ...f, shortDescription: e.target.value }))}
                     placeholder="Brief summary of this lesson..."
-                    className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-violet-500 transition-all resize-none"
-                  />
+                    className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-violet-500 transition-all resize-none" />
                 </div>
 
                 {/* Type selector */}
@@ -781,17 +656,9 @@ export default function TeacherLessons() {
                   <label className="block text-xs font-semibold text-slate-600 mb-1.5">Lesson Type <span className="text-red-500">*</span></label>
                   <div className="grid grid-cols-3 gap-2">
                     {LESSON_TYPES.map(t => (
-                      <button
-                        key={t.value}
-                        type="button"
-                        onClick={() => setForm(f => ({ ...f, type: t.value as Lesson['type'] }))}
-                        className={cn(
-                          'flex flex-col items-center gap-1.5 py-3 px-2 rounded-xl border-2 text-xs font-semibold transition-all',
-                          form.type === t.value
-                            ? `${t.bg} ${t.color} border-current`
-                            : 'bg-slate-50 text-slate-400 border-slate-200 hover:border-slate-300'
-                        )}
-                      >
+                      <button key={t.value} type="button" onClick={() => setForm(f => ({ ...f, type: t.value as Lesson['type'] }))}
+                        className={cn('flex flex-col items-center gap-1.5 py-3 px-2 rounded-xl border-2 text-xs font-semibold transition-all',
+                          form.type === t.value ? `${t.bg} ${t.color} border-current` : 'bg-slate-50 text-slate-400 border-slate-200 hover:border-slate-300')}>
                         <t.icon className="w-5 h-5" />
                         {t.label}
                       </button>
@@ -803,31 +670,20 @@ export default function TeacherLessons() {
                 <div className="grid grid-cols-3 gap-3">
                   <div>
                     <label className="block text-xs font-semibold text-slate-600 mb-1.5">Duration (min)</label>
-                    <input
-                      type="number"
-                      min={1}
-                      value={form.durationMinutes}
+                    <input type="number" min={1} value={form.durationMinutes}
                       onChange={e => setForm(f => ({ ...f, durationMinutes: Number(e.target.value) }))}
-                      className="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-violet-500 transition-all"
-                    />
+                      className="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-violet-500 transition-all" />
                   </div>
                   <div>
                     <label className="block text-xs font-semibold text-slate-600 mb-1.5">Order</label>
-                    <input
-                      type="number"
-                      min={1}
-                      value={form.order}
+                    <input type="number" min={1} value={form.order}
                       onChange={e => setForm(f => ({ ...f, order: Number(e.target.value) }))}
-                      className="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-violet-500 transition-all"
-                    />
+                      className="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-violet-500 transition-all" />
                   </div>
                   <div>
                     <label className="block text-xs font-semibold text-slate-600 mb-1.5">Status</label>
-                    <select
-                      value={form.status}
-                      onChange={e => setForm(f => ({ ...f, status: e.target.value }))}
-                      className="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-violet-500 transition-all"
-                    >
+                    <select value={form.status} onChange={e => setForm(f => ({ ...f, status: e.target.value }))}
+                      className="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-violet-500 transition-all">
                       <option value="published">Published</option>
                       <option value="draft">Draft</option>
                     </select>
@@ -840,39 +696,131 @@ export default function TeacherLessons() {
                     <p className="text-sm font-semibold text-slate-700">Free Preview</p>
                     <p className="text-xs text-slate-400">Allow non-enrolled students to view this lesson</p>
                   </div>
-                  <button
-                    type="button"
-                    onClick={() => setForm(f => ({ ...f, isFreePreview: !f.isFreePreview }))}
-                    className={cn(
-                      'relative inline-flex h-6 w-11 shrink-0 rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none',
-                      form.isFreePreview ? 'bg-violet-600' : 'bg-slate-300'
-                    )}
-                  >
-                    <span className={cn(
-                      'pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out',
-                      form.isFreePreview ? 'translate-x-5' : 'translate-x-0'
-                    )} />
+                  <button type="button" onClick={() => setForm(f => ({ ...f, isFreePreview: !f.isFreePreview }))}
+                    className={cn('relative inline-flex h-6 w-11 shrink-0 rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none',
+                      form.isFreePreview ? 'bg-violet-600' : 'bg-slate-300')}>
+                    <span className={cn('pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out',
+                      form.isFreePreview ? 'translate-x-5' : 'translate-x-0')} />
                   </button>
+                </div>
+
+                {/* Auto-publish toggle */}
+                <div className={cn('rounded-xl border transition-all duration-200',
+                  form.autoPublish ? 'border-violet-200 bg-violet-50/60' : 'border-slate-200 bg-slate-50/60')}>
+                  <label className="flex items-center gap-3 px-4 py-3 cursor-pointer select-none">
+                    <div className="relative">
+                      <input
+                        type="checkbox"
+                        checked={form.autoPublish}
+                        onChange={e => setForm(f => ({
+                          ...f,
+                          autoPublish: e.target.checked,
+                          status: e.target.checked ? 'draft' : f.status,
+                          publishAt: e.target.checked ? f.publishAt : '',
+                        }))}
+                        className="sr-only"
+                      />
+                      <div className={cn('w-10 h-5 rounded-full transition-colors duration-200', form.autoPublish ? 'bg-violet-500' : 'bg-slate-300')}>
+                        <div className={cn('absolute top-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform duration-200',
+                          form.autoPublish ? 'translate-x-5' : 'translate-x-0.5')} />
+                      </div>
+                    </div>
+                    <div>
+                      <span className={cn('text-sm font-semibold transition-colors', form.autoPublish ? 'text-violet-700' : 'text-slate-600')}>
+                        Auto-publish
+                      </span>
+                      <p className="text-[11px] text-slate-400 mt-0.5">
+                        Publiko automatikisht në datën dhe orën e zgjedhur
+                      </p>
+                    </div>
+                  </label>
+
+                  <AnimatePresence>
+                    {form.autoPublish && (
+                      <motion.div
+                        initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }}
+                        exit={{ opacity: 0, height: 0 }} transition={{ duration: 0.2 }}
+                        className="overflow-hidden">
+                        <div className="px-4 pb-4 pt-1">
+                          <label className="block text-xs font-semibold text-violet-600 mb-1.5">
+                            <Calendar className="inline w-3.5 h-3.5 mr-1 -mt-0.5" />
+                            Data dhe ora e publikimit
+                          </label>
+                          <input
+                            type="datetime-local"
+                            value={form.publishAt}
+                            min={new Date().toISOString().slice(0, 16)}
+                            onChange={e => setForm(f => ({ ...f, publishAt: e.target.value }))}
+                            className="w-full px-3.5 py-2.5 bg-white border border-violet-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-violet-500 transition-all text-slate-700"
+                          />
+                          {form.publishAt && (
+                            <p className="text-[11px] text-violet-500 mt-1.5 font-medium">
+                              ✓ Do të publikohet: {new Date(form.publishAt).toLocaleString('sq-AL', { dateStyle: 'full', timeStyle: 'short' })}
+                            </p>
+                          )}
+                        </div>
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
                 </div>
               </div>
 
               {/* Modal Footer */}
               <div className="px-6 pb-6 flex items-center justify-end gap-3 shrink-0 border-t border-slate-100 pt-4">
-                <button
-                  onClick={closeModal}
-                  className="px-4 py-2.5 text-sm font-semibold text-slate-600 hover:bg-slate-100 rounded-xl transition-all"
-                >
+                <button onClick={closeModal} className="px-4 py-2.5 text-sm font-semibold text-slate-600 hover:bg-slate-100 rounded-xl transition-all">
                   Cancel
                 </button>
-                {can('actions.teacher.lessons.manage') && <button
-                  onClick={handleSave}
-                  disabled={saving}
-                  className="inline-flex items-center gap-2 px-5 py-2.5 text-white rounded-xl font-semibold text-sm transition-all disabled:opacity-60"
-                  style={{ background: 'linear-gradient(135deg,#6366f1,#8b5cf6)' }}
-                >
-                  <Save className="w-4 h-4" />
-                  {saving ? 'Saving...' : editing ? 'Save Changes' : 'Create Lesson'}
-                </button>}
+                {can('actions.teacher.lessons.manage') && (
+                  <button onClick={handleSave} disabled={saving}
+                    className="inline-flex items-center gap-2 px-5 py-2.5 text-white rounded-xl font-semibold text-sm transition-all disabled:opacity-60"
+                    style={{ background: 'linear-gradient(135deg,#6366f1,#8b5cf6)' }}>
+                    <Save className="w-4 h-4" />
+                    {saving ? 'Saving...' : editing ? 'Save Changes' : 'Create Lesson'}
+                  </button>
+                )}
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Delete Confirmation Modal */}
+      <AnimatePresence>
+        {deleteTarget && (
+          <motion.div
+            initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[60] flex items-center justify-center p-4"
+            onClick={() => !deleting && setDeleteTarget(null)}>
+            <motion.div
+              initial={{ opacity: 0, scale: 0.9, y: 24 }} animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.9, y: 24 }} transition={{ type: 'spring', stiffness: 300, damping: 28 }}
+              className="bg-white rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden"
+              onClick={e => e.stopPropagation()}>
+              <div className="h-1.5 w-full" style={{ background: 'linear-gradient(90deg,#ef4444,#f97316)' }} />
+              <div className="p-6">
+                <div className="flex justify-center mb-4">
+                  <div className="w-16 h-16 rounded-2xl flex items-center justify-center"
+                    style={{ background: 'linear-gradient(135deg,#fee2e2,#fecaca)' }}>
+                    <AlertTriangle className="w-8 h-8 text-red-500" />
+                  </div>
+                </div>
+                <h3 className="text-center text-lg font-bold text-slate-900 mb-1">Delete this lesson?</h3>
+                <p className="text-center text-sm text-slate-500 mb-1">
+                  <span className="font-semibold text-slate-700">"{deleteTarget.title}"</span>
+                </p>
+                <p className="text-center text-xs text-red-400 font-medium mb-6">This cannot be undone.</p>
+                <div className="flex gap-3">
+                  <button type="button" disabled={deleting} onClick={() => setDeleteTarget(null)}
+                    className="flex-1 py-2.5 rounded-xl text-sm font-semibold text-slate-600 bg-slate-100 hover:bg-slate-200 transition-all disabled:opacity-50">
+                    Cancel
+                  </button>
+                  <button type="button" disabled={deleting} onClick={() => void confirmDelete()}
+                    className="flex-1 py-2.5 rounded-xl text-sm font-semibold text-white transition-all disabled:opacity-60 flex items-center justify-center gap-2"
+                    style={{ background: 'linear-gradient(135deg,#ef4444,#dc2626)' }}>
+                    <Trash2 className="w-4 h-4" />
+                    {deleting ? 'Deleting...' : 'Delete'}
+                  </button>
+                </div>
               </div>
             </motion.div>
           </motion.div>
