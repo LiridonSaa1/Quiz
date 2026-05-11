@@ -98,7 +98,7 @@ export default function AdminModules() {
       const json = await res.json();
       if (!res.ok || !json.success) throw new Error(json.error || 'Failed to load modules');
 
-      const { modules: modulesData, courses: coursesData, teachers: teachersData } = json;
+      const { modules: modulesData, courses: coursesData, teachers: teachersData, lessons: lessonsData } = json;
 
       const teacherMap: Record<string, string> = {};
       (teachersData || []).forEach((t: { user_id: string; first_name: string; last_name: string }) => {
@@ -106,13 +106,19 @@ export default function AdminModules() {
       });
 
       const coursesMap: Record<string, { title: string; teacher: string }> = {};
-      (coursesData || []).forEach((c: { id: string; title?: string; teacher_id: string }) => {
+      (coursesData || []).forEach((c: { id: string; title?: string; teacher_id?: string | null }) => {
+        const teacherName = c.teacher_id ? (teacherMap[c.teacher_id] || '—') : '—';
         coursesMap[c.id] = {
           title: c.title || 'Untitled',
-          teacher: teacherMap[c.teacher_id] || 'Unknown',
+          teacher: teacherName,
         };
       });
       setCourses(coursesMap);
+
+      const lessonCountByModule: Record<string, number> = {};
+      (lessonsData || []).forEach((l: { module_id?: string }) => {
+        if (l.module_id) lessonCountByModule[l.module_id] = (lessonCountByModule[l.module_id] || 0) + 1;
+      });
 
       setModules((modulesData || []).map((m: Record<string, unknown>) => ({
         id: m.id as string,
@@ -122,7 +128,7 @@ export default function AdminModules() {
         description: m.description as string | undefined,
         order: (m.order as number) || 1,
         status: isPublishedStatus(String(m.status)) ? 'published' : 'draft',
-        totalLessons: (m.total_lessons as number) || 0,
+        totalLessons: lessonCountByModule[m.id as string] ?? (m.total_lessons as number) ?? 0,
         publishAt: (m.publish_at as string | null | undefined) ?? null,
         createdAt: m.created_at as string,
         updatedAt: m.updated_at as string,
