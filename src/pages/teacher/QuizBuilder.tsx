@@ -834,75 +834,52 @@ export default function QuizBuilder() {
                   </div>
 
                   {/* Publish toggle — hidden when auto-publish is active */}
-                  <AnimatePresence initial={false}>
-                    {!autoPublish && (
-                      <motion.label
-                        key="publish-toggle"
-                        initial={{ opacity: 0, height: 0 }}
-                        animate={{ opacity: 1, height: 'auto' }}
-                        exit={{ opacity: 0, height: 0 }}
-                        transition={{ duration: 0.18 }}
-                        className="flex items-center justify-between gap-3 cursor-pointer rounded-xl border border-slate-100 bg-slate-50/80 px-3 py-2.5 overflow-hidden"
-                      >
-                        <span className="text-sm font-medium text-slate-700">Publish quiz</span>
-                        <input
-                          type="checkbox"
-                          checked={!!quizData.published}
-                          onChange={(e) => setQuizData({ ...quizData, published: e.target.checked })}
-                          className="sr-only"
-                        />
-                        <span className={cn('relative inline-flex h-6 w-11 shrink-0 rounded-full border-2 border-transparent transition-colors',
-                          quizData.published ? 'bg-violet-600' : 'bg-slate-300')}>
-                          <span className={cn('pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow transition',
-                            quizData.published ? 'translate-x-5' : 'translate-x-0')} />
-                        </span>
-                      </motion.label>
-                    )}
-                    {autoPublish && (
-                      <motion.div
-                        key="autopublish-notice"
-                        initial={{ opacity: 0, height: 0 }}
-                        animate={{ opacity: 1, height: 'auto' }}
-                        exit={{ opacity: 0, height: 0 }}
-                        transition={{ duration: 0.18 }}
-                        className="overflow-hidden"
-                      >
-                        <div className="flex items-center gap-2.5 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2.5">
-                          <Calendar className="w-4 h-4 text-amber-500 shrink-0" />
-                          <div>
-                            <p className="text-xs font-semibold text-amber-700">Quiz not published yet</p>
-                            <p className="text-[10px] text-amber-500 mt-0.5">
-                              {publishAt
-                                ? `Will auto-publish on ${new Date(publishAt).toLocaleString()}`
-                                : 'Set a date below to schedule publishing'}
-                            </p>
-                          </div>
-                        </div>
-                      </motion.div>
-                    )}
-                  </AnimatePresence>
+                  {!autoPublish && (
+                    <div
+                      role="switch"
+                      aria-checked={!!quizData.published}
+                      onClick={() => setQuizData(prev => ({ ...prev, published: !prev.published }))}
+                      className="flex items-center justify-between gap-3 cursor-pointer rounded-xl border border-slate-100 bg-slate-50/80 px-3 py-2.5 select-none"
+                    >
+                      <span className="text-sm font-medium text-slate-700">Publish quiz</span>
+                      <span className={cn('relative inline-flex h-6 w-11 shrink-0 rounded-full border-2 border-transparent transition-colors duration-200',
+                        quizData.published ? 'bg-violet-600' : 'bg-slate-300')}>
+                        <span className={cn('inline-block h-5 w-5 transform rounded-full bg-white shadow transition-transform duration-200',
+                          quizData.published ? 'translate-x-5' : 'translate-x-0')} />
+                      </span>
+                    </div>
+                  )}
+                  {autoPublish && (
+                    <div className="flex items-center gap-2.5 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2.5">
+                      <Calendar className="w-4 h-4 text-amber-500 shrink-0" />
+                      <div>
+                        <p className="text-xs font-semibold text-amber-700">Quiz not published yet</p>
+                        <p className="text-[10px] text-amber-500 mt-0.5">
+                          {publishAt
+                            ? `Will auto-publish on ${new Date(publishAt).toLocaleString()}`
+                            : 'Set a date below to schedule publishing'}
+                        </p>
+                      </div>
+                    </div>
+                  )}
 
                   {/* Auto-publish toggle */}
                   <div className={cn('rounded-xl border transition-all duration-200',
                     autoPublish ? 'border-violet-200 bg-violet-50/60' : 'border-slate-200 bg-slate-50/60')}>
-                    <label className="flex items-center gap-3 px-3 py-2.5 cursor-pointer select-none">
-                      <div className="relative">
-                        <input
-                          type="checkbox"
-                          checked={autoPublish}
-                          onChange={(e) => {
-                            setAutoPublish(e.target.checked);
-                            if (e.target.checked) {
-                              setQuizData(prev => ({ ...prev, published: false }));
-                            }
-                            if (!e.target.checked) setPublishAt('');
-                          }}
-                          className="sr-only"
-                        />
-                        <div className={cn('w-10 h-5 rounded-full transition-colors duration-200', autoPublish ? 'bg-violet-500' : 'bg-slate-300')}>
-                          <div className={cn('absolute top-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform duration-200',
-                            autoPublish ? 'translate-x-5' : 'translate-x-0.5')} />
-                        </div>
+                    <div
+                      role="switch"
+                      aria-checked={autoPublish}
+                      onClick={() => {
+                        const next = !autoPublish;
+                        setAutoPublish(next);
+                        if (next) setQuizData(prev => ({ ...prev, published: false }));
+                        if (!next) setPublishAt('');
+                      }}
+                      className="flex items-center gap-3 px-3 py-2.5 cursor-pointer select-none"
+                    >
+                      <div className={cn('relative w-10 h-5 rounded-full transition-colors duration-200 shrink-0', autoPublish ? 'bg-violet-500' : 'bg-slate-300')}>
+                        <div className={cn('absolute top-0.5 left-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform duration-200',
+                          autoPublish ? 'translate-x-5' : 'translate-x-0')} />
                       </div>
                       <div>
                         <span className={cn('text-sm font-semibold', autoPublish ? 'text-violet-700' : 'text-slate-600')}>
@@ -910,32 +887,27 @@ export default function QuizBuilder() {
                         </span>
                         <p className="text-[11px] text-slate-400 mt-0.5">Schedule a future publish date</p>
                       </div>
-                    </label>
-                    <AnimatePresence>
-                      {autoPublish && (
-                        <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }}
-                          exit={{ opacity: 0, height: 0 }} transition={{ duration: 0.2 }} className="overflow-hidden">
-                          <div className="px-3 pb-3 pt-1">
-                            <label className="block text-xs font-semibold text-violet-600 mb-1.5">
-                              <Calendar className="inline w-3.5 h-3.5 mr-1 -mt-0.5" />
-                              Publish date &amp; time
-                            </label>
-                            <input
-                              type="datetime-local"
-                              value={publishAt}
-                              min={new Date().toISOString().slice(0, 16)}
-                              onChange={(e) => setPublishAt(e.target.value)}
-                              className="w-full px-3 py-2 bg-white border border-violet-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-violet-500 transition-all text-slate-700"
-                            />
-                            {publishAt && (
-                              <p className="text-[11px] text-violet-500 mt-1.5 font-medium">
-                                ✓ {new Date(publishAt).toLocaleString()}
-                              </p>
-                            )}
-                          </div>
-                        </motion.div>
-                      )}
-                    </AnimatePresence>
+                    </div>
+                    {autoPublish && (
+                      <div className="px-3 pb-3 pt-1">
+                        <label className="block text-xs font-semibold text-violet-600 mb-1.5">
+                          <Calendar className="inline w-3.5 h-3.5 mr-1 -mt-0.5" />
+                          Publish date &amp; time
+                        </label>
+                        <input
+                          type="datetime-local"
+                          value={publishAt}
+                          min={new Date().toISOString().slice(0, 16)}
+                          onChange={(e) => setPublishAt(e.target.value)}
+                          className="w-full px-3 py-2 bg-white border border-violet-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-violet-500 transition-all text-slate-700"
+                        />
+                        {publishAt && (
+                          <p className="text-[11px] text-violet-500 mt-1.5 font-medium">
+                            ✓ {new Date(publishAt).toLocaleString()}
+                          </p>
+                        )}
+                      </div>
+                    )}
                   </div>
 
                   <div className="space-y-2 pt-2 border-t border-slate-100">
