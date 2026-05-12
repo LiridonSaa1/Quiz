@@ -833,25 +833,54 @@ export default function QuizBuilder() {
                     </div>
                   </div>
 
-                  {/* Publish toggle */}
-                  <label className={cn(
-                    'flex items-center justify-between gap-3 cursor-pointer rounded-xl border px-3 py-2.5 transition-all',
-                    autoPublish ? 'opacity-40 pointer-events-none border-slate-100 bg-slate-50/80' : 'border-slate-100 bg-slate-50/80'
-                  )}>
-                    <span className="text-sm font-medium text-slate-700">Publish quiz</span>
-                    <input
-                      type="checkbox"
-                      checked={!!quizData.published && !autoPublish}
-                      onChange={(e) => setQuizData({ ...quizData, published: e.target.checked })}
-                      className="sr-only"
-                      disabled={autoPublish}
-                    />
-                    <span className={cn('relative inline-flex h-6 w-11 shrink-0 rounded-full border-2 border-transparent transition-colors',
-                      quizData.published && !autoPublish ? 'bg-violet-600' : 'bg-slate-300')}>
-                      <span className={cn('pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow transition',
-                        quizData.published && !autoPublish ? 'translate-x-5' : 'translate-x-0')} />
-                    </span>
-                  </label>
+                  {/* Publish toggle — hidden when auto-publish is active */}
+                  <AnimatePresence initial={false}>
+                    {!autoPublish && (
+                      <motion.label
+                        key="publish-toggle"
+                        initial={{ opacity: 0, height: 0 }}
+                        animate={{ opacity: 1, height: 'auto' }}
+                        exit={{ opacity: 0, height: 0 }}
+                        transition={{ duration: 0.18 }}
+                        className="flex items-center justify-between gap-3 cursor-pointer rounded-xl border border-slate-100 bg-slate-50/80 px-3 py-2.5 overflow-hidden"
+                      >
+                        <span className="text-sm font-medium text-slate-700">Publish quiz</span>
+                        <input
+                          type="checkbox"
+                          checked={!!quizData.published}
+                          onChange={(e) => setQuizData({ ...quizData, published: e.target.checked })}
+                          className="sr-only"
+                        />
+                        <span className={cn('relative inline-flex h-6 w-11 shrink-0 rounded-full border-2 border-transparent transition-colors',
+                          quizData.published ? 'bg-violet-600' : 'bg-slate-300')}>
+                          <span className={cn('pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow transition',
+                            quizData.published ? 'translate-x-5' : 'translate-x-0')} />
+                        </span>
+                      </motion.label>
+                    )}
+                    {autoPublish && (
+                      <motion.div
+                        key="autopublish-notice"
+                        initial={{ opacity: 0, height: 0 }}
+                        animate={{ opacity: 1, height: 'auto' }}
+                        exit={{ opacity: 0, height: 0 }}
+                        transition={{ duration: 0.18 }}
+                        className="overflow-hidden"
+                      >
+                        <div className="flex items-center gap-2.5 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2.5">
+                          <Calendar className="w-4 h-4 text-amber-500 shrink-0" />
+                          <div>
+                            <p className="text-xs font-semibold text-amber-700">Quiz not published yet</p>
+                            <p className="text-[10px] text-amber-500 mt-0.5">
+                              {publishAt
+                                ? `Will auto-publish on ${new Date(publishAt).toLocaleString()}`
+                                : 'Set a date below to schedule publishing'}
+                            </p>
+                          </div>
+                        </div>
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
 
                   {/* Auto-publish toggle */}
                   <div className={cn('rounded-xl border transition-all duration-200',
