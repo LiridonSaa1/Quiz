@@ -25,6 +25,8 @@ import {
   Sparkles,
   TextCursorInput,
   AlignLeft,
+  Calendar,
+  RefreshCw,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { Quiz, Question, Course, QuestionType } from '../../types';
@@ -42,7 +44,7 @@ import {
   importQuizQuestionsFromText,
 } from '../../lib/gemini';
 import type { ImportedQuizQuestion } from '../../lib/gemini';
-import { motion } from 'motion/react';
+import { motion, AnimatePresence } from 'motion/react';
 import { isDirectVideoFileUrl, isLikelyVideoLink, toEmbedVideoUrl } from '../../lib/quizMedia';
 import { questionBodyFromRow } from '../../lib/questionText';
 
@@ -194,6 +196,8 @@ export default function QuizBuilder() {
   const [introTab, setIntroTab] = useState<'url' | 'upload'>('url');
   const [questionMediaTab, setQuestionMediaTab] = useState<Record<number, 'url' | 'upload'>>({});
   const [uploading, setUploading] = useState<null | 'intro' | number>(null);
+  const [autoPublish, setAutoPublish] = useState(false);
+  const [publishAt, setPublishAt] = useState('');
 
   const [quizData, setQuizData] = useState<Partial<Quiz>>({
     title: '',
@@ -281,6 +285,11 @@ export default function QuizBuilder() {
             published,
             createdAt: quiz.created_at
           } as Quiz);
+
+          if (row.publish_at) {
+            setAutoPublish(true);
+            setPublishAt(new Date(String(row.publish_at)).toISOString().slice(0, 16));
+          }
 
           let questionRows: any[] | null = null;
 
@@ -584,13 +593,15 @@ export default function QuizBuilder() {
     try {
       let currentQuizId = quizId;
       const settings = { ...defaultSettings(), ...quizData.settings } as QuizSettingsExtended;
+      const effectivePublished = autoPublish ? false : quizData.published;
       const basePayload: Record<string, unknown> = {
         title: quizData.title,
         description: quizData.description,
         course_id: quizData.courseId,
         time_limit: quizData.timeLimit,
-        published: quizData.published,
+        published: effectivePublished,
         settings,
+        publish_at: autoPublish && publishAt ? new Date(publishAt).toISOString() : null,
       };
 
       if (quizId) {
@@ -822,28 +833,81 @@ export default function QuizBuilder() {
                     </div>
                   </div>
 
-                  <label className="flex items-center justify-between gap-3 cursor-pointer rounded-xl border border-slate-100 bg-slate-50/80 px-3 py-2.5">
+                  {/* Publish toggle */}
+                  <label className={cn(
+                    'flex items-center justify-between gap-3 cursor-pointer rounded-xl border px-3 py-2.5 transition-all',
+                    autoPublish ? 'opacity-40 pointer-events-none border-slate-100 bg-slate-50/80' : 'border-slate-100 bg-slate-50/80'
+                  )}>
                     <span className="text-sm font-medium text-slate-700">Publish quiz</span>
                     <input
                       type="checkbox"
-                      checked={!!quizData.published}
+                      checked={!!quizData.published && !autoPublish}
                       onChange={(e) => setQuizData({ ...quizData, published: e.target.checked })}
                       className="sr-only"
+                      disabled={autoPublish}
                     />
-                    <span
-                      className={cn(
-                        'relative inline-flex h-6 w-11 shrink-0 rounded-full border-2 border-transparent transition-colors',
-                        quizData.published ? 'bg-violet-600' : 'bg-slate-300'
-                      )}
-                    >
-                      <span
-                        className={cn(
-                          'pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow transition',
-                          quizData.published ? 'translate-x-5' : 'translate-x-0'
-                        )}
-                      />
+                    <span className={cn('relative inline-flex h-6 w-11 shrink-0 rounded-full border-2 border-transparent transition-colors',
+                      quizData.published && !autoPublish ? 'bg-violet-600' : 'bg-slate-300')}>
+                      <span className={cn('pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow transition',
+                        quizData.published && !autoPublish ? 'translate-x-5' : 'translate-x-0')} />
                     </span>
                   </label>
+
+                  {/* Auto-publish toggle */}
+                  <div className={cn('rounded-xl border transition-all duration-200',
+                    autoPublish ? 'border-violet-200 bg-violet-50/60' : 'border-slate-200 bg-slate-50/60')}>
+                    <label className="flex items-center gap-3 px-3 py-2.5 cursor-pointer select-none">
+                      <div className="relative">
+                        <input
+                          type="checkbox"
+                          checked={autoPublish}
+                          onChange={(e) => {
+                            setAutoPublish(e.target.checked);
+                            if (e.target.checked) {
+                              setQuizData(prev => ({ ...prev, published: false }));
+                            }
+                            if (!e.target.checked) setPublishAt('');
+                          }}
+                          className="sr-only"
+                        />
+                        <div className={cn('w-10 h-5 rounded-full transition-colors duration-200', autoPublish ? 'bg-violet-500' : 'bg-slate-300')}>
+                          <div className={cn('absolute top-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform duration-200',
+                            autoPublish ? 'translate-x-5' : 'translate-x-0.5')} />
+                        </div>
+                      </div>
+                      <div>
+                        <span className={cn('text-sm font-semibold', autoPublish ? 'text-violet-700' : 'text-slate-600')}>
+                          Auto-publish
+                        </span>
+                        <p className="text-[11px] text-slate-400 mt-0.5">Schedule a future publish date</p>
+                      </div>
+                    </label>
+                    <AnimatePresence>
+                      {autoPublish && (
+                        <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }}
+                          exit={{ opacity: 0, height: 0 }} transition={{ duration: 0.2 }} className="overflow-hidden">
+                          <div className="px-3 pb-3 pt-1">
+                            <label className="block text-xs font-semibold text-violet-600 mb-1.5">
+                              <Calendar className="inline w-3.5 h-3.5 mr-1 -mt-0.5" />
+                              Publish date &amp; time
+                            </label>
+                            <input
+                              type="datetime-local"
+                              value={publishAt}
+                              min={new Date().toISOString().slice(0, 16)}
+                              onChange={(e) => setPublishAt(e.target.value)}
+                              className="w-full px-3 py-2 bg-white border border-violet-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-violet-500 transition-all text-slate-700"
+                            />
+                            {publishAt && (
+                              <p className="text-[11px] text-violet-500 mt-1.5 font-medium">
+                                ✓ {new Date(publishAt).toLocaleString()}
+                              </p>
+                            )}
+                          </div>
+                        </motion.div>
+                      )}
+                    </AnimatePresence>
+                  </div>
 
                   <div className="space-y-2 pt-2 border-t border-slate-100">
                     <p className="text-xs font-bold text-slate-500 uppercase tracking-wider flex items-center gap-1.5">
@@ -932,20 +996,36 @@ export default function QuizBuilder() {
                     )}
                   </div>
 
-                  <div className="space-y-2 pt-2 border-t border-slate-100">
+                  <div className="space-y-1.5 pt-2 border-t border-slate-100">
+                    <p className="text-xs font-bold text-slate-500 uppercase tracking-wider flex items-center gap-1.5 mb-2">
+                      <Shuffle className="w-3.5 h-3.5 text-violet-400" />
+                      Quiz behaviour
+                    </p>
                     {[
-                      { key: 'shuffleQuestions' as const, label: 'Shuffle questions' },
-                      { key: 'shuffleAnswers' as const, label: 'Shuffle answers' },
-                      { key: 'allowRetry' as const, label: 'Allow retries' },
-                    ].map(({ key, label }) => (
-                      <label key={key} className="flex items-center gap-3 cursor-pointer">
+                      { key: 'shuffleQuestions' as const, label: 'Shuffle questions', icon: Shuffle, desc: 'Randomise question order' },
+                      { key: 'shuffleAnswers' as const, label: 'Shuffle answers', icon: RefreshCw, desc: 'Randomise answer options' },
+                      { key: 'allowRetry' as const, label: 'Allow retries', icon: RefreshCw, desc: 'Let students retake the quiz' },
+                    ].map(({ key, label, icon: Icon, desc }) => (
+                      <label key={key} className={cn(
+                        'flex items-center justify-between gap-3 cursor-pointer rounded-xl border px-3 py-2.5 transition-all duration-150 select-none',
+                        settings[key] ? 'border-violet-200 bg-violet-50/60' : 'border-slate-100 bg-slate-50/60 hover:border-slate-200'
+                      )}>
+                        <div className="flex items-center gap-2.5 min-w-0">
+                          <Icon className={cn('w-4 h-4 shrink-0', settings[key] ? 'text-violet-500' : 'text-slate-400')} />
+                          <div>
+                            <p className={cn('text-sm font-medium leading-tight', settings[key] ? 'text-violet-700' : 'text-slate-600')}>{label}</p>
+                            <p className="text-[10px] text-slate-400 mt-0.5">{desc}</p>
+                          </div>
+                        </div>
                         <input
                           type="checkbox"
                           checked={!!settings[key]}
                           onChange={(e) => setSettings({ [key]: e.target.checked })}
-                          className="w-4 h-4 rounded border-slate-300 text-violet-600 focus:ring-violet-500"
+                          className="sr-only"
                         />
-                        <span className="text-sm text-slate-600">{label}</span>
+                        <div className={cn('relative w-10 h-5 rounded-full transition-colors duration-200 shrink-0', settings[key] ? 'bg-violet-500' : 'bg-slate-300')}>
+                          <div className={cn('absolute top-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform duration-200', settings[key] ? 'translate-x-5' : 'translate-x-0.5')} />
+                        </div>
                       </label>
                     ))}
                   </div>

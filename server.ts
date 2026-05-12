@@ -5551,6 +5551,7 @@ Assistant:`;
       }
       if (body.published !== undefined) payload.published = Boolean(body.published);
       if (body.settings !== undefined && body.settings !== null) payload.settings = body.settings;
+      if ('publish_at' in body) payload.publish_at = body.publish_at ? new Date(String(body.publish_at)).toISOString() : null;
 
       const { data: inserted, error: insErr } = await insertCompatibleQuizAdmin(payload, caller.userId);
       if (insErr) throw insErr;
@@ -10749,6 +10750,31 @@ async function runModulesPublishAtMigration(): Promise<void> {
   }
 }
 
+async function runQuizzesPublishAtMigration(): Promise<void> {
+  try {
+    await poolQuery(`ALTER TABLE quizzes ADD COLUMN IF NOT EXISTS publish_at timestamptz NULL`);
+    console.log('[migration] quizzes.publish_at column ensured ✓');
+    return;
+  } catch {
+    // fall through to supabaseAdmin probe
+  }
+  try {
+    const probe = await supabaseAdmin.from('quizzes').select('publish_at').limit(1);
+    if (!probe.error) {
+      console.log('[migration] quizzes.publish_at column already exists ✓');
+      return;
+    }
+    const rpcResult = await (supabaseAdmin as any).rpc('exec_sql', {
+      sql: 'ALTER TABLE public.quizzes ADD COLUMN IF NOT EXISTS publish_at timestamptz NULL',
+    });
+    if (rpcResult.error) throw rpcResult.error;
+    console.log('[migration] quizzes.publish_at added via RPC ✓');
+  } catch (err: any) {
+    console.warn('[migration] quizzes.publish_at column could not be auto-created:', err?.message?.split('\n')[0]);
+    console.warn('[migration] Run manually: ALTER TABLE quizzes ADD COLUMN IF NOT EXISTS publish_at timestamptz NULL');
+  }
+}
+
 async function runLessonsPublishAtMigration(): Promise<void> {
   try {
     await poolQuery(`ALTER TABLE lessons ADD COLUMN IF NOT EXISTS publish_at timestamptz NULL`);
@@ -10803,6 +10829,7 @@ async function startServer() {
   void runAssignmentSubmissionsMigration();
   void runModulesPublishAtMigration();
   void runLessonsPublishAtMigration();
+  void runQuizzesPublishAtMigration();
   void ensureAssignmentFilesBucket();
 
   const httpServer = http.createServer();
@@ -10858,6 +10885,31 @@ async function startServer() {
   throw new Error(
     `Unable to start server after trying ports ${preferredPort}-${preferredPort + maxPortAttempts - 1}. Last error: ${lastRecoverableError?.code ?? "unknown"}`,
   );
+}
+
+async function runAutoPublishQuizzes() {
+  try {
+    const now = new Date().toISOString();
+    const { data, error } = await supabaseAdmin
+      .from('quizzes')
+      .select('id, title')
+      .lte('publish_at', now)
+      .neq('published', true);
+    if (error || !data || data.length === 0) return;
+    for (const quiz of data) {
+      const { error: updErr } = await supabaseAdmin
+        .from('quizzes')
+        .update({ published: true, publish_at: null, updated_at: now })
+        .eq('id', quiz.id);
+      if (updErr) {
+        console.error(`[auto-publish] Failed to publish quiz "${quiz.title}":`, updErr.message);
+      } else {
+        console.log(`[auto-publish] Published quiz "${quiz.title}" (${quiz.id})`);
+      }
+    }
+  } catch (e: any) {
+    console.error('[auto-publish] Quizzes scheduler error:', e?.message);
+  }
 }
 
 async function runAutoPublishLessons() {
@@ -10916,6 +10968,9 @@ if (!process.env.VERCEL) {
 
   setInterval(() => { void runAutoPublishLessons(); }, 60_000);
   void runAutoPublishLessons();
+
+  setInterval(() => { void runAutoPublishQuizzes(); }, 60_000);
+  void runAutoPublishQuizzes();
 
   setInterval(() => {
     void flushFailedTelegramAlerts();

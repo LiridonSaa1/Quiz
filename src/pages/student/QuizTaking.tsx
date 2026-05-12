@@ -296,6 +296,25 @@ export default function QuizTaking() {
         }
       }
 
+      // Check allow retries: if allowRetry is false and student already has a completed attempt, block
+      if (settings.allowRetry === false && userId) {
+        try {
+          const { data: existingAttempts } = await supabase
+            .from('quiz_attempts')
+            .select('id')
+            .eq('quiz_id', quizId)
+            .eq('student_id', userId)
+            .not('completed_at', 'is', null)
+            .limit(1);
+          if (existingAttempts && existingAttempts.length > 0) {
+            setLoadError('You have already completed this quiz. The teacher has not enabled retries.');
+            return;
+          }
+        } catch {
+          // Best-effort — if check fails, allow the student in
+        }
+      }
+
       const questionById = new Map(builtQuestions.map((q) => [String(q.id), q] as const));
       let formattedQuestions: Question[] = builtQuestions;
 
@@ -308,6 +327,16 @@ export default function QuizTaking() {
         }
       } else if (formattedQuiz.settings.shuffleQuestions) {
         formattedQuestions = [...builtQuestions].sort(() => Math.random() - 0.5);
+      }
+
+      // Shuffle answer options if enabled (shuffle once at load, not on every render)
+      if (formattedQuiz.settings.shuffleAnswers) {
+        formattedQuestions = formattedQuestions.map((q) => ({
+          ...q,
+          options: Array.isArray(q.options) && q.options.length > 1
+            ? [...q.options].sort(() => Math.random() - 0.5)
+            : q.options,
+        }));
       }
 
       if (formattedQuestions.length === 0) {

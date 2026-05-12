@@ -26,6 +26,13 @@ export function missingQuizzesPublishedColumn(err: unknown): boolean {
   return false;
 }
 
+/** Generic: true when PostgREST reports a specific column is missing from the quizzes table. */
+export function isColumnMissingError(err: unknown, column: string): boolean {
+  const e = err as { message?: string; details?: string; hint?: string; code?: string };
+  const hay = `${e?.message || ''} ${e?.details || ''} ${e?.hint || ''}`.toLowerCase();
+  return (e?.code === 'PGRST204' || e?.code === '42703') && hay.includes(column.toLowerCase());
+}
+
 /** True when PostgREST reports `quizzes.settings` missing (older DBs store pass rules in pass_mark only). */
 export function missingQuizzesSettingsColumn(err: unknown): boolean {
   const e = err as { message?: string; details?: string; hint?: string; code?: string };
@@ -115,6 +122,12 @@ export async function updateCompatibleQuiz(
     if (missingQuizzesPublishedColumn(err) && 'published' in payload) {
       const { published: _p, ...rest } = payload;
       void _p;
+      payload = rest;
+      continue;
+    }
+    if ('publish_at' in payload && isColumnMissingError(err, 'publish_at')) {
+      const { publish_at: _pa, ...rest } = payload;
+      void _pa;
       payload = rest;
       continue;
     }
