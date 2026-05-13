@@ -1,66 +1,73 @@
 import React from 'react';
 import { cn } from '../../lib/utils';
-
-export type Gender = 'male' | 'female';
-
-const FEMALE_ENDINGS = ['ita', 'ina', 'eta', 'isa', 'ela', 'ora', 'ura', 'ara', 'ana', 'ola', 'lla', 'ia', 'ra', 'sa', 'na', 'ta', 'a'];
-
-export function resolveGender(gender?: string | null, name?: string): Gender {
-  if (gender) {
-    const g = gender.toLowerCase();
-    if (g === 'male' || g === 'm') return 'male';
-    if (g === 'female' || g === 'f') return 'female';
-  }
-  if (name) {
-    const first = name.trim().toLowerCase().split(' ')[0];
-    for (const end of FEMALE_ENDINGS) {
-      if (first.endsWith(end) && first.length > end.length + 1) return 'female';
-    }
-  }
-  return 'male';
-}
+import { resolveGender } from '../../lib/genderUtils';
 
 const MaleIcon = () => (
-  <svg viewBox="0 0 64 64" fill="none" className="w-full h-full">
-    {/* Body/shirt */}
-    <rect x="16" y="38" width="32" height="22" rx="6" fill="#cbd5e1" />
-    {/* Tie */}
-    <polygon points="32,40 29,46 32,52 35,46" fill="#94a3b8" />
-    <rect x="30" y="37" width="4" height="5" rx="1" fill="#94a3b8" />
+  <svg viewBox="0 0 80 80" fill="none" className="w-full h-full">
+    {/* Suit body */}
+    <path d="M14 80 Q14 56 40 53 Q66 56 66 80Z" fill="#64748b" />
+    {/* Collar left */}
+    <path d="M33 53 L40 65 L40 80 L14 80 L14 72 Q28 68 33 53Z" fill="#475569" />
+    {/* Collar right */}
+    <path d="M47 53 L40 65 L40 80 L66 80 L66 72 Q52 68 47 53Z" fill="#475569" />
+    {/* Shirt/tie center */}
+    <path d="M36 53 L40 58 L44 53 L42 65 L40 68 L38 65Z" fill="#e2e8f0" />
+    {/* Tie knot */}
+    <rect x="38" y="53" width="4" height="4" rx="1" fill="#94a3b8" />
+    {/* Neck */}
+    <rect x="35" y="45" width="10" height="10" rx="3" fill="#94a3b8" />
     {/* Head */}
-    <circle cx="32" cy="26" r="11" fill="#cbd5e1" />
+    <circle cx="40" cy="32" r="16" fill="#94a3b8" />
     {/* Hair */}
-    <path d="M21 22 Q22 14 32 13 Q42 14 43 22 Q40 18 32 18 Q24 18 21 22Z" fill="#64748b" />
-    {/* Ears */}
-    <ellipse cx="21" cy="27" rx="2.5" ry="3" fill="#cbd5e1" />
-    <ellipse cx="43" cy="27" rx="2.5" ry="3" fill="#cbd5e1" />
-    {/* Face details */}
-    <ellipse cx="27.5" cy="27" rx="1.5" ry="2" fill="#94a3b8" />
-    <ellipse cx="36.5" cy="27" rx="1.5" ry="2" fill="#94a3b8" />
-    <path d="M28 33 Q32 36 36 33" stroke="#94a3b8" strokeWidth="1.5" strokeLinecap="round" fill="none" />
+    <path d="M24 28 Q25 14 40 12 Q55 14 56 28 Q53 20 40 19 Q27 20 24 28Z" fill="#475569" />
+    {/* Ear left */}
+    <ellipse cx="24" cy="33" rx="3" ry="4" fill="#94a3b8" />
+    {/* Ear right */}
+    <ellipse cx="56" cy="33" rx="3" ry="4" fill="#94a3b8" />
+    {/* Eyes */}
+    <ellipse cx="34" cy="32" rx="2.5" ry="3" fill="#475569" />
+    <ellipse cx="46" cy="32" rx="2.5" ry="3" fill="#475569" />
+    {/* Smile */}
+    <path d="M34 42 Q40 46 46 42" stroke="#475569" strokeWidth="2" strokeLinecap="round" fill="none" />
   </svg>
 );
 
 const FemaleIcon = () => (
-  <svg viewBox="0 0 64 64" fill="none" className="w-full h-full">
-    {/* Body/blouse */}
-    <rect x="16" y="38" width="32" height="22" rx="6" fill="#e2e8f0" />
-    {/* Necklace/collar detail */}
-    <path d="M24 39 Q32 43 40 39" stroke="#cbd5e1" strokeWidth="2" fill="none" />
-    {/* Head */}
-    <circle cx="32" cy="26" r="11" fill="#e2e8f0" />
-    {/* Hair - longer/curly */}
-    <path d="M20 22 Q18 12 32 11 Q46 12 44 22 Q44 28 46 32 Q44 30 43 26 Q40 18 32 17 Q24 18 21 26 Q20 30 18 32 Q16 28 20 22Z" fill="#94a3b8" />
-    {/* Side hair curls */}
-    <path d="M21 26 Q18 30 19 35 Q20 32 22 30" fill="#94a3b8" />
-    <path d="M43 26 Q46 30 45 35 Q44 32 42 30" fill="#94a3b8" />
-    {/* Ears */}
-    <ellipse cx="21" cy="27" rx="2.5" ry="3" fill="#e2e8f0" />
-    <ellipse cx="43" cy="27" rx="2.5" ry="3" fill="#e2e8f0" />
-    {/* Face details */}
-    <ellipse cx="27.5" cy="27" rx="1.5" ry="2" fill="#94a3b8" />
-    <ellipse cx="36.5" cy="27" rx="1.5" ry="2" fill="#94a3b8" />
-    <path d="M28 33 Q32 36.5 36 33" stroke="#94a3b8" strokeWidth="1.5" strokeLinecap="round" fill="none" />
+  <svg viewBox="0 0 80 80" fill="none" className="w-full h-full">
+    {/* Body */}
+    <path d="M16 80 Q16 57 40 54 Q64 57 64 80Z" fill="#94a3b8" />
+    {/* Top clothing */}
+    <path d="M30 54 Q40 57 50 54 L48 80 L32 80Z" fill="#cbd5e1" />
+    {/* Neck */}
+    <rect x="35" y="46" width="10" height="10" rx="3" fill="#b0bec5" />
+    {/* Curly hair — multiple overlapping circles for poofy/afro look */}
+    <circle cx="40" cy="16" r="9" fill="#64748b" />
+    <circle cx="26" cy="20" r="8" fill="#64748b" />
+    <circle cx="54" cy="20" r="8" fill="#64748b" />
+    <circle cx="20" cy="30" r="7" fill="#64748b" />
+    <circle cx="60" cy="30" r="7" fill="#64748b" />
+    <circle cx="23" cy="40" r="6" fill="#64748b" />
+    <circle cx="57" cy="40" r="6" fill="#64748b" />
+    <circle cx="33" cy="15" r="7" fill="#64748b" />
+    <circle cx="47" cy="15" r="7" fill="#64748b" />
+    {/* Head (face on top of hair) */}
+    <circle cx="40" cy="33" r="14" fill="#b0bec5" />
+    {/* Ear left */}
+    <ellipse cx="26" cy="34" rx="3" ry="4" fill="#b0bec5" />
+    {/* Ear right */}
+    <ellipse cx="54" cy="34" rx="3" ry="4" fill="#b0bec5" />
+    {/* Eyes */}
+    <ellipse cx="35" cy="32" rx="2.5" ry="3" fill="#475569" />
+    <ellipse cx="45" cy="32" rx="2.5" ry="3" fill="#475569" />
+    {/* Eyelashes */}
+    <path d="M32.5 29 L33 27" stroke="#475569" strokeWidth="1" />
+    <path d="M35 28.5 L35 26.5" stroke="#475569" strokeWidth="1" />
+    <path d="M37.5 29 L37 27" stroke="#475569" strokeWidth="1" />
+    <path d="M42.5 29 L43 27" stroke="#475569" strokeWidth="1" />
+    <path d="M45 28.5 L45 26.5" stroke="#475569" strokeWidth="1" />
+    <path d="M47.5 29 L47 27" stroke="#475569" strokeWidth="1" />
+    {/* Smile */}
+    <path d="M35 42 Q40 46 45 42" stroke="#475569" strokeWidth="2" strokeLinecap="round" fill="none" />
   </svg>
 );
 
@@ -74,8 +81,7 @@ interface GenderAvatarProps {
 export default function GenderAvatar({ gender, name, size = 'md', className }: GenderAvatarProps) {
   const resolved = resolveGender(gender, name);
   const isFemale = resolved === 'female';
-
-  const sizeClass = size === 'sm' ? 'w-10 h-10' : size === 'lg' ? 'w-14 h-14' : 'w-12 h-12';
+  const sizeClass = size === 'sm' ? 'w-10 h-10' : size === 'lg' ? 'w-16 h-16' : 'w-12 h-12';
 
   return (
     <div

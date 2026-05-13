@@ -3305,6 +3305,24 @@ Assistant:`;
         const aggr = attemptsByStudent[sid] || { attempts: 0, passed: 0, scoreSum: 0 };
         const avgScore = aggr.attempts > 0 ? Math.round(aggr.scoreSum / aggr.attempts) : 0;
         const passRate = aggr.attempts > 0 ? Math.round((aggr.passed / aggr.attempts) * 100) : 0;
+
+        const studentAttempts = attemptsRows.filter((a: any) => String(a.student_id || "") === sid);
+        const sortedAttempts = [...studentAttempts].sort((a: any, b: any) =>
+          new Date(b.completed_at || 0).getTime() - new Date(a.completed_at || 0).getTime()
+        );
+        const lastAttemptDate: string | null = sortedAttempts[0]?.completed_at || null;
+
+        const courseCount: Record<string, number> = {};
+        studentAttempts.forEach((a: any) => {
+          const quiz = quizRows.find((q: any) => String(q.id || "") === String(a.quiz_id || ""));
+          if (quiz?.course_id) {
+            const cid = String(quiz.course_id);
+            courseCount[cid] = (courseCount[cid] || 0) + 1;
+          }
+        });
+        const topCourseId = Object.entries(courseCount).sort(([, a], [, b]) => (b as number) - (a as number))[0]?.[0];
+        const topCourse = courseRows.find((c: any) => String(c.id || "") === topCourseId);
+
         return {
           studentId: sid,
           studentName: String(s.display_name || "Unknown Student"),
@@ -3313,6 +3331,8 @@ Assistant:`;
           passed: aggr.passed,
           passRate,
           avgScore,
+          lastAttemptDate,
+          topCourseName: topCourse?.title || null,
         };
       });
 
