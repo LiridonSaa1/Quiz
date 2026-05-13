@@ -20,6 +20,7 @@ import {
 import { cn } from '../../lib/utils';
 import { format, isPast, isToday, formatDistanceToNow } from 'date-fns';
 import { authFetch } from '../../lib/apiUrl';
+import { supabase } from '../../supabase';
 import { LoadingButton } from '../../components/ui/LoadingButton';
 
 type AssignmentStatus = 'draft' | 'published' | 'closed';
@@ -338,9 +339,11 @@ export default function TeacherAssignments() {
   const fetchData = async () => {
     setLoading(true);
     try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const userId = session?.user?.id || '';
       const [aRes, cRes, clRes] = await Promise.all([
         authFetch('/api/teacher/assignments'),
-        authFetch('/api/teacher/courses'),
+        authFetch(userId ? `/api/teacher/courses?userId=${encodeURIComponent(userId)}` : '/api/teacher/courses'),
         authFetch('/api/teacher/classes'),
       ]);
       const aJson = aRes.ok ? await aRes.json() : { assignments: [] };
