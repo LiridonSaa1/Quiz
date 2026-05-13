@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import TeacherLayout from '../../components/layout/TeacherLayout';
 import { supabase } from '../../supabase';
 import { toast } from 'sonner';
+import GenderAvatar from '../../components/ui/GenderAvatar';
 import {
   AdminListFilterBar,
   AdminListPageShell,
@@ -148,18 +149,10 @@ export default function TeacherProgress() {
             <>
               <div className={ADMIN_LIST_CARD_GRID}>
                 {filtered.map((row) => {
-                  const initials = row.studentName.split(' ').map((n) => n[0]).join('').substring(0, 2).toUpperCase();
                   return (
-                    <div key={row.studentId} className={ADMIN_LIST_ITEM_CARD}>
+                    <div key={row.studentId} className={ADMIN_LIST_ITEM_CARD} style={{ borderLeftWidth: '4px', borderLeftColor: row.avgScore >= 70 ? '#10b981' : row.avgScore >= 50 ? '#f59e0b' : '#f43f5e' }}>
                       <div className="flex items-start gap-3">
-                        <div
-                          className={cn(
-                            'w-12 h-12 rounded-xl bg-gradient-to-br flex items-center justify-center text-white text-sm font-bold shrink-0',
-                            getAvatarColor(row.studentName),
-                          )}
-                        >
-                          {initials}
-                        </div>
+                        <GenderAvatar name={row.studentName} />
                         <div className="min-w-0 flex-1">
                           <p className="font-semibold text-slate-900 text-sm">{row.studentName}</p>
                           <p className="text-xs text-slate-400 truncate">{row.studentEmail}</p>

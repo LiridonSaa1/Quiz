@@ -2,6 +2,7 @@ import React, { useEffect, useState, useMemo } from 'react';
 import { supabase } from '../../supabase';
 import TeacherLayout from '../../components/layout/TeacherLayout';
 import { Users, UserPlus, Search, UserCheck, UserX, BookOpen, X, Pencil, Trash2 } from 'lucide-react';
+import GenderAvatar from '../../components/ui/GenderAvatar';
 import { toast } from 'sonner';
 import { UserProfile, UserRole } from '../../types';
 import { cn } from '../../lib/utils';
@@ -410,11 +411,9 @@ export default function StudentManagement() {
               {filtered.map(student => {
                 const enrolledCount = student.enrolledCourses.length;
                 return (
-                  <div key={student.uid} className={ADMIN_LIST_ITEM_CARD}>
+                  <div key={student.uid} className={ADMIN_LIST_ITEM_CARD} style={{ borderLeftWidth: '4px', borderLeftColor: student.status === 'active' ? '#10b981' : '#94a3b8' }}>
                     <div className="flex items-center gap-3 min-w-0">
-                      <div className={`w-11 h-11 rounded-xl bg-gradient-to-br ${getAvatarColor(student.displayName || student.email || '')} flex items-center justify-center text-white font-bold text-sm shrink-0`}>
-                        {(student.displayName || student.email || '?').charAt(0).toUpperCase()}
-                      </div>
+                      <GenderAvatar name={student.displayName || student.email} />
                       <div className="min-w-0 flex-1">
                         <div className="text-sm font-semibold text-slate-900 truncate">{student.displayName || '—'}</div>
                         <div className="text-xs text-slate-400 truncate">{student.email}</div>

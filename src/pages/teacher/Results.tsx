@@ -2,6 +2,7 @@ import React, { useEffect, useState, useMemo, useCallback, useRef } from 'react'
 import * as XLSX from 'xlsx';
 import { supabase } from '../../supabase';
 import TeacherLayout from '../../components/layout/TeacherLayout';
+import GenderAvatar from '../../components/ui/GenderAvatar';
 import { motion } from 'motion/react';
 import {
   AdminListFilterBar,
@@ -571,23 +572,10 @@ export default function TeacherResults() {
                   const st = students[attempt.studentId];
                   const studentName = st?.name || 'Unknown Student';
                   const quizName = quizzes[attempt.quizId] || 'Unknown Quiz';
-                  const initials = studentName
-                    .split(' ')
-                    .map((w) => w[0])
-                    .join('')
-                    .slice(0, 2)
-                    .toUpperCase();
                   return (
-                    <div key={attempt.id} className={ADMIN_LIST_ITEM_CARD}>
+                    <div key={attempt.id} className={ADMIN_LIST_ITEM_CARD} style={{ borderLeftWidth: '4px', borderLeftColor: attempt.passed ? '#10b981' : attempt.status === 'completed' ? '#f43f5e' : '#f59e0b' }}>
                       <div className="flex items-start gap-3">
-                        <div
-                          className={cn(
-                            'w-11 h-11 rounded-xl bg-gradient-to-br flex items-center justify-center text-white text-xs font-bold shrink-0 shadow-sm',
-                            avatarColor(studentName),
-                          )}
-                        >
-                          {initials}
-                        </div>
+                        <GenderAvatar name={studentName} />
                         <div className="min-w-0 flex-1">
                           <p className="font-semibold text-slate-900 text-sm truncate">{studentName}</p>
                           {st?.email && <p className="text-xs text-slate-400 truncate">{st.email}</p>}

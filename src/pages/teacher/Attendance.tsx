@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import TeacherLayout from '../../components/layout/TeacherLayout';
 import { toast } from 'sonner';
+import GenderAvatar from '../../components/ui/GenderAvatar';
 import { motion } from 'motion/react';
 import {
   AdminListFilterBar,
@@ -484,14 +485,11 @@ export default function TeacherAttendance() {
                 {filtered.map(r => {
                   const sc = STATUS_CFG[r.status];
                   const name = r.student?.display_name || 'Unknown';
-                  const initials = name.split(' ').map(n => n[0]).join('').substring(0, 2).toUpperCase();
                   return (
-                    <div key={r.id} className={ADMIN_LIST_ITEM_CARD}>
+                    <div key={r.id} className={ADMIN_LIST_ITEM_CARD} style={{ borderLeftWidth: '4px', borderLeftColor: r.status === 'present' ? '#10b981' : r.status === 'absent' ? '#f43f5e' : r.status === 'late' ? '#f59e0b' : '#6366f1' }}>
                       <div className="flex items-start justify-between gap-3">
                         <div className="flex items-center gap-3 min-w-0">
-                          <div className={cn('w-10 h-10 rounded-full bg-gradient-to-br flex items-center justify-center text-white text-xs font-bold shrink-0', getAvatarColor(name))}>
-                            {initials}
-                          </div>
+                          <GenderAvatar name={name} size="sm" />
                           <div className="min-w-0">
                             <p className="font-semibold text-slate-900 text-sm truncate">{name}</p>
                             <p className="text-xs text-slate-400 truncate">{r.student?.email}</p>

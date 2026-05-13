@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import AdminLayout from '../../components/layout/AdminLayout';
 import { toast } from 'sonner';
+import GenderAvatar from '../../components/ui/GenderAvatar';
 import { motion } from 'motion/react';
 import {
   AdminListFilterBar,
@@ -339,14 +340,11 @@ export default function AdminCertificates() {
               {filtered.map(cert => {
                 const sc = STATUS_CFG[cert.status];
                 const name = cert.student?.display_name || 'Unknown';
-                const initials = name.split(' ').map(n => n[0]).join('').substring(0, 2).toUpperCase();
                 const gradeColor = cert.grade ? (GRADE_COLORS[cert.grade] || 'text-slate-600 bg-slate-100') : null;
                 return (
-                  <div key={cert.id} className={ADMIN_LIST_ITEM_CARD}>
+                  <div key={cert.id} className={ADMIN_LIST_ITEM_CARD} style={{ borderLeftWidth: '4px', borderLeftColor: cert.status === 'issued' ? '#10b981' : '#f43f5e' }}>
                     <div className="flex items-start gap-3">
-                      <div className={cn('w-12 h-12 rounded-xl bg-gradient-to-br flex items-center justify-center text-white text-sm font-bold shrink-0', getAvatarColor(name))}>
-                        {initials}
-                      </div>
+                      <GenderAvatar name={name} />
                       <div className="min-w-0 flex-1">
                         <p className="font-semibold text-slate-900 text-sm">{name}</p>
                         <p className="text-xs text-slate-400 truncate">{cert.student?.email}</p>
