@@ -1,7 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import { Toaster, toast } from 'sonner';
-import { SpeedInsights } from '@vercel/speed-insights/react';
 import { supabase } from './supabase';
 import { UserProfile } from './types';
 import { AppBootSkeleton } from './components/ui/Skeleton';
@@ -362,7 +361,6 @@ export default function App() {
         <Route path="*" element={<Navigate to="/not-found" replace />} />
       </Routes>
       {user && <ChatBot userRole={user.role} />}
-      <SpeedInsights />
     </Router>
   );
 }
