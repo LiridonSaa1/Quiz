@@ -618,8 +618,9 @@ export default function QuizBuilder() {
             description: quizData.description,
             course_id: quizData.courseId,
             time_limit: quizData.timeLimit,
-            published: quizData.published,
+            published: effectivePublished,
             settings,
+            publish_at: autoPublish && publishAt ? new Date(publishAt).toISOString() : null,
           }),
         });
         if (!createRes.ok) throw new Error(await readApiError(createRes));
