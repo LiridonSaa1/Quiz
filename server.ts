@@ -10168,21 +10168,40 @@ Assistant:`;
       const caller = await assertAuthenticated(req, res);
       if (!caller) return;
       if (caller.role !== 'teacher' && caller.role !== 'admin') return res.status(403).json({ error: 'Forbidden' });
-      let rows: any[];
+
+      // Always include caller.userId so even if teachers table lookup fails we still scope correctly
+      let scopedIds: string[] = [caller.userId];
       try {
         const teacherIds = await getTeacherIdCandidates(caller.userId);
-        const scopedIds = teacherIds.length > 0 ? teacherIds : [caller.userId];
-        const result = caller.role === 'teacher'
-          ? await poolQuery(`SELECT * FROM assignments WHERE teacher_id = ANY($1::uuid[]) ORDER BY created_at DESC`, [scopedIds])
-          : await poolQuery(`SELECT * FROM assignments ORDER BY created_at DESC`);
-        rows = result.rows;
+        if (teacherIds.length > 0) scopedIds = teacherIds;
       } catch {
-        const query = supabaseAdmin.from('assignments').select('*').order('created_at', { ascending: false });
-        const { data, error } = await query;
-        if (error) return res.status(500).json({ error: error.message });
-        rows = data || [];
+        // teachers table may not exist — scopedIds stays as [caller.userId]
       }
-      res.json({ success: true, assignments: rows });
+
+      // Try direct SQL first (bypasses PostgREST schema cache)
+      try {
+        const result = caller.role === 'teacher'
+          ? await poolQuery(
+              `SELECT * FROM assignments WHERE teacher_id = ANY($1::uuid[]) ORDER BY created_at DESC`,
+              [scopedIds]
+            )
+          : await poolQuery(`SELECT * FROM assignments ORDER BY created_at DESC`);
+        console.log(`[assignments] GET via poolQuery: ${result.rows.length} rows (role=${caller.role})`);
+        return res.json({ success: true, assignments: result.rows });
+      } catch (sqlErr: any) {
+        console.warn('[assignments] poolQuery failed, falling back to supabaseAdmin:', sqlErr?.message);
+      }
+
+      // Fallback: supabaseAdmin (PostgREST)
+      let query = supabaseAdmin.from('assignments').select('*').order('created_at', { ascending: false });
+      if (caller.role === 'teacher') query = (query as any).in('teacher_id', scopedIds);
+      const { data, error } = await query;
+      if (error) {
+        console.warn('[assignments] supabaseAdmin GET error:', error.message);
+        return res.json({ success: true, assignments: [] });
+      }
+      console.log(`[assignments] GET via supabaseAdmin: ${(data || []).length} rows`);
+      return res.json({ success: true, assignments: data || [] });
     } catch (e: any) { res.status(500).json({ error: e.message }); }
   });
 

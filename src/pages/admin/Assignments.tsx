@@ -11,6 +11,7 @@ import {
   ADMIN_LIST_ITEM_CARD,
 } from '../../components/admin/AdminListPageShell';
 import { supabase } from '../../supabase';
+import { authFetch } from '../../lib/apiUrl';
 import {
   ClipboardList, Plus, Search, Star,
   X, Pencil, Trash2, CheckCircle2, Archive, FileText, AlertCircle, Clock,
@@ -97,13 +98,14 @@ export default function AdminAssignments() {
   const fetchData = async () => {
     setLoading(true);
     try {
-      const [{ data: rawData, error }, { data: c }, { data: t }, { data: cl }] = await Promise.all([
-        supabase.from('assignments').select('*').order('created_at', { ascending: false }),
+      const [aRes, { data: c }, { data: t }, { data: cl }] = await Promise.all([
+        authFetch('/api/teacher/assignments'),
         supabase.from('courses').select('id,title'),
         supabase.from('profiles').select('id,display_name').in('role', ['teacher', 'admin']),
         supabase.from('classes').select('id,name'),
       ]);
-      if (error) throw error;
+      const aJson = aRes.ok ? await aRes.json() : { assignments: [] };
+      const rawData: any[] = aJson.assignments || [];
 
       const courseMap: Record<string, string> = {};
       (c || []).forEach((course: any) => { courseMap[course.id] = course.title; });
@@ -112,7 +114,7 @@ export default function AdminAssignments() {
       const classMap: Record<string, string> = {};
       (cl || []).forEach((cls: any) => { classMap[cls.id] = cls.name; });
 
-      setAssignments((rawData || []).map((a: any) => ({
+      setAssignments(rawData.map((a: any) => ({
         ...a,
         course: a.course_id ? { title: courseMap[a.course_id] } : null,
         teacher: a.teacher_id ? { display_name: teacherMap[a.teacher_id] } : null,
@@ -164,27 +166,19 @@ export default function AdminAssignments() {
     if (!form.title.trim()) { toast.error('Title is required'); return; }
     setSaving(true);
     try {
-      const payload: any = {
+      const payload = {
         title: form.title.trim(), description: form.description || null,
         instructions: form.instructions || null,
         course_id: form.course_id || null, teacher_id: form.teacher_id || null,
         class_id: form.class_id || null, type: form.type,
         due_date: form.due_date || null, max_score: Number(form.max_score),
         status: form.status, allow_late_submission: form.allow_late_submission,
-        updated_at: new Date().toISOString(),
       };
-
-      const tryOp = async (p: any) => editId
-        ? supabase.from('assignments').update(p).eq('id', editId)
-        : supabase.from('assignments').insert({ ...p, created_at: new Date().toISOString() });
-
-      let result = await tryOp(payload);
-      if (result.error && /column|schema cache/i.test(result.error.message)) {
-        const { instructions, allow_late_submission, ...safe } = payload;
-        result = await tryOp(safe);
-      }
-      if (result.error) throw result.error;
-
+      const url = editId ? `/api/teacher/assignments/${editId}` : '/api/teacher/assignments';
+      const method = editId ? 'PATCH' : 'POST';
+      const res = await authFetch(url, { method, body: JSON.stringify(payload) });
+      const j = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error((j as any).error || 'Failed to save');
       toast.success(editId ? 'Assignment updated' : 'Assignment created');
       setShowModal(false);
       fetchData();
@@ -197,8 +191,8 @@ export default function AdminAssignments() {
 
   const handleDelete = async (id: string) => {
     try {
-      const { error } = await supabase.from('assignments').delete().eq('id', id);
-      if (error) throw error;
+      const res = await authFetch(`/api/teacher/assignments/${id}`, { method: 'DELETE' });
+      if (!res.ok) throw new Error('Failed to delete');
       toast.success('Assignment deleted');
       setDeleteId(null);
       fetchData();
