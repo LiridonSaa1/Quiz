@@ -10163,6 +10163,17 @@ Assistant:`;
   });
 
   // ── Teacher Assignment CRUD (poolQuery — bypasses PostgREST schema cache) ────
+  // Trigger auto-publish check immediately (called by frontend on page load)
+  app.post('/api/teacher/assignments/trigger-autopublish', async (req: Request, res: Response) => {
+    try {
+      const caller = await assertAuthenticated(req, res);
+      if (!caller) return;
+      if (caller.role !== 'teacher' && caller.role !== 'admin') return res.status(403).json({ error: 'Forbidden' });
+      await runAutoPublishAssignments();
+      return res.json({ success: true });
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
   app.get('/api/teacher/assignments', async (req: Request, res: Response) => {
     try {
       const caller = await assertAuthenticated(req, res);
@@ -10949,6 +10960,16 @@ async function runAssignmentSubmissionsMigration() {
   } catch (err: any) {
     console.warn('[migration] assignments submission_config:', err?.message?.split('\n')[0]);
   }
+  try {
+    await poolQuery(`ALTER TABLE assignments ADD COLUMN IF NOT EXISTS publish_at timestamptz NULL`);
+    console.log('[migration] assignments.publish_at column ensured ✓');
+  } catch (err: any) {
+    if (!String(err?.message || '').toLowerCase().includes('already exists')) {
+      console.warn('[migration] assignments.publish_at:', err?.message?.split('\n')[0]);
+    } else {
+      console.log('[migration] assignments.publish_at column already exists ✓');
+    }
+  }
 }
 
 async function runModulesPublishAtMigration(): Promise<void> {
@@ -11189,12 +11210,44 @@ async function runAutoPublishLessons() {
 async function runAutoPublishAssignments() {
   try {
     const now = new Date().toISOString();
+    // Try direct SQL first — single UPDATE is atomic and avoids PostgREST schema cache issues
+    try {
+      const result = await poolQuery(
+        `UPDATE assignments
+         SET status = 'published', publish_at = NULL, updated_at = $1
+         WHERE publish_at IS NOT NULL
+           AND publish_at <= $1
+           AND status != 'published'
+         RETURNING id, title`,
+        [now]
+      );
+      if (result.rows.length > 0) {
+        for (const a of result.rows) {
+          console.log(`[auto-publish] Published assignment "${a.title}" (${a.id})`);
+        }
+      }
+      return;
+    } catch (sqlErr: any) {
+      // If publish_at column missing, try to add it then bail (next tick will publish)
+      if (String(sqlErr?.message || '').includes('publish_at')) {
+        try {
+          await poolQuery(`ALTER TABLE assignments ADD COLUMN IF NOT EXISTS publish_at timestamptz NULL`);
+          console.log('[auto-publish] Added missing publish_at column ✓');
+        } catch { /* ignore */ }
+      }
+      console.warn('[auto-publish] poolQuery failed, falling back to supabaseAdmin:', sqlErr?.message?.split('\n')[0]);
+    }
+    // Fallback: supabaseAdmin
     const { data, error } = await supabaseAdmin
       .from('assignments')
       .select('id, title')
       .lte('publish_at', now)
       .neq('status', 'published');
-    if (error || !data || data.length === 0) return;
+    if (error) {
+      console.warn('[auto-publish] assignments query error (publish_at may be missing):', error.message?.split('\n')[0]);
+      return;
+    }
+    if (!data || data.length === 0) return;
     for (const a of data) {
       const { error: updErr } = await supabaseAdmin
         .from('assignments')

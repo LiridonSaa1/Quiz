@@ -334,7 +334,18 @@ export default function TeacherAssignments() {
   const [deleting, setDeleting] = useState(false);
   const [submissionsFor, setSubmissionsFor] = useState<Assignment | null>(null);
 
-  useEffect(() => { fetchData(); }, []);
+  useEffect(() => {
+    // Trigger server-side auto-publish check immediately on page load
+    authFetch('/api/teacher/assignments/trigger-autopublish', { method: 'POST' }).catch(() => {});
+    fetchData();
+
+    // Poll every 30s to pick up auto-published status changes
+    const interval = setInterval(() => {
+      authFetch('/api/teacher/assignments/trigger-autopublish', { method: 'POST' }).catch(() => {});
+      fetchData();
+    }, 30_000);
+    return () => clearInterval(interval);
+  }, []);
 
   const fetchData = async () => {
     setLoading(true);
