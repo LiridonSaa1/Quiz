@@ -10162,6 +10162,110 @@ Assistant:`;
     } catch (e: any) { res.status(500).json({ error: e.message }); }
   });
 
+  // ── Teacher Assignment CRUD (supabaseAdmin — bypasses RLS / missing columns) ─────
+  app.get('/api/teacher/assignments', async (req: Request, res: Response) => {
+    try {
+      const caller = await assertAuthenticated(req, res);
+      if (!caller) return;
+      if (caller.role !== 'teacher' && caller.role !== 'admin') return res.status(403).json({ error: 'Forbidden' });
+      const teacherIds = await getTeacherIdCandidates(caller.userId);
+      const scopedIds = teacherIds.length > 0 ? teacherIds : [caller.userId];
+      let query = supabaseAdmin.from('assignments').select('*').order('created_at', { ascending: false });
+      if (caller.role === 'teacher') query = query.in('teacher_id', scopedIds);
+      const { data, error } = await query;
+      if (error) return res.status(500).json({ error: error.message });
+      res.json({ success: true, assignments: data || [] });
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  app.post('/api/teacher/assignments', async (req: Request, res: Response) => {
+    try {
+      const caller = await assertAuthenticated(req, res);
+      if (!caller) return;
+      if (caller.role !== 'teacher' && caller.role !== 'admin') return res.status(403).json({ error: 'Forbidden' });
+      const b = req.body as Record<string, unknown>;
+      if (!b.title) return res.status(400).json({ error: 'Title is required' });
+      const now = new Date().toISOString();
+      const base: Record<string, unknown> = {
+        title: String(b.title),
+        description: b.description != null ? String(b.description) : null,
+        course_id: b.course_id || null, class_id: b.class_id || null,
+        teacher_id: b.teacher_id || caller.userId,
+        type: b.type || 'homework',
+        due_date: b.due_date || null,
+        max_score: Number(b.max_score) || 100,
+        status: b.status || 'draft',
+        created_at: now, updated_at: now,
+      };
+      let payload = { ...base };
+      // optional columns — strip on schema error
+      if (b.instructions != null) payload.instructions = String(b.instructions);
+      if (b.allow_late_submission !== undefined) payload.allow_late_submission = Boolean(b.allow_late_submission);
+      if (b.submission_config !== undefined) payload.submission_config = b.submission_config;
+      if ('publish_at' in b) payload.publish_at = b.publish_at ? new Date(String(b.publish_at)).toISOString() : null;
+      for (let i = 0; i < 8; i++) {
+        const { data, error } = await supabaseAdmin.from('assignments').insert(payload).select('id').single();
+        if (!error && data?.id) return res.json({ success: true, assignment: { id: data.id } });
+        if (!error) return res.status(500).json({ error: 'Insert returned no id' });
+        const msg = (error.message || '').toLowerCase();
+        if (/column|schema cache|does not exist/i.test(msg) && msg.includes('instructions') && 'instructions' in payload) { const { instructions: _, ...r } = payload; payload = r; continue; }
+        if (/column|schema cache|does not exist/i.test(msg) && msg.includes('allow_late') && 'allow_late_submission' in payload) { const { allow_late_submission: _, ...r } = payload; payload = r; continue; }
+        if (/column|schema cache|does not exist/i.test(msg) && msg.includes('submission_config') && 'submission_config' in payload) { const { submission_config: _, ...r } = payload; payload = r; continue; }
+        if (/column|schema cache|does not exist/i.test(msg) && msg.includes('publish_at') && 'publish_at' in payload) { const { publish_at: _, ...r } = payload; payload = r; continue; }
+        return res.status(500).json({ error: error.message });
+      }
+      res.status(500).json({ error: 'Max retries exceeded' });
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  app.patch('/api/teacher/assignments/:id', async (req: Request, res: Response) => {
+    try {
+      const caller = await assertAuthenticated(req, res);
+      if (!caller) return;
+      if (caller.role !== 'teacher' && caller.role !== 'admin') return res.status(403).json({ error: 'Forbidden' });
+      const aId = req.params.id?.trim();
+      if (!aId) return res.status(400).json({ error: 'Assignment id required' });
+      const b = req.body as Record<string, unknown>;
+      let payload: Record<string, unknown> = { updated_at: new Date().toISOString() };
+      if (b.title !== undefined) payload.title = String(b.title);
+      if (b.description !== undefined) payload.description = b.description != null ? String(b.description) : null;
+      if (b.course_id !== undefined) payload.course_id = b.course_id || null;
+      if (b.class_id !== undefined) payload.class_id = b.class_id || null;
+      if (b.type !== undefined) payload.type = b.type;
+      if (b.due_date !== undefined) payload.due_date = b.due_date || null;
+      if (b.max_score !== undefined) payload.max_score = Number(b.max_score) || 100;
+      if (b.status !== undefined) payload.status = b.status;
+      if (b.instructions !== undefined) payload.instructions = b.instructions != null ? String(b.instructions) : null;
+      if (b.allow_late_submission !== undefined) payload.allow_late_submission = Boolean(b.allow_late_submission);
+      if (b.submission_config !== undefined) payload.submission_config = b.submission_config;
+      if ('publish_at' in b) payload.publish_at = b.publish_at ? new Date(String(b.publish_at)).toISOString() : null;
+      for (let i = 0; i < 8; i++) {
+        const { error } = await supabaseAdmin.from('assignments').update(payload).eq('id', aId);
+        if (!error) return res.json({ success: true });
+        const msg = (error.message || '').toLowerCase();
+        if (/column|schema cache|does not exist/i.test(msg) && msg.includes('instructions') && 'instructions' in payload) { const { instructions: _, ...r } = payload; payload = r; continue; }
+        if (/column|schema cache|does not exist/i.test(msg) && msg.includes('allow_late') && 'allow_late_submission' in payload) { const { allow_late_submission: _, ...r } = payload; payload = r; continue; }
+        if (/column|schema cache|does not exist/i.test(msg) && msg.includes('submission_config') && 'submission_config' in payload) { const { submission_config: _, ...r } = payload; payload = r; continue; }
+        if (/column|schema cache|does not exist/i.test(msg) && msg.includes('publish_at') && 'publish_at' in payload) { const { publish_at: _, ...r } = payload; payload = r; continue; }
+        return res.status(500).json({ error: error.message });
+      }
+      res.status(500).json({ error: 'Max retries exceeded' });
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  app.delete('/api/teacher/assignments/:id', async (req: Request, res: Response) => {
+    try {
+      const caller = await assertAuthenticated(req, res);
+      if (!caller) return;
+      if (caller.role !== 'teacher' && caller.role !== 'admin') return res.status(403).json({ error: 'Forbidden' });
+      const aId = req.params.id?.trim();
+      if (!aId) return res.status(400).json({ error: 'Assignment id required' });
+      const { error } = await supabaseAdmin.from('assignments').delete().eq('id', aId);
+      if (error) return res.status(500).json({ error: error.message });
+      res.json({ success: true });
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
   // Teacher: get all submissions for an assignment
   app.get('/api/teacher/assignments/:assignmentId/submissions', async (req: Request, res: Response) => {
     try {
@@ -10844,6 +10948,25 @@ async function runLessonsPublishAtMigration(): Promise<void> {
   }
 }
 
+async function runAssignmentsPublishAtMigration(): Promise<void> {
+  try {
+    await poolQuery(`ALTER TABLE assignments ADD COLUMN IF NOT EXISTS publish_at timestamptz NULL`);
+    console.log('[migration] assignments.publish_at column ensured ✓');
+    return;
+  } catch { /* fall through */ }
+  try {
+    const probe = await supabaseAdmin.from('assignments').select('publish_at').limit(1);
+    if (!probe.error) { console.log('[migration] assignments.publish_at column already exists ✓'); return; }
+    const rpcResult = await (supabaseAdmin as any).rpc('exec_sql', {
+      sql: 'ALTER TABLE public.assignments ADD COLUMN IF NOT EXISTS publish_at timestamptz NULL',
+    });
+    if (rpcResult.error) throw rpcResult.error;
+    console.log('[migration] assignments.publish_at added via RPC ✓');
+  } catch (err: any) {
+    console.warn('[migration] assignments.publish_at column could not be auto-created:', err?.message?.split('\n')[0]);
+  }
+}
+
 async function ensureAssignmentFilesBucket(): Promise<void> {
   try {
     const { error } = await supabaseAdmin.storage.createBucket('assignment-files', {
@@ -10874,6 +10997,7 @@ async function startServer() {
   void runModulesPublishAtMigration();
   void runLessonsPublishAtMigration();
   void runQuizzesPublishAtMigration();
+  void runAssignmentsPublishAtMigration();
   void ensureAssignmentFilesBucket();
 
   const httpServer = http.createServer();
@@ -10981,6 +11105,31 @@ async function runAutoPublishLessons() {
   }
 }
 
+async function runAutoPublishAssignments() {
+  try {
+    const now = new Date().toISOString();
+    const { data, error } = await supabaseAdmin
+      .from('assignments')
+      .select('id, title')
+      .lte('publish_at', now)
+      .neq('status', 'published');
+    if (error || !data || data.length === 0) return;
+    for (const a of data) {
+      const { error: updErr } = await supabaseAdmin
+        .from('assignments')
+        .update({ status: 'published', publish_at: null, updated_at: now })
+        .eq('id', a.id);
+      if (updErr) {
+        console.error(`[auto-publish] Failed to publish assignment "${a.title}":`, updErr.message);
+      } else {
+        console.log(`[auto-publish] Published assignment "${a.title}" (${a.id})`);
+      }
+    }
+  } catch (e: any) {
+    console.error('[auto-publish] Assignments scheduler error:', e?.message);
+  }
+}
+
 async function runAutoPublishModules() {
   try {
     const now = new Date().toISOString();
@@ -11015,6 +11164,9 @@ if (!process.env.VERCEL) {
 
   setInterval(() => { void runAutoPublishQuizzes(); }, 60_000);
   void runAutoPublishQuizzes();
+
+  setInterval(() => { void runAutoPublishAssignments(); }, 60_000);
+  void runAutoPublishAssignments();
 
   setInterval(() => {
     void flushFailedTelegramAlerts();

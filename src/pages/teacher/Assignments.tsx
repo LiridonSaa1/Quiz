@@ -10,18 +10,17 @@ import {
   ADMIN_LIST_CARD_GRID,
   ADMIN_LIST_ITEM_CARD,
 } from '../../components/admin/AdminListPageShell';
-import { supabase } from '../../supabase';
 import {
   ClipboardList, Plus, Search, Star,
   X, Pencil, Trash2, CheckCircle2, Archive, FileText, AlertCircle,
   Users, MessageSquare, ChevronDown, ChevronUp, Award, Clock,
   Paperclip, Link2, ExternalLink, File, Image, Video,
-  Archive as ArchiveIcon, Code, FileSpreadsheet,
+  Archive as ArchiveIcon, Code, FileSpreadsheet, Calendar,
 } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { format, isPast, isToday, formatDistanceToNow } from 'date-fns';
-import { resolveTeacherIdCandidates } from '../../lib/teacherScope';
 import { authFetch } from '../../lib/apiUrl';
+import { LoadingButton } from '../../components/ui/LoadingButton';
 
 type AssignmentStatus = 'draft' | 'published' | 'closed';
 type AssignmentType = 'homework' | 'project' | 'essay' | 'quiz' | 'lab' | 'exercise' | 'research' | 'other';
@@ -39,6 +38,8 @@ interface Assignment {
   max_score: number;
   status: AssignmentStatus;
   allow_late_submission: boolean;
+  submission_config?: SubmissionConfig | null;
+  publish_at?: string | null;
   created_at: string;
   course?: { title: string } | null;
   class_name?: string | null;
@@ -68,6 +69,7 @@ const DEFAULT_CFG: SubmissionConfig = { allow_text: true, allow_files: false, al
 function parseJsonField<T>(val: any, fallback: T): T {
   if (Array.isArray(val)) return val as unknown as T;
   if (typeof val === 'string') { try { return JSON.parse(val); } catch { return fallback; } }
+  if (val && typeof val === 'object') return val as T;
   return fallback;
 }
 
@@ -80,26 +82,26 @@ function getFileIcon(mime: string) {
   if (mime?.includes('text') || mime?.includes('code')) return <Code className="w-4 h-4" />;
   return <File className="w-4 h-4" />;
 }
-function formatBytes(b: number) { if (b < 1024) return `${b} B`; if (b < 1048576) return `${(b/1024).toFixed(1)} KB`; return `${(b/1048576).toFixed(1)} MB`; }
+function formatBytes(b: number) { if (b < 1024) return `${b} B`; if (b < 1048576) return `${(b / 1024).toFixed(1)} KB`; return `${(b / 1048576).toFixed(1)} MB`; }
 
 interface Course { id: string; title: string }
 interface ClassRec { id: string; name: string }
 
 const STATUS_CFG: Record<AssignmentStatus, { label: string; bg: string; text: string; dot: string; icon: React.ElementType }> = {
   draft:     { label: 'Draft',     bg: 'bg-slate-100',   text: 'text-slate-600',  dot: 'bg-slate-400',   icon: FileText     },
-  published: { label: 'Published', bg: 'bg-emerald-50',  text: 'text-emerald-700',dot: 'bg-emerald-500', icon: CheckCircle2 },
+  published: { label: 'Published', bg: 'bg-emerald-50',  text: 'text-emerald-700', dot: 'bg-emerald-500', icon: CheckCircle2 },
   closed:    { label: 'Closed',    bg: 'bg-amber-50',    text: 'text-amber-700',  dot: 'bg-amber-500',   icon: Archive      },
 };
 
 const TYPE_CFG: Record<AssignmentType, { label: string; color: string; bg: string }> = {
-  homework: { label: 'Homework',  color: 'text-blue-700',   bg: 'bg-blue-50'    },
-  project:  { label: 'Project',   color: 'text-violet-700', bg: 'bg-violet-50'  },
-  essay:    { label: 'Essay',     color: 'text-rose-700',   bg: 'bg-rose-50'    },
-  quiz:     { label: 'Quiz',      color: 'text-amber-700',  bg: 'bg-amber-50'   },
-  lab:      { label: 'Lab',       color: 'text-teal-700',   bg: 'bg-teal-50'    },
-  exercise: { label: 'Exercise',  color: 'text-cyan-700',   bg: 'bg-cyan-50'    },
-  research: { label: 'Research',  color: 'text-indigo-700', bg: 'bg-indigo-50'  },
-  other:    { label: 'Other',     color: 'text-slate-600',  bg: 'bg-slate-100'  },
+  homework: { label: 'Homework',  color: 'text-blue-700',   bg: 'bg-blue-50'   },
+  project:  { label: 'Project',   color: 'text-violet-700', bg: 'bg-violet-50' },
+  essay:    { label: 'Essay',     color: 'text-rose-700',   bg: 'bg-rose-50'   },
+  quiz:     { label: 'Quiz',      color: 'text-amber-700',  bg: 'bg-amber-50'  },
+  lab:      { label: 'Lab',       color: 'text-teal-700',   bg: 'bg-teal-50'   },
+  exercise: { label: 'Exercise',  color: 'text-cyan-700',   bg: 'bg-cyan-50'   },
+  research: { label: 'Research',  color: 'text-indigo-700', bg: 'bg-indigo-50' },
+  other:    { label: 'Other',     color: 'text-slate-600',  bg: 'bg-slate-100' },
 };
 
 const AVATAR_COLORS = [
@@ -118,6 +120,8 @@ const emptyForm = {
   type: 'homework' as AssignmentType, due_date: '', max_score: 100,
   status: 'draft' as AssignmentStatus, allow_late_submission: false,
   submission_config: { ...DEFAULT_CFG },
+  autoPublish: false,
+  publishAt: '',
 };
 
 function SubmissionsPanel({ assignment, onClose }: { assignment: Assignment; onClose: () => void }) {
@@ -130,9 +134,7 @@ function SubmissionsPanel({ assignment, onClose }: { assignment: Assignment; onC
   useEffect(() => {
     authFetch(`/api/teacher/assignments/${assignment.id}/submissions`)
       .then(r => r.json())
-      .then(json => {
-        if (json.success) setSubmissions(json.submissions || []);
-      })
+      .then(json => { if (json.success) setSubmissions(json.submissions || []); })
       .catch(() => toast.error('Failed to load submissions'))
       .finally(() => setLoading(false));
   }, [assignment.id]);
@@ -237,14 +239,12 @@ function SubmissionsPanel({ assignment, onClose }: { assignment: Assignment; onC
                     className="overflow-hidden"
                   >
                     <div className="px-4 pb-4 space-y-3 border-t border-slate-100 pt-3">
-                      {/* Text answer */}
                       {sub.content && (
                         <div>
                           <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-1">Text Answer</p>
                           <div className="bg-slate-50 rounded-lg p-3 text-sm text-slate-700 whitespace-pre-wrap max-h-40 overflow-y-auto">{sub.content}</div>
                         </div>
                       )}
-                      {/* Files */}
                       {parseJsonField<FileEntry[]>(sub.file_urls, []).length > 0 && (
                         <div>
                           <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2 flex items-center gap-1"><Paperclip className="w-3 h-3" />Attached Files</p>
@@ -259,7 +259,6 @@ function SubmissionsPanel({ assignment, onClose }: { assignment: Assignment; onC
                           </div>
                         </div>
                       )}
-                      {/* Links */}
                       {parseJsonField<LinkEntry[]>(sub.link_urls, []).length > 0 && (
                         <div>
                           <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2 flex items-center gap-1"><Link2 className="w-3 h-3" />Submitted Links</p>
@@ -296,14 +295,15 @@ function SubmissionsPanel({ assignment, onClose }: { assignment: Assignment; onC
                           />
                         </div>
                       </div>
-                      <button
+                      <LoadingButton
                         onClick={() => handleGrade(sub.id)}
-                        disabled={saving === sub.id}
-                        className="inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold bg-indigo-600 text-white hover:bg-indigo-700 transition-colors disabled:opacity-50"
+                        loading={saving === sub.id}
+                        icon={<Award className="w-3.5 h-3.5" />}
+                        size="sm"
+                        className="rounded-lg"
                       >
-                        <Award className="w-3.5 h-3.5" />
-                        {saving === sub.id ? 'Saving...' : 'Save Grade'}
-                      </button>
+                        Save Grade
+                      </LoadingButton>
                     </div>
                   </motion.div>
                 )}
@@ -317,7 +317,6 @@ function SubmissionsPanel({ assignment, onClose }: { assignment: Assignment; onC
 }
 
 export default function TeacherAssignments() {
-  const [teacherId, setTeacherId] = useState<string | null>(null);
   const [assignments, setAssignments] = useState<Assignment[]>([]);
   const [courses, setCourses] = useState<Course[]>([]);
   const [classes, setClasses] = useState<ClassRec[]>([]);
@@ -331,58 +330,41 @@ export default function TeacherAssignments() {
   const [form, setForm] = useState(emptyForm);
   const [saving, setSaving] = useState(false);
   const [deleteId, setDeleteId] = useState<string | null>(null);
+  const [deleting, setDeleting] = useState(false);
   const [submissionsFor, setSubmissionsFor] = useState<Assignment | null>(null);
 
-  useEffect(() => {
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      if (session?.user) setTeacherId(session.user.id);
-    });
-  }, []);
-
-  useEffect(() => { if (teacherId) fetchData(); }, [teacherId]);
+  useEffect(() => { fetchData(); }, []);
 
   const fetchData = async () => {
-    if (!teacherId) return;
     setLoading(true);
     try {
-      const teacherIds = await resolveTeacherIdCandidates(teacherId);
-      const [assignmentsRes, coursesRes, classesRes] = await Promise.allSettled([
-        supabase.from('assignments').select('*').in('teacher_id', teacherIds).order('created_at', { ascending: false }),
-        supabase.from('courses').select('id,title').in('teacher_id', teacherIds),
-        supabase.from('classes').select('id,name').in('teacher_id', teacherIds),
+      const [aRes, cRes, clRes] = await Promise.all([
+        authFetch('/api/teacher/assignments'),
+        authFetch('/api/teacher/courses'),
+        authFetch('/api/teacher/classes'),
       ]);
+      const aJson = aRes.ok ? await aRes.json() : { assignments: [] };
+      const cJson = cRes.ok ? await cRes.json() : { courses: [] };
+      const clJson = clRes.ok ? await clRes.json() : { classes: [] };
 
-      const rawData = assignmentsRes.status === 'fulfilled' && !assignmentsRes.value.error ? (assignmentsRes.value.data || []) : [];
-      let coursesData: Course[] = coursesRes.status === 'fulfilled' && !coursesRes.value.error ? ((coursesRes.value.data || []) as Course[]) : [];
-      let classesData: ClassRec[] = classesRes.status === 'fulfilled' && !classesRes.value.error ? ((classesRes.value.data || []) as ClassRec[]) : [];
-
-      if (coursesData.length === 0) {
-        const r = await authFetch(`/api/teacher/courses?userId=${encodeURIComponent(teacherId)}`);
-        if (r.ok) { const j = await r.json(); if (j?.success) coursesData = j.courses.map((c: any) => ({ id: String(c.id), title: String(c.title || 'Untitled') })); }
-      }
-      if (classesData.length === 0) {
-        const r = await authFetch('/api/teacher/classes');
-        if (r.ok) { const j = await r.json(); if (j?.success) classesData = j.classes.map((c: any) => ({ id: String(c.id), name: String(c.name || 'Untitled class') })); }
-      }
-      if (classesData.length === 0) {
-        const broad = await supabase.from('classes').select('id,name').order('created_at', { ascending: false }).limit(200);
-        if (!broad.error) classesData = (broad.data || []).map((c: any) => ({ id: String(c.id), name: String(c.name || 'Untitled class') }));
-      }
-
+      const coursesData: Course[] = (cJson.courses || []).map((c: any) => ({ id: String(c.id), title: String(c.title || 'Untitled') }));
+      const classesData: ClassRec[] = (clJson.classes || []).map((c: any) => ({ id: String(c.id), name: String(c.name || 'Untitled') }));
       const courseMap: Record<string, string> = {};
-      coursesData.forEach((c: any) => { courseMap[c.id] = c.title; });
+      coursesData.forEach(c => { courseMap[c.id] = c.title; });
       const classMap: Record<string, string> = {};
-      classesData.forEach((c: any) => { classMap[c.id] = c.name; });
+      classesData.forEach(c => { classMap[c.id] = c.name; });
 
-      setAssignments((rawData || []).map((a: any) => ({
+      setAssignments((aJson.assignments || []).map((a: any) => ({
         ...a,
+        allow_late_submission: Boolean(a.allow_late_submission),
+        submission_config: a.submission_config ? parseJsonField<SubmissionConfig>(a.submission_config, { ...DEFAULT_CFG }) : null,
         course: a.course_id ? { title: courseMap[a.course_id] || 'Unknown' } : null,
         class_name: a.class_id ? (classMap[a.class_id] || null) : null,
       })));
       setCourses(coursesData);
       setClasses(classesData);
     } catch {
-      toast.error('Failed to load assignment data');
+      toast.error('Failed to load assignments');
     } finally {
       setLoading(false);
     }
@@ -399,64 +381,59 @@ export default function TeacherAssignments() {
   });
 
   const stats = [
-    { label: 'Total',     value: assignments.length,                                                                                   gradient: 'from-indigo-500 to-indigo-600', shadow: 'shadow-indigo-500/25', icon: ClipboardList },
-    { label: 'Published', value: assignments.filter(a => a.status === 'published').length,                                             gradient: 'from-emerald-500 to-emerald-600', shadow: 'shadow-emerald-500/25', icon: CheckCircle2 },
-    { label: 'Draft',     value: assignments.filter(a => a.status === 'draft').length,                                                 gradient: 'from-slate-500 to-slate-600',   shadow: 'shadow-slate-500/25',   icon: FileText     },
+    { label: 'Total',     value: assignments.length,                                                                                    gradient: 'from-indigo-500 to-indigo-600',   shadow: 'shadow-indigo-500/25',   icon: ClipboardList },
+    { label: 'Published', value: assignments.filter(a => a.status === 'published').length,                                              gradient: 'from-emerald-500 to-emerald-600', shadow: 'shadow-emerald-500/25', icon: CheckCircle2  },
+    { label: 'Draft',     value: assignments.filter(a => a.status === 'draft').length,                                                  gradient: 'from-slate-500 to-slate-600',     shadow: 'shadow-slate-500/25',   icon: FileText      },
     { label: 'Overdue',   value: assignments.filter(a => a.due_date && isPast(new Date(a.due_date)) && !isToday(new Date(a.due_date)) && a.status === 'published').length, gradient: 'from-rose-500 to-pink-600', shadow: 'shadow-rose-500/25', icon: AlertCircle },
   ];
 
   const openAdd = () => { setEditId(null); setForm(emptyForm); setShowModal(true); };
   const openEdit = (a: Assignment) => {
     setEditId(a.id);
-    let cfg: SubmissionConfig = { ...DEFAULT_CFG };
-    if ((a as any).submission_config) {
-      try {
-        cfg = typeof (a as any).submission_config === 'string'
-          ? JSON.parse((a as any).submission_config)
-          : (a as any).submission_config;
-      } catch { }
-    }
+    const cfg = a.submission_config ? parseJsonField<SubmissionConfig>(a.submission_config, { ...DEFAULT_CFG }) : { ...DEFAULT_CFG };
+    const hasPublishAt = !!a.publish_at;
+    const publishAtLocal = hasPublishAt ? new Date(a.publish_at!).toISOString().slice(0, 16) : '';
     setForm({
       title: a.title, description: a.description || '', instructions: a.instructions || '',
       course_id: a.course_id || '', class_id: a.class_id || '', type: a.type,
       due_date: a.due_date ? a.due_date.substring(0, 10) : '', max_score: a.max_score,
-      status: a.status, allow_late_submission: a.allow_late_submission || false,
+      status: hasPublishAt ? 'draft' : a.status,
+      allow_late_submission: a.allow_late_submission || false,
       submission_config: cfg,
+      autoPublish: hasPublishAt,
+      publishAt: publishAtLocal,
     });
     setShowModal(true);
   };
 
   const handleSave = async () => {
     if (!form.title.trim()) { toast.error('Title is required'); return; }
-    if (!teacherId) return;
+    if (form.autoPublish && !form.publishAt) { toast.error('Please select a date and time for auto-publish'); return; }
     setSaving(true);
     try {
-      const payload: any = {
-        title: form.title.trim(), description: form.description || null,
+      const effectiveStatus = form.autoPublish ? 'draft' : form.status;
+      const payload: Record<string, unknown> = {
+        title: form.title.trim(),
+        description: form.description || null,
         instructions: form.instructions || null,
-        course_id: form.course_id || null, class_id: form.class_id || null,
-        teacher_id: teacherId, type: form.type,
-        due_date: form.due_date || null, max_score: Number(form.max_score),
-        status: form.status, allow_late_submission: form.allow_late_submission,
+        course_id: form.course_id || null,
+        class_id: form.class_id || null,
+        type: form.type,
+        due_date: form.due_date || null,
+        max_score: Number(form.max_score),
+        status: effectiveStatus,
+        allow_late_submission: form.allow_late_submission,
         submission_config: form.submission_config,
-        updated_at: new Date().toISOString(),
+        publish_at: form.autoPublish && form.publishAt ? new Date(form.publishAt).toISOString() : null,
       };
 
-      const tryInsert = async (p: any) => {
-        if (editId) {
-          const r = await supabase.from('assignments').update(p).eq('id', editId);
-          return r;
-        } else {
-          return supabase.from('assignments').insert({ ...p, created_at: new Date().toISOString() });
-        }
-      };
-
-      let result = await tryInsert(payload);
-      if (result.error && /column|schema cache/i.test(result.error.message)) {
-        const { instructions, allow_late_submission, submission_config, ...safePayload } = payload;
-        result = await tryInsert(safePayload);
+      const url = editId ? `/api/teacher/assignments/${editId}` : '/api/teacher/assignments';
+      const method = editId ? 'PATCH' : 'POST';
+      const res = await authFetch(url, { method, body: JSON.stringify(payload) });
+      if (!res.ok) {
+        const j = await res.json().catch(() => ({}));
+        throw new Error((j as any).error || 'Failed to save');
       }
-      if (result.error) throw result.error;
       toast.success(editId ? 'Assignment updated' : 'Assignment created');
       setShowModal(false);
       fetchData();
@@ -468,13 +445,15 @@ export default function TeacherAssignments() {
   };
 
   const handleDelete = async (id: string) => {
+    setDeleting(true);
     try {
-      const { error } = await supabase.from('assignments').delete().eq('id', id);
-      if (error) throw error;
+      const res = await authFetch(`/api/teacher/assignments/${id}`, { method: 'DELETE' });
+      if (!res.ok) throw new Error('Failed to delete');
       toast.success('Assignment deleted');
       setDeleteId(null);
       fetchData();
     } catch { toast.error('Failed to delete'); }
+    finally { setDeleting(false); }
   };
 
   const getDueBadge = (due: string | null, status: AssignmentStatus) => {
@@ -484,6 +463,9 @@ export default function TeacherAssignments() {
     if (isToday(d)) return <span className="text-xs text-amber-600 font-medium">Due today</span>;
     return null;
   };
+
+  const set = <K extends keyof typeof emptyForm>(key: K, val: typeof emptyForm[K]) =>
+    setForm(f => ({ ...f, [key]: val }));
 
   return (
     <TeacherLayout>
@@ -556,6 +538,11 @@ export default function TeacherAssignments() {
                             <span className={cn('inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-medium', sc.bg, sc.text)}>
                               <span className={cn('w-1.5 h-1.5 rounded-full', sc.dot)} />{sc.label}
                             </span>
+                            {a.publish_at && a.status === 'draft' && (
+                              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-violet-50 text-violet-600">
+                                <Calendar className="w-2.5 h-2.5" />Scheduled
+                              </span>
+                            )}
                             {a.allow_late_submission && (
                               <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-orange-50 text-orange-600">
                                 <Clock className="w-2.5 h-2.5 mr-1" />Late OK
@@ -589,6 +576,12 @@ export default function TeacherAssignments() {
                             {a.due_date ? <><span className="block">{format(new Date(a.due_date), 'MMM d, yyyy')}</span>{dueBadge}</> : '—'}
                           </span>
                         </div>
+                        {a.publish_at && a.status === 'draft' && (
+                          <div className="flex justify-between gap-2 items-center">
+                            <span className="text-slate-400 font-semibold uppercase tracking-wider shrink-0">Auto-publish</span>
+                            <span className="text-right text-violet-600 font-medium">{format(new Date(a.publish_at), 'MMM d, HH:mm')}</span>
+                          </div>
+                        )}
                         <div className="flex justify-between gap-2 items-center">
                           <span className="text-slate-400 font-semibold uppercase tracking-wider">Score</span>
                           <span className="inline-flex items-center gap-1 font-medium text-slate-800">
@@ -626,73 +619,84 @@ export default function TeacherAssignments() {
               <button type="button" onClick={() => setShowModal(false)} className="p-2 hover:bg-slate-100 rounded-lg"><X className="w-4 h-4" /></button>
             </div>
             <div className="p-5 space-y-4">
+              {/* Title */}
               <div>
                 <label className="text-xs font-semibold text-slate-600 uppercase tracking-wide">Title *</label>
-                <input value={form.title} onChange={e => setForm(f => ({ ...f, title: e.target.value }))}
+                <input value={form.title} onChange={e => set('title', e.target.value)}
                   className="mt-1 w-full px-3 py-2.5 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-500/30"
                   placeholder="Assignment title" />
               </div>
+              {/* Description */}
               <div>
                 <label className="text-xs font-semibold text-slate-600 uppercase tracking-wide">Description</label>
-                <textarea value={form.description} onChange={e => setForm(f => ({ ...f, description: e.target.value }))}
+                <textarea value={form.description} onChange={e => set('description', e.target.value)}
                   rows={2} className="mt-1 w-full px-3 py-2.5 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-500/30 resize-none"
                   placeholder="Brief overview..." />
               </div>
+              {/* Instructions */}
               <div>
                 <label className="text-xs font-semibold text-slate-600 uppercase tracking-wide">Instructions</label>
-                <textarea value={form.instructions} onChange={e => setForm(f => ({ ...f, instructions: e.target.value }))}
+                <textarea value={form.instructions} onChange={e => set('instructions', e.target.value)}
                   rows={4} className="mt-1 w-full px-3 py-2.5 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-500/30 resize-none"
                   placeholder="Detailed step-by-step instructions for students..." />
               </div>
+              {/* Type + Status */}
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="text-xs font-semibold text-slate-600 uppercase tracking-wide">Type</label>
-                  <select value={form.type} onChange={e => setForm(f => ({ ...f, type: e.target.value as AssignmentType }))}
+                  <select value={form.type} onChange={e => set('type', e.target.value as AssignmentType)}
                     className="mt-1 w-full px-3 py-2.5 text-sm border border-slate-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-amber-500/30">
                     {Object.entries(TYPE_CFG).map(([v, c]) => <option key={v} value={v}>{c.label}</option>)}
                   </select>
                 </div>
                 <div>
                   <label className="text-xs font-semibold text-slate-600 uppercase tracking-wide">Status</label>
-                  <select value={form.status} onChange={e => setForm(f => ({ ...f, status: e.target.value as AssignmentStatus }))}
-                    className="mt-1 w-full px-3 py-2.5 text-sm border border-slate-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-amber-500/30">
+                  <select value={form.status} onChange={e => set('status', e.target.value as AssignmentStatus)}
+                    disabled={form.autoPublish}
+                    className="mt-1 w-full px-3 py-2.5 text-sm border border-slate-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-amber-500/30 disabled:opacity-50 disabled:cursor-not-allowed">
                     <option value="draft">Draft</option>
                     <option value="published">Published</option>
                     <option value="closed">Closed</option>
                   </select>
                 </div>
               </div>
+              {/* Due Date + Max Score */}
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="text-xs font-semibold text-slate-600 uppercase tracking-wide">Due Date</label>
-                  <input type="date" value={form.due_date} onChange={e => setForm(f => ({ ...f, due_date: e.target.value }))}
+                  <input type="date" value={form.due_date} onChange={e => set('due_date', e.target.value)}
                     className="mt-1 w-full px-3 py-2.5 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-500/30" />
                 </div>
                 <div>
                   <label className="text-xs font-semibold text-slate-600 uppercase tracking-wide">Max Score</label>
-                  <input type="number" min={0} value={form.max_score} onChange={e => setForm(f => ({ ...f, max_score: Number(e.target.value) }))}
+                  <input type="number" min={0} value={form.max_score} onChange={e => set('max_score', Number(e.target.value) as any)}
                     className="mt-1 w-full px-3 py-2.5 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-500/30" />
                 </div>
               </div>
-              <div>
-                <label className="text-xs font-semibold text-slate-600 uppercase tracking-wide">Course</label>
-                <select value={form.course_id} onChange={e => setForm(f => ({ ...f, course_id: e.target.value }))}
-                  className="mt-1 w-full px-3 py-2.5 text-sm border border-slate-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-amber-500/30">
-                  <option value="">No course</option>
-                  {courses.map(c => <option key={c.id} value={c.id}>{c.title}</option>)}
-                </select>
+              {/* Course + Class */}
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-xs font-semibold text-slate-600 uppercase tracking-wide">Course</label>
+                  <select value={form.course_id} onChange={e => set('course_id', e.target.value)}
+                    className="mt-1 w-full px-3 py-2.5 text-sm border border-slate-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-amber-500/30">
+                    <option value="">No course</option>
+                    {courses.map(c => <option key={c.id} value={c.id}>{c.title}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label className="text-xs font-semibold text-slate-600 uppercase tracking-wide">Class</label>
+                  <select value={form.class_id} onChange={e => set('class_id', e.target.value)}
+                    className="mt-1 w-full px-3 py-2.5 text-sm border border-slate-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-amber-500/30">
+                    <option value="">No class</option>
+                    {classes.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                  </select>
+                </div>
               </div>
-              <div>
-                <label className="text-xs font-semibold text-slate-600 uppercase tracking-wide">Class</label>
-                <select value={form.class_id} onChange={e => setForm(f => ({ ...f, class_id: e.target.value }))}
-                  className="mt-1 w-full px-3 py-2.5 text-sm border border-slate-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-amber-500/30">
-                  <option value="">No class</option>
-                  {classes.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-                </select>
-              </div>
+
+              {/* Allow late submission */}
               <label className="flex items-center gap-3 cursor-pointer select-none">
                 <div
-                  onClick={() => setForm(f => ({ ...f, allow_late_submission: !f.allow_late_submission }))}
+                  onClick={() => set('allow_late_submission', !form.allow_late_submission as any)}
                   className={cn('relative w-10 h-5 rounded-full transition-colors', form.allow_late_submission ? 'bg-amber-500' : 'bg-slate-200')}
                 >
                   <span className={cn('absolute top-0.5 left-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform', form.allow_late_submission ? 'translate-x-5' : '')} />
@@ -700,15 +704,61 @@ export default function TeacherAssignments() {
                 <span className="text-sm font-medium text-slate-700">Allow late submission</span>
               </label>
 
-              {/* Submission Method Config */}
+              {/* Auto-publish */}
+              <div className={cn('rounded-xl border transition-all duration-200', form.autoPublish ? 'border-violet-200 bg-violet-50/60' : 'border-slate-200 bg-slate-50/60')}>
+                <div
+                  role="switch"
+                  aria-checked={form.autoPublish}
+                  onClick={() => {
+                    const next = !form.autoPublish;
+                    setForm(f => ({
+                      ...f,
+                      autoPublish: next,
+                      status: next ? 'draft' : f.status,
+                      publishAt: next ? f.publishAt : '',
+                    }));
+                  }}
+                  className="flex items-center gap-3 px-3 py-2.5 cursor-pointer select-none"
+                >
+                  <div className={cn('relative w-10 h-5 rounded-full transition-colors shrink-0', form.autoPublish ? 'bg-violet-500' : 'bg-slate-300')}>
+                    <div className={cn('absolute top-0.5 left-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform', form.autoPublish ? 'translate-x-5' : 'translate-x-0')} />
+                  </div>
+                  <div>
+                    <span className={cn('text-sm font-semibold', form.autoPublish ? 'text-violet-700' : 'text-slate-600')}>Auto-publish</span>
+                    <p className="text-[11px] text-slate-400 mt-0.5">Schedule a future publish date</p>
+                  </div>
+                </div>
+                {form.autoPublish && (
+                  <div className="px-3 pb-3 pt-1">
+                    <label className="block text-xs font-semibold text-violet-600 mb-1.5">
+                      <Calendar className="inline w-3.5 h-3.5 mr-1 -mt-0.5" />
+                      Publish date &amp; time
+                    </label>
+                    <input
+                      type="datetime-local"
+                      value={form.publishAt}
+                      min={new Date().toISOString().slice(0, 16)}
+                      onChange={e => set('publishAt', e.target.value as any)}
+                      className="w-full px-3 py-2 bg-white border border-violet-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-violet-500 transition-all text-slate-700"
+                    />
+                    {form.publishAt && (
+                      <p className="text-[11px] text-violet-500 mt-1.5 font-medium">
+                        ✓ {new Date(form.publishAt).toLocaleString()}
+                      </p>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              {/* Submission Methods */}
               <div className="border border-slate-200 rounded-xl p-4 space-y-3">
                 <p className="text-xs font-bold text-slate-700 uppercase tracking-wide">Submission Methods</p>
                 <p className="text-xs text-slate-400">Choose which methods students can use to submit their work.</p>
                 <div className="space-y-2">
                   {[
-                    { key: 'allow_text' as const, label: 'Text answer', desc: 'Students can type a written response', color: 'bg-blue-500' },
-                    { key: 'allow_files' as const, label: 'File uploads', desc: 'Students can upload documents, images, etc.', color: 'bg-teal-500' },
-                    { key: 'allow_links' as const, label: 'Link submissions', desc: 'Students can submit URLs (GitHub, Drive, etc.)', color: 'bg-violet-500' },
+                    { key: 'allow_text' as const,  label: 'Text answer',       desc: 'Students can type a written response',            color: 'bg-blue-500'   },
+                    { key: 'allow_files' as const,  label: 'File uploads',      desc: 'Students can upload documents, images, etc.',     color: 'bg-teal-500'   },
+                    { key: 'allow_links' as const,  label: 'Link submissions',  desc: 'Students can submit URLs (GitHub, Drive, etc.)',  color: 'bg-violet-500' },
                   ].map(opt => (
                     <label key={opt.key} className="flex items-start gap-3 cursor-pointer group">
                       <div
@@ -737,12 +787,17 @@ export default function TeacherAssignments() {
                 )}
               </div>
             </div>
+
             <div className="flex justify-end gap-3 p-5 border-t border-slate-100">
               <button type="button" onClick={() => setShowModal(false)} className="px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-100 rounded-lg">Cancel</button>
-              <button type="button" onClick={handleSave} disabled={saving}
-                className="px-4 py-2 text-sm font-semibold bg-amber-500 hover:bg-amber-600 text-white rounded-lg disabled:opacity-50">
-                {saving ? 'Saving...' : editId ? 'Update' : 'Create'}
-              </button>
+              <LoadingButton
+                onClick={handleSave}
+                loading={saving}
+                className="rounded-lg"
+                style={{ background: saving ? '#f59e0b99' : '#f59e0b' }}
+              >
+                {editId ? 'Update' : 'Create'}
+              </LoadingButton>
             </div>
           </div>
         </div>
@@ -758,8 +813,15 @@ export default function TeacherAssignments() {
             <h3 className="text-lg font-bold text-slate-800 mb-1">Delete Assignment?</h3>
             <p className="text-sm text-slate-500 mb-5">This action cannot be undone.</p>
             <div className="flex gap-3 justify-center">
-              <button type="button" onClick={() => setDeleteId(null)} className="px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-100 rounded-lg">Cancel</button>
-              <button type="button" onClick={() => handleDelete(deleteId)} className="px-4 py-2 text-sm font-semibold bg-rose-500 hover:bg-rose-600 text-white rounded-lg">Delete</button>
+              <button type="button" onClick={() => setDeleteId(null)} disabled={deleting} className="px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-100 rounded-lg disabled:opacity-50">Cancel</button>
+              <LoadingButton
+                loading={deleting}
+                onClick={() => handleDelete(deleteId)}
+                variant="danger"
+                className="rounded-lg"
+              >
+                Delete
+              </LoadingButton>
             </div>
           </div>
         </div>
