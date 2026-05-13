@@ -395,7 +395,11 @@ export default function TeacherAssignments() {
     setEditId(a.id);
     const cfg = a.submission_config ? parseJsonField<SubmissionConfig>(a.submission_config, { ...DEFAULT_CFG }) : { ...DEFAULT_CFG };
     const hasPublishAt = !!a.publish_at;
-    const publishAtLocal = hasPublishAt ? new Date(a.publish_at!).toISOString().slice(0, 16) : '';
+    const publishAtLocal = hasPublishAt ? (() => {
+      const d = new Date(a.publish_at!);
+      const pad = (n: number) => String(n).padStart(2, '0');
+      return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+    })() : '';
     setForm({
       title: a.title, description: a.description || '', instructions: a.instructions || '',
       course_id: a.course_id || '', class_id: a.class_id || '', type: a.type,

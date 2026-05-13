@@ -10162,19 +10162,27 @@ Assistant:`;
     } catch (e: any) { res.status(500).json({ error: e.message }); }
   });
 
-  // ── Teacher Assignment CRUD (supabaseAdmin — bypasses RLS / missing columns) ─────
+  // ── Teacher Assignment CRUD (poolQuery — bypasses PostgREST schema cache) ────
   app.get('/api/teacher/assignments', async (req: Request, res: Response) => {
     try {
       const caller = await assertAuthenticated(req, res);
       if (!caller) return;
       if (caller.role !== 'teacher' && caller.role !== 'admin') return res.status(403).json({ error: 'Forbidden' });
-      const teacherIds = await getTeacherIdCandidates(caller.userId);
-      const scopedIds = teacherIds.length > 0 ? teacherIds : [caller.userId];
-      let query = supabaseAdmin.from('assignments').select('*').order('created_at', { ascending: false });
-      if (caller.role === 'teacher') query = query.in('teacher_id', scopedIds);
-      const { data, error } = await query;
-      if (error) return res.status(500).json({ error: error.message });
-      res.json({ success: true, assignments: data || [] });
+      let rows: any[];
+      try {
+        const teacherIds = await getTeacherIdCandidates(caller.userId);
+        const scopedIds = teacherIds.length > 0 ? teacherIds : [caller.userId];
+        const result = caller.role === 'teacher'
+          ? await poolQuery(`SELECT * FROM assignments WHERE teacher_id = ANY($1::uuid[]) ORDER BY created_at DESC`, [scopedIds])
+          : await poolQuery(`SELECT * FROM assignments ORDER BY created_at DESC`);
+        rows = result.rows;
+      } catch {
+        const query = supabaseAdmin.from('assignments').select('*').order('created_at', { ascending: false });
+        const { data, error } = await query;
+        if (error) return res.status(500).json({ error: error.message });
+        rows = data || [];
+      }
+      res.json({ success: true, assignments: rows });
     } catch (e: any) { res.status(500).json({ error: e.message }); }
   });
 
@@ -10185,36 +10193,49 @@ Assistant:`;
       if (caller.role !== 'teacher' && caller.role !== 'admin') return res.status(403).json({ error: 'Forbidden' });
       const b = req.body as Record<string, unknown>;
       if (!b.title) return res.status(400).json({ error: 'Title is required' });
-      const now = new Date().toISOString();
-      const base: Record<string, unknown> = {
-        title: String(b.title),
-        description: b.description != null ? String(b.description) : null,
-        course_id: b.course_id || null, class_id: b.class_id || null,
-        teacher_id: b.teacher_id || caller.userId,
-        type: b.type || 'homework',
-        due_date: b.due_date || null,
-        max_score: Number(b.max_score) || 100,
-        status: b.status || 'draft',
-        created_at: now, updated_at: now,
-      };
-      let payload = { ...base };
-      // optional columns — strip on schema error
-      if (b.instructions != null) payload.instructions = String(b.instructions);
-      if (b.allow_late_submission !== undefined) payload.allow_late_submission = Boolean(b.allow_late_submission);
-      if (b.submission_config !== undefined) payload.submission_config = b.submission_config;
-      if ('publish_at' in b) payload.publish_at = b.publish_at ? new Date(String(b.publish_at)).toISOString() : null;
-      for (let i = 0; i < 8; i++) {
-        const { data, error } = await supabaseAdmin.from('assignments').insert(payload).select('id').single();
-        if (!error && data?.id) return res.json({ success: true, assignment: { id: data.id } });
-        if (!error) return res.status(500).json({ error: 'Insert returned no id' });
-        const msg = (error.message || '').toLowerCase();
-        if (/column|schema cache|does not exist/i.test(msg) && msg.includes('instructions') && 'instructions' in payload) { const { instructions: _, ...r } = payload; payload = r; continue; }
-        if (/column|schema cache|does not exist/i.test(msg) && msg.includes('allow_late') && 'allow_late_submission' in payload) { const { allow_late_submission: _, ...r } = payload; payload = r; continue; }
-        if (/column|schema cache|does not exist/i.test(msg) && msg.includes('submission_config') && 'submission_config' in payload) { const { submission_config: _, ...r } = payload; payload = r; continue; }
-        if (/column|schema cache|does not exist/i.test(msg) && msg.includes('publish_at') && 'publish_at' in payload) { const { publish_at: _, ...r } = payload; payload = r; continue; }
-        return res.status(500).json({ error: error.message });
+      const publishAt = 'publish_at' in b && b.publish_at ? new Date(String(b.publish_at)).toISOString() : null;
+      try {
+        const result = await poolQuery(
+          `INSERT INTO assignments
+             (title, description, instructions, course_id, class_id, teacher_id,
+              type, due_date, max_score, status, allow_late_submission,
+              submission_config, publish_at, created_at, updated_at)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12::jsonb,$13,now(),now())
+           RETURNING id`,
+          [
+            String(b.title),
+            b.description != null ? String(b.description) : null,
+            b.instructions != null ? String(b.instructions) : null,
+            b.course_id || null,
+            b.class_id || null,
+            b.teacher_id || caller.userId,
+            b.type || 'homework',
+            b.due_date || null,
+            Number(b.max_score) || 100,
+            b.status || 'draft',
+            b.allow_late_submission ? true : false,
+            b.submission_config != null ? JSON.stringify(b.submission_config) : null,
+            publishAt,
+          ]
+        );
+        return res.json({ success: true, assignment: { id: result.rows[0].id } });
+      } catch {
+        // poolQuery unavailable — fall back to supabaseAdmin without schema-sensitive columns
+        const now = new Date().toISOString();
+        const base: Record<string, unknown> = {
+          title: String(b.title),
+          description: b.description != null ? String(b.description) : null,
+          course_id: b.course_id || null, class_id: b.class_id || null,
+          teacher_id: b.teacher_id || caller.userId,
+          type: b.type || 'homework', due_date: b.due_date || null,
+          max_score: Number(b.max_score) || 100, status: b.status || 'draft',
+          allow_late_submission: Boolean(b.allow_late_submission),
+          publish_at: publishAt, created_at: now, updated_at: now,
+        };
+        const { data, error } = await supabaseAdmin.from('assignments').insert(base).select('id').single();
+        if (error) return res.status(500).json({ error: error.message });
+        return res.json({ success: true, assignment: { id: data?.id } });
       }
-      res.status(500).json({ error: 'Max retries exceeded' });
     } catch (e: any) { res.status(500).json({ error: e.message }); }
   });
 
@@ -10226,30 +10247,45 @@ Assistant:`;
       const aId = req.params.id?.trim();
       if (!aId) return res.status(400).json({ error: 'Assignment id required' });
       const b = req.body as Record<string, unknown>;
-      let payload: Record<string, unknown> = { updated_at: new Date().toISOString() };
-      if (b.title !== undefined) payload.title = String(b.title);
-      if (b.description !== undefined) payload.description = b.description != null ? String(b.description) : null;
-      if (b.course_id !== undefined) payload.course_id = b.course_id || null;
-      if (b.class_id !== undefined) payload.class_id = b.class_id || null;
-      if (b.type !== undefined) payload.type = b.type;
-      if (b.due_date !== undefined) payload.due_date = b.due_date || null;
-      if (b.max_score !== undefined) payload.max_score = Number(b.max_score) || 100;
-      if (b.status !== undefined) payload.status = b.status;
-      if (b.instructions !== undefined) payload.instructions = b.instructions != null ? String(b.instructions) : null;
-      if (b.allow_late_submission !== undefined) payload.allow_late_submission = Boolean(b.allow_late_submission);
-      if (b.submission_config !== undefined) payload.submission_config = b.submission_config;
-      if ('publish_at' in b) payload.publish_at = b.publish_at ? new Date(String(b.publish_at)).toISOString() : null;
-      for (let i = 0; i < 8; i++) {
+      try {
+        const sets: string[] = ['updated_at = now()'];
+        const params: any[] = [];
+        let pi = 1;
+        const col = (name: string, val: any) => { sets.push(`${name} = $${pi++}`); params.push(val); };
+        if (b.title !== undefined) col('title', String(b.title));
+        if (b.description !== undefined) col('description', b.description != null ? String(b.description) : null);
+        if (b.course_id !== undefined) col('course_id', b.course_id || null);
+        if (b.class_id !== undefined) col('class_id', b.class_id || null);
+        if (b.type !== undefined) col('type', b.type);
+        if (b.due_date !== undefined) col('due_date', b.due_date || null);
+        if (b.max_score !== undefined) col('max_score', Number(b.max_score) || 100);
+        if (b.status !== undefined) col('status', b.status);
+        if (b.instructions !== undefined) col('instructions', b.instructions != null ? String(b.instructions) : null);
+        if (b.allow_late_submission !== undefined) col('allow_late_submission', Boolean(b.allow_late_submission));
+        if (b.submission_config !== undefined) col('submission_config', b.submission_config != null ? JSON.stringify(b.submission_config) : null);
+        if ('publish_at' in b) col('publish_at', b.publish_at ? new Date(String(b.publish_at)).toISOString() : null);
+        params.push(aId);
+        await poolQuery(`UPDATE assignments SET ${sets.join(', ')} WHERE id = $${pi}`, params);
+        return res.json({ success: true });
+      } catch {
+        // poolQuery unavailable — fall back to supabaseAdmin
+        let payload: Record<string, unknown> = { updated_at: new Date().toISOString() };
+        if (b.title !== undefined) payload.title = String(b.title);
+        if (b.description !== undefined) payload.description = b.description != null ? String(b.description) : null;
+        if (b.course_id !== undefined) payload.course_id = b.course_id || null;
+        if (b.class_id !== undefined) payload.class_id = b.class_id || null;
+        if (b.type !== undefined) payload.type = b.type;
+        if (b.due_date !== undefined) payload.due_date = b.due_date || null;
+        if (b.max_score !== undefined) payload.max_score = Number(b.max_score) || 100;
+        if (b.status !== undefined) payload.status = b.status;
+        if (b.instructions !== undefined) payload.instructions = b.instructions != null ? String(b.instructions) : null;
+        if (b.allow_late_submission !== undefined) payload.allow_late_submission = Boolean(b.allow_late_submission);
+        if (b.submission_config !== undefined) payload.submission_config = b.submission_config;
+        if ('publish_at' in b) payload.publish_at = b.publish_at ? new Date(String(b.publish_at)).toISOString() : null;
         const { error } = await supabaseAdmin.from('assignments').update(payload).eq('id', aId);
-        if (!error) return res.json({ success: true });
-        const msg = (error.message || '').toLowerCase();
-        if (/column|schema cache|does not exist/i.test(msg) && msg.includes('instructions') && 'instructions' in payload) { const { instructions: _, ...r } = payload; payload = r; continue; }
-        if (/column|schema cache|does not exist/i.test(msg) && msg.includes('allow_late') && 'allow_late_submission' in payload) { const { allow_late_submission: _, ...r } = payload; payload = r; continue; }
-        if (/column|schema cache|does not exist/i.test(msg) && msg.includes('submission_config') && 'submission_config' in payload) { const { submission_config: _, ...r } = payload; payload = r; continue; }
-        if (/column|schema cache|does not exist/i.test(msg) && msg.includes('publish_at') && 'publish_at' in payload) { const { publish_at: _, ...r } = payload; payload = r; continue; }
-        return res.status(500).json({ error: error.message });
+        if (error) return res.status(500).json({ error: error.message });
+        return res.json({ success: true });
       }
-      res.status(500).json({ error: 'Max retries exceeded' });
     } catch (e: any) { res.status(500).json({ error: e.message }); }
   });
 
