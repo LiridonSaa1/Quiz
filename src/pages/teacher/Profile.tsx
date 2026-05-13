@@ -1,6 +1,7 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import { supabase } from '../../supabase';
 import TeacherLayout from '../../components/layout/TeacherLayout';
+import LoadingButton from '../../components/ui/LoadingButton';
 import { motion } from 'motion/react';
 import { AdminListPageShell, ADMIN_LIST_ITEM_CARD } from '../../components/admin/AdminListPageShell';
 import {
@@ -214,13 +215,12 @@ export default function TeacherProfile() {
         statsGridClassName="grid grid-cols-2 sm:grid-cols-4 gap-4"
         stats={statItems}
         action={
-          <motion.button
-            type="button"
+          <LoadingButton
             onClick={handleSave}
+            loading={saving}
             disabled={saving || loading || !dirty}
-            whileHover={{ scale: dirty ? 1.04 : 1 }}
-            whileTap={{ scale: dirty ? 0.97 : 1 }}
-            className="inline-flex items-center gap-2 px-6 py-3 rounded-2xl font-bold text-sm text-white shrink-0 transition-all disabled:opacity-50"
+            icon={<Save className="w-4 h-4" />}
+            className="px-6 py-3 rounded-2xl font-bold shrink-0"
             style={{
               background: dirty
                 ? 'linear-gradient(135deg, #818cf8 0%, #a78bfa 100%)'
@@ -228,9 +228,8 @@ export default function TeacherProfile() {
               boxShadow: dirty ? '0 8px 32px rgba(139,92,246,0.45), 0 2px 8px rgba(0,0,0,0.15)' : undefined,
             }}
           >
-            {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
             Save changes
-          </motion.button>
+          </LoadingButton>
         }
       >
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">

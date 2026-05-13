@@ -1,6 +1,7 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import TeacherLayout from '../../components/layout/TeacherLayout';
+import LoadingButton from '../../components/ui/LoadingButton';
 import { supabase } from '../../supabase';
 import { authFetch } from '../../lib/apiUrl';
 import { toast } from 'sonner';
@@ -526,10 +527,14 @@ export default function TeacherLiveSessions() {
                 className="flex-1 py-3 bg-slate-100 text-slate-600 rounded-xl font-semibold text-sm hover:bg-slate-200 transition-all">
                 Cancel
               </button>
-              <button onClick={handleSaveEdit} disabled={saving}
-                className="flex-1 py-3 bg-indigo-600 text-white rounded-xl font-semibold text-sm hover:bg-indigo-700 transition-all disabled:opacity-50 shadow-lg shadow-indigo-200">
-                {saving ? 'Saving...' : 'Update Session'}
-              </button>
+              <LoadingButton
+                onClick={handleSaveEdit}
+                loading={saving}
+                fullWidth
+                className="flex-1 py-3 bg-indigo-600 hover:bg-indigo-700 shadow-lg shadow-indigo-200"
+              >
+                Update Session
+              </LoadingButton>
             </div>
           </div>
         </div>
@@ -933,10 +938,15 @@ function NewSessionModal({
               className="flex-1 py-3 bg-slate-100 text-slate-600 rounded-xl font-semibold text-sm hover:bg-slate-200 transition-all">
               Cancel
             </button>
-            <button type="submit" disabled={saving}
-              className="flex-1 py-3 bg-indigo-600 text-white rounded-xl font-semibold text-sm hover:bg-indigo-700 transition-all disabled:opacity-50 shadow-lg shadow-indigo-200 flex items-center justify-center gap-2">
-              {saving ? <><Loader2 className="w-4 h-4 animate-spin" /> Creating...</> : 'Schedule Session'}
-            </button>
+            <LoadingButton
+              type="submit"
+              loading={saving}
+              loadingText="Creating..."
+              fullWidth
+              className="flex-1 py-3 bg-indigo-600 hover:bg-indigo-700 shadow-lg shadow-indigo-200"
+            >
+              Schedule Session
+            </LoadingButton>
           </div>
         </form>
       </motion.div>

@@ -1,6 +1,7 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import { supabase } from '../../supabase';
 import TeacherLayout from '../../components/layout/TeacherLayout';
+import LoadingButton from '../../components/ui/LoadingButton';
 import {
   Plus,
   Trash2,
@@ -196,6 +197,7 @@ export default function QuizBuilder() {
   const [introTab, setIntroTab] = useState<'url' | 'upload'>('url');
   const [questionMediaTab, setQuestionMediaTab] = useState<Record<number, 'url' | 'upload'>>({});
   const [uploading, setUploading] = useState<null | 'intro' | number>(null);
+  const [saving, setSaving] = useState(false);
   const [autoPublish, setAutoPublish] = useState(false);
   const [publishAt, setPublishAt] = useState('');
 
@@ -590,6 +592,7 @@ export default function QuizBuilder() {
       return;
     }
 
+    setSaving(true);
     try {
       let currentQuizId = quizId;
       const settings = { ...defaultSettings(), ...quizData.settings } as QuizSettingsExtended;
@@ -657,6 +660,8 @@ export default function QuizBuilder() {
     } catch (err: unknown) {
       const msg = err && typeof err === 'object' && 'message' in err ? String((err as { message: string }).message) : 'Failed to save quiz';
       toast.error(msg);
+    } finally {
+      setSaving(false);
     }
   };
 
@@ -728,20 +733,19 @@ export default function QuizBuilder() {
                 </div>
                 <div className="flex flex-wrap items-center gap-3 shrink-0">
                   <AITriggerButton onClick={() => setAiOpen(true)} label="AI / Import" />
-                  <motion.button
+                  <LoadingButton
                     type="button"
                     onClick={() => void handleSave()}
-                    whileHover={{ scale: 1.02 }}
-                    whileTap={{ scale: 0.98 }}
-                    className="inline-flex items-center gap-2 px-6 py-3 rounded-2xl font-bold text-sm text-white shadow-lg"
+                    loading={saving}
+                    icon={<Save className="w-4 h-4" />}
+                    className="px-6 py-3 rounded-2xl font-bold"
                     style={{
-                      background: 'linear-gradient(135deg, #818cf8 0%, #a78bfa 100%)',
+                      background: saving ? 'rgba(129,140,248,0.7)' : 'linear-gradient(135deg, #818cf8 0%, #a78bfa 100%)',
                       boxShadow: '0 8px 32px rgba(139,92,246,0.4)',
                     }}
                   >
-                    <Save className="w-4 h-4" />
                     Save quiz
-                  </motion.button>
+                  </LoadingButton>
                 </div>
               </div>
             </div>

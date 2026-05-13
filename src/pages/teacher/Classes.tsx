@@ -1,6 +1,7 @@
 import React, { useEffect, useState, useMemo } from 'react';
 import { supabase } from '../../supabase';
 import TeacherLayout from '../../components/layout/TeacherLayout';
+import LoadingButton from '../../components/ui/LoadingButton';
 import { toast } from 'sonner';
 import { motion } from 'motion/react';
 import {
@@ -634,13 +635,15 @@ export default function TeacherClasses() {
                 >
                   Cancel
                 </button>
-                <button
+                <LoadingButton
                   type="submit"
-                  disabled={submitting}
-                  className="flex-1 px-4 py-2.5 bg-indigo-600 text-white rounded-xl font-semibold text-sm hover:bg-indigo-700 transition-all disabled:opacity-50 shadow-lg shadow-indigo-500/20"
+                  loading={submitting}
+                  loadingText={editing ? 'Saving...' : 'Creating...'}
+                  fullWidth
+                  className="flex-1 px-4 py-2.5 bg-indigo-600 hover:bg-indigo-700 shadow-lg shadow-indigo-500/20"
                 >
-                  {submitting ? 'Saving...' : editing ? 'Save Changes' : 'Create Class'}
-                </button>
+                  {editing ? 'Save Changes' : 'Create Class'}
+                </LoadingButton>
               </div>
             </form>
           </div>

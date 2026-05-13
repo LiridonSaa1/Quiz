@@ -3,6 +3,7 @@ import AdminLayout from '../../components/layout/AdminLayout';
 import { cn } from '../../lib/utils';
 import { toast } from 'sonner';
 import { authFetch } from '../../lib/apiUrl';
+import LoadingButton from '../../components/ui/LoadingButton';
 import {
   ShieldCheck, Users, GraduationCap, Crown,
   Check, X, Save, Info, Lock, Unlock
@@ -275,14 +276,14 @@ export default function AdminRoles() {
             <h1 className="text-2xl font-bold text-slate-900">Roles & Permissions</h1>
             <p className="text-sm text-slate-500 mt-0.5">Control what each role can access and do</p>
           </div>
-          <button
+          <LoadingButton
             onClick={handleSave}
-            disabled={saving}
-            className="inline-flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-60 text-white text-sm font-semibold px-4 py-2.5 rounded-xl transition-colors"
+            loading={saving}
+            icon={<Save className="w-4 h-4" />}
+            className="bg-indigo-600 hover:bg-indigo-700 px-4 py-2.5"
           >
-            <Save className="w-4 h-4" />
-            {saving ? 'Saving…' : 'Save Changes'}
-          </button>
+            Save Changes
+          </LoadingButton>
         </div>
 
         {/* Role Cards */}

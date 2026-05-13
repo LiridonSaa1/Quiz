@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { supabase } from '../../supabase';
 import TeacherLayout from '../../components/layout/TeacherLayout';
+import LoadingButton from '../../components/ui/LoadingButton';
 import {
   Plus, Search, Layers, Trash2, Edit2,
   BookOpen, X, Save, PlayCircle, ChevronRight, HelpCircle, AlertTriangle, Calendar
@@ -915,15 +916,18 @@ export default function TeacherModules() {
                 >
                   Cancel
                 </button>}
-                {can('actions.teacher.modules.manage') && <button
-                  onClick={handleSave}
-                  disabled={saving}
-                  className="inline-flex items-center gap-2 px-5 py-2.5 text-white rounded-xl font-semibold text-sm transition-all disabled:opacity-60"
-                  style={{ background: 'linear-gradient(135deg,#6366f1,#8b5cf6)' }}
-                >
-                  <Save className="w-4 h-4" />
-                  {saving ? 'Saving...' : editing ? 'Save Changes' : 'Create Module'}
-                </button>}
+                {can('actions.teacher.modules.manage') && (
+                  <LoadingButton
+                    onClick={handleSave}
+                    loading={saving}
+                    loadingText={editing ? 'Saving...' : 'Creating...'}
+                    icon={<Save className="w-4 h-4" />}
+                    className="px-5 py-2.5"
+                    style={{ background: 'linear-gradient(135deg,#6366f1,#8b5cf6)' }}
+                  >
+                    {editing ? 'Save Changes' : 'Create Module'}
+                  </LoadingButton>
+                )}
               </div>
             </motion.div>
           </motion.div>

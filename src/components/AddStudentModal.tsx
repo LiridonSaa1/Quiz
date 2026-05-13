@@ -8,6 +8,7 @@ import { toast } from 'sonner';
 import { supabase } from '../supabase';
 import { cn } from '../lib/utils';
 import { authFetch } from '../lib/apiUrl';
+import LoadingButton from './ui/LoadingButton';
 
 interface FormData {
   name: string;
@@ -376,14 +377,15 @@ export default function AddStudentModal({ onClose, onSuccess, accentColor = 'vio
               <ChevronRight className="w-4 h-4" />
             </button>
           ) : (
-            <button
-              type="button"
+            <LoadingButton
               onClick={handleSubmit}
-              disabled={submitting}
-              className={`flex items-center gap-2 px-5 py-2.5 ${accent.btn} text-white rounded-xl font-semibold text-sm transition-all shadow-lg disabled:opacity-60`}
+              loading={submitting}
+              className={`px-5 py-2.5 ${accent.btn} shadow-lg`}
+              variant="primary"
+              size="sm"
             >
-              {submitting ? 'Creating...' : 'Create Student'}
-            </button>
+              Create Student
+            </LoadingButton>
           )}
         </div>
       </div>

@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import AdminLayout from '../../components/layout/AdminLayout';
 import { cn } from '../../lib/utils';
 import { toast } from 'sonner';
+import LoadingButton from '../../components/ui/LoadingButton';
 import { supabase } from '../../supabase';
 import { authFetch } from '../../lib/apiUrl';
 import {
@@ -187,14 +188,14 @@ export default function AdminProfile() {
             <h1 className="text-2xl font-bold text-slate-900">Profile</h1>
             <p className="text-sm text-slate-500 mt-0.5">Manage your personal information and preferences</p>
           </div>
-          <button
+          <LoadingButton
             onClick={handleSave}
-            disabled={saving}
-            className="inline-flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-60 text-white text-sm font-semibold px-4 py-2.5 rounded-xl transition-colors"
+            loading={saving}
+            icon={<Save className="w-4 h-4" />}
+            className="bg-indigo-600 hover:bg-indigo-700 px-4 py-2.5"
           >
-            <Save className="w-4 h-4" />
-            {saving ? 'Saving…' : 'Save Profile'}
-          </button>
+            Save Profile
+          </LoadingButton>
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">

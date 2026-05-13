@@ -1,0 +1,131 @@
+Create a modern and professional UX behavior for all forms, modals, dialogs, drawers, and action buttons across the entire system for Teacher, Student, and Admin roles.
+
+Requirements:
+
+* Every form that contains:
+
+  * Create
+  * Submit
+  * Save
+  * Update
+  * Edit
+  * Upload
+  * Delete
+  * Approve
+  * Reject
+  * Assign
+  * Publish
+  * Send
+  * Login/Register
+  * Reset Password
+  * Add Lesson
+  * Add Course
+  * Create Quiz
+  * Submit Assignment
+  * Upload Project
+  * Attendance Submit
+  * Grade Submit
+  * Payment Submit
+  * Profile Update
+  * Settings Save
+  * Announcement Post
+  * Certificate Generate
+  * Export PDF/Excel
+  * Any async action
+
+must follow these UX rules:
+
+1. When the user clicks the button:
+
+   * Immediately show a loading spinner/icon inside the button.
+   * Disable the button completely to prevent double clicks.
+   * Change button text dynamically:
+
+     * Save → Saving...
+     * Submit → Submitting...
+     * Update → Updating...
+     * Delete → Deleting...
+     * Upload → Uploading...
+     * Generate → Generating...
+   * Add reduced opacity while loading.
+   * Cursor should become `not-allowed`.
+
+2. Prevent multiple submissions:
+
+   * User cannot click the same action twice while request is processing.
+   * Disable Enter key submit spam.
+   * Prevent duplicate API requests.
+
+3. Loading UX:
+
+   * Spinner should be centered with text.
+   * Use smooth transition animation.
+   * Minimum loading visibility: 500ms for better UX consistency.
+   * Show skeleton loaders where data is being fetched.
+
+4. Success/Error Handling:
+
+   * On success:
+
+     * Show toast notification.
+     * Reset loading state.
+     * Close modal if needed.
+     * Refresh table/list automatically.
+   * On error:
+
+     * Reset button state.
+     * Show error toast/message.
+     * Keep form data intact.
+
+5. Button states:
+
+   * Default
+   * Hover
+   * Active
+   * Disabled
+   * Loading
+   * Success (optional)
+
+6. Apply this behavior globally for:
+
+   * Teacher Dashboard
+   * Student Dashboard
+   * Admin Panel
+   * Mobile responsive views
+   * Modals
+   * Tables with actions
+   * Forms
+   * Multi-step forms
+   * File uploads
+   * Real-time quiz submissions
+   * Live classroom actions
+
+7. Accessibility:
+
+   * Add aria-busy="true" during loading.
+   * Add proper disabled attributes.
+   * Ensure keyboard accessibility.
+   * Spinner should have accessible label.
+
+8. Visual consistency:
+
+   * Use same spinner style across platform.
+   * Keep same animation timing.
+   * Same disabled styling globally.
+
+9. Technical expectations:
+
+   * Use reusable loading button component.
+   * Centralized async handling.
+   * Support API calls with async/await.
+   * Prevent race conditions.
+   * Handle network timeout gracefully.
+
+10. Example UX:
+    Before click:
+    [ Save Changes ]
+
+After click:
+[ spinner Saving... ]
+
+Button disabled until request finishes.

@@ -16,6 +16,7 @@ import {
 import { toast } from 'sonner';
 import AdminLayout from '../components/layout/AdminLayout';
 import { TableRowsSkeleton } from '../components/ui/Skeleton';
+import LoadingButton from '../components/ui/LoadingButton';
 import { motion, AnimatePresence } from 'motion/react';
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, ResponsiveContainer, BarChart, Bar, Cell } from 'recharts';
 import { apiUrl, authFetch } from '../lib/apiUrl';
@@ -514,10 +515,14 @@ export default function AdminDashboard() {
                     className="flex-1 px-4 py-2.5 bg-slate-100 text-slate-700 rounded-xl font-bold text-sm hover:bg-slate-200 transition-all">
                     Cancel
                   </button>
-                  <button type="submit" disabled={submitting}
-                    className="flex-1 px-4 py-2.5 bg-indigo-600 text-white rounded-xl font-bold text-sm hover:bg-indigo-700 transition-all disabled:opacity-50 shadow-lg shadow-indigo-200">
-                    {submitting ? 'Creating...' : 'Create User'}
-                  </button>
+                  <LoadingButton
+                    type="submit"
+                    loading={submitting}
+                    fullWidth
+                    className="flex-1 px-4 py-2.5 bg-indigo-600 hover:bg-indigo-700 shadow-lg shadow-indigo-200"
+                  >
+                    Create User
+                  </LoadingButton>
                 </div>
               </form>
             </motion.div>
