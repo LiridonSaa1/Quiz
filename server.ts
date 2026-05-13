@@ -10822,6 +10822,32 @@ async function runAnnouncementColumnsMigration(): Promise<void> {
 async function runAssignmentSubmissionsMigration() {
   const dbUrl = process.env.DATABASE_URL?.trim();
   if (!dbUrl) return;
+  // Ensure assignments table exists first
+  try {
+    await poolQuery(`
+      CREATE TABLE IF NOT EXISTS assignments (
+        id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+        title text NOT NULL,
+        description text,
+        instructions text,
+        course_id uuid,
+        class_id uuid,
+        teacher_id uuid,
+        type text NOT NULL DEFAULT 'homework',
+        due_date timestamptz,
+        max_score numeric NOT NULL DEFAULT 100,
+        status text NOT NULL DEFAULT 'draft',
+        allow_late_submission boolean NOT NULL DEFAULT false,
+        submission_config jsonb,
+        publish_at timestamptz,
+        created_at timestamptz NOT NULL DEFAULT now(),
+        updated_at timestamptz NOT NULL DEFAULT now()
+      )
+    `);
+    console.log('[migration] assignments table ensured ✓');
+  } catch (err: any) {
+    console.warn('[migration] assignments table:', err?.message?.split('\n')[0]);
+  }
   try {
     await poolQuery(`
       CREATE TABLE IF NOT EXISTS assignment_submissions (
