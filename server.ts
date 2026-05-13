@@ -5564,6 +5564,50 @@ Assistant:`;
   app.post("/api/teacher/quizzes", teacherQuizzesPostHandler);
   app.post("/api/teacher/quizzes/", teacherQuizzesPostHandler);
 
+  /** Update quiz metadata (service role — bypasses RLS for schemas without teacher_id). */
+  app.patch("/api/teacher/quizzes/:id", async (req: Request, res: Response) => {
+    try {
+      const caller = await assertAuthenticated(req, res);
+      if (!caller) return;
+      if (caller.role !== "teacher" && caller.role !== "admin") {
+        return res.status(403).json({ error: "Forbidden" });
+      }
+      const quizId = typeof req.params.id === "string" ? req.params.id.trim() : "";
+      if (!quizId) return res.status(400).json({ error: "Quiz id required" });
+
+      const body = req.body as Record<string, unknown>;
+      const updates: Record<string, unknown> = {};
+      if (body.title !== undefined) updates.title = String(body.title);
+      if (body.description !== undefined) updates.description = body.description != null ? String(body.description) : null;
+      if (body.course_id !== undefined) updates.course_id = body.course_id;
+      if (body.time_limit !== undefined) updates.time_limit = Number(body.time_limit) || 0;
+      if (body.published !== undefined) updates.published = Boolean(body.published);
+      if (body.settings !== undefined && body.settings !== null) updates.settings = body.settings;
+      if ("publish_at" in body) updates.publish_at = body.publish_at ? new Date(String(body.publish_at)).toISOString() : null;
+
+      let payload = { ...updates };
+      for (let i = 0; i < 8; i++) {
+        const { error } = await supabaseAdmin.from("quizzes").update(payload).eq("id", quizId);
+        if (!error) return res.json({ success: true });
+        const e = error as { message?: string; code?: string };
+        const msg = (e.message || "").toLowerCase();
+        if ((e.code === "PGRST204" || /schema cache|could not find|does not exist/i.test(msg)) && msg.includes("settings") && "settings" in payload) {
+          const { settings: _s, ...rest } = payload; void _s; payload = rest; continue;
+        }
+        if ((e.code === "PGRST204" || /schema cache|could not find|does not exist/i.test(msg)) && msg.includes("published") && "published" in payload) {
+          const { published: _p, ...rest } = payload; void _p; payload = rest; continue;
+        }
+        if ((e.code === "PGRST204" || e.code === "42703") && msg.includes("publish_at") && "publish_at" in payload) {
+          const { publish_at: _pa, ...rest } = payload; void _pa; payload = rest; continue;
+        }
+        return res.status(500).json({ error: e.message || "Failed to update quiz" });
+      }
+      return res.status(500).json({ error: "Quiz update: max retries" });
+    } catch (e: any) {
+      res.status(500).json({ error: e?.message || "Failed to update quiz" });
+    }
+  });
+
   /** Load quiz questions for edit (service role) — bypasses RLS; teachers may only read quizzes for courses they own. */
   app.get("/api/teacher/quizzes/:quizId/questions", async (req: Request, res: Response) => {
     try {

@@ -34,7 +34,6 @@ import { Quiz, Question, Course, QuestionType } from '../../types';
 import { cn } from '../../lib/utils';
 import { apiUrl, authFetch, readApiError } from '../../lib/apiUrl';
 import { resolveTeacherIdCandidates } from '../../lib/teacherScope';
-import { updateCompatibleQuiz } from '../../lib/fetchTeacherQuizzes';
 import { useNavigate, useParams } from 'react-router-dom';
 import { FormPageSkeleton } from '../../components/ui/Skeleton';
 import { AIPanel, AITriggerButton } from '../../components/AIPanel';
@@ -608,8 +607,11 @@ export default function QuizBuilder() {
       };
 
       if (quizId) {
-        const { error } = await updateCompatibleQuiz(supabase, quizId, basePayload);
-        if (error) throw error;
+        const updateRes = await authFetch(`/api/teacher/quizzes/${encodeURIComponent(quizId)}`, {
+          method: 'PATCH',
+          body: JSON.stringify(basePayload),
+        });
+        if (!updateRes.ok) throw new Error(await readApiError(updateRes));
       } else {
         const createRes = await authFetch('/api/teacher/quizzes', {
           method: 'POST',
