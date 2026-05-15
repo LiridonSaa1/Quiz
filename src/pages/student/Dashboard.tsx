@@ -33,8 +33,15 @@ export default function StudentDashboard() {
       if (!session) return;
       const studentId = session.user.id;
 
-      // First-login celebration — runs once per user per browser
-      if (!hasSeenWelcome(studentId)) {
+      // First-login celebration — detected via Supabase Auth timestamps
+      // created_at ≈ last_sign_in_at (within 60s) means this is the very first login,
+      // regardless of browser/device. localStorage guard prevents showing it twice
+      // in the same browser if the component remounts.
+      const createdAt = session.user.created_at ? new Date(session.user.created_at).getTime() : 0;
+      const lastSignIn = session.user.last_sign_in_at ? new Date(session.user.last_sign_in_at).getTime() : 0;
+      const isFirstLogin = createdAt > 0 && lastSignIn > 0 && Math.abs(lastSignIn - createdAt) < 60_000;
+
+      if (isFirstLogin && !hasSeenWelcome(studentId)) {
         const { data: profileRow } = await supabase
           .from('profiles')
           .select('display_name')
