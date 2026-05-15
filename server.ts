@@ -1457,6 +1457,36 @@ Assistant:`;
     );
   };
 
+  // Resilient notification insert — retries without columns the live DB doesn't have
+  // (older Supabase instances may be missing `title` and/or `read`).
+  let _notifColsKnown = false;
+  let _notifHasTitle = true;
+  let _notifHasRead  = true;
+  const notifInsert = async (rows: Record<string, unknown> | Record<string, unknown>[]) => {
+    const arr = Array.isArray(rows) ? rows : [rows];
+    const strip = (r: Record<string, unknown>) => {
+      const out = { ...r };
+      if (!_notifHasTitle) delete out.title;
+      if (!_notifHasRead)  delete out.read;
+      return out;
+    };
+    const attempt = async () => supabaseAdmin.from('notifications').insert(arr.map(strip));
+    let { error } = await attempt();
+    if (!error) { _notifColsKnown = true; return; }
+    const hay = `${error.message || ''} ${(error as any).details || ''}`.toLowerCase();
+    const missingTitle = hay.includes("'title'") || hay.includes('"title"');
+    const missingRead  = hay.includes("'read'")  || hay.includes('"read"');
+    if ((missingTitle || missingRead) && !_notifColsKnown) {
+      if (missingTitle) _notifHasTitle = false;
+      if (missingRead)  _notifHasRead  = false;
+      _notifColsKnown = false;
+      const retry = await attempt();
+      if (retry.error) console.warn('[notify] insert failed (retry):', retry.error.message);
+    } else {
+      console.warn('[notify] insert failed:', error.message);
+    }
+  };
+
   const isClassesTableMissing = (error: any) => {
     const haystack = `${error?.message || ""} ${error?.details || ""} ${error?.hint || ""}`.toLowerCase();
     return (
@@ -6306,7 +6336,7 @@ Assistant:`;
           action_url: `/student/live-sessions/${session.id}`,
           created_at: new Date().toISOString(),
         }));
-        await supabaseAdmin.from('notifications').insert(notifRows);
+        await notifInsert(notifRows);
       }
 
       res.json({ success: true, session });
@@ -6349,7 +6379,7 @@ Assistant:`;
             action_url: `/student/live-sessions/${req.params.id}`,
             created_at: new Date().toISOString(),
           }));
-          await supabaseAdmin.from('notifications').insert(notifRows);
+          await notifInsert(notifRows);
         }
       }
 
@@ -6552,7 +6582,7 @@ Assistant:`;
         action_url: `/student/live-sessions/${req.params.id}`,
         created_at: new Date().toISOString(),
       }));
-      await supabaseAdmin.from('notifications').insert(notifRows);
+      await notifInsert(notifRows);
 
       res.json({ success: true, invited: inviteIds.length });
     } catch (e: unknown) { res.status(500).json({ error: (e as Error).message }); }
@@ -7752,7 +7782,7 @@ Assistant:`;
         violationCount !== null ? `Warnings: ${violationCount}` : '',
       ].filter(Boolean).join(' | ');
 
-      await supabaseAdmin.from('notifications').insert({
+      await notifInsert({
         user_id: teacherId,
         title: 'Quiz Integrity Alert',
         message: `${studentLabel} triggered a quiz violation in "${quizTitle}". ${violationInfo}`.trim(),
@@ -9276,7 +9306,7 @@ Assistant:`;
   // ─── END REAL-TIME LIVE QUIZ ──────────────────────────────────────────────────
 
   const addDiscussionNotification = async (userId: string, title: string, message: string, actionUrl: string) => {
-    await supabaseAdmin.from('notifications').insert({
+    await notifInsert({
       user_id: userId,
       title,
       message: message.slice(0, 240),
@@ -9985,7 +10015,7 @@ Assistant:`;
       };
     });
 
-    await supabaseAdmin.from('notifications').insert(notifRows);
+    await notifInsert(notifRows);
 
     // Send email via Brevo if enabled
     if (shouldSendEmail) {
@@ -11195,6 +11225,34 @@ async function runAssignmentsPublishAtMigration(): Promise<void> {
   }
 }
 
+async function runNotificationsColumnsMigration(): Promise<void> {
+  // Add `title` and `read` columns if the live DB was created from an older schema
+  const cols: Array<{ name: string; ddl: string }> = [
+    { name: 'title', ddl: `ALTER TABLE notifications ADD COLUMN IF NOT EXISTS title TEXT NOT NULL DEFAULT ''` },
+    { name: 'read',  ddl: `ALTER TABLE notifications ADD COLUMN IF NOT EXISTS read BOOLEAN NOT NULL DEFAULT FALSE` },
+  ];
+  for (const col of cols) {
+    try {
+      await poolQuery(col.ddl);
+      console.log(`[migration] notifications.${col.name} column ensured ✓`);
+    } catch {
+      // poolQuery failed — try supabase probe then RPC
+      try {
+        const probe = await supabaseAdmin.from('notifications').select(col.name).limit(1);
+        if (!probe.error) {
+          console.log(`[migration] notifications.${col.name} column already exists ✓`);
+          continue;
+        }
+        const rpc = await (supabaseAdmin as any).rpc('exec_sql', { sql: col.ddl });
+        if (rpc.error) throw rpc.error;
+        console.log(`[migration] notifications.${col.name} added via RPC ✓`);
+      } catch (err: any) {
+        console.warn(`[migration] notifications.${col.name} could not be auto-created:`, err?.message?.split('\n')[0]);
+      }
+    }
+  }
+}
+
 async function ensureAssignmentFilesBucket(): Promise<void> {
   try {
     const { error } = await supabaseAdmin.storage.createBucket('assignment-files', {
@@ -11226,6 +11284,7 @@ async function startServer() {
   void runLessonsPublishAtMigration();
   void runQuizzesPublishAtMigration();
   void runAssignmentsPublishAtMigration();
+  void runNotificationsColumnsMigration();
   void ensureAssignmentFilesBucket();
 
   const httpServer = http.createServer();

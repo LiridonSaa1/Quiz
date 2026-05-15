@@ -355,26 +355,28 @@ export async function notifyEvent(
 
     if (rows.length === 0) return;
 
-    const { error } = await admin.from("notifications").insert(rows);
-    if (error) {
-      // Some Supabase deployments don't have the `action_url` column on
-      // `notifications` (or the PostgREST schema cache hasn't picked it up).
-      // Retry without that field so the bell still fires — the link target is
-      // a nice-to-have, not core to the notification.
+    // Resilient insert: strip columns the live DB doesn't have and retry.
+    // Older Supabase instances may be missing `title`, `read`, and/or `action_url`.
+    let insertRows: Record<string, unknown>[] = rows as Record<string, unknown>[];
+    let lastError: string | null = null;
+    for (let attempt = 0; attempt < 4; attempt++) {
+      const { error } = await admin.from("notifications").insert(insertRows);
+      if (!error) { lastError = null; break; }
       const msg = String(error.message || "");
-      if (/action_url/i.test(msg)) {
-        const trimmed = rows.map((r) => {
-          const { action_url, ...rest } = r as { action_url?: unknown } & Record<string, unknown>;
-          void action_url;
-          return rest;
+      lastError = msg;
+      const missingCol = msg.match(/Could not find the '(\w+)' column/)?.[1];
+      if (missingCol && ["title", "read", "action_url"].includes(missingCol)) {
+        insertRows = insertRows.map((r) => {
+          const copy = { ...r };
+          delete copy[missingCol];
+          return copy;
         });
-        const retry = await admin.from("notifications").insert(trimmed);
-        if (retry.error) {
-          console.warn(`[notify:${event}] insert failed (retry):`, retry.error.message);
-        }
       } else {
-        console.warn(`[notify:${event}] insert failed:`, msg);
+        break;
       }
+    }
+    if (lastError) {
+      console.warn(`[notify:${event}] insert failed (retry):`, lastError);
     }
   } catch (err: any) {
     console.warn(`[notify:${event}] dispatch failed:`, err?.message || err);

@@ -10,6 +10,7 @@ import { fetchAttemptRowsByStudentId, normalizeAttempts } from '../../lib/quizAt
 import { selectPublishedQuizzesCompat } from '../../lib/quizzesCompat';
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, ResponsiveContainer, Tooltip } from 'recharts';
 import { format, subDays } from 'date-fns';
+import WelcomeCelebration, { hasSeenWelcome } from '../../components/WelcomeCelebration';
 
 interface LiveSessionBanner {
   id: string;
@@ -23,12 +24,27 @@ export default function StudentDashboard() {
   const [recentAttempts, setRecentAttempts] = useState<any[]>([]);
   const [liveSessions, setLiveSessions] = useState<LiveSessionBanner[]>([]);
   const [loading, setLoading] = useState(true);
+  const [celebrationUserId, setCelebrationUserId] = useState<string | null>(null);
+  const [celebrationName, setCelebrationName] = useState<string>('');
 
   useEffect(() => {
     const fetchData = async () => {
       const { data: { session } } = await supabase.auth.getSession();
       if (!session) return;
       const studentId = session.user.id;
+
+      // First-login celebration — runs once per user per browser
+      if (!hasSeenWelcome(studentId)) {
+        const { data: profileRow } = await supabase
+          .from('profiles')
+          .select('display_name')
+          .eq('id', studentId)
+          .maybeSingle();
+        const name = String(profileRow?.display_name || session.user.email || '').trim();
+        setCelebrationName(name);
+        setCelebrationUserId(studentId);
+      }
+
       try {
         let courses: any[] = [];
         let quizzes: Quiz[] = [];
@@ -162,6 +178,13 @@ export default function StudentDashboard() {
 
   return (
     <StudentLayout>
+      {celebrationUserId && (
+        <WelcomeCelebration
+          userId={celebrationUserId}
+          displayName={celebrationName}
+          onDone={() => setCelebrationUserId(null)}
+        />
+      )}
       <div className="space-y-6">
         {/* Live Session Banner */}
         {liveSessions.length > 0 && (
