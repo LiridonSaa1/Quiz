@@ -794,7 +794,8 @@ export async function createApp(options: CreateAppOptions = {}) {
   const includeFrontend = options.includeFrontend ?? true;
   const app = express();
 
-  app.use(express.json());
+  app.use(express.json({ limit: "15mb" }));
+  app.use(express.urlencoded({ extended: true, limit: "15mb" }));
 
   // PWA: serve sw.js with no-cache so browsers always check for updates
   app.get("/sw.js", (_req, res, next) => {
