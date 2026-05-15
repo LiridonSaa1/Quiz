@@ -81,15 +81,19 @@ export default function PWAInstallButton() {
   const { schoolName } = useBranding();
   const [showIOSModal, setShowIOSModal] = useState(false);
   const [dismissed, setDismissed] = useState(false);
+  const prevState = useRef<string>('idle');
 
-  // Show toast on successful install
+  // Show toast ONLY when transitioning from installing/available → installed
+  // (not on initial load when app is already standalone)
   useEffect(() => {
-    if (state === 'installed') {
+    const prev = prevState.current;
+    if (state === 'installed' && (prev === 'installing' || prev === 'available')) {
       toast.success(`${schoolName} installed successfully 🎉`, {
         description: `${schoolName} is now on your home screen.`,
         duration: 5000,
       });
     }
+    prevState.current = state;
   }, [state, schoolName]);
 
   const handleInstallClick = async () => {
