@@ -1745,8 +1745,19 @@ Assistant:`;
       .from("platform_config")
       .upsert({ section, value, updated_at: new Date().toISOString() }, { onConflict: "section" })
       .select("section, value, updated_at")
-      .single();
+      .maybeSingle();
     if (res.error) throw res.error;
+    // Some PostgREST versions return null data on a successful upsert (RLS/schema-cache quirk).
+    // Fall back to a plain read so callers always get the saved value.
+    if (!res.data) {
+      const readRes = await supabaseAdmin
+        .from("platform_config")
+        .select("section, value, updated_at")
+        .eq("section", section)
+        .maybeSingle();
+      if (readRes.error) throw readRes.error;
+      return readRes.data;
+    }
     return res.data;
   };
 
