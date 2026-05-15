@@ -795,6 +795,21 @@ export async function createApp(options: CreateAppOptions = {}) {
   const app = express();
 
   app.use(express.json());
+
+  // PWA: serve sw.js with no-cache so browsers always check for updates
+  app.get("/sw.js", (_req, res, next) => {
+    res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate");
+    res.setHeader("Content-Type", "application/javascript");
+    next();
+  });
+
+  // PWA: serve manifest.json with short cache
+  app.get("/manifest.json", (_req, res, next) => {
+    res.setHeader("Cache-Control", "public, max-age=86400");
+    res.setHeader("Content-Type", "application/manifest+json");
+    next();
+  });
+
   app.post("/api/log-error", async (req: Request, res: Response) => {
     try {
       const body = (req.body || {}) as any;
