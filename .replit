@@ -1,4 +1,4 @@
-modules = ["nodejs-20", "web", "bash"]
+modules = ["nodejs-20", "web"]
 [agent]
 expertMode = true
 stack = "BEST_EFFORT_FALLBACK"
@@ -55,6 +55,7 @@ build = ["npm", "run", "build"]
 [userenv]
 
 [userenv.shared]
+TELEGRAM_WEBHOOK_BASE_URL = "https://quiz-amber-omega.vercel.app"
 
 [postMerge]
 path = "scripts/post-merge.sh"

@@ -6,8 +6,7 @@ const IMAGE_IMPORT_NOTE_MAX_CHARS = 4000;
 const getApiKey = (): string => {
   const replitKey = (process.env.AI_INTEGRATIONS_GEMINI_API_KEY as string | undefined) || '';
   const processKey = (process.env.GEMINI_API_KEY as string | undefined) || '';
-  const viteKey = import.meta.env?.VITE_GEMINI_API_KEY || '';
-  return String(replitKey || processKey || viteKey).trim();
+  return String(replitKey || processKey).trim();
 };
 
 const getBaseUrl = (): string | undefined => {
