@@ -58,12 +58,12 @@ interface GeneralForm {
 }
 
 interface NotifSettings {
-  email_new_enrollment: boolean;
-  email_quiz_submitted: boolean;
-  email_certificate_issued: boolean;
-  email_payment_received: boolean;
-  system_maintenance_alerts: boolean;
-  weekly_report: boolean;
+  email_new_enrollment:      RoleBoolMap;
+  email_quiz_submitted:      RoleBoolMap;
+  email_certificate_issued:  RoleBoolMap;
+  email_payment_received:    RoleBoolMap;
+  system_maintenance_alerts: RoleBoolMap;
+  weekly_report:             RoleBoolMap;
 }
 
 const TIMEZONES = ['UTC', 'America/New_York', 'America/Chicago', 'America/Los_Angeles', 'Europe/London', 'Europe/Berlin', 'Asia/Tokyo', 'Asia/Dubai', 'Australia/Sydney'];
@@ -104,12 +104,12 @@ export default function AdminSettings() {
   });
 
   const [notifs, setNotifs] = useState<NotifSettings>({
-    email_new_enrollment: true,
-    email_quiz_submitted: true,
-    email_certificate_issued: true,
-    email_payment_received: true,
-    system_maintenance_alerts: true,
-    weekly_report: false,
+    email_new_enrollment:      { student: true,  teacher: true,  admin: true  },
+    email_quiz_submitted:      { student: true,  teacher: true,  admin: true  },
+    email_certificate_issued:  { student: true,  teacher: true,  admin: true  },
+    email_payment_received:    { student: true,  teacher: false, admin: true  },
+    system_maintenance_alerts: { student: false, teacher: false, admin: true  },
+    weekly_report:             { student: false, teacher: true,  admin: true  },
   });
 
   const [emailSettings, setEmailSettings] = useState({
@@ -161,7 +161,21 @@ export default function AdminSettings() {
         if (!res.ok || !json?.success || !json?.value) return;
         const v = json.value as any;
         if (v.general) setGeneral((prev) => ({ ...prev, ...v.general }));
-        if (v.notifications) setNotifs((prev) => ({ ...prev, ...v.notifications }));
+        if (v.notifications) {
+          // Backward-compat: old format stored plain booleans per key.
+          // New format stores per-role objects { student, teacher, admin }.
+          const rawN = v.notifications as Record<string, any>;
+          const parsed: Partial<NotifSettings> = {};
+          for (const key of Object.keys(rawN) as (keyof NotifSettings)[]) {
+            const val = rawN[key];
+            if (val && typeof val === 'object' && 'student' in val) {
+              parsed[key] = { student: !!val.student, teacher: !!val.teacher, admin: !!val.admin };
+            } else if (typeof val === 'boolean') {
+              parsed[key] = { student: val, teacher: val, admin: val };
+            }
+          }
+          setNotifs(prev => ({ ...prev, ...parsed }));
+        }
         if (v.email) setEmailSettings((prev) => ({ ...prev, ...v.email }));
         if (v.security) {
           if (typeof v.security.requireEmailVerify === 'boolean') setRequireEmailVerify(v.security.requireEmailVerify);
@@ -300,14 +314,71 @@ export default function AdminSettings() {
 
             {/* NOTIFICATIONS */}
             {activeTab === 'notifications' && (
-              <Section title="Email Notifications" subtitle="Choose which events trigger email alerts">
-                <Toggle label={NOTIF_LABELS.email_new_enrollment.label}      description={NOTIF_LABELS.email_new_enrollment.desc}      value={notifs.email_new_enrollment}      onChange={v => setNotifs(p => ({ ...p, email_new_enrollment: v }))} />
-                <Toggle label={NOTIF_LABELS.email_quiz_submitted.label}      description={NOTIF_LABELS.email_quiz_submitted.desc}      value={notifs.email_quiz_submitted}      onChange={v => setNotifs(p => ({ ...p, email_quiz_submitted: v }))} />
-                <Toggle label={NOTIF_LABELS.email_certificate_issued.label}  description={NOTIF_LABELS.email_certificate_issued.desc}  value={notifs.email_certificate_issued}  onChange={v => setNotifs(p => ({ ...p, email_certificate_issued: v }))} />
-                <Toggle label={NOTIF_LABELS.email_payment_received.label}    description={NOTIF_LABELS.email_payment_received.desc}    value={notifs.email_payment_received}    onChange={v => setNotifs(p => ({ ...p, email_payment_received: v }))} />
-                <Toggle label={NOTIF_LABELS.system_maintenance_alerts.label} description={NOTIF_LABELS.system_maintenance_alerts.desc} value={notifs.system_maintenance_alerts} onChange={v => setNotifs(p => ({ ...p, system_maintenance_alerts: v }))} />
-                <Toggle label={NOTIF_LABELS.weekly_report.label}             description={NOTIF_LABELS.weekly_report.desc}             value={notifs.weekly_report}             onChange={v => setNotifs(p => ({ ...p, weekly_report: v }))} />
-              </Section>
+              <>
+                {/* Legend */}
+                <div className="bg-gradient-to-br from-indigo-50 to-blue-50 border border-indigo-100 rounded-2xl p-4 flex items-start gap-3">
+                  <div className="w-9 h-9 rounded-xl bg-white flex items-center justify-center shrink-0 shadow-sm">
+                    <Bell className="w-4 h-4 text-indigo-600" />
+                  </div>
+                  <div>
+                    <p className="text-sm font-bold text-slate-900">Per-role notification control</p>
+                    <p className="text-xs text-slate-500 mt-0.5 leading-relaxed">
+                      Toggle which roles receive each event notification — in the header bell and via email.
+                      Click a role chip to enable or disable it for that event.
+                      <span className="inline-flex items-center gap-1 ml-1">
+                        <span className="inline-block w-2 h-2 rounded-full bg-emerald-500" /> Students
+                        <span className="inline-block w-2 h-2 rounded-full bg-violet-500 ml-1" /> Teachers
+                        <span className="inline-block w-2 h-2 rounded-full bg-amber-500 ml-1" /> Admins
+                      </span>
+                    </p>
+                  </div>
+                </div>
+
+                <Section title="Enrollment & Progress" subtitle="Events triggered by student learning activity">
+                  <RoleToggleRow
+                    label={NOTIF_LABELS.email_new_enrollment.label}
+                    description={NOTIF_LABELS.email_new_enrollment.desc}
+                    value={notifs.email_new_enrollment}
+                    onChange={v => setNotifs(p => ({ ...p, email_new_enrollment: v }))}
+                  />
+                  <RoleToggleRow
+                    label={NOTIF_LABELS.email_quiz_submitted.label}
+                    description={NOTIF_LABELS.email_quiz_submitted.desc}
+                    value={notifs.email_quiz_submitted}
+                    onChange={v => setNotifs(p => ({ ...p, email_quiz_submitted: v }))}
+                  />
+                  <RoleToggleRow
+                    label={NOTIF_LABELS.email_certificate_issued.label}
+                    description={NOTIF_LABELS.email_certificate_issued.desc}
+                    value={notifs.email_certificate_issued}
+                    onChange={v => setNotifs(p => ({ ...p, email_certificate_issued: v }))}
+                  />
+                </Section>
+
+                <Section title="Payments & Revenue" subtitle="Financial events and transaction confirmations">
+                  <RoleToggleRow
+                    label={NOTIF_LABELS.email_payment_received.label}
+                    description={NOTIF_LABELS.email_payment_received.desc}
+                    value={notifs.email_payment_received}
+                    onChange={v => setNotifs(p => ({ ...p, email_payment_received: v }))}
+                  />
+                </Section>
+
+                <Section title="System & Reports" subtitle="Platform health alerts and periodic summaries">
+                  <RoleToggleRow
+                    label={NOTIF_LABELS.system_maintenance_alerts.label}
+                    description={NOTIF_LABELS.system_maintenance_alerts.desc}
+                    value={notifs.system_maintenance_alerts}
+                    onChange={v => setNotifs(p => ({ ...p, system_maintenance_alerts: v }))}
+                  />
+                  <RoleToggleRow
+                    label={NOTIF_LABELS.weekly_report.label}
+                    description={NOTIF_LABELS.weekly_report.desc}
+                    value={notifs.weekly_report}
+                    onChange={v => setNotifs(p => ({ ...p, weekly_report: v }))}
+                  />
+                </Section>
+              </>
             )}
 
             {/* EMAIL */}
@@ -522,12 +593,12 @@ export default function AdminSettings() {
 const inputCls = 'w-full px-3.5 py-2.5 text-sm border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-400 bg-white text-slate-800 placeholder:text-slate-400';
 
 const NOTIF_LABELS: Record<string, { label: string; desc: string }> = {
-  email_new_enrollment:       { label: 'New Enrollment',         desc: 'Notify when a student enrolls in a course' },
-  email_quiz_submitted:       { label: 'Quiz Submitted',         desc: 'Notify when a student submits a quiz attempt' },
-  email_certificate_issued:   { label: 'Certificate Issued',     desc: 'Notify when a certificate is issued to a student' },
-  email_payment_received:     { label: 'Payment Received',       desc: 'Notify when a payment is successfully processed' },
-  system_maintenance_alerts:  { label: 'Maintenance Alerts',     desc: 'Receive alerts about system health and maintenance' },
-  weekly_report:              { label: 'Weekly Summary Report',  desc: 'Receive a weekly digest of platform activity' },
+  email_new_enrollment:       { label: 'New Enrollment',        desc: 'Student gets a confirmation. Teacher sees who joined their course. Admin monitors platform growth.' },
+  email_quiz_submitted:       { label: 'Quiz Submitted',        desc: 'Student gets their score. Teacher reviews new attempts. Admin tracks system load & analytics.' },
+  email_certificate_issued:   { label: 'Certificate Issued',    desc: 'Student can view and download their certificate. Teacher is notified of completion. Admin keeps statistics.' },
+  email_payment_received:     { label: 'Payment Received',      desc: 'Student gets a payment confirmation. Admin monitors revenue. (Teachers typically don\'t need this.)' },
+  system_maintenance_alerts:  { label: 'Maintenance Alerts',    desc: 'Critical system alerts for server health, bugs and performance. Admin-only by default.' },
+  weekly_report:              { label: 'Weekly Summary Report', desc: 'A 7-day digest covering enrollments, quiz attempts, certificates and revenue.' },
 };
 
 function Section({ title, subtitle, children }: { title: string; subtitle?: string; children: React.ReactNode }) {

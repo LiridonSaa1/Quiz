@@ -1756,19 +1756,35 @@ Assistant:`;
   };
 
   /**
-   * Reads `platform_config.settings.notifications[settingsKey]` to decide whether
-   * an event-driven notification should fire. Defaults to `true` when no settings
-   * row exists yet so events fan out on a fresh install.
+   * Reads `platform_config.settings.notifications[settingsKey]` and returns
+   * per-role enabled flags. Defaults all roles to `true` when the settings row
+   * doesn't exist yet so events fan out on a fresh install.
+   *
+   * Backward-compatible: if the stored value is a plain boolean (old format)
+   * it applies that boolean to all three roles.
    */
-  const isNotificationEnabled = async (settingsKey: string): Promise<boolean> => {
+  const isNotificationEnabled = async (settingsKey: string): Promise<{ student: boolean; teacher: boolean; admin: boolean }> => {
+    const allTrue  = { student: true,  teacher: true,  admin: true  };
+    const allFalse = { student: false, teacher: false, admin: false };
     try {
       const settings: any = await getConfigSection("settings");
       const notifs = settings?.notifications;
-      if (!notifs || typeof notifs !== "object") return true;
+      if (!notifs || typeof notifs !== "object") return allTrue;
       const v = notifs[settingsKey];
-      return v === undefined ? true : Boolean(v);
+      if (v === undefined) return allTrue;
+      // New format: per-role object { student, teacher, admin }
+      if (v && typeof v === "object" && "student" in v) {
+        return {
+          student: Boolean(v.student),
+          teacher: Boolean(v.teacher),
+          admin:   Boolean(v.admin),
+        };
+      }
+      // Legacy format: single boolean — apply to all roles
+      const b = Boolean(v);
+      return { student: b, teacher: b, admin: b };
     } catch {
-      return false;
+      return allFalse;
     }
   };
 

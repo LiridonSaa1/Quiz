@@ -263,12 +263,20 @@ function renderContent(role: Role, event: NotifyEventKey, ctx: NotifyContext): {
   }
 }
 
+export interface RoleEnabled {
+  student: boolean;
+  teacher: boolean;
+  admin: boolean;
+}
+
 export interface NotifyDeps {
   /**
-   * Reads the admin's notifications toggle from `platform_config.settings.notifications[settingsKey]`.
-   * Should default to `true` when the section doesn't exist yet (so events fire out of the box).
+   * Reads the admin's per-role notification toggle from
+   * `platform_config.settings.notifications[settingsKey]`.
+   * Returns per-role booleans; defaults all to `true` when the section
+   * doesn't exist yet so events fan out on a fresh install.
    */
-  isEventEnabled: (settingsKey: string) => Promise<boolean>;
+  isEventEnabled: (settingsKey: string) => Promise<RoleEnabled>;
 }
 
 export async function notifyEvent(
@@ -278,10 +286,22 @@ export async function notifyEvent(
   ctx: NotifyContext,
 ): Promise<void> {
   try {
-    const enabled = await deps.isEventEnabled(SETTINGS_KEY[event]);
-    if (!enabled) return;
+    // Per-role enabled flags — the admin can toggle each role independently.
+    const roleEnabled = await deps.isEventEnabled(SETTINGS_KEY[event]);
 
-    const recipients = RECIPIENTS[event];
+    // The hardcoded RECIPIENTS matrix is the "ceiling" (e.g. maintenanceAlert
+    // never goes to students regardless of toggle). The per-role settings from
+    // admin → Notifications can only narrow this down, not expand it.
+    const baseRecipients = RECIPIENTS[event];
+    const recipients: Record<Role, boolean> = {
+      student: baseRecipients.student && roleEnabled.student,
+      teacher: baseRecipients.teacher && roleEnabled.teacher,
+      admin:   baseRecipients.admin   && roleEnabled.admin,
+    };
+
+    // Bail out early if no role is enabled at all.
+    if (!recipients.student && !recipients.teacher && !recipients.admin) return;
+
     const seen = new Set<string>();
     const rows: Array<Record<string, unknown>> = [];
 
