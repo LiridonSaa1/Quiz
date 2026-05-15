@@ -1,10 +1,11 @@
 import React, { useEffect, useState } from 'react';
 import { toast } from 'sonner';
-import { Download, Smartphone, X, CheckCircle, Loader2 } from 'lucide-react';
+import { Download, Smartphone, X, Loader2 } from 'lucide-react';
 import { usePWAInstall } from '../hooks/usePWAInstall';
+import { useBranding } from '../lib/useBranding';
 import { cn } from '../lib/utils';
 
-function IOSInstructionsModal({ onClose }: { onClose: () => void }) {
+function IOSInstructionsModal({ onClose, schoolName }: { onClose: () => void; schoolName: string }) {
   return (
     <div
       className="fixed inset-0 z-[9999] flex items-end sm:items-center justify-center p-4"
@@ -28,7 +29,7 @@ function IOSInstructionsModal({ onClose }: { onClose: () => void }) {
           <Smartphone className="w-7 h-7 text-white" />
         </div>
 
-        <h2 className="text-lg font-bold text-slate-900 mb-1">Install QuizMaster</h2>
+        <h2 className="text-lg font-bold text-slate-900 mb-1">Install {schoolName}</h2>
         <p className="text-sm text-slate-500 mb-5">
           Add this app to your Home Screen for the best experience.
         </p>
@@ -77,18 +78,19 @@ function IOSInstructionsModal({ onClose }: { onClose: () => void }) {
 
 export default function PWAInstallButton() {
   const { state, install } = usePWAInstall();
+  const { schoolName } = useBranding();
   const [showIOSModal, setShowIOSModal] = useState(false);
   const [dismissed, setDismissed] = useState(false);
 
   // Show toast on successful install
   useEffect(() => {
     if (state === 'installed') {
-      toast.success('App installed successfully 🎉', {
-        description: 'QuizMaster is now on your home screen.',
+      toast.success(`${schoolName} installed successfully 🎉`, {
+        description: `${schoolName} is now on your home screen.`,
         duration: 5000,
       });
     }
-  }, [state]);
+  }, [state, schoolName]);
 
   const handleInstallClick = async () => {
     if (state === 'ios') {
@@ -136,12 +138,17 @@ export default function PWAInstallButton() {
           ) : (
             <Download className="w-4 h-4" />
           )}
-          {state === 'installing' ? 'Installing…' : 'Install App'}
+          {state === 'installing' ? 'Installing…' : `Install ${schoolName}`}
         </button>
       </div>
 
       {/* iOS Instructions Modal */}
-      {showIOSModal && <IOSInstructionsModal onClose={() => setShowIOSModal(false)} />}
+      {showIOSModal && (
+        <IOSInstructionsModal
+          onClose={() => setShowIOSModal(false)}
+          schoolName={schoolName}
+        />
+      )}
     </>
   );
 }

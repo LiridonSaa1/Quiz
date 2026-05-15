@@ -803,11 +803,71 @@ export async function createApp(options: CreateAppOptions = {}) {
     next();
   });
 
-  // PWA: serve manifest.json with short cache
-  app.get("/manifest.json", (_req, res, next) => {
-    res.setHeader("Cache-Control", "public, max-age=86400");
-    res.setHeader("Content-Type", "application/manifest+json");
-    next();
+  // PWA: serve manifest.json dynamically (reads school name, colors, logoText from DB)
+  app.get("/manifest.json", async (_req, res) => {
+    try {
+      const [branding, settings] = await Promise.all([
+        getConfigSection("branding").catch(() => null),
+        getConfigSection("settings").catch(() => null),
+      ]);
+      const b: any = branding || {};
+      const s: any = settings || {};
+      const schoolName =
+        (typeof s?.general?.school_name === "string" && s.general.school_name.trim()) ||
+        (typeof b?.schoolName === "string" && b.schoolName.trim()) ||
+        "QuizMaster";
+      const primaryColor = (typeof b?.colors?.primary === "string" && b.colors.primary) || "#4f46e5";
+      const bgColor = (typeof b?.colors?.sidebar_bg === "string" && b.colors.sidebar_bg) || "#0f172a";
+      res.setHeader("Content-Type", "application/manifest+json");
+      res.setHeader("Cache-Control", "no-store");
+      res.json({
+        name: schoolName,
+        short_name: schoolName.length > 14 ? schoolName.slice(0, 14) : schoolName,
+        description: `${schoolName} — Education Platform`,
+        start_url: "/",
+        scope: "/",
+        display: "standalone",
+        orientation: "portrait-primary",
+        background_color: bgColor,
+        theme_color: primaryColor,
+        lang: "en",
+        categories: ["education", "productivity"],
+        icons: [
+          { src: "/api/pwa/icon.svg", sizes: "any", type: "image/svg+xml", purpose: "any" },
+          { src: "/icon-192.png", sizes: "192x192", type: "image/png", purpose: "any" },
+          { src: "/icon-512.png", sizes: "512x512", type: "image/png", purpose: "any" },
+          { src: "/icon-maskable-512.png", sizes: "512x512", type: "image/png", purpose: "maskable" },
+        ],
+        shortcuts: [
+          { name: "Dashboard", short_name: "Dashboard", url: "/", icons: [{ src: "/icon-192.png", sizes: "192x192" }] },
+        ],
+      });
+    } catch {
+      // Fallback: serve static manifest
+      const staticPath = path.join(process.cwd(), "public", "manifest.json");
+      res.setHeader("Content-Type", "application/manifest+json");
+      res.sendFile(staticPath);
+    }
+  });
+
+  // PWA: dynamic SVG app icon — shows logoText on brand-color background
+  app.get("/api/pwa/icon.svg", async (_req, res) => {
+    try {
+      const branding = await getConfigSection("branding").catch(() => null);
+      const b: any = branding || {};
+      const raw = typeof b.logoText === "string" ? b.logoText.trim().toUpperCase() : "";
+      const logoText = raw.slice(0, 3) || "QM";
+      const primaryColor = (typeof b?.colors?.primary === "string" && b.colors.primary) || "#4f46e5";
+      const fontSize = logoText.length > 2 ? 180 : 210;
+      const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><rect width="512" height="512" rx="112" fill="${primaryColor}"/><text x="256" y="338" font-family="system-ui,-apple-system,BlinkMacSystemFont,sans-serif" font-size="${fontSize}" font-weight="800" text-anchor="middle" fill="white" letter-spacing="-6">${logoText}</text></svg>`;
+      res.setHeader("Content-Type", "image/svg+xml");
+      res.setHeader("Cache-Control", "no-store");
+      res.send(svg);
+    } catch {
+      const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><rect width="512" height="512" rx="112" fill="#4f46e5"/><text x="256" y="338" font-family="system-ui,sans-serif" font-size="210" font-weight="800" text-anchor="middle" fill="white">QM</text></svg>`;
+      res.setHeader("Content-Type", "image/svg+xml");
+      res.send(svg);
+    }
   });
 
   app.post("/api/log-error", async (req: Request, res: Response) => {
@@ -1901,6 +1961,7 @@ Assistant:`;
         success: true,
         logoUrl: typeof b.logoUrl === "string" ? b.logoUrl : null,
         faviconUrl: typeof b.faviconUrl === "string" ? b.faviconUrl : null,
+        logoText: typeof b.logoText === "string" ? b.logoText.trim().toUpperCase() : null,
         schoolName,
         colors: b.colors && typeof b.colors === "object" ? b.colors : null,
         typography: b.typography && typeof b.typography === "object" ? b.typography : null,

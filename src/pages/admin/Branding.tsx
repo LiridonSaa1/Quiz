@@ -25,6 +25,7 @@ export default function AdminBranding() {
   const [darkMode, setDarkMode] = useState(false);
   const [logoUrl, setLogoUrl] = useState<string | null>(null);
   const [faviconUrl, setFaviconUrl] = useState<string | null>(null);
+  const [logoText, setLogoText] = useState('QM');
   const logoInputRef = useRef<HTMLInputElement>(null);
   const faviconInputRef = useRef<HTMLInputElement>(null);
 
@@ -91,14 +92,14 @@ export default function AdminBranding() {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          value: { colors, typography, copy, darkMode, preview, logoUrl, faviconUrl },
+          value: { colors, typography, copy, darkMode, preview, logoUrl, faviconUrl, logoText },
         }),
       });
       const json = await res.json();
       if (!res.ok || !json?.success) throw new Error(json?.error || 'Failed to save branding');
       window.dispatchEvent(
         new CustomEvent('branding-updated', {
-          detail: { logoUrl, faviconUrl, colors, typography, copy, darkMode },
+          detail: { logoUrl, faviconUrl, logoText, colors, typography, copy, darkMode },
         }),
       );
       toast.success('Branding saved successfully.');
@@ -123,6 +124,7 @@ export default function AdminBranding() {
         if (v.preview === 'desktop' || v.preview === 'mobile') setPreview(v.preview);
         if (typeof v.logoUrl === 'string' || v.logoUrl === null) setLogoUrl(v.logoUrl ?? null);
         if (typeof v.faviconUrl === 'string' || v.faviconUrl === null) setFaviconUrl(v.faviconUrl ?? null);
+        if (typeof v.logoText === 'string' && v.logoText.trim()) setLogoText(v.logoText.trim().toUpperCase());
       } catch {
         // fallback to defaults
       }
@@ -198,6 +200,33 @@ export default function AdminBranding() {
                   {faviconUrl && (
                     <button onClick={() => setFaviconUrl(null)} className="mt-2 text-xs text-rose-500 hover:underline font-medium">Remove favicon</button>
                   )}
+                </div>
+              </div>
+
+              {/* App Icon Text (PWA) */}
+              <div className="mt-5 pt-5 border-t border-slate-100">
+                <label className="block text-xs font-semibold text-slate-600 uppercase tracking-wide mb-1">App Icon Text</label>
+                <p className="text-xs text-slate-400 mb-3">2–3 letters shown on the installed app icon (e.g. "SC" for Britanika School). Used when the app is installed on mobile or desktop.</p>
+                <div className="flex items-center gap-4">
+                  {/* Live preview of icon */}
+                  <div
+                    className="w-16 h-16 rounded-2xl flex items-center justify-center shrink-0 shadow-md select-none"
+                    style={{ background: colors.primary }}
+                  >
+                    <span className="text-white font-extrabold tracking-tight" style={{ fontSize: logoText.length > 2 ? '20px' : '24px' }}>
+                      {logoText || 'QM'}
+                    </span>
+                  </div>
+                  <div className="flex-1">
+                    <input
+                      value={logoText}
+                      onChange={e => setLogoText(e.target.value.toUpperCase().slice(0, 3))}
+                      maxLength={3}
+                      placeholder="SC"
+                      className={inputCls + ' max-w-[120px] text-center font-bold text-lg tracking-widest'}
+                    />
+                    <p className="text-xs text-slate-400 mt-1.5">Max 3 characters · auto uppercase</p>
+                  </div>
                 </div>
               </div>
             </Card>
