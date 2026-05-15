@@ -40,21 +40,38 @@ export default function WelcomeCelebration({ userId, displayName, onDone }: Welc
       });
     };
 
-    const burst = () => {
-      fire(0.25, { spread: 26, startVelocity: 55, colors: ['#6366f1', '#8b5cf6', '#a855f7'] });
-      fire(0.2,  { spread: 60, colors: ['#10b981', '#34d399', '#6ee7b7'] });
-      fire(0.35, { spread: 100, decay: 0.91, scalar: 0.8, colors: ['#f59e0b', '#fbbf24', '#fcd34d'] });
-      fire(0.1,  { spread: 120, startVelocity: 25, decay: 0.92, scalar: 1.2, colors: ['#ec4899', '#f43f5e'] });
-      fire(0.1,  { spread: 120, startVelocity: 45, colors: ['#6366f1', '#10b981', '#f59e0b'] });
+    const burst = (heavy = false) => {
+      fire(heavy ? 0.25 : 0.15, { spread: 26, startVelocity: 55, colors: ['#6366f1', '#8b5cf6', '#a855f7'] });
+      fire(heavy ? 0.2  : 0.12, { spread: 60, colors: ['#10b981', '#34d399', '#6ee7b7'] });
+      fire(heavy ? 0.35 : 0.2,  { spread: 100, decay: 0.91, scalar: 0.8, colors: ['#f59e0b', '#fbbf24', '#fcd34d'] });
+      fire(heavy ? 0.1  : 0.06, { spread: 120, startVelocity: 25, decay: 0.92, scalar: 1.2, colors: ['#ec4899', '#f43f5e'] });
+      fire(heavy ? 0.1  : 0.06, { spread: 120, startVelocity: 45, colors: ['#6366f1', '#10b981', '#f59e0b'] });
     };
 
-    burst();
-    const t1 = setTimeout(burst, 700);
-    const t2 = setTimeout(burst, 1400);
+    const DURATION_MS = 12000;
+    const endTime = Date.now() + DURATION_MS;
+    const timeouts: ReturnType<typeof setTimeout>[] = [];
+
+    // Big opening burst
+    burst(true);
+    timeouts.push(setTimeout(() => burst(true), 600));
+    timeouts.push(setTimeout(() => burst(true), 1200));
+
+    // Keep firing lighter bursts every 1.2 s until DURATION_MS
+    let next = 2000;
+    while (next < DURATION_MS - 500) {
+      const t = next;
+      timeouts.push(setTimeout(() => {
+        if (Date.now() < endTime) burst(false);
+      }, t));
+      next += 1200;
+    }
+
+    // Final big closing burst
+    timeouts.push(setTimeout(() => burst(true), DURATION_MS - 800));
 
     return () => {
-      clearTimeout(t1);
-      clearTimeout(t2);
+      timeouts.forEach(clearTimeout);
       confetti.reset();
     };
   }, []);
