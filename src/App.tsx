@@ -84,7 +84,6 @@ import { apiUrl, authFetch } from './lib/apiUrl';
 import { isProfileAccessAllowed } from './lib/profileAccess';
 import { normalizeUserRole } from './lib/userRole';
 import { defaultFeatureFlags, extractFeatureFlags, FeatureFlags } from './lib/platformFeatures';
-import ChatBot from './components/ChatBot';
 import PWAInstallButton from './components/PWAInstallButton';
 
 export default function App() {
@@ -361,7 +360,6 @@ export default function App() {
         <Route path="/student/*" element={user?.role === 'student' ? <StudentRoutes features={features} /> : <Navigate to="/login" />} />
         <Route path="*" element={<Navigate to="/not-found" replace />} />
       </Routes>
-      {user && <ChatBot userRole={user.role} />}
       <PWAInstallButton />
     </Router>
   );

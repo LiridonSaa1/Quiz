@@ -1,6 +1,5 @@
 import React, { useEffect, useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
-import AIChatbot from '../AIChatbot';
 import { supabase } from '../../supabase';
 import { cn } from '../../lib/utils';
 import NotificationCenter from '../NotificationCenter';
@@ -262,7 +261,6 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
         </div>
       </main>
 
-      <AIChatbot userRole="admin" />
     </div>
   );
 }

@@ -1,6 +1,5 @@
 import React, { useState, useEffect } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
-import AIChatbot from '../AIChatbot';
 import { supabase } from '../../supabase';
 import { authFetch } from '../../lib/apiUrl';
 import { cn } from '../../lib/utils';
@@ -297,7 +296,6 @@ export default function StudentLayout({ children }: { children: React.ReactNode 
         </div>
       </main>
 
-      <AIChatbot userRole="student" />
     </div>
   );
 }
