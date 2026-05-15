@@ -309,7 +309,7 @@ export default function StudentCourses() {
         .from('profiles')
         .select('display_name')
         .eq('id', uid)
-        .single();
+        .maybeSingle();
 
       if (profileSnap.data) setStudentName(profileSnap.data.display_name || '');
 

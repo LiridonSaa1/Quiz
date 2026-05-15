@@ -260,7 +260,7 @@ export default function ContinueLearning() {
       const uid = session.user.id;
 
       const [profileSnap, attemptRows] = await Promise.all([
-        supabase.from('profiles').select('display_name').eq('id', uid).single(),
+        supabase.from('profiles').select('display_name').eq('id', uid).maybeSingle(),
         fetchAttemptRowsByStudentId(supabase, uid),
       ]);
 

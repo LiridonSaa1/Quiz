@@ -317,7 +317,6 @@ export async function notifyEvent(
         message,
         type: TYPE_MAP[event],
         action_url: ACTION_URLS[event][role],
-        read: false,
       });
     };
 

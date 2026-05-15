@@ -6379,11 +6379,12 @@ Assistant:`;
       .from('live_sessions').select('host_id').eq('id', sessionId).single();
     if (!sessionRow) { res.status(404).json({ error: 'Session not found' }); return null; }
     if (sessionRow.host_id === caller.userId) return caller.userId;
-    const { data: participation, error: partErr } = await supabaseAdmin
-      .from('session_participants').select('id,is_removed').eq('session_id', sessionId).eq('user_id', caller.userId).single();
+    const { data: participationRows, error: partErr } = await supabaseAdmin
+      .from('session_participants').select('id,is_removed').eq('session_id', sessionId).eq('user_id', caller.userId).limit(1);
     if (partErr && !isSessionParticipantsTableMissing(partErr)) {
       throw partErr;
     }
+    const participation = Array.isArray(participationRows) ? participationRows[0] ?? null : null;
     if (participation && (participation as { id: string; is_removed?: boolean }).is_removed) {
       res.status(403).json({ error: 'Forbidden: you have been removed from this session' }); return null;
     }
@@ -6409,8 +6410,9 @@ Assistant:`;
 
     // Check session_participants table
     let participantsTableMissing = false;
-    const { data: participation, error: partErr } = await supabaseAdmin
-      .from('session_participants').select('id,is_removed').eq('session_id', sessionId).eq('user_id', caller.userId).single();
+    const { data: participationRows, error: partErr } = await supabaseAdmin
+      .from('session_participants').select('id,is_removed').eq('session_id', sessionId).eq('user_id', caller.userId).limit(1);
+    const participation = Array.isArray(participationRows) ? participationRows[0] ?? null : null;
     if (partErr) {
       if (isSessionParticipantsTableMissing(partErr)) {
         participantsTableMissing = true;
@@ -7755,7 +7757,6 @@ Assistant:`;
         title: 'Quiz Integrity Alert',
         message: `${studentLabel} triggered a quiz violation in "${quizTitle}". ${violationInfo}`.trim(),
         type: 'warning',
-        read: false,
         action_url: `/teacher/results`,
         created_at: new Date().toISOString(),
       });
@@ -9280,7 +9281,6 @@ Assistant:`;
       title,
       message: message.slice(0, 240),
       type: 'info',
-      read: false,
       action_url: actionUrl,
       created_at: new Date().toISOString(),
     });
