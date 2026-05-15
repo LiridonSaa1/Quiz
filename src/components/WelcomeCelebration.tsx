@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { useEffect } from 'react';
 import confetti from 'canvas-confetti';
 
 interface WelcomeCelebrationProps {
@@ -23,16 +23,13 @@ export function markWelcomeSeen(userId: string): void {
   } catch {}
 }
 
-export default function WelcomeCelebration({ userId, onDone }: WelcomeCelebrationProps) {
-  const firedRef = useRef(false);
-
+export default function WelcomeCelebration({ onDone }: WelcomeCelebrationProps) {
   useEffect(() => {
-    if (firedRef.current) return;
-    firedRef.current = true;
-
-    markWelcomeSeen(userId);
+    let cancelled = false;
+    const allTimeouts: ReturnType<typeof setTimeout>[] = [];
 
     const fire = (particleRatio: number, opts: confetti.Options) => {
+      if (cancelled) return;
       confetti({
         origin: { y: 0.6 },
         ...opts,
@@ -48,31 +45,37 @@ export default function WelcomeCelebration({ userId, onDone }: WelcomeCelebratio
       fire(heavy ? 0.1  : 0.06, { spread: 120, startVelocity: 45, colors: ['#6366f1', '#10b981', '#f59e0b'] });
     };
 
-    const DURATION_MS = 12000;
-    const endTime = Date.now() + DURATION_MS;
-    const timeouts: ReturnType<typeof setTimeout>[] = [];
+    // 150 ms start delay: React Strict Mode's first-mount cleanup fires before
+    // this callback runs, so only the second (real) mount actually starts confetti.
+    const startTimer = setTimeout(() => {
+      if (cancelled) return;
 
-    burst(true);
-    timeouts.push(setTimeout(() => burst(true), 600));
-    timeouts.push(setTimeout(() => burst(true), 1200));
+      const DURATION_MS = 12000;
+      const endTime = Date.now() + DURATION_MS;
 
-    let next = 2000;
-    while (next < DURATION_MS - 500) {
-      const t = next;
-      timeouts.push(setTimeout(() => {
-        if (Date.now() < endTime) burst(false);
-      }, t));
-      next += 1200;
-    }
+      burst(true);
+      allTimeouts.push(setTimeout(() => burst(true), 600));
+      allTimeouts.push(setTimeout(() => burst(true), 1200));
 
-    timeouts.push(setTimeout(() => burst(true), DURATION_MS - 800));
-    timeouts.push(setTimeout(() => {
-      confetti.reset();
-      onDone();
-    }, DURATION_MS + 500));
+      let next = 2000;
+      while (next < DURATION_MS - 500) {
+        const t = next;
+        allTimeouts.push(setTimeout(() => {
+          if (!cancelled && Date.now() < endTime) burst(false);
+        }, t));
+        next += 1200;
+      }
+
+      allTimeouts.push(setTimeout(() => burst(true), DURATION_MS - 800));
+      allTimeouts.push(setTimeout(() => {
+        if (!cancelled) { confetti.reset(); onDone(); }
+      }, DURATION_MS + 500));
+    }, 150);
 
     return () => {
-      timeouts.forEach(clearTimeout);
+      cancelled = true;
+      clearTimeout(startTimer);
+      allTimeouts.forEach(clearTimeout);
       confetti.reset();
     };
   }, []);

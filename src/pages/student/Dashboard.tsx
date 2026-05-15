@@ -12,6 +12,10 @@ import { AreaChart, Area, XAxis, YAxis, CartesianGrid, ResponsiveContainer, Tool
 import { format, subDays } from 'date-fns';
 import WelcomeCelebration, { hasSeenWelcome, markWelcomeSeen } from '../../components/WelcomeCelebration';
 
+// Module-level — survives React Strict Mode's unmount/remount so the state
+// is available when useState() initializer runs on the second mount.
+let pendingCelebration: { userId: string; name: string } | null = null;
+
 interface LiveSessionBanner {
   id: string;
   title: string;
@@ -24,8 +28,9 @@ export default function StudentDashboard() {
   const [recentAttempts, setRecentAttempts] = useState<any[]>([]);
   const [liveSessions, setLiveSessions] = useState<LiveSessionBanner[]>([]);
   const [loading, setLoading] = useState(true);
-  const [celebrationUserId, setCelebrationUserId] = useState<string | null>(null);
-  const [celebrationName, setCelebrationName] = useState<string>('');
+  // Initialise from module-level so Strict Mode's second mount picks up the pending celebration
+  const [celebrationUserId, setCelebrationUserId] = useState<string | null>(() => pendingCelebration?.userId ?? null);
+  const [celebrationName, setCelebrationName] = useState<string>(() => pendingCelebration?.name ?? '');
 
   useEffect(() => {
     const fetchData = async () => {
@@ -34,24 +39,24 @@ export default function StudentDashboard() {
       const studentId = session.user.id;
 
       // First-login celebration:
-      // Source of truth → user_metadata.welcomed (server-side, cross-device)
-      // localStorage → only prevents double-fire within the same browser session
+      // - user_metadata.welcomed  → server-side cross-device guard (set fire-and-forget)
+      // - hasSeenWelcome          → localStorage guard (prevents show on next page load)
+      // - pendingCelebration      → module-level so Strict Mode's 2nd mount picks it up
+      // markWelcomeSeen is called here so localStorage is set before WelcomeCelebration
+      // mounts, preventing a third render from re-triggering on fast remounts.
       const alreadyWelcomed = session.user.user_metadata?.welcomed === true;
-      if (!alreadyWelcomed) {
-        const showConfetti = !hasSeenWelcome(studentId);
-        // Always persist to Supabase so this block never runs again on any device
-        await supabase.auth.updateUser({ data: { welcomed: true } });
+      if (!alreadyWelcomed && !hasSeenWelcome(studentId) && !pendingCelebration) {
         markWelcomeSeen(studentId);
-        if (showConfetti) {
-          const { data: profileRow } = await supabase
-            .from('profiles')
-            .select('display_name')
-            .eq('id', studentId)
-            .maybeSingle();
-          const name = String(profileRow?.display_name || session.user.email || '').trim();
-          setCelebrationName(name);
-          setCelebrationUserId(studentId);
-        }
+        supabase.auth.updateUser({ data: { welcomed: true } }).catch(() => {});
+        const { data: profileRow } = await supabase
+          .from('profiles')
+          .select('display_name')
+          .eq('id', studentId)
+          .maybeSingle();
+        const name = String(profileRow?.display_name || session.user.email || '').trim();
+        pendingCelebration = { userId: studentId, name };
+        setCelebrationName(name);
+        setCelebrationUserId(studentId);
       }
 
       try {
