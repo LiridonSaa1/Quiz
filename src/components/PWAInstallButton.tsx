@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { toast } from 'sonner';
 import { Download, Smartphone, X, Loader2 } from 'lucide-react';
 import { usePWAInstall } from '../hooks/usePWAInstall';
