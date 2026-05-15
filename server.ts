@@ -834,6 +834,8 @@ export async function createApp(options: CreateAppOptions = {}) {
         lang: "en",
         categories: ["education", "productivity"],
         icons: [
+          { src: "/bs-icon.jpg", sizes: "512x512", type: "image/jpeg", purpose: "any" },
+          { src: "/bs-icon.jpg", sizes: "192x192", type: "image/jpeg", purpose: "any" },
           { src: "/api/pwa/icon.svg", sizes: "any", type: "image/svg+xml", purpose: "any" },
           { src: "/icon-192.png", sizes: "192x192", type: "image/png", purpose: "any" },
           { src: "/icon-512.png", sizes: "512x512", type: "image/png", purpose: "any" },
