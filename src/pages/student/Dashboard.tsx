@@ -196,7 +196,7 @@ export default function StudentDashboard() {
         <WelcomeCelebration
           userId={celebrationUserId}
           displayName={celebrationName}
-          onDone={() => setCelebrationUserId(null)}
+          onDone={() => { pendingCelebration = null; setCelebrationUserId(null); }}
         />
       )}
       <div className="space-y-6">

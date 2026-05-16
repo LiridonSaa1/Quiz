@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { supabase } from '../../supabase';
 import { UserProfile } from '../../types';
-import { Users, UserPlus, Search, UserCheck, UserX, BookOpen, X, Pencil, Trash2 } from 'lucide-react';
+import { Users, UserPlus, Search, UserCheck, UserX, BookOpen, X, Pencil, Trash2, PartyPopper } from 'lucide-react';
 import GenderAvatar from '../../components/ui/GenderAvatar';
 import { toast } from 'sonner';
 import AdminLayout from '../../components/layout/AdminLayout';
@@ -111,6 +111,19 @@ export default function AdminStudents() {
       fetchData();
     } catch (e: any) {
       toast.error(e?.message || 'Failed to update student');
+    }
+  };
+
+  const resetWelcome = async (student: StudentWithMeta) => {
+    try {
+      const res = await authFetch(apiUrl(`/api/admin/reset-welcome/${encodeURIComponent(student.uid)}`), { method: 'POST' });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok || !json?.success) throw new Error(json?.error || 'Failed');
+      // Also clear localStorage so the browser shows celebration on next login
+      try { localStorage.removeItem(`quizmaster_welcomed_v1_${student.uid}`); } catch {}
+      toast.success(`Welcome celebration reset for ${student.displayName || student.email}`);
+    } catch (e: any) {
+      toast.error(e?.message || 'Failed to reset welcome');
     }
   };
 
@@ -234,6 +247,14 @@ export default function AdminStudents() {
                           <div className="text-xs text-slate-400 truncate">{student.email}</div>
                         </div>
                         <div className="flex items-center gap-1 shrink-0">
+                          <button
+                            type="button"
+                            onClick={() => resetWelcome(student)}
+                            title="Reset welcome celebration"
+                            className="p-2 rounded-lg text-slate-400 hover:text-violet-600 hover:bg-violet-50 transition-all"
+                          >
+                            <PartyPopper className="w-4 h-4" />
+                          </button>
                           <button
                             type="button"
                             onClick={() => editStudent(student)}

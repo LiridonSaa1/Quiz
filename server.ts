@@ -2873,6 +2873,22 @@ Assistant:`;
   });
 
   // Route to create a student
+  app.post("/api/admin/reset-welcome/:userId", async (req, res) => {
+    try {
+      const caller = await assertAuthenticated(req, res);
+      if (!caller) return;
+      if (caller.role !== "admin") return res.status(403).json({ error: "Admin only" });
+      const { userId } = req.params;
+      const { error } = await supabaseAdmin.auth.admin.updateUserById(userId, {
+        user_metadata: { welcomed: false },
+      });
+      if (error) throw error;
+      return res.json({ success: true });
+    } catch (e: any) {
+      return res.status(500).json({ error: e?.message || "Failed to reset welcome flag" });
+    }
+  });
+
   app.post("/api/admin/create-student", async (req, res) => {
     const {
       name, email, password, teacherId,
