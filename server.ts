@@ -2515,7 +2515,7 @@ Assistant:`;
 
   // Route to seed the initial admin account
   app.get("/api/admin/seed", async (req, res) => {
-    const adminEmail = "liridon.salihi123@gmail.com";
+    const adminEmail = "bitanicaschool@gmail.com";
     const adminPassword = "Admin123!";
     
     try {
