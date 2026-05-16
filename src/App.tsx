@@ -84,13 +84,6 @@ import { apiUrl, authFetch } from './lib/apiUrl';
 import { isProfileAccessAllowed } from './lib/profileAccess';
 import { normalizeUserRole } from './lib/userRole';
 import { defaultFeatureFlags, extractFeatureFlags, FeatureFlags } from './lib/platformFeatures';
-import PWAInstallButton from './components/PWAInstallButton';
-
-class PWAErrorBoundary extends React.Component<{ children: React.ReactNode }, { failed: boolean }> {
-  state = { failed: false };
-  static getDerivedStateFromError() { return { failed: true }; }
-  render() { return this.state.failed ? null : this.props.children; }
-}
 
 export default function App() {
   const [user, setUser] = useState<UserProfile | null>(null);
@@ -366,7 +359,6 @@ export default function App() {
         <Route path="/student/*" element={user?.role === 'student' ? <StudentRoutes features={features} /> : <Navigate to="/login" />} />
         <Route path="*" element={<Navigate to="/not-found" replace />} />
       </Routes>
-      <PWAErrorBoundary><PWAInstallButton /></PWAErrorBoundary>
     </Router>
   );
 }
