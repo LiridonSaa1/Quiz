@@ -127,6 +127,22 @@ export default function AdminStudents() {
     }
   };
 
+  const resetAllWelcome = async () => {
+    if (!window.confirm('Reset welcome celebration for ALL students? They will see the celebration on their next login.')) return;
+    try {
+      const res = await authFetch(apiUrl('/api/admin/reset-all-welcome'), { method: 'POST' });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok || !json?.success) throw new Error(json?.error || 'Failed');
+      // Clear localStorage for all known students
+      students.forEach(s => {
+        try { localStorage.removeItem(`quizmaster_welcomed_v1_${s.uid}`); } catch {}
+      });
+      toast.success(`Welcome celebration reset for ${json.count} student${json.count !== 1 ? 's' : ''}`);
+    } catch (e: any) {
+      toast.error(e?.message || 'Failed to reset welcome flags');
+    }
+  };
+
   const deleteStudent = async (student: StudentWithMeta) => {
     if (!window.confirm(`Delete student "${student.displayName || student.email}"?`)) return;
     try {
@@ -166,6 +182,19 @@ export default function AdminStudents() {
         title="Students"
         description="Platform-wide view of all student accounts and enrollments."
         action={
+          <div className="flex items-center gap-2">
+          <motion.button
+            type="button"
+            onClick={resetAllWelcome}
+            whileHover={{ scale: 1.04, y: -2 }}
+            whileTap={{ scale: 0.97 }}
+            title="Reset welcome celebration for all students"
+            className="inline-flex items-center gap-2 px-4 py-3 rounded-2xl font-bold text-sm shrink-0 transition-all border border-violet-200 text-violet-600 bg-white hover:bg-violet-50"
+            style={{ boxShadow: '0 2px 8px rgba(139,92,246,0.12)' }}
+          >
+            <PartyPopper className="w-4 h-4" />
+            Reset All Welcome
+          </motion.button>
           <motion.button
             type="button"
             onClick={() => setShowAddModal(true)}
@@ -180,6 +209,7 @@ export default function AdminStudents() {
             <UserPlus className="w-4 h-4" />
             Add Student
           </motion.button>
+          </div>
         }
         stats={stats}
         filterBar={

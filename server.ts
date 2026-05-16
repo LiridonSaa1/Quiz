@@ -2873,6 +2873,38 @@ Assistant:`;
   });
 
   // Route to create a student
+  app.post("/api/admin/reset-all-welcome", async (req, res) => {
+    try {
+      const caller = await assertAuthenticated(req, res);
+      if (!caller) return;
+      if (caller.role !== "admin") return res.status(403).json({ error: "Admin only" });
+
+      // Fetch all users with role=student
+      let page = 1;
+      const resetIds: string[] = [];
+      while (true) {
+        const { data, error } = await supabaseAdmin.auth.admin.listUsers({ page, perPage: 1000 });
+        if (error) throw error;
+        for (const u of data.users) {
+          if (u.user_metadata?.role === "student") resetIds.push(u.id);
+        }
+        if (data.users.length < 1000) break;
+        page++;
+      }
+
+      // Reset welcomed flag for each student
+      await Promise.all(
+        resetIds.map(id =>
+          supabaseAdmin.auth.admin.updateUserById(id, { user_metadata: { welcomed: false } })
+        )
+      );
+
+      return res.json({ success: true, count: resetIds.length });
+    } catch (e: any) {
+      return res.status(500).json({ error: e?.message || "Failed to reset welcome flags" });
+    }
+  });
+
   app.post("/api/admin/reset-welcome/:userId", async (req, res) => {
     try {
       const caller = await assertAuthenticated(req, res);
