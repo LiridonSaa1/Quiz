@@ -10,7 +10,8 @@ import { fetchAttemptRowsByStudentId, normalizeAttempts } from '../../lib/quizAt
 import { selectPublishedQuizzesCompat } from '../../lib/quizzesCompat';
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, ResponsiveContainer, Tooltip } from 'recharts';
 import { format, subDays } from 'date-fns';
-import WelcomeCelebration, { hasSeenWelcome, markWelcomeSeen } from '../../components/WelcomeCelebration';
+import WelcomeCelebration from '../../components/WelcomeCelebration';
+import { hasSeenWelcome, markWelcomeSeen } from '../../components/welcomeStorage';
 
 // Module-level — survives React Strict Mode's unmount/remount so the state
 // is available when useState() initializer runs on the second mount.
