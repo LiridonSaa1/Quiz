@@ -2519,9 +2519,19 @@ Assistant:`;
     const adminPassword = "Admin123!";
     
     try {
-      const caller = await assertAuthenticated(req, res);
-      if (!caller) return;
-      if (!isAdmin(caller)) return res.status(403).json({ error: "Forbidden: admin role required" });
+      // Allow unauthenticated seed only when no profiles exist yet (fresh DB)
+      const { count } = await supabaseAdmin
+        .from('profiles')
+        .select('id', { count: 'exact', head: true })
+        .then(r => ({ count: r.count ?? 0 }));
+
+      if (count > 0) {
+        // Profiles exist — require admin auth
+        const caller = await assertAuthenticated(req, res);
+        if (!caller) return;
+        if (!isAdmin(caller)) return res.status(403).json({ error: "Forbidden: admin role required" });
+      }
+
       if (!isAdminSeedAllowed(process.env.NODE_ENV)) {
         return res.status(403).json({ error: "Forbidden: admin seed is disabled outside development" });
       }
