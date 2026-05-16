@@ -135,7 +135,7 @@ function WelcomeModal({
   return createPortal(
     <>
       <style>{INJECTED_CSS}</style>
-      <div className={`wc-overlay ${phase}`} onClick={onClose} />
+      <div className={`wc-overlay ${phase}`} />
       <div className={`wc-card ${phase}`}>
         {/* gradient header */}
         <div style={{
@@ -228,34 +228,30 @@ export default function WelcomeCelebration({ displayName, onDone }: WelcomeCeleb
       fire(heavy ? 0.1  : 0.05, { spread: 120, startVelocity: 25, decay: 0.92, scalar: 1.2, colors: ['#ec4899', '#f43f5e'] });
     };
 
-    const DURATION_MS = 5000;
+    // Looping confetti — keeps firing every 2.5s until user clicks Continue
+    const scheduleLoop = (delay: number) => {
+      const t = setTimeout(() => {
+        if (cancelled) return;
+        burst(false);
+        scheduleLoop(2500);
+      }, delay);
+      allTimeouts.push(t);
+    };
 
     const startTimer = setTimeout(() => {
       if (cancelled) return;
 
+      // Opening heavy burst
       burst(true);
-      allTimeouts.push(setTimeout(() => burst(true), 500));
-      allTimeouts.push(setTimeout(() => { if (!cancelled) burst(false); }, 2000));
-      allTimeouts.push(setTimeout(() => { if (!cancelled) burst(false); }, 3200));
-      allTimeouts.push(setTimeout(() => { if (!cancelled) burst(true); }, DURATION_MS - 700));
+      allTimeouts.push(setTimeout(() => { if (!cancelled) burst(true); }, 500));
 
-      // Show modal after 1.5s (balloons are mid-flight, confetti is going)
+      // Show modal after 1.5s (balloons mid-flight)
       allTimeouts.push(setTimeout(() => {
         if (!cancelled) setModalPhase('entering');
       }, 1500));
 
-      // Auto-dismiss after duration
-      allTimeouts.push(setTimeout(() => {
-        if (!cancelled) {
-          setModalPhase(p => {
-            if (p !== 'leaving') {
-              setTimeout(() => { confetti.reset(); onDone(); }, 320);
-              return 'leaving';
-            }
-            return p;
-          });
-        }
-      }, DURATION_MS + 600));
+      // Start looping gentle bursts every 2.5s after the opening
+      scheduleLoop(2000);
     }, 150);
 
     return () => {
