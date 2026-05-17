@@ -1,114 +1,94 @@
 import React, { useEffect, useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
 import { supabase } from '../../supabase';
 import { cn } from '../../lib/utils';
 import NotificationCenter from '../NotificationCenter';
+import LanguageDropdown from '../LanguageDropdown';
 import { authFetch } from '../../lib/apiUrl';
 import { defaultFeatureFlags, extractFeatureFlags, FeatureFlags } from '../../lib/platformFeatures';
 import { useBranding } from '../../lib/useBranding';
 import { 
-  LayoutDashboard, 
-  BookOpen, 
-  Layers, 
-  PlayCircle, 
-  FileText, 
-  Users, 
-  ShieldCheck, 
-  School, 
-  ClipboardList, 
-  CalendarCheck, 
-  Award, 
-  Video, 
-  MessageSquare, 
-  Megaphone, 
-  BarChart3, 
-  FileBarChart, 
-  DollarSign,
-  Receipt, 
-  Settings, 
-  Palette, 
-  Lock, 
-  User, 
-  Shield, 
-  LogOut,
-  Menu,
-  X,
-  GraduationCap
+  LayoutDashboard, BookOpen, Layers, PlayCircle, FileText, Users, ShieldCheck,
+  School, ClipboardList, CalendarCheck, Award, Video, MessageSquare, Megaphone,
+  BarChart3, FileBarChart, DollarSign, Receipt, Settings, Palette, Lock,
+  User, Shield, LogOut, Menu, X, GraduationCap
 } from 'lucide-react';
 
-const adminNavSections = [
-  {
-    title: 'MAIN',
-    items: [
-      { icon: LayoutDashboard, label: 'Dashboard', path: '/admin' },
-      { icon: BookOpen, label: 'Courses', path: '/admin/courses' },
-      { icon: Layers, label: 'Modules', path: '/admin/modules' },
-      { icon: PlayCircle, label: 'Lessons', path: '/admin/lessons' },
-      { icon: FileText, label: 'Quizzes', path: '/admin/quizzes' },
-    ]
-  },
-  {
-    title: 'USERS',
-    items: [
-      { icon: Users, label: 'Students', path: '/admin/students' },
-      { icon: ShieldCheck, label: 'Teachers', path: '/admin/teachers' },
-      { icon: School, label: 'Classes', path: '/admin/classes' },
-    ]
-  },
-  {
-    title: 'LEARNING',
-    items: [
-      { icon: ClipboardList, label: 'Assignments', path: '/admin/assignments' },
-      { icon: CalendarCheck, label: 'Attendance', path: '/admin/attendance' },
-      { icon: Award, label: 'Certificates', path: '/admin/certificates' },
-    ]
-  },
-  {
-    title: 'INTERACTION',
-    items: [
-      { icon: Video, label: 'Live Sessions', path: '/admin/live-sessions' },
-      { icon: MessageSquare, label: 'Community', path: '/admin/community' },
-      { icon: Megaphone, label: 'Announcements', path: '/admin/announcements' },
-    ]
-  },
-  {
-    title: 'ANALYTICS',
-    items: [
-      { icon: BarChart3, label: 'Analytics', path: '/admin/analytics' },
-      { icon: FileBarChart, label: 'Reports', path: '/admin/reports' },
-    ]
-  },
-  {
-    title: 'BUSINESS',
-    items: [
-      { icon: DollarSign, label: 'Payments', path: '/admin/payments' },
-      { icon: Receipt, label: 'Invoices', path: '/admin/invoices' },
-    ]
-  },
-  {
-    title: 'SYSTEM',
-    items: [
-      { icon: Settings, label: 'Settings', path: '/admin/settings' },
-      { icon: Palette, label: 'Branding', path: '/admin/branding' },
-      { icon: Lock, label: 'Roles & Permissions', path: '/admin/roles' },
-    ]
-  },
-  {
-    title: 'ACCOUNT',
-    items: [
-      { icon: User, label: 'Profile', path: '/admin/profile' },
-      { icon: Shield, label: 'Security', path: '/admin/security' },
-    ]
-  }
-];
-
 export default function AdminLayout({ children }: { children: React.ReactNode }) {
+  const { t } = useTranslation();
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [features, setFeatures] = useState<FeatureFlags>(defaultFeatureFlags);
   const branding = useBranding();
   const brandLogoUrl = branding.logoUrl;
   const location = useLocation();
   const navigate = useNavigate();
+
+  const adminNavSections = [
+    {
+      key: 'main',
+      items: [
+        { icon: LayoutDashboard, label: t('nav.dashboard'), path: '/admin' },
+        { icon: BookOpen,        label: t('nav.courses'),   path: '/admin/courses' },
+        { icon: Layers,          label: t('nav.modules'),   path: '/admin/modules' },
+        { icon: PlayCircle,      label: t('nav.lessons'),   path: '/admin/lessons' },
+        { icon: FileText,        label: t('nav.quizzes'),   path: '/admin/quizzes' },
+      ]
+    },
+    {
+      key: 'users',
+      items: [
+        { icon: Users,      label: t('nav.students'),  path: '/admin/students' },
+        { icon: ShieldCheck,label: t('nav.teachers'),  path: '/admin/teachers' },
+        { icon: School,     label: t('nav.classes'),   path: '/admin/classes' },
+      ]
+    },
+    {
+      key: 'learning',
+      items: [
+        { icon: ClipboardList, label: t('nav.assignments'), path: '/admin/assignments' },
+        { icon: CalendarCheck, label: t('nav.attendance'),  path: '/admin/attendance' },
+        { icon: Award,         label: t('nav.certificates'),path: '/admin/certificates' },
+      ]
+    },
+    {
+      key: 'interaction',
+      items: [
+        { icon: Video,        label: t('nav.liveSessions'),   path: '/admin/live-sessions' },
+        { icon: MessageSquare,label: t('nav.community'),      path: '/admin/community' },
+        { icon: Megaphone,    label: t('nav.announcements'),  path: '/admin/announcements' },
+      ]
+    },
+    {
+      key: 'analytics',
+      items: [
+        { icon: BarChart3,   label: t('nav.analytics'), path: '/admin/analytics' },
+        { icon: FileBarChart,label: t('nav.reports'),   path: '/admin/reports' },
+      ]
+    },
+    {
+      key: 'business',
+      items: [
+        { icon: DollarSign, label: t('nav.payments'), path: '/admin/payments' },
+        { icon: Receipt,    label: t('nav.invoices'), path: '/admin/invoices' },
+      ]
+    },
+    {
+      key: 'system',
+      items: [
+        { icon: Settings, label: t('nav.settings'),          path: '/admin/settings' },
+        { icon: Palette,  label: t('nav.branding'),          path: '/admin/branding' },
+        { icon: Lock,     label: t('nav.rolesPermissions'),  path: '/admin/roles' },
+      ]
+    },
+    {
+      key: 'account',
+      items: [
+        { icon: User,   label: t('nav.profile'),  path: '/admin/profile' },
+        { icon: Shield, label: t('nav.security'), path: '/admin/security' },
+      ]
+    }
+  ];
 
   useEffect(() => {
     let mounted = true;
@@ -120,9 +100,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
         if (settingsRes.ok && settingsJson?.success) {
           setFeatures(extractFeatureFlags(settingsJson.value));
         }
-      } catch {
-        // keep default features
-      }
+      } catch { /* keep default features */ }
     };
     loadSettings();
     const onSettingsUpdated = () => loadSettings();
@@ -151,7 +129,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
     }))
     .filter((section) => section.items.length > 0);
 
-  const NavItem = ({ item, onClick }: { item: any; key?: React.Key; onClick?: () => void }) => (
+  const NavItem = ({ item, onClick }: { item: any; onClick?: () => void }) => (
     <Link
       to={item.path}
       onClick={onClick}
@@ -180,15 +158,15 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
           </div>
           <div>
             <h1 className="text-base font-bold text-white leading-tight">{branding.schoolName}</h1>
-            <p className="text-[10px] text-slate-400 font-medium uppercase tracking-widest">Admin Panel</p>
+            <p className="text-[10px] text-slate-400 font-medium uppercase tracking-widest">{t('nav.adminPanel')}</p>
           </div>
         </div>
       </div>
       <nav className="flex-1 min-h-0 px-3 py-4 space-y-5 overflow-y-auto scrollbar-none">
         {visibleSections.map((section) => (
-          <div key={section.title} className="space-y-0.5">
+          <div key={section.key} className="space-y-0.5">
             <h3 className="px-3 text-[9px] font-bold text-slate-500 uppercase tracking-widest mb-1.5">
-              {section.title}
+              {t(`nav.sections.${section.key}`)}
             </h3>
             {section.items.map((item) => (
               <NavItem key={item.path} item={item} onClick={onLinkClick} />
@@ -202,11 +180,13 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
           className="flex items-center gap-3 px-3 py-2 w-full text-slate-400 hover:bg-red-500/10 hover:text-red-400 rounded-lg transition-all text-sm font-medium"
         >
           <LogOut className="w-4 h-4" />
-          <span>Sign out</span>
+          <span>{t('nav.signOut')}</span>
         </button>
       </div>
     </div>
   );
+
+  const currentLabel = visibleSections.flatMap(s => s.items).find(i => i.path === location.pathname)?.label || t('nav.dashboard');
 
   return (
     <div className="min-h-screen bg-slate-50 flex">
@@ -218,11 +198,12 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
       {/* Top Bar Desktop */}
       <header className="hidden lg:flex fixed top-0 right-0 left-60 h-14 bg-white border-b border-slate-200 items-center justify-between px-6 z-20">
         <div className="flex items-center gap-2">
-          <span className="text-sm font-semibold text-slate-500">
-            {visibleSections.flatMap(s => s.items).find(i => i.path === location.pathname)?.label || 'Dashboard'}
-          </span>
+          <span className="text-sm font-semibold text-slate-500">{currentLabel}</span>
         </div>
-        <NotificationCenter />
+        <div className="flex items-center gap-2">
+          <LanguageDropdown variant="light" />
+          <NotificationCenter />
+        </div>
       </header>
 
       {/* Mobile Header */}
@@ -237,7 +218,8 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
           </div>
           <h1 className="text-base font-bold text-white">{branding.schoolName}</h1>
         </div>
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-2">
+          <LanguageDropdown variant="dark" />
           <NotificationCenter />
           <button onClick={() => setIsSidebarOpen(!isSidebarOpen)} className="p-1.5 hover:bg-slate-700 rounded-lg">
             {isSidebarOpen ? <X className="w-5 h-5 text-slate-300" /> : <Menu className="w-5 h-5 text-slate-300" />}
@@ -260,7 +242,6 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
           {children}
         </div>
       </main>
-
     </div>
   );
 }

@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
 import { supabase } from '../../supabase';
 import {
   LayoutDashboard, BookOpen, Users, FileText, BarChart3, LogOut,
@@ -9,67 +10,16 @@ import {
 } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import NotificationCenter from '../NotificationCenter';
+import LanguageDropdown from '../LanguageDropdown';
 import { authFetch } from '../../lib/apiUrl';
 import { defaultFeatureFlags, extractFeatureFlags, FeatureFlags } from '../../lib/platformFeatures';
 import { getTeacherPagePermission, useTeacherPermissions } from '../../lib/teacherPermissions';
 import { useBranding } from '../../lib/useBranding';
 
-const NAV_SECTIONS = [
-  {
-    title: 'Main',
-    items: [
-      { icon: LayoutDashboard, label: 'Dashboard',  path: '/teacher' },
-      { icon: BookOpen,        label: 'My Courses',  path: '/teacher/courses' },
-      { icon: Layers,          label: 'Modules',     path: '/teacher/modules' },
-      { icon: PlayCircle,      label: 'Lessons',     path: '/teacher/lessons' },
-      { icon: FileText,        label: 'Quizzes',     path: '/teacher/quizzes' },
-      { icon: ScrollText,      label: 'Exams',       path: '/teacher/exams' },
-    ],
-  },
-  {
-    title: 'Students',
-    items: [
-      { icon: Users,  label: 'My Students', path: '/teacher/students' },
-      { icon: School, label: 'Classes',     path: '/teacher/classes' },
-    ],
-  },
-  {
-    title: 'Learning',
-    items: [
-      { icon: ClipboardList, label: 'Assignments', path: '/teacher/assignments' },
-      { icon: CalendarCheck, label: 'Attendance',  path: '/teacher/attendance' },
-      { icon: Award,         label: 'Certificates',path: '/teacher/certificates' },
-    ],
-  },
-  {
-    title: 'Interaction',
-    items: [
-      { icon: Zap,          label: 'Live Quiz',      path: '/teacher/live-quiz' },
-      { icon: FileBarChart2,label: 'Quiz Reports',    path: '/teacher/live-quiz/reports' },
-      { icon: Video,        label: 'Live Sessions',  path: '/teacher/live-sessions' },
-      { icon: MessageSquare,label: 'Community',      path: '/teacher/community' },
-      { icon: Megaphone,    label: 'Announcements',  path: '/teacher/announcements' },
-    ],
-  },
-  {
-    title: 'Analytics',
-    items: [
-      { icon: BarChart3,   label: 'Student Progress', path: '/teacher/progress' },
-      { icon: FileBarChart,label: 'Quiz Results',      path: '/teacher/results' },
-    ],
-  },
-  {
-    title: 'Account',
-    items: [
-      { icon: User, label: 'Profile', path: '/teacher/profile' },
-    ],
-  },
-];
-
 function NavItem({
   item, active, collapsed, onClick,
 }: {
-  item: typeof NAV_SECTIONS[0]['items'][0];
+  item: { icon: React.ElementType; label: string; path: string };
   active: boolean;
   collapsed: boolean;
   onClick?: () => void;
@@ -96,13 +46,11 @@ function NavItem({
           style={{ background: 'linear-gradient(180deg,#a78bfa,#818cf8)' }}
         />
       )}
-      <item.icon
-        className={cn(
-          'shrink-0 transition-colors',
-          collapsed ? 'w-5 h-5' : 'w-4 h-4',
-          active ? 'text-violet-300' : 'text-slate-500 group-hover:text-slate-300'
-        )}
-      />
+      <item.icon className={cn(
+        'shrink-0 transition-colors',
+        collapsed ? 'w-5 h-5' : 'w-4 h-4',
+        active ? 'text-violet-300' : 'text-slate-500 group-hover:text-slate-300'
+      )} />
       {!collapsed && (
         <>
           <span className="truncate">{item.label}</span>
@@ -121,16 +69,16 @@ function NavItem({
 }
 
 function SidebarContent({
-  activePath, collapsed, onCollapse, onLinkClick, onLogout,
-  sections,
+  activePath, collapsed, onCollapse, onLinkClick, onLogout, sections,
 }: {
   activePath: string;
   collapsed: boolean;
   onCollapse: () => void;
   onLinkClick?: () => void;
   onLogout: () => void;
-  sections: typeof NAV_SECTIONS;
+  sections: { key: string; title: string; items: { icon: React.ElementType; label: string; path: string }[] }[];
 }) {
+  const { t } = useTranslation();
   const [userEmail, setUserEmail] = useState('');
   const [displayName, setDisplayName] = useState('');
   const branding = useBranding();
@@ -147,17 +95,12 @@ function SidebarContent({
   const initials = displayName.split(' ').map((w) => w[0]).join('').toUpperCase().slice(0, 2);
 
   return (
-    <div
-      className="flex flex-col h-full"
-      style={{ background: 'linear-gradient(180deg,#0c0e16 0%,#0f1525 60%,#0e1320 100%)' }}
-    >
+    <div className="flex flex-col h-full" style={{ background: 'linear-gradient(180deg,#0c0e16 0%,#0f1525 60%,#0e1320 100%)' }}>
       {/* Logo */}
-      <div
-        className={cn(
-          'flex items-center border-b border-white/[0.06] transition-all duration-300 shrink-0',
-          collapsed ? 'px-3 py-4 justify-center' : 'px-5 py-5 gap-3'
-        )}
-      >
+      <div className={cn(
+        'flex items-center border-b border-white/[0.06] transition-all duration-300 shrink-0',
+        collapsed ? 'px-3 py-4 justify-center' : 'px-5 py-5 gap-3'
+      )}>
         <div className="relative shrink-0">
           <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-violet-500 to-indigo-600 flex items-center justify-center shadow-lg shadow-violet-900/50 overflow-hidden">
             {branding.logoUrl ? (
@@ -171,7 +114,7 @@ function SidebarContent({
         {!collapsed && (
           <div className="overflow-hidden">
             <div className="text-sm font-bold text-white tracking-tight">{branding.schoolName}</div>
-            <div className="text-[9px] text-violet-400/70 font-semibold tracking-[0.18em] uppercase">Teacher Portal</div>
+            <div className="text-[9px] text-violet-400/70 font-semibold tracking-[0.18em] uppercase">{t('nav.teacherPortal')}</div>
           </div>
         )}
       </div>
@@ -179,7 +122,7 @@ function SidebarContent({
       {/* Nav */}
       <nav className="flex-1 px-2 py-4 overflow-y-auto space-y-4 scrollbar-none">
         {sections.map((section) => (
-          <div key={section.title} className="space-y-0.5">
+          <div key={section.key} className="space-y-0.5">
             {!collapsed ? (
               <p className="px-3 mb-2 mt-1 text-[9px] font-bold tracking-[0.2em] uppercase text-slate-500/70">
                 {section.title}
@@ -188,13 +131,7 @@ function SidebarContent({
               <div className="h-px bg-white/[0.06] mx-2 mb-2 mt-1" />
             )}
             {section.items.map((item) => (
-              <NavItem
-                key={item.path}
-                item={item}
-                active={activePath === item.path}
-                collapsed={collapsed}
-                onClick={onLinkClick}
-              />
+              <NavItem key={item.path} item={item} active={activePath === item.path} collapsed={collapsed} onClick={onLinkClick} />
             ))}
           </div>
         ))}
@@ -222,29 +159,26 @@ function SidebarContent({
 
         <button
           onClick={onLogout}
-          title={collapsed ? 'Sign out' : undefined}
+          title={collapsed ? t('nav.signOut') : undefined}
           className={cn(
             'w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-slate-500 hover:text-red-400 hover:bg-red-500/[0.08] transition-all text-sm font-medium',
             collapsed && 'justify-center px-2'
           )}
         >
           <LogOut className="w-4 h-4 shrink-0" />
-          {!collapsed && <span>Sign out</span>}
+          {!collapsed && <span>{t('nav.signOut')}</span>}
         </button>
 
         <button
           onClick={onCollapse}
-          title={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+          title={collapsed ? t('nav.collapse') : t('nav.collapse')}
           className={cn(
             'w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-slate-600 hover:text-slate-300 hover:bg-white/[0.06] transition-all text-sm font-medium',
             collapsed && 'justify-center px-2'
           )}
         >
-          {collapsed
-            ? <PanelLeftOpen className="w-4 h-4 shrink-0" />
-            : <PanelLeftClose className="w-4 h-4 shrink-0" />
-          }
-          {!collapsed && <span>Collapse</span>}
+          {collapsed ? <PanelLeftOpen className="w-4 h-4 shrink-0" /> : <PanelLeftClose className="w-4 h-4 shrink-0" />}
+          {!collapsed && <span>{t('nav.collapse')}</span>}
         </button>
       </div>
     </div>
@@ -252,6 +186,7 @@ function SidebarContent({
 }
 
 export default function TeacherLayout({ children }: { children: React.ReactNode }) {
+  const { t } = useTranslation();
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [collapsed, setCollapsed] = useState(false);
   const [features, setFeatures] = useState<FeatureFlags>(defaultFeatureFlags);
@@ -259,6 +194,64 @@ export default function TeacherLayout({ children }: { children: React.ReactNode 
   const { can } = useTeacherPermissions();
   const location = useLocation();
   const navigate = useNavigate();
+
+  const NAV_SECTIONS = [
+    {
+      key: 'main',
+      title: t('nav.sections.main'),
+      items: [
+        { icon: LayoutDashboard, label: t('nav.dashboard'),  path: '/teacher' },
+        { icon: BookOpen,        label: t('nav.myCourses'),  path: '/teacher/courses' },
+        { icon: Layers,          label: t('nav.modules'),    path: '/teacher/modules' },
+        { icon: PlayCircle,      label: t('nav.lessons'),    path: '/teacher/lessons' },
+        { icon: FileText,        label: t('nav.quizzes'),    path: '/teacher/quizzes' },
+        { icon: ScrollText,      label: t('nav.exams'),      path: '/teacher/exams' },
+      ],
+    },
+    {
+      key: 'students',
+      title: t('nav.sections.students'),
+      items: [
+        { icon: Users,  label: t('nav.myStudents'), path: '/teacher/students' },
+        { icon: School, label: t('nav.classes'),    path: '/teacher/classes' },
+      ],
+    },
+    {
+      key: 'learning',
+      title: t('nav.sections.learning'),
+      items: [
+        { icon: ClipboardList, label: t('nav.assignments'), path: '/teacher/assignments' },
+        { icon: CalendarCheck, label: t('nav.attendance'),  path: '/teacher/attendance' },
+        { icon: Award,         label: t('nav.certificates'),path: '/teacher/certificates' },
+      ],
+    },
+    {
+      key: 'interaction',
+      title: t('nav.sections.interaction'),
+      items: [
+        { icon: Zap,          label: t('nav.liveQuiz'),      path: '/teacher/live-quiz' },
+        { icon: FileBarChart2,label: t('nav.quizReports'),   path: '/teacher/live-quiz/reports' },
+        { icon: Video,        label: t('nav.liveSessions'),  path: '/teacher/live-sessions' },
+        { icon: MessageSquare,label: t('nav.community'),     path: '/teacher/community' },
+        { icon: Megaphone,    label: t('nav.announcements'), path: '/teacher/announcements' },
+      ],
+    },
+    {
+      key: 'analytics',
+      title: t('nav.sections.analytics'),
+      items: [
+        { icon: BarChart3,   label: t('nav.studentProgress'), path: '/teacher/progress' },
+        { icon: FileBarChart,label: t('nav.quizResults'),     path: '/teacher/results' },
+      ],
+    },
+    {
+      key: 'account',
+      title: t('nav.sections.account'),
+      items: [
+        { icon: User, label: t('nav.profile'), path: '/teacher/profile' },
+      ],
+    },
+  ];
 
   useEffect(() => {
     let mounted = true;
@@ -268,9 +261,7 @@ export default function TeacherLayout({ children }: { children: React.ReactNode 
         const json = await res.json();
         if (!mounted || !res.ok || !json?.success) return;
         setFeatures(extractFeatureFlags({ features: json.features }));
-      } catch {
-        // keep defaults
-      }
+      } catch { /* keep defaults */ }
     };
     loadSettings();
     const onSettingsUpdated = () => loadSettings();
@@ -300,9 +291,7 @@ export default function TeacherLayout({ children }: { children: React.ReactNode 
     }))
     .filter((section) => section.items.length > 0);
 
-  const currentLabel =
-    visibleSections.flatMap((s) => s.items).find((i) => i.path === location.pathname)?.label || 'Dashboard';
-
+  const currentLabel = visibleSections.flatMap((s) => s.items).find((i) => i.path === location.pathname)?.label || t('nav.dashboard');
   const currentPagePermission = getTeacherPagePermission(location.pathname);
   const canAccessCurrentPage = !currentPagePermission || can(currentPagePermission, true);
 
@@ -313,12 +302,7 @@ export default function TeacherLayout({ children }: { children: React.ReactNode 
   return (
     <div className="min-h-screen bg-slate-50 flex">
       {/* Desktop Sidebar */}
-      <aside
-        className={cn(
-          'hidden lg:flex flex-col fixed h-full z-30 overflow-hidden border-r border-white/[0.04] transition-all duration-300 ease-in-out',
-          sidebarW
-        )}
-      >
+      <aside className={cn('hidden lg:flex flex-col fixed h-full z-30 overflow-hidden border-r border-white/[0.04] transition-all duration-300 ease-in-out', sidebarW)}>
         <SidebarContent
           activePath={location.pathname}
           collapsed={collapsed}
@@ -329,18 +313,16 @@ export default function TeacherLayout({ children }: { children: React.ReactNode 
       </aside>
 
       {/* Desktop Topbar */}
-      <header
-        className={cn(
-          'hidden lg:flex fixed top-0 right-0 h-14 bg-white/95 backdrop-blur-md border-b border-slate-100/80 items-center justify-between px-6 z-20 transition-all duration-300 ease-in-out shadow-sm shadow-slate-100/50',
-          headerL
-        )}
-      >
+      <header className={cn('hidden lg:flex fixed top-0 right-0 h-14 bg-white/95 backdrop-blur-md border-b border-slate-100/80 items-center justify-between px-6 z-20 transition-all duration-300 ease-in-out shadow-sm shadow-slate-100/50', headerL)}>
         <div className="flex items-center gap-2 text-sm">
-          <span className="text-slate-400 text-xs font-medium">Teacher Portal</span>
+          <span className="text-slate-400 text-xs font-medium">{t('nav.teacherPortal')}</span>
           <ChevronRight className="w-3.5 h-3.5 text-slate-300" />
           <span className="text-slate-800 font-semibold text-sm">{currentLabel}</span>
         </div>
-        <NotificationCenter />
+        <div className="flex items-center gap-2">
+          <LanguageDropdown variant="light" />
+          <NotificationCenter />
+        </div>
       </header>
 
       {/* Mobile Topbar */}
@@ -359,11 +341,9 @@ export default function TeacherLayout({ children }: { children: React.ReactNode 
           <span className="text-sm font-bold text-white">{branding.schoolName}</span>
         </div>
         <div className="flex items-center gap-2">
+          <LanguageDropdown variant="dark" />
           <NotificationCenter />
-          <button
-            onClick={() => setSidebarOpen(!sidebarOpen)}
-            className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-white/10 transition-all"
-          >
+          <button onClick={() => setSidebarOpen(!sidebarOpen)} className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-white/10 transition-all">
             {sidebarOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
           </button>
         </div>
@@ -372,10 +352,7 @@ export default function TeacherLayout({ children }: { children: React.ReactNode 
       {/* Mobile Sidebar */}
       {sidebarOpen && (
         <div className="lg:hidden fixed inset-0 z-40 flex">
-          <div
-            className="absolute inset-0 bg-black/60 backdrop-blur-sm"
-            onClick={() => setSidebarOpen(false)}
-          />
+          <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setSidebarOpen(false)} />
           <aside className="relative w-64 h-full z-50">
             <SidebarContent
               activePath={location.pathname}
@@ -397,14 +374,13 @@ export default function TeacherLayout({ children }: { children: React.ReactNode 
           ) : (
             <div className="min-h-[60vh] flex items-center justify-center">
               <div className="max-w-md text-center space-y-3">
-                <h2 className="text-2xl font-bold text-slate-900">Access denied</h2>
-                <p className="text-slate-500 text-sm">You do not have permission to access this page.</p>
+                <h2 className="text-2xl font-bold text-slate-900">{t('errors.noAccess')}</h2>
+                <p className="text-slate-500 text-sm">{t('errors.noPermission')}</p>
               </div>
             </div>
           )}
         </div>
       </main>
-
     </div>
   );
 }
