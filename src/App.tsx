@@ -202,29 +202,10 @@ export default function App() {
       }
 
       if (!profile) {
-        const { data: { session } } = await supabase.auth.getSession();
-        const authUser = session?.user && session.user.id === userId ? session.user : null;
-        const metadata = authUser?.user_metadata && typeof authUser.user_metadata === 'object'
-          ? authUser.user_metadata as Record<string, unknown>
-          : {};
-        const fallbackRole = normalizeUserRole(typeof metadata.role === 'string' ? metadata.role : null);
-
-        if (runtimeMaintenanceMode && fallbackRole !== 'admin') {
-          await supabase.auth.signOut();
-          setUser(null);
-          toast.error('Platform is currently offline for all students and teachers.', { id: 'maintenance-mode' });
-          return;
-        }
-
-        setUser({
-          uid: userId,
-          email: String(authUser?.email || ''),
-          displayName: String(metadata.display_name || metadata.full_name || authUser?.email || 'Student'),
-          role: fallbackRole,
-          teacherId: typeof metadata.teacher_id === 'string' ? metadata.teacher_id : undefined,
-          status: 'active',
-          createdAt: String(authUser?.created_at || new Date().toISOString()),
-        });
+        await supabase.auth.signOut();
+        setUser(null);
+        setLoading(false);
+        toast.error('Account not found in database. Please contact your administrator.', { id: 'no-profile' });
         return;
       }
 
