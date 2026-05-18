@@ -15,7 +15,7 @@ import { supabase } from '../../supabase';
 import { authFetch } from '../../lib/apiUrl';
 import {
   ClipboardList, Plus, Search, Star,
-  X, Pencil, Trash2, CheckCircle2, Archive, FileText, AlertCircle, Clock,
+  X, Pencil, Trash2, CheckCircle2, Archive, FileText, AlertCircle, Clock, Send,
 } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { format, isPast, isToday } from 'date-fns';
@@ -77,7 +77,7 @@ const getAvatarColor = (str: string) => {
 const emptyForm = {
   title: '', description: '', instructions: '', course_id: '', teacher_id: '', class_id: '',
   type: 'homework' as AssignmentType, due_date: '', max_score: 100,
-  status: 'draft' as AssignmentStatus, allow_late_submission: false,
+  status: 'published' as AssignmentStatus, allow_late_submission: false,
 };
 
 export default function AdminAssignments() {
@@ -201,6 +201,18 @@ export default function AdminAssignments() {
     } catch { toast.error('Failed to delete'); }
   };
 
+  const handleQuickPublish = async (id: string) => {
+    try {
+      const res = await authFetch(`/api/teacher/assignments/${id}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ status: 'published' }),
+      });
+      if (!res.ok) throw new Error('Failed to publish');
+      toast.success('Assignment published — students can now see it');
+      fetchData();
+    } catch { toast.error('Failed to publish assignment'); }
+  };
+
   const getDueBadge = (due: string | null, status: AssignmentStatus) => {
     if (!due || status === 'closed') return null;
     const d = new Date(due);
@@ -287,6 +299,16 @@ export default function AdminAssignments() {
                           </div>
                         </div>
                         <div className="flex gap-1 shrink-0">
+                          {a.status === 'draft' && (
+                            <button
+                              type="button"
+                              title="Publish — make visible to students"
+                              onClick={() => handleQuickPublish(a.id)}
+                              className="p-2 rounded-lg text-slate-400 hover:text-emerald-600 hover:bg-emerald-50 transition-colors"
+                            >
+                              <Send className="w-4 h-4" />
+                            </button>
+                          )}
                           <button type="button" onClick={() => openEdit(a)} className="p-2 rounded-lg text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 transition-colors">
                             <Pencil className="w-4 h-4" />
                           </button>

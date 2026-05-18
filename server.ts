@@ -10336,33 +10336,76 @@ Assistant:`;
         .from('profiles').select('teacher_id').eq('id', caller.userId).maybeSingle();
 
       const teacherId: string | null = profile?.teacher_id || null;
-      if (!teacherId) return res.json({ success: true, assignments: [] });
+      console.log(`[student/assignments] student=${caller.userId} teacher_id=${teacherId}`);
+      if (!teacherId) {
+        console.log('[student/assignments] no teacher_id on profile — returning empty');
+        return res.json({ success: true, assignments: [] });
+      }
 
+      // Always keep the raw teacher_id from profile; getTeacherIdCandidates may add extras
       let teacherIds: string[] = [teacherId];
       try {
         const candidates = await getTeacherIdCandidates(teacherId);
+        // candidates always contains teacherId itself, so safe to use
         if (candidates.length > 0) teacherIds = candidates;
-      } catch { /* ignore */ }
+      } catch { /* teachers table may not exist */ }
+      console.log(`[student/assignments] querying teacher_ids=${JSON.stringify(teacherIds)}`);
 
       let assignments: any[] = [];
       try {
-        const result = await poolQuery(
-          `SELECT a.*, COALESCE(c.title, c.name, '') AS course_title
-           FROM assignments a
-           LEFT JOIN courses c ON c.id = a.course_id
-           WHERE a.teacher_id = ANY($1::uuid[])
-             AND a.status = 'published'
-           ORDER BY a.due_date ASC NULLS LAST, a.created_at DESC`,
+        // Debug: count total assignments for this teacher
+        const countResult = await poolQuery(
+          `SELECT COUNT(*) AS total, COUNT(*) FILTER (WHERE status='published') AS published FROM public.assignments WHERE teacher_id = ANY($1::uuid[])`,
           [teacherIds]
         );
-        assignments = result.rows;
-      } catch {
-        const { data, error } = await supabaseAdmin
-          .from('assignments').select('*')
-          .in('teacher_id', teacherIds).eq('status', 'published')
-          .order('created_at', { ascending: false });
-        if (error && !/does not exist/i.test(error.message)) throw error;
-        assignments = (data || []).map((a: any) => ({ ...a, course_title: '' }));
+        const { total, published } = countResult.rows[0] || {};
+        console.log(`[student/assignments] teacher has ${total} total assignments, ${published} published`);
+
+        // Try with courses JOIN first
+        let didJoin = false;
+        try {
+          const result = await poolQuery(
+            `SELECT a.*, COALESCE(c.title, c.name, '') AS course_title
+             FROM public.assignments a
+             LEFT JOIN public.courses c ON c.id = a.course_id
+             WHERE a.teacher_id = ANY($1::uuid[])
+               AND a.status = 'published'
+             ORDER BY a.due_date ASC NULLS LAST, a.created_at DESC`,
+            [teacherIds]
+          );
+          assignments = result.rows;
+          didJoin = true;
+        } catch {
+          // courses table unavailable — query without join
+          const result = await poolQuery(
+            `SELECT a.* FROM public.assignments a
+             WHERE a.teacher_id = ANY($1::uuid[])
+               AND a.status = 'published'
+             ORDER BY a.due_date ASC NULLS LAST, a.created_at DESC`,
+            [teacherIds]
+          );
+          assignments = result.rows.map((r: any) => ({ ...r, course_title: '' }));
+        }
+        console.log(`[student/assignments] returning ${assignments.length} assignments (join=${didJoin})`);
+      } catch (sqlErr: any) {
+        console.warn('[student/assignments] poolQuery failed entirely:', sqlErr?.message);
+        // Last resort: raw SQL via supabaseAdmin RPC or direct query
+        try {
+          const { data, error } = await supabaseAdmin
+            .from('assignments')
+            .select('*')
+            .eq('status', 'published')
+            .order('created_at', { ascending: false });
+          if (error) throw error;
+          // Filter client-side since PostgREST may not support .in() for teacher_id
+          const filtered = (data || []).filter((a: any) =>
+            a.teacher_id && teacherIds.includes(String(a.teacher_id))
+          );
+          assignments = filtered.map((a: any) => ({ ...a, course_title: '' }));
+          console.log(`[student/assignments] supabaseAdmin fallback: ${assignments.length} of ${data?.length || 0}`);
+        } catch (fbErr: any) {
+          console.error('[student/assignments] all methods failed:', fbErr?.message);
+        }
       }
 
       return res.json({ success: true, assignments });
