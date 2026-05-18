@@ -124,9 +124,9 @@ function SlidePresenter({ slides, theme, title, onClose }: { slides: Slide[]; th
 
       {/* Speaker notes */}
       {slide.notes && (
-        <div className="px-6 py-3 bg-black/40 border-t border-white/10">
-          <p className="text-white/40 text-xs font-semibold uppercase tracking-wider mb-1">Speaker Notes</p>
-          <p className="text-white/70 text-sm">{slide.notes}</p>
+        <div className="px-6 py-4 bg-black/50 border-t border-white/10 max-h-40 overflow-y-auto">
+          <p className="text-white/40 text-xs font-semibold uppercase tracking-wider mb-2">Speaker Notes</p>
+          <p className="text-white/80 text-sm leading-relaxed">{slide.notes}</p>
         </div>
       )}
 

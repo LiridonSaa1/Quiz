@@ -74,9 +74,9 @@ function SlideViewer({ slides, theme, onClose }: { slides: Slide[]; theme: strin
             </ul>
           )}
           {slide.notes && (
-            <div className="mt-8 pt-6 border-t border-white/20">
-              <p className="text-white/60 text-sm font-medium mb-1">Speaker Notes</p>
-              <p className="text-white/80 text-sm italic">{slide.notes}</p>
+            <div className="mt-8 pt-6 border-t border-white/20 max-h-40 overflow-y-auto">
+              <p className="text-white/60 text-sm font-medium mb-2">Speaker Notes</p>
+              <p className="text-white/80 text-sm leading-relaxed italic">{slide.notes}</p>
             </div>
           )}
         </motion.div>

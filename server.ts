@@ -11042,7 +11042,7 @@ Return ONLY valid JSON with this exact structure (no markdown, no extra text):
       "type": "title",
       "title": "Slide Title",
       "content": ["bullet point 1", "bullet point 2", "bullet point 3"],
-      "notes": "Speaker notes for this slide. What to say.",
+      "notes": "Detailed speaker notes: explain the slide topic in depth, provide context, examples, and transitions to the next slide. Write 3-5 sentences minimum.",
       "emoji": "🎯"
     }
   ]
@@ -11050,6 +11050,7 @@ Return ONLY valid JSON with this exact structure (no markdown, no extra text):
 
 Slide types: "title" (first slide), "content" (main slides), "quote", "stats", "summary" (last slide).
 Each content slide must have 3-5 bullet points. Keep content concise and educational.
+Speaker notes MUST be detailed and thorough — write 3 to 5 full sentences per slide. Include: what to say out loud, real-world examples or context, and a smooth transition sentence to the next slide.
 Make it engaging, modern, and appropriate for the education level.`;
 
       let rawText = '';
