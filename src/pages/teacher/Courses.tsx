@@ -451,6 +451,7 @@ function MiniAvatar({ seed, sizePx = 24 }: { seed: string; sizePx?: number }) {
 }
 
 function TeacherCourseCard({ course, gradient, index, onEdit, onDelete, onToggleStatus, canEdit, canDelete, canPublish }: any) {
+  const { t } = useTranslation();
   const [menuOpen, setMenuOpen] = useState(false);
   const name = course.name || course.title || 'Untitled';
   const students = course.student_ids?.length || course.total_students || 0;
