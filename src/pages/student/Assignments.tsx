@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
-import { supabase } from '../../supabase';
 import StudentLayout from '../../components/layout/StudentLayout';
+import { authFetch } from '../../lib/apiUrl';
 import { motion, AnimatePresence } from 'motion/react';
 import { ClipboardList, Search, Calendar, BookOpen, AlertCircle, CheckCircle2, Archive, FileText, ArrowRight, Play } from 'lucide-react';
 import { cn } from '../../lib/utils';
@@ -47,37 +47,20 @@ export default function StudentAssignments() {
 
   useEffect(() => {
     const load = async () => {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (!session) {
+      try {
+        const res = await authFetch('/api/student/assignments');
+        const json = await res.json();
+        if (json.success) {
+          setAssignments((json.assignments || []).map((a: any) => ({
+            ...a,
+            courseTitle: a.course_title || a.courseTitle || '',
+          })));
+        }
+      } catch {
+        // silent fallback — empty list
+      } finally {
         setLoading(false);
-        return;
       }
-      const uid = session.user.id;
-
-      const { data: enrolledCourses } = await supabase
-        .from('courses')
-        .select('id, title, status, student_ids')
-        .contains('student_ids', [uid]);
-
-      const courses = (enrolledCourses || [])
-        .filter((c: any) => {
-          const status = String(c?.status || '').toLowerCase();
-          return status === '' || status === 'published' || status === 'active';
-        })
-        .map((c: any) => ({ id: String(c.id), title: String(c.title || 'Course') }));
-      if (!courses.length) { setLoading(false); return; }
-      const courseIds = courses.map((c: any) => c.id);
-      const courseMap: Record<string, string> = {};
-      courses.forEach((c: any) => { courseMap[c.id] = c.title; });
-
-      const { data } = await supabase
-        .from('assignments').select('*').in('course_id', courseIds).eq('status', 'published')
-        .order('due_date', { ascending: true });
-
-      setAssignments((data || []).map((a: any) => ({
-        ...a, courseTitle: courseMap[a.course_id] || 'Course',
-      })));
-      setLoading(false);
     };
     load();
   }, []);

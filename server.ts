@@ -10325,6 +10325,50 @@ Assistant:`;
     } catch (e: any) { res.status(500).json({ error: e.message }); }
   });
 
+  // GET /api/student/assignments — list published assignments visible to this student
+  app.get('/api/student/assignments', async (req: Request, res: Response) => {
+    try {
+      const caller = await assertAuthenticated(req, res);
+      if (!caller) return;
+      if (caller.role !== 'student' && caller.role !== 'admin') return res.status(403).json({ error: 'Forbidden' });
+
+      const { data: profile } = await supabaseAdmin
+        .from('profiles').select('teacher_id').eq('id', caller.userId).maybeSingle();
+
+      const teacherId: string | null = profile?.teacher_id || null;
+      if (!teacherId) return res.json({ success: true, assignments: [] });
+
+      let teacherIds: string[] = [teacherId];
+      try {
+        const candidates = await getTeacherIdCandidates(teacherId);
+        if (candidates.length > 0) teacherIds = candidates;
+      } catch { /* ignore */ }
+
+      let assignments: any[] = [];
+      try {
+        const result = await poolQuery(
+          `SELECT a.*, COALESCE(c.title, c.name, '') AS course_title
+           FROM assignments a
+           LEFT JOIN courses c ON c.id = a.course_id
+           WHERE a.teacher_id = ANY($1::uuid[])
+             AND a.status = 'published'
+           ORDER BY a.due_date ASC NULLS LAST, a.created_at DESC`,
+          [teacherIds]
+        );
+        assignments = result.rows;
+      } catch {
+        const { data, error } = await supabaseAdmin
+          .from('assignments').select('*')
+          .in('teacher_id', teacherIds).eq('status', 'published')
+          .order('created_at', { ascending: false });
+        if (error && !/does not exist/i.test(error.message)) throw error;
+        assignments = (data || []).map((a: any) => ({ ...a, course_title: '' }));
+      }
+
+      return res.json({ success: true, assignments });
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
   // Student: get own submission for an assignment
   app.get('/api/student/assignments/:assignmentId/submission', async (req: Request, res: Response) => {
     try {
