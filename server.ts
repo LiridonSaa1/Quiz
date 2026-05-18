@@ -10816,7 +10816,7 @@ Each content slide must have 3-5 bullet points. Keep content concise and educati
 Make it engaging, modern, and appropriate for the education level.`;
 
       const response = await ai.models.generateContent({
-        model: 'gemini-2.0-flash',
+        model: 'gemini-1.5-flash',
         contents: prompt,
       });
 
