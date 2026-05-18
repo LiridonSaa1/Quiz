@@ -10698,9 +10698,9 @@ When giving instructions, number each step clearly. Be precise and technical whe
         );
         return res.json({ success: true, assignment: { id: result.rows[0].id } });
       } catch {
-        // poolQuery unavailable — fall back to supabaseAdmin without schema-sensitive columns
+        // poolQuery unavailable — fall back to supabaseAdmin with column-strip retry loop
         const now = new Date().toISOString();
-        const base: Record<string, unknown> = {
+        let payload: Record<string, unknown> = {
           title: String(b.title),
           description: b.description != null ? String(b.description) : null,
           course_id: b.course_id || null, class_id: b.class_id || null,
@@ -10708,15 +10708,22 @@ When giving instructions, number each step clearly. Be precise and technical whe
           type: b.type || 'homework', due_date: b.due_date || null,
           max_score: Number(b.max_score) || 100, status: b.status || 'draft',
           allow_late_submission: Boolean(b.allow_late_submission),
-          publish_at: publishAt, created_at: now, updated_at: now,
+          instructions: b.instructions != null ? String(b.instructions) : null,
+          submission_config: b.submission_config != null ? b.submission_config : null,
+          created_at: now, updated_at: now,
         };
-        let { data, error } = await supabaseAdmin.from('assignments').insert(base).select('id').single();
-        if (error && /allow_late_submission|schema cache/i.test(error.message)) {
-          const { allow_late_submission: _dropped, ...baseWithout } = base as any;
-          ({ data, error } = await supabaseAdmin.from('assignments').insert(baseWithout).select('id').single());
+        if (publishAt) payload.publish_at = publishAt; // only include if actually set
+        const STRIP_COLS = ['publish_at', 'allow_late_submission', 'instructions', 'submission_config'];
+        for (let i = 0; i < STRIP_COLS.length + 2; i++) {
+          const { data, error } = await supabaseAdmin.from('assignments').insert(payload).select('id').single();
+          if (!error && data?.id) return res.json({ success: true, assignment: { id: data.id } });
+          if (!error) return res.status(500).json({ error: 'Insert returned no id' });
+          const em = (error.message || '').toLowerCase();
+          const hit = STRIP_COLS.find(c => em.includes(c) && c in payload);
+          if (hit) { const { [hit]: _d, ...rest } = payload; payload = rest; continue; }
+          return res.status(500).json({ error: error.message });
         }
-        if (error) return res.status(500).json({ error: error.message });
-        return res.json({ success: true, assignment: { id: data?.id } });
+        return res.status(500).json({ error: 'Failed to insert assignment' });
       }
     } catch (e: any) { res.status(500).json({ error: e.message }); }
   });
@@ -10750,7 +10757,7 @@ When giving instructions, number each step clearly. Be precise and technical whe
         await poolQuery(`UPDATE assignments SET ${sets.join(', ')} WHERE id = $${pi}`, params);
         return res.json({ success: true });
       } catch {
-        // poolQuery unavailable — fall back to supabaseAdmin
+        // poolQuery unavailable — fall back to supabaseAdmin with column-strip retry loop
         let payload: Record<string, unknown> = { updated_at: new Date().toISOString() };
         if (b.title !== undefined) payload.title = String(b.title);
         if (b.description !== undefined) payload.description = b.description != null ? String(b.description) : null;
@@ -10763,14 +10770,18 @@ When giving instructions, number each step clearly. Be precise and technical whe
         if (b.instructions !== undefined) payload.instructions = b.instructions != null ? String(b.instructions) : null;
         if (b.allow_late_submission !== undefined) payload.allow_late_submission = Boolean(b.allow_late_submission);
         if (b.submission_config !== undefined) payload.submission_config = b.submission_config;
-        if ('publish_at' in b) payload.publish_at = b.publish_at ? new Date(String(b.publish_at)).toISOString() : null;
-        let { error } = await supabaseAdmin.from('assignments').update(payload).eq('id', aId);
-        if (error && /allow_late_submission|schema cache/i.test(error.message)) {
-          const { allow_late_submission: _dropped, ...payloadWithout } = payload as any;
-          ({ error } = await supabaseAdmin.from('assignments').update(payloadWithout).eq('id', aId));
+        // Only include publish_at if it has a value (null/absent = don't touch the column)
+        if ('publish_at' in b && b.publish_at) payload.publish_at = new Date(String(b.publish_at)).toISOString();
+        const STRIP_COLS = ['publish_at', 'allow_late_submission', 'instructions', 'submission_config'];
+        for (let i = 0; i < STRIP_COLS.length + 2; i++) {
+          const { error } = await supabaseAdmin.from('assignments').update(payload).eq('id', aId);
+          if (!error) return res.json({ success: true });
+          const em = (error.message || '').toLowerCase();
+          const hit = STRIP_COLS.find(c => em.includes(c) && c in payload);
+          if (hit) { const { [hit]: _d, ...rest } = payload; payload = rest; continue; }
+          return res.status(500).json({ error: error.message });
         }
-        if (error) return res.status(500).json({ error: error.message });
-        return res.json({ success: true });
+        return res.status(500).json({ error: 'Failed to update assignment' });
       }
     } catch (e: any) { res.status(500).json({ error: e.message }); }
   });
