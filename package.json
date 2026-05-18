@@ -55,7 +55,7 @@
     "autoprefixer": "^10.4.27",
     "cross-env": "^10.1.0",
     "tailwindcss": "^4.2.2",
-    "tsx": "^4.22.1",
+    "tsx": "^4.22.2",
     "typescript": "~5.8.2",
     "vite": "^6.4.2"
   }
