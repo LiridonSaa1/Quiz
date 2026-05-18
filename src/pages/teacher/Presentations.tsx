@@ -6,7 +6,7 @@ import { authFetch } from '../../lib/apiUrl';
 import {
   Presentation, Plus, Trash2, Eye, Pencil, Sparkles, X, ChevronLeft, ChevronRight,
   Download, Copy, LayoutGrid, Globe, BookOpen, Loader2, Check, Save,
-  Wand2, Monitor, GraduationCap, Briefcase, Layers,
+  Wand2, Monitor, GraduationCap, Briefcase, Layers, ClipboardList,
 } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { format } from 'date-fns';
@@ -29,7 +29,13 @@ interface PresentationRecord {
   education_level?: string;
   slides: Slide[];
   is_public: boolean;
+  assignment_id?: string | null;
   created_at: string;
+}
+
+interface AssignmentOption {
+  id: string;
+  title: string;
 }
 
 const THEMES = [
@@ -264,6 +270,21 @@ function GenerateModal({ onGenerated, onClose }: {
   const [language, setLanguage] = useState('English');
   const [level, setLevel] = useState('General');
   const [loading, setLoading] = useState(false);
+  const [assignmentId, setAssignmentId] = useState<string>('');
+  const [assignments, setAssignments] = useState<AssignmentOption[]>([]);
+  const [loadingAssignments, setLoadingAssignments] = useState(true);
+
+  useEffect(() => {
+    authFetch('/api/teacher/assignments')
+      .then(r => r.json())
+      .then(j => {
+        if (j.success) {
+          setAssignments((j.assignments || []).map((a: any) => ({ id: a.id, title: a.title })));
+        }
+      })
+      .catch(() => {})
+      .finally(() => setLoadingAssignments(false));
+  }, []);
 
   async function generate() {
     if (!topic.trim()) { toast.error('Please enter a topic'); return; }
@@ -275,7 +296,7 @@ function GenerateModal({ onGenerated, onClose }: {
       });
       const json = await res.json();
       if (!res.ok) throw new Error(json.error || 'Generation failed');
-      onGenerated(json.data, { theme, language, educationLevel: level });
+      onGenerated(json.data, { theme, language, educationLevel: level, assignmentId: assignmentId || null });
     } catch (e: any) {
       toast.error(e.message || 'AI generation failed');
     } finally {
@@ -314,6 +335,28 @@ function GenerateModal({ onGenerated, onClose }: {
               placeholder="e.g. Climate Change and Renewable Energy"
               className="w-full bg-white/10 border border-white/15 text-white placeholder-white/30 rounded-xl px-4 py-3 text-sm focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500"
             />
+          </div>
+
+          {/* Assignment link */}
+          <div>
+            <label className="block text-sm font-semibold text-white/80 mb-2 flex items-center gap-2">
+              <ClipboardList className="w-4 h-4 text-violet-400" />
+              Link to Assignment <span className="text-white/40 font-normal">(optional)</span>
+            </label>
+            <select
+              value={assignmentId}
+              onChange={e => setAssignmentId(e.target.value)}
+              disabled={loadingAssignments}
+              className="w-full bg-white/10 border border-white/15 text-white rounded-xl px-4 py-3 text-sm focus:outline-none focus:border-indigo-500 disabled:opacity-50"
+            >
+              <option value="">— No assignment —</option>
+              {assignments.map(a => (
+                <option key={a.id} value={a.id}>{a.title}</option>
+              ))}
+            </select>
+            {!loadingAssignments && assignments.length === 0 && (
+              <p className="text-white/30 text-xs mt-1.5">No assignments found. Create an assignment first to link it here.</p>
+            )}
           </div>
 
           {/* Theme */}
@@ -383,13 +426,25 @@ function GenerateModal({ onGenerated, onClose }: {
 /* ─── Main Page ─── */
 export default function TeacherPresentations() {
   const [presentations, setPresentations] = useState<PresentationRecord[]>([]);
+  const [assignments, setAssignments] = useState<AssignmentOption[]>([]);
   const [loading, setLoading] = useState(true);
   const [showGenerate, setShowGenerate] = useState(false);
   const [presenting, setPresenting] = useState<PresentationRecord | null>(null);
   const [editing, setEditing] = useState<PresentationRecord | null>(null);
   const [saving, setSaving] = useState<string | null>(null);
 
-  useEffect(() => { load(); }, []);
+  useEffect(() => {
+    load();
+    authFetch('/api/teacher/assignments')
+      .then(r => r.json())
+      .then(j => { if (j.success) setAssignments((j.assignments || []).map((a: any) => ({ id: a.id, title: a.title }))); })
+      .catch(() => {});
+  }, []);
+
+  function getAssignmentTitle(id?: string | null): string | null {
+    if (!id) return null;
+    return assignments.find(a => a.id === id)?.title || null;
+  }
 
   async function load() {
     setLoading(true);
@@ -417,6 +472,7 @@ export default function TeacherPresentations() {
           language: opts.language,
           education_level: opts.educationLevel,
           slides,
+          assignment_id: opts.assignmentId || null,
         }),
       });
       const json = await res.json();
@@ -571,6 +627,7 @@ export default function TeacherPresentations() {
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
             {presentations.map((p, idx) => {
               const colors = THEME_META[p.theme] || THEME_META.modern;
+              const assignmentTitle = getAssignmentTitle(p.assignment_id);
               return (
                 <motion.div
                   key={p.id}
@@ -597,7 +654,15 @@ export default function TeacherPresentations() {
 
                   {/* Actions */}
                   <div className="p-3">
-                    <p className="text-slate-400 text-xs mb-3">{format(new Date(p.created_at), 'MMM d, yyyy')}</p>
+                    <div className="flex items-center justify-between mb-2.5">
+                      <p className="text-slate-400 text-xs">{format(new Date(p.created_at), 'MMM d, yyyy')}</p>
+                      {assignmentTitle && (
+                        <span className="flex items-center gap-1 text-xs bg-violet-500/15 text-violet-300 border border-violet-500/25 px-2 py-0.5 rounded-full truncate max-w-[140px]">
+                          <ClipboardList className="w-3 h-3 shrink-0" />
+                          <span className="truncate">{assignmentTitle}</span>
+                        </span>
+                      )}
+                    </div>
                     <div className="grid grid-cols-4 gap-1.5">
                       <button onClick={() => setPresenting(p)}
                         className="col-span-2 flex items-center justify-center gap-1.5 py-2 bg-indigo-600/20 hover:bg-indigo-600/40 text-indigo-300 hover:text-indigo-200 rounded-xl text-xs font-semibold transition-colors">

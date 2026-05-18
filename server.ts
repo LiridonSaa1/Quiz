@@ -10640,12 +10640,16 @@ Assistant:`;
             education_level TEXT,
             slides JSONB NOT NULL DEFAULT '[]',
             is_public BOOLEAN NOT NULL DEFAULT false,
+            assignment_id UUID,
             created_at TIMESTAMPTZ DEFAULT NOW(),
             updated_at TIMESTAMPTZ DEFAULT NOW()
           )
         `).catch(() => null);
         await poolQuery(`CREATE INDEX IF NOT EXISTS presentations_user_id_idx ON presentations(user_id)`).catch(() => null);
         console.log('[presentations] Table created ✓');
+      } else {
+        // Table exists — ensure assignment_id column is present
+        await poolQuery(`ALTER TABLE presentations ADD COLUMN IF NOT EXISTS assignment_id UUID`).catch(() => null);
       }
     } catch (e: any) {
       console.warn('[presentations] Migration check:', e?.message);
@@ -10666,7 +10670,7 @@ Assistant:`;
 
       let query = supabaseAdmin
         .from('presentations')
-        .select('id, user_id, title, description, theme, language, education_level, is_public, slides, created_at, updated_at')
+        .select('id, user_id, title, description, theme, language, education_level, is_public, slides, assignment_id, created_at, updated_at')
         .order('created_at', { ascending: false });
 
       if (profile?.role !== 'admin') {
@@ -10708,11 +10712,12 @@ Assistant:`;
       );
       if (authErr || !user) return res.status(401).json({ error: 'Unauthorized' });
 
-      const { title, description, theme, language, education_level, slides, is_public } = req.body;
+      const { title, description, theme, language, education_level, slides, is_public, assignment_id } = req.body;
       const { data, error } = await supabaseAdmin.from('presentations').insert({
         user_id: user.id, title, description, theme: theme || 'modern',
         language: language || 'en', education_level, slides: slides || [],
         is_public: is_public || false,
+        assignment_id: assignment_id || null,
       }).select().single();
       if (error) throw error;
       res.json({ success: true, presentation: data });
@@ -10735,9 +10740,9 @@ Assistant:`;
         return res.status(403).json({ error: 'Forbidden' });
       }
 
-      const { title, description, theme, language, education_level, slides, is_public } = req.body;
+      const { title, description, theme, language, education_level, slides, is_public, assignment_id } = req.body;
       const { data, error } = await supabaseAdmin.from('presentations')
-        .update({ title, description, theme, language, education_level, slides, is_public, updated_at: new Date().toISOString() })
+        .update({ title, description, theme, language, education_level, slides, is_public, assignment_id: assignment_id ?? null, updated_at: new Date().toISOString() })
         .eq('id', req.params.id).select().single();
       if (error) throw error;
       res.json({ success: true, presentation: data });
