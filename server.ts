@@ -11374,6 +11374,20 @@ async function startServer() {
     for (const hostToTry of hostCandidates) {
       try {
         await tryListen(portToTry, hostToTry);
+        // In Replit, .replit maps both localPort=5000 and localPort=24678 to
+        // externalPort=80. The proxy uses the last mapping (24678), so we must
+        // also listen on 24678 with the same app to handle web traffic correctly.
+        if (process.env.REPL_ID) {
+          const replitProxyServer = http.createServer(app);
+          replitProxyServer.listen(24678, "0.0.0.0", () => {
+            console.log("Replit proxy listener also running on port 24678");
+          });
+          replitProxyServer.on("error", (e: NodeJS.ErrnoException) => {
+            if (e.code !== "EADDRINUSE") {
+              console.warn("Replit proxy port 24678 error:", e.code);
+            }
+          });
+        }
         return;
       } catch (error) {
         const listenError = error as NodeJS.ErrnoException;

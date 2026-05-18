@@ -1,4 +1,4 @@
-modules = ["nodejs-20", "web"]
+modules = ["nodejs-20", "web", "python-3.11"]
 [agent]
 expertMode = true
 stack = "BEST_EFFORT_FALLBACK"
@@ -35,6 +35,14 @@ waitForPort = 5000
 localPort = 5000
 externalPort = 80
 
+[[ports]]
+localPort = 23636
+externalPort = 3000
+
+[[ports]]
+localPort = 24678
+externalPort = 80
+
 [deployment]
 deploymentTarget = "autoscale"
 run = ["node", "dist/server.js"]
@@ -43,7 +51,6 @@ build = ["npm", "run", "build"]
 [userenv]
 
 [userenv.shared]
-TELEGRAM_WEBHOOK_BASE_URL = "https://e1857b64-254a-40dd-9340-0e80e943d264-00-23dju2t82ldcr.worf.replit.dev"
 
 [postMerge]
 path = "scripts/post-merge.sh"
