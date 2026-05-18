@@ -65,9 +65,10 @@ export default function StudentDashboard() {
       try {
         let courses: any[] = [];
         let quizzes: Quiz[] = [];
-        let attempts: any[] = [];
 
-        const [enrolledCoursesRes, enrolledClassesRes] = await Promise.all([
+        // Run all independent fetches in parallel: courses, classes, attempts, live sessions
+        const t0 = performance.now();
+        const [enrolledCoursesRes, enrolledClassesRes, attemptsRows, liveSessionsRes] = await Promise.all([
           supabase
             .from('courses')
             .select('*')
@@ -76,7 +77,15 @@ export default function StudentDashboard() {
             .from('classes')
             .select('course_id,student_ids')
             .contains('student_ids', [studentId]),
+          fetchAttemptRowsByStudentId(supabase, studentId),
+          authFetch('/api/student/live-sessions?status=live')
+            .then((r) => r.json())
+            .catch(() => ({ success: false })),
         ]);
+        if (performance.now() - t0 > 500) {
+          console.warn(`[perf] Student dashboard initial batch took ${Math.round(performance.now() - t0)}ms`);
+        }
+
         if (enrolledCoursesRes.error) throw enrolledCoursesRes.error;
         if (enrolledClassesRes.error) throw enrolledClassesRes.error;
 
@@ -100,15 +109,8 @@ export default function StudentDashboard() {
         const enrolledCourses = courses.filter((c: any) => String(c?.status || '').toLowerCase() === 'published');
         setEnrolledCourses(enrolledCourses);
 
-        if (enrolledCourses.length > 0) {
-          const courseIds = enrolledCourses.map((c: any) => c.id);
-          const quizRows = await selectPublishedQuizzesCompat(supabase, courseIds, '*');
-          quizzes = (quizRows as any) || [];
-        }
-        setAvailableQuizzes(quizzes);
-
-        const attemptsRows = await fetchAttemptRowsByStudentId(supabase, studentId);
-        attempts = normalizeAttempts(attemptsRows).map((a) => ({
+        // Attempts are already resolved — set them immediately
+        const attempts = normalizeAttempts(attemptsRows).map((a) => ({
           id: a.id,
           quiz_id: a.quiz_id,
           score: a.score,
@@ -121,14 +123,20 @@ export default function StudentDashboard() {
         }));
         setRecentAttempts(attempts);
 
-        // Fetch live sessions where this student is an invited participant
-        try {
-          const liveRes = await authFetch('/api/student/live-sessions?status=live');
-          const liveJson = await liveRes.json();
-          if (liveJson.success) setLiveSessions(liveJson.sessions || []);
-        } catch {
-          // Non-blocking: live sessions banner is best-effort
+        // Live sessions already resolved
+        if (liveSessionsRes?.success) setLiveSessions(liveSessionsRes.sessions || []);
+
+        // Quizzes depend on courseIds — fetch after courses resolved
+        if (enrolledCourses.length > 0) {
+          const courseIds = enrolledCourses.map((c: any) => c.id);
+          const t1 = performance.now();
+          const quizRows = await selectPublishedQuizzesCompat(supabase, courseIds, '*');
+          if (performance.now() - t1 > 500) {
+            console.warn(`[perf] Quiz fetch took ${Math.round(performance.now() - t1)}ms`);
+          }
+          quizzes = (quizRows as any) || [];
         }
+        setAvailableQuizzes(quizzes);
       } catch (error) {
         console.error('Error fetching student data:', error);
       } finally {

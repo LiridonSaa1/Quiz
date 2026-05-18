@@ -1,0 +1,91 @@
+Kontrollo dhe optimizo performancën e aplikacionit sepse të dhënat po ngarkohen shumë ngadalë kur jam i loguar si Student, Teacher ose Admin.
+
+Dua të analizosh komplet flow-in e frontend dhe backend dhe të identifikosh bottleneck-et që po e bëjnë dashboard-in dhe të dhënat të dalin ngadalë.
+
+Kontrollo këto pika:
+
+1. API Requests
+- Kontrollo nëse ka shumë API requests të panevojshme.
+- Kontrollo duplicate requests.
+- Kontrollo nëse requests po bëhen disa herë pas render-it.
+- Shto caching kur është e nevojshme.
+- Optimizo pagination dhe limit-et.
+
+2. Database Queries
+- Kontrollo query-t e ngadalta.
+- Kontrollo N+1 query problems.
+- Përdor eager loading ku duhet.
+- Shto indexes për kolonat që përdoren shpesh:
+  - user_id
+  - tenant_id
+  - course_id
+  - class_id
+  - role
+  - created_at
+- Analizo query execution time.
+
+3. Authentication & Role Loading
+- Kontrollo pse ngadalësohet kur ndërrohen rolet:
+  - student
+  - teacher
+  - admin
+- Optimizo loading e permissions dhe role checks.
+- Mos bëj fetch të panevojshëm të user profile në çdo page refresh.
+
+4. Frontend Performance
+- Kontrollo komponentët që rerenderohen shumë.
+- Përdor lazy loading për pages dhe modules.
+- Përdor skeleton loaders në vend të loading blocks.
+- Optimizo state management.
+- Kontrollo memory leaks.
+- Kontrollo useEffect/watch loops nëse përdoret React/Vue.
+
+5. Dashboard Optimization
+- Dashboard-i duhet të hapet menjëherë.
+- Statistikat dhe cards të ngarkohen async.
+- Mos blloko UI duke pritur të gjitha requests.
+- Prioritizo critical data first.
+
+6. Multi-Tenant Optimization
+- Kontrollo tenant middleware.
+- Kontrollo nëse tenant switching po bën reconnect të panevojshëm.
+- Optimizo tenant database queries.
+
+7. Server & Backend
+- Kontrollo response times.
+- Kontrollo middleware të ngadalta.
+- Aktivizo query logging.
+- Shto performance monitoring.
+- Kontrollo CPU/RAM usage.
+
+8. Caching
+- Implemento caching për:
+  - dashboard stats
+  - user permissions
+  - courses
+  - lessons
+  - settings
+- Përdor Redis ose memory cache nëse është e mundur.
+
+9. Real Debug Report
+Pas analizës:
+- Jep listën e saktë të problemeve.
+- Trego cilat queries/API janë më të ngadalta.
+- Trego cilët komponentë po shkaktojnë delay.
+- Jep optimizimet konkrete.
+- Implemento fixes automatikisht.
+
+10. Final Goal
+Aplikacioni duhet:
+- të hapet shpejt
+- dashboard-i të load-ojë instantly
+- navigimi mes roleve të jetë smooth
+- requests të jenë minimale
+- UI të mos ngrijë gjatë loading
+- performance të jetë production-level
+
+Shto edhe:
+- loading metrics
+- API timing logs
+- database timing logs
+- console warnings për requests të ngadalta mbi 500ms

@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import { Toaster, toast } from 'sonner';
 import { supabase } from './supabase';
@@ -93,7 +93,9 @@ export default function App() {
   const [loading, setLoading] = useState(true);
   const [features, setFeatures] = useState<FeatureFlags>(defaultFeatureFlags);
   const [maintenanceMode, setMaintenanceMode] = useState(false);
-
+  // Tracks the userId that initSession already loaded so onAuthStateChange
+  // doesn't trigger a redundant second fetchProfile on startup.
+  const initializedUserIdRef = useRef<string | null>(null);
 
   useEffect(() => {
     const checkBackend = async () => {
@@ -111,6 +113,7 @@ export default function App() {
       try {
         const { data: { session } } = await supabase.auth.getSession();
         if (session) {
+          initializedUserIdRef.current = session.user.id;
           await fetchProfile(session.user.id);
         } else {
           setLoading(false);
@@ -121,6 +124,7 @@ export default function App() {
       }
     };
 
+    // Fire health check and platform config in parallel with session init
     checkBackend();
     void loadPlatformRuntimeConfig();
     initSession();
@@ -131,6 +135,12 @@ export default function App() {
     try {
       const { data } = supabase.auth.onAuthStateChange((_event, session) => {
         if (session) {
+          // Skip if initSession already loaded this exact user to avoid
+          // the double-fetchProfile that happens on every cold startup.
+          if (initializedUserIdRef.current === session.user.id) {
+            initializedUserIdRef.current = null;
+            return;
+          }
           fetchProfile(session.user.id);
         } else {
           setUser(null);
@@ -182,18 +192,9 @@ export default function App() {
 
   const fetchProfile = async (userId: string) => {
     try {
-      let runtimeMaintenanceMode = maintenanceMode;
-      try {
-        const runtimeRes = await fetch(`${apiUrl('/api/platform/runtime')}?t=${Date.now()}`, { cache: 'no-store' });
-        const runtimeJson = await runtimeRes.json().catch(() => ({}));
-        if (runtimeRes.ok && runtimeJson?.success) {
-          runtimeMaintenanceMode = Boolean(runtimeJson.maintenanceMode);
-          setMaintenanceMode(runtimeMaintenanceMode);
-        }
-      } catch {
-        // keep current in-memory maintenance value
-      }
-
+      // NOTE: Do NOT call /api/platform/runtime here.
+      // loadPlatformRuntimeConfig() already fetches it in parallel on startup.
+      // Calling it again causes a duplicate DB round-trip on every login/refresh.
       let profile: any = null;
       const profileRes = await supabase.from('profiles').select('*').eq('id', userId).maybeSingle();
       if (profileRes.error) {
@@ -218,7 +219,7 @@ export default function App() {
         toast.error('Your account has been disabled. Contact an administrator.', { id: 'account-disabled' });
         return;
       }
-      if (profile && runtimeMaintenanceMode && normalizeUserRole(profile.role) !== 'admin') {
+      if (profile && maintenanceMode && normalizeUserRole(profile.role) !== 'admin') {
         await supabase.auth.signOut();
         setUser(null);
         toast.error('Platform is currently offline for all students and teachers.', { id: 'maintenance-mode' });

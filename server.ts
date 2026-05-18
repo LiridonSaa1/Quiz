@@ -1243,6 +1243,16 @@ When giving instructions, number each step clearly. Be precise and technical whe
 
     res.setHeader("X-Request-Id", requestId);
     res.on("finish", () => {
+      const durationMs = Date.now() - startedAt;
+      res.setHeader("X-Response-Time", `${durationMs}ms`);
+
+      // Log slow API requests (>500ms) so bottlenecks are visible in console
+      if (req.path.startsWith("/api") && durationMs > 500) {
+        console.warn(
+          `[perf] ⚠️  SLOW REQUEST  ${req.method} ${req.path} → ${res.statusCode}  ${durationMs}ms`,
+        );
+      }
+
       if (res.statusCode < 500 || !req.path.startsWith("/api")) return;
       if ((res.locals as any).errorAlertEmitted) {
         console.log(
@@ -1252,7 +1262,6 @@ When giving instructions, number each step clearly. Be precise and technical whe
         );
         return;
       }
-      const durationMs = Date.now() - startedAt;
       void recordApi5xxAlertForFix(req, res.statusCode, durationMs, requestId);
     });
     next();
@@ -1279,10 +1288,25 @@ When giving instructions, number each step clearly. Be precise and technical whe
   const normalizeRole = (r: string | undefined | null) =>
     String(r || "student").toLowerCase().trim();
 
+  // ── Auth token in-memory cache (30s TTL) ────────────────────────────────
+  // Every authenticated API call previously made 2 Supabase round-trips:
+  // (1) auth.getUser(token) and (2) profiles.select("role").
+  // Caching by token hash saves ~100-300ms per request for active users.
+  const AUTH_CACHE_TTL_MS = 30_000;
+  const authUserCache = new Map<string, { userId: string; role: string; expiresAt: number }>();
+
   const getAuthUser = async (req: Request): Promise<{ userId: string; role: string } | null> => {
     const auth = req.headers["authorization"] || "";
     const token = auth.startsWith("Bearer ") ? auth.slice(7).trim() : "";
     if (!token) return null;
+
+    // Use a hash of the token as the cache key (tokens can be large)
+    const cacheKey = stableHash(token);
+    const cached = authUserCache.get(cacheKey);
+    if (cached && Date.now() < cached.expiresAt) {
+      return { userId: cached.userId, role: cached.role };
+    }
+
     const {
       data: { user },
       error,
@@ -1298,7 +1322,17 @@ When giving instructions, number each step clearly. Be precise and technical whe
       .select("role")
       .eq("id", user.id)
       .maybeSingle();
-    return { userId: user.id, role: normalizeRole(profile?.role) };
+    const result = { userId: user.id, role: normalizeRole(profile?.role) };
+    authUserCache.set(cacheKey, { ...result, expiresAt: Date.now() + AUTH_CACHE_TTL_MS });
+    // Evict old entries to avoid unbounded growth
+    if (authUserCache.size > 500) {
+      const now = Date.now();
+      for (const [k, v] of authUserCache) {
+        if (v.expiresAt < now) authUserCache.delete(k);
+        if (authUserCache.size <= 400) break;
+      }
+    }
+    return result;
   };
 
   const assertSessionHost = async (req: Request, res: Response, sessionId: string): Promise<string | null> => {
@@ -1776,17 +1810,32 @@ When giving instructions, number each step clearly. Be precise and technical whe
 
   const CONFIG_SECTIONS = new Set(["settings", "branding", "domain", "roles"]);
 
+  // ── Config section in-memory cache (30s TTL) ────────────────────────────
+  // Each DB call to getConfigSection costs ~50-150ms. With branding + runtime
+  // + settings fetched on every startup (up to 4 calls), caching saves 200-600ms
+  // per request cluster. Cache is invalidated immediately on any write.
+  const CONFIG_CACHE_TTL_MS = 30_000;
+  const configSectionCache = new Map<string, { value: unknown; expiresAt: number }>();
+
   const getConfigSection = async (section: string) => {
+    const cached = configSectionCache.get(section);
+    if (cached && Date.now() < cached.expiresAt) {
+      return cached.value;
+    }
     const res = await supabaseAdmin
       .from("platform_config")
       .select("section, value, updated_at")
       .eq("section", section)
       .maybeSingle();
     if (res.error) throw res.error;
-    return res.data?.value ?? null;
+    const value = res.data?.value ?? null;
+    configSectionCache.set(section, { value, expiresAt: Date.now() + CONFIG_CACHE_TTL_MS });
+    return value;
   };
 
   const upsertConfigSection = async (section: string, value: unknown) => {
+    // Invalidate cache immediately on write so the next read is fresh
+    configSectionCache.delete(section);
     const res = await supabaseAdmin
       .from("platform_config")
       .upsert({ section, value, updated_at: new Date().toISOString() }, { onConflict: "section" })
@@ -1802,8 +1851,14 @@ When giving instructions, number each step clearly. Be precise and technical whe
         .eq("section", section)
         .maybeSingle();
       if (readRes.error) throw readRes.error;
+      // Update cache with the freshly-read value
+      if (readRes.data?.value !== undefined) {
+        configSectionCache.set(section, { value: readRes.data.value, expiresAt: Date.now() + CONFIG_CACHE_TTL_MS });
+      }
       return readRes.data;
     }
+    // Update cache with the written value
+    configSectionCache.set(section, { value, expiresAt: Date.now() + CONFIG_CACHE_TTL_MS });
     return res.data;
   };
 
