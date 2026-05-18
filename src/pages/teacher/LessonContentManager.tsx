@@ -300,7 +300,7 @@ export default function TeacherLessonContentManager() {
                   <input
                     value={item.title || ''}
                     onChange={(e) => setItems((prev) => prev.map((x) => x.id === item.id ? { ...x, title: e.target.value } : x))}
-                    placeholder={t('lessons.title')}
+                    placeholder={t('lessons.contentTitle')}
                     className="px-3 py-2 rounded-lg border border-slate-200 text-sm"
                   />
                   <input

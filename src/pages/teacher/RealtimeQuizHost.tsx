@@ -149,7 +149,7 @@ export default function RealtimeQuizHost() {
   }, [currentQuestion?.index, view]);
 
   const handleStart = async () => {
-    if (!selectedQuizId) { toast.error(t('realtimeQuiz.selectQuiz')); return; }
+    if (!selectedQuizId) { toast.error(t('realtimeQuiz.selectQuizRequired')); return; }
     setStarting(true);
     try {
       const res = await authFetch('/api/teacher/realtime-quiz/start', {
