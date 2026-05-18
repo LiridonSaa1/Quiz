@@ -6983,7 +6983,13 @@ Assistant:`;
       if (teacherIdCandidates.length > 0) query = query.in('teacher_id', teacherIdCandidates);
       const { data, error } = await query;
       if (error) throw error;
-      res.json({ success: true, classes: data || [] });
+      const deduped = (data || []).map((cls: any) => ({
+        ...cls,
+        student_ids: Array.isArray(cls.student_ids)
+          ? [...new Set(cls.student_ids.map((s: unknown) => String(s)).filter(Boolean))]
+          : [],
+      }));
+      res.json({ success: true, classes: deduped });
     } catch (e: unknown) { res.status(500).json({ error: (e as Error).message }); }
   });
 

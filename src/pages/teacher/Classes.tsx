@@ -168,8 +168,8 @@ export default function TeacherClasses() {
 
       const enriched = classesRows.map((cls: Record<string, unknown>) => {
         const row = normalizeClassRow(cls) as ClassRecord;
-        const classStudentIds = Array.isArray(row.student_ids) ? row.student_ids.map((sid: unknown) => String(sid)) : [];
-        const courseStudentIds = row.course_id ? (courseMap[String(row.course_id)]?.studentIds || []) : [];
+        const classStudentIds = [...new Set((Array.isArray(row.student_ids) ? row.student_ids : []).map((sid: unknown) => String(sid)).filter(Boolean))];
+        const courseStudentIds = [...new Set((row.course_id ? (courseMap[String(row.course_id)]?.studentIds || []) : []).filter(Boolean))];
         const hasSingleClassForCourse = row.course_id ? (classCountPerCourse[String(row.course_id)] || 0) === 1 : false;
         const enrollmentCount =
           classStudentIds.length > 0
