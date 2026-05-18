@@ -458,6 +458,14 @@ export default function TeacherCourseForm() {
                           </button>
                         ))}
                       </div>
+                      {form.status === 'draft' && (
+                        <div className="mt-3 flex items-start gap-2.5 p-3 bg-amber-50 border border-amber-200 rounded-xl">
+                          <span className="text-amber-500 text-base leading-none mt-0.5">⚠️</span>
+                          <p className="text-xs text-amber-800 leading-relaxed">
+                            <span className="font-bold">Draft courses are invisible to students.</span> Switch to <span className="font-bold">Published</span> so your students can find and enroll in this course.
+                          </p>
+                        </div>
+                      )}
                     </div>
                     <div onClick={() => set('certificate_enabled', !form.certificate_enabled)}
                       className={`flex items-center justify-between p-4 rounded-xl border-2 cursor-pointer transition-all ${form.certificate_enabled ? 'border-violet-500 bg-violet-50' : 'border-slate-200 hover:border-slate-300'}`}>

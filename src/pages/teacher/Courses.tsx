@@ -358,10 +358,17 @@ export default function TeacherCourses() {
                           : <span className="text-slate-300 text-xs">—</span>}
                       </td>
                       <td className="px-5 py-4">
-                        <span className={`inline-flex items-center gap-1.5 text-xs font-semibold px-2.5 py-1 rounded-lg ${course.status === 'published' ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-700'}`}>
-                          <span className={`w-1.5 h-1.5 rounded-full ${course.status === 'published' ? 'bg-emerald-500' : 'bg-amber-500'}`} />
-                          {course.status === 'published' ? t('common.published') : t('common.draft')}
-                        </span>
+                        <div className="flex flex-col gap-1.5">
+                          <span className={`inline-flex items-center gap-1.5 text-xs font-semibold px-2.5 py-1 rounded-lg w-fit ${course.status === 'published' ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-700'}`}>
+                            <span className={`w-1.5 h-1.5 rounded-full ${course.status === 'published' ? 'bg-emerald-500' : 'bg-amber-500'}`} />
+                            {course.status === 'published' ? t('common.published') : t('common.draft')}
+                          </span>
+                          {course.status !== 'published' && (
+                            <span className="inline-flex items-center gap-1 text-[10px] font-medium text-amber-600">
+                              <EyeOff className="w-3 h-3" /> Students can't see this
+                            </span>
+                          )}
+                        </div>
                       </td>
                       <td className="px-5 py-4 text-right">
                         <div className="flex items-center justify-end gap-1 opacity-0 group-hover:opacity-100 transition-all">
@@ -537,6 +544,24 @@ function TeacherCourseCard({ course, gradient, index, onEdit, onDelete, onToggle
           )}
         </AnimatePresence>
       </div>
+
+      {/* Draft warning banner */}
+      {!isPublished && (
+        <div className="mx-4 mt-3 flex items-center justify-between gap-2 px-3 py-2 bg-amber-50 border border-amber-200 rounded-xl">
+          <div className="flex items-center gap-1.5 min-w-0">
+            <EyeOff className="w-3.5 h-3.5 text-amber-600 shrink-0" />
+            <span className="text-xs font-semibold text-amber-700 truncate">Students can't see this</span>
+          </div>
+          {canPublish && (
+            <button
+              onClick={e => { e.stopPropagation(); onToggleStatus(); }}
+              className="shrink-0 text-[11px] font-bold px-2.5 py-1 bg-amber-600 text-white rounded-lg hover:bg-amber-700 transition-all whitespace-nowrap"
+            >
+              Publish
+            </button>
+          )}
+        </div>
+      )}
 
       {/* Card Body */}
       <div className="p-5 flex flex-col flex-1">
