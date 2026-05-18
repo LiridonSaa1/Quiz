@@ -91,24 +91,32 @@ export default function AdminCourseForm() {
 
     if (isEditing) {
       const fetchCourse = async () => {
-        const { data, error } = await supabase.from('courses').select('*').eq('id', id).single();
-        if (error) { toast.error('Course not found'); navigate('/admin/courses'); return; }
-        setForm({
-          name: data.name || data.title || '',
-          description: data.description || '',
-          short_description: data.short_description || '',
-          language: data.language || 'English',
-          level: data.level || 'beginner',
-          price: data.price || 0,
-          is_free: data.is_free ?? true,
-          status: data.status || 'draft',
-          certificate_enabled: data.certificate_enabled || false,
-          gradient: data.gradient || 'from-indigo-500 to-violet-600',
-          category: data.category || 'Other',
-          teacher_id: data.teacher_id || '',
-          tags: data.tags || [],
-        });
-        setLoading(false);
+        try {
+          const res = await authFetch(`/api/admin/courses/${id}`);
+          const json = await res.json().catch(() => ({}));
+          if (!res.ok || !json?.success) throw new Error(json?.error || 'Course not found');
+          const data = json.course;
+          setForm({
+            name: data.name || data.title || '',
+            description: data.description || '',
+            short_description: data.short_description || '',
+            language: data.language || 'English',
+            level: data.level || 'beginner',
+            price: data.price || 0,
+            is_free: data.is_free ?? true,
+            status: data.status || 'draft',
+            certificate_enabled: data.certificate_enabled || false,
+            gradient: data.gradient || 'from-indigo-500 to-violet-600',
+            category: data.category || 'Other',
+            teacher_id: data.teacher_id || '',
+            tags: data.tags || [],
+          });
+        } catch {
+          toast.error('Course not found');
+          navigate('/admin/courses');
+        } finally {
+          setLoading(false);
+        }
       };
       fetchCourse();
     }
@@ -136,7 +144,7 @@ export default function AdminCourseForm() {
       };
 
       if (isEditing) {
-        const res = await fetch(`/api/admin/update-course/${id}`, {
+        const res = await authFetch(`/api/admin/update-course/${id}`, {
           method: 'PATCH',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(payload),
@@ -145,7 +153,7 @@ export default function AdminCourseForm() {
         if (!json.success) throw new Error(json.error || 'Failed to update course');
         toast.success(publishNow ? 'Course published!' : 'Course saved');
       } else {
-        const res = await fetch('/api/admin/create-course', {
+        const res = await authFetch('/api/admin/create-course', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(payload),

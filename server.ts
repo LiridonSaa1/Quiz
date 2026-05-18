@@ -3108,6 +3108,23 @@ Assistant:`;
     }
   });
 
+  app.get('/api/admin/courses/:id', async (req, res) => {
+    try {
+      const caller = await assertAuthenticated(req, res);
+      if (!caller) return;
+      if (!isAdmin(caller)) return res.status(403).json({ error: 'Forbidden: admin role required' });
+      const { data, error } = await supabaseAdmin
+        .from('courses')
+        .select('*')
+        .eq('id', req.params.id)
+        .single();
+      if (error) return res.status(404).json({ error: 'Course not found' });
+      res.json({ success: true, course: data });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
   app.get('/api/admin/courses-list', async (req, res) => {
     try {
       const { data, error } = await supabaseAdmin.from('courses').select('id, title').order('title');
