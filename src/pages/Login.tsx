@@ -161,8 +161,11 @@ export default function Login() {
       toast.success(t('login.welcomeBack') + '!');
       navigate('/');
     } catch (err: any) {
-      toast.error(err.message || 'Login failed');
-      if (err.message?.includes('Invalid login credentials')) toast.info('Seed the admin account first.');
+      const msg = err.message || 'Login failed';
+      toast.error(msg);
+      if (msg.includes('Invalid login credentials')) {
+        toast.info('Check your email and password. Student accounts are created by an admin or teacher.');
+      }
     } finally { setLoading(false); }
   };
 
