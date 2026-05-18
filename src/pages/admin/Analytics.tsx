@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import AdminLayout from '../../components/layout/AdminLayout';
 import { toast } from 'sonner';
+import { useTranslation } from 'react-i18next';
 import {
   AreaChart, Area, BarChart, Bar, PieChart, Pie, Cell,
   XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer
@@ -78,6 +79,7 @@ const CustomTooltip = ({ active, payload, label }: any) => {
 };
 
 export default function AdminAnalytics() {
+  const { t } = useTranslation();
   const [data, setData] = useState<AnalyticsData | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -89,8 +91,8 @@ export default function AdminAnalytics() {
       const res = await fetch('/api/admin/analytics');
       const json = await res.json();
       if (json.success) setData(json);
-      else toast.error(json.error || 'Failed to load analytics');
-    } catch { toast.error('Failed to load analytics'); }
+      else toast.error(json.error || t('errors.loadFailed'));
+    } catch { toast.error(t('errors.loadFailed')); }
     finally { setLoading(false); }
   };
 
@@ -110,18 +112,18 @@ export default function AdminAnalytics() {
         {/* Header */}
         <div className="flex items-center justify-between">
           <div>
-            <h1 className="text-2xl font-bold text-slate-900">Analytics</h1>
-            <p className="text-slate-500 text-sm mt-0.5">Real-time platform performance and engagement insights</p>
+            <h1 className="text-2xl font-bold text-slate-900">{t('analytics.analyticsTitle')}</h1>
+            <p className="text-slate-500 text-sm mt-0.5">{t('analytics.realTimeInsights')}</p>
           </div>
           <button onClick={fetchData}
             className="flex items-center gap-2 px-4 py-2 bg-white border border-slate-200 text-slate-600 rounded-xl text-sm font-semibold hover:bg-slate-50 transition-all">
-            <RefreshCw className="w-4 h-4" /> Refresh
+            <RefreshCw className="w-4 h-4" /> {t('common.refresh')}
           </button>
         </div>
 
         {/* Platform Health Summary */}
         <div className="bg-gradient-to-br from-indigo-600 to-violet-700 rounded-2xl p-6 text-white shadow-xl shadow-indigo-200">
-          <h3 className="text-lg font-bold mb-4">Platform Health Summary</h3>
+          <h3 className="text-lg font-bold mb-4">{t('analytics.platformHealthSummary')}</h3>
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
             {[
               { label: 'Quiz Pass Rate', value: `${ov?.passRate ?? 0}%`, good: (ov?.passRate ?? 0) >= 60 },
@@ -140,49 +142,49 @@ export default function AdminAnalytics() {
 
         {/* Stat Cards — Row 1: Users, Classes & Courses */}
         <div>
-          <h2 className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-3">Users & Content</h2>
+          <h2 className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-3">{t('analytics.usersAndContent')}</h2>
           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4">
-            <StatCard icon={GraduationCap} label="Total Students" value={ov?.totalStudents ?? 0}
-              sub={`${ov?.activeStudents ?? 0} active`} color="bg-indigo-50 text-indigo-600" grad="from-indigo-500 to-violet-500" ring="ring-indigo-100" />
-            <StatCard icon={Users} label="Teachers" value={ov?.totalTeachers ?? 0}
+            <StatCard icon={GraduationCap} label={t('analytics.totalStudents')} value={ov?.totalStudents ?? 0}
+              sub={`${ov?.activeStudents ?? 0} ${t('analytics.activeLabel')}`} color="bg-indigo-50 text-indigo-600" grad="from-indigo-500 to-violet-500" ring="ring-indigo-100" />
+            <StatCard icon={Users} label={t('analytics.teachers')} value={ov?.totalTeachers ?? 0}
               color="bg-violet-50 text-violet-600" grad="from-violet-500 to-purple-600" ring="ring-violet-100" />
-            <StatCard icon={Layers} label="Classes" value={ov?.totalClasses ?? 0}
-              sub={`${ov?.activeClasses ?? 0} active • ${ov?.upcomingClasses ?? 0} upcoming`} color="bg-cyan-50 text-cyan-600" grad="from-cyan-500 to-sky-500" ring="ring-cyan-100" />
-            <StatCard icon={BookOpen} label="Courses" value={ov?.totalCourses ?? 0}
-              sub={`${ov?.publishedCourses ?? 0} published`} color="bg-blue-50 text-blue-600" grad="from-blue-500 to-indigo-500" ring="ring-blue-100" />
+            <StatCard icon={Layers} label={t('analytics.classes')} value={ov?.totalClasses ?? 0}
+              sub={`${ov?.activeClasses ?? 0} ${t('analytics.activeLabel')} • ${ov?.upcomingClasses ?? 0} ${t('nav.sections.learning')}`} color="bg-cyan-50 text-cyan-600" grad="from-cyan-500 to-sky-500" ring="ring-cyan-100" />
+            <StatCard icon={BookOpen} label={t('analytics.courses')} value={ov?.totalCourses ?? 0}
+              sub={`${ov?.publishedCourses ?? 0} ${t('analytics.published')}`} color="bg-blue-50 text-blue-600" grad="from-blue-500 to-indigo-500" ring="ring-blue-100" />
           </div>
         </div>
 
         {/* Stat Cards — Row 2: Performance */}
         <div>
-          <h2 className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-3">Performance & Results</h2>
+          <h2 className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-3">{t('analytics.performanceResults')}</h2>
           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4">
-            <StatCard icon={FileText} label="Quiz Attempts" value={ov?.totalAttempts ?? 0}
-              sub={`${ov?.completedAttempts ?? 0} completed`} color="bg-amber-50 text-amber-600" grad="from-amber-500 to-orange-500" ring="ring-amber-100" />
+            <StatCard icon={FileText} label={t('analytics.quizAttempts')} value={ov?.totalAttempts ?? 0}
+              sub={`${ov?.completedAttempts ?? 0} ${t('analytics.completedLabel')}`} color="bg-amber-50 text-amber-600" grad="from-amber-500 to-orange-500" ring="ring-amber-100" />
             <StatCard icon={Target} label="Pass Rate" value={`${ov?.passRate ?? 0}%`}
-              sub="of completed attempts"
+              sub={t('analytics.passRateLabel')}
               color={ov?.passRate && ov.passRate >= 60 ? 'bg-emerald-50 text-emerald-600' : 'bg-rose-50 text-rose-600'}
               grad={ov?.passRate && ov.passRate >= 60 ? 'from-emerald-500 to-teal-500' : 'from-rose-500 to-pink-500'}
               ring={ov?.passRate && ov.passRate >= 60 ? 'ring-emerald-100' : 'ring-rose-100'} />
-            <StatCard icon={TrendingUp} label="Avg Score" value={`${ov?.avgScore ?? 0}%`}
+            <StatCard icon={TrendingUp} label={t('analytics.avgScore')} value={`${ov?.avgScore ?? 0}%`}
               color="bg-teal-50 text-teal-600" grad="from-teal-500 to-cyan-500" ring="ring-teal-100" />
-            <StatCard icon={Award} label="Certificates" value={ov?.totalCertificates ?? 0}
-              sub="issued" color="bg-yellow-50 text-yellow-600" grad="from-yellow-400 to-amber-500" ring="ring-yellow-100" />
+            <StatCard icon={Award} label={t('analytics.certificates')} value={ov?.totalCertificates ?? 0}
+              sub={t('analytics.issuedLabel')} color="bg-yellow-50 text-yellow-600" grad="from-yellow-400 to-amber-500" ring="ring-yellow-100" />
           </div>
         </div>
 
         {/* Row 3: Activity */}
         <div>
-          <h2 className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-3">Activity</h2>
+          <h2 className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-3">{t('analytics.activitySection')}</h2>
           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4">
-            <StatCard icon={FileText} label="Quizzes" value={ov?.totalQuizzes ?? 0}
-              sub={`${ov?.publishedQuizzes ?? 0} published`} color="bg-rose-50 text-rose-600" grad="from-rose-500 to-pink-500" ring="ring-rose-100" />
-            <StatCard icon={ClipboardList} label="Assignments" value={ov?.totalAssignments ?? 0}
+            <StatCard icon={FileText} label={t('analytics.quizzes')} value={ov?.totalQuizzes ?? 0}
+              sub={`${ov?.publishedQuizzes ?? 0} ${t('analytics.published')}`} color="bg-rose-50 text-rose-600" grad="from-rose-500 to-pink-500" ring="ring-rose-100" />
+            <StatCard icon={ClipboardList} label={t('analytics.assignments')} value={ov?.totalAssignments ?? 0}
               color="bg-orange-50 text-orange-600" grad="from-orange-500 to-amber-500" ring="ring-orange-100" />
-            <StatCard icon={CalendarCheck} label="Attendance Records" value={ov?.totalAttendance ?? 0}
-              sub={`${ov?.attendanceRate ?? 0}% present rate`} color="bg-green-50 text-green-600" grad="from-green-500 to-emerald-500" ring="ring-green-100" />
+            <StatCard icon={CalendarCheck} label={t('analytics.attendanceRecords')} value={ov?.totalAttendance ?? 0}
+              sub={`${ov?.attendanceRate ?? 0}${t('analytics.presentRateLabel')}`} color="bg-green-50 text-green-600" grad="from-green-500 to-emerald-500" ring="ring-green-100" />
             <StatCard icon={CheckCircle2} label="Class Fill Rate" value={`${ov?.avgClassFillRate ?? 0}%`}
-              sub={`${ov?.totalClassEnrollments ?? 0} class enrollments`}
+              sub={`${ov?.totalClassEnrollments ?? 0} ${t('analytics.classEnrollments')}`}
               color={ov?.avgClassFillRate && ov.avgClassFillRate >= 70 ? 'bg-emerald-50 text-emerald-600' : 'bg-amber-50 text-amber-600'}
               grad={ov?.avgClassFillRate && ov.avgClassFillRate >= 70 ? 'from-emerald-500 to-teal-500' : 'from-amber-500 to-orange-500'}
               ring={ov?.avgClassFillRate && ov.avgClassFillRate >= 70 ? 'ring-emerald-100' : 'ring-amber-100'} />
@@ -191,7 +193,7 @@ export default function AdminAnalytics() {
 
         {/* Charts Row 1 */}
         <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
-          <ChartCard title="Student Signups & Quiz Attempts" subtitle="Last 30 days">
+          <ChartCard title={t('analytics.studentSignupsTrend')} subtitle={t('analytics.last30Days')}>
             <ResponsiveContainer width="100%" height={260}>
               <AreaChart data={data?.trend || []} margin={{ top: 5, right: 10, left: -20, bottom: 0 }}>
                 <defs>
@@ -218,7 +220,7 @@ export default function AdminAnalytics() {
             </ResponsiveContainer>
           </ChartCard>
 
-          <ChartCard title="Quiz Score Distribution" subtitle="Across all completed attempts">
+          <ChartCard title={t('analytics.quizScoreDistribution')} subtitle={t('analytics.allCompletedAttempts')}>
             <ResponsiveContainer width="100%" height={260}>
               <BarChart data={data?.scoreDistribution || []} margin={{ top: 5, right: 10, left: -20, bottom: 0 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
@@ -237,12 +239,12 @@ export default function AdminAnalytics() {
 
         {/* Charts Row 2 */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-          <ChartCard title="Courses by Category" subtitle="Distribution across all categories">
+          <ChartCard title={t('analytics.coursesByCategory')} subtitle={t('analytics.distributionAllCategories')}>
             {(data?.courseByCategory || []).length === 0 ? (
               <div className="flex items-center justify-center h-52 text-slate-300">
                 <div className="text-center">
                   <BarChart3 className="w-10 h-10 mx-auto mb-2 opacity-40" />
-                  <p className="text-sm text-slate-400">No courses yet</p>
+                  <p className="text-sm text-slate-400">{t('analytics.noCourses')}</p>
                 </div>
               </div>
             ) : (
@@ -271,12 +273,12 @@ export default function AdminAnalytics() {
             )}
           </ChartCard>
 
-          <ChartCard title="Courses by Level" subtitle="Beginner, intermediate, advanced">
+          <ChartCard title={t('analytics.coursesByLevel')} subtitle={t('analytics.beginnerIntermediateAdvanced')}>
             {(data?.courseByLevel || []).length === 0 ? (
               <div className="flex items-center justify-center h-52 text-slate-300">
                 <div className="text-center">
                   <BarChart3 className="w-10 h-10 mx-auto mb-2 opacity-40" />
-                  <p className="text-sm text-slate-400">No courses yet</p>
+                  <p className="text-sm text-slate-400">{t('analytics.noCourses')}</p>
                 </div>
               </div>
             ) : (

@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import StudentLayout from '../../components/layout/StudentLayout';
 import { authFetch } from '../../lib/apiUrl';
 import { motion } from 'motion/react';
@@ -74,6 +75,7 @@ function BadgeCard({ badge, index }: { badge: Badge; index: number }) {
 }
 
 export default function Badges() {
+  const { t } = useTranslation();
   const [badges, setBadges] = useState<Badge[]>([]);
   const [earnedCount, setEarnedCount] = useState(0);
   const [totalCount, setTotalCount] = useState(0);
@@ -103,8 +105,8 @@ export default function Badges() {
               🏆
             </div>
             <div>
-              <h1 className="text-3xl font-black text-slate-900">Achievement Badges</h1>
-              <p className="text-slate-500">Earn badges by completing quizzes and reaching milestones</p>
+              <h1 className="text-3xl font-black text-slate-900">{t('student.badges.achievementBadges')}</h1>
+              <p className="text-slate-500">{t('student.badges.earnBadgesMessage')}</p>
             </div>
           </div>
 
@@ -112,8 +114,8 @@ export default function Badges() {
           {!loading && (
             <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className="mt-6 rounded-2xl border border-amber-100 bg-white p-5 shadow-sm">
               <div className="flex items-center justify-between mb-2">
-                <span className="text-sm font-bold text-slate-700">{earnedCount} / {totalCount} badges earned</span>
-                <span className="text-sm font-bold text-amber-600">{totalCount > 0 ? Math.round(earnedCount / totalCount * 100) : 0}%</span>
+                <span className="text-sm font-bold text-slate-700">{t('student.badges.badgesEarned', { earned: earnedCount, total: totalCount })}</span>
+                <span className="text-sm font-bold text-amber-600">{t('student.badges.percentage', { percent: totalCount > 0 ? Math.round(earnedCount / totalCount * 100) : 0 })}</span>
               </div>
               <div className="h-3 rounded-full bg-slate-100 overflow-hidden">
                 <motion.div
@@ -137,7 +139,7 @@ export default function Badges() {
             {earned.length > 0 && (
               <div>
                 <h2 className="mb-4 flex items-center gap-2 text-sm font-bold uppercase tracking-wider text-amber-600">
-                  <Trophy className="h-4 w-4" /> Earned ({earned.length})
+                  <Trophy className="h-4 w-4" /> {t('student.badges.earned', { count: earned.length })}
                 </h2>
                 <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5">
                   {earned.map((b, i) => <BadgeCard key={b.id} badge={b} index={i} />)}
@@ -149,7 +151,7 @@ export default function Badges() {
             {locked.length > 0 && (
               <div>
                 <h2 className="mb-4 flex items-center gap-2 text-sm font-bold uppercase tracking-wider text-slate-400">
-                  <Lock className="h-4 w-4" /> Locked ({locked.length})
+                  <Lock className="h-4 w-4" /> {t('student.badges.locked', { count: locked.length })}
                 </h2>
                 <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5">
                   {locked.map((b, i) => <BadgeCard key={b.id} badge={b} index={i + earned.length} />)}
@@ -160,7 +162,7 @@ export default function Badges() {
             {badges.length === 0 && (
               <div className="py-16 text-center text-slate-400">
                 <div className="text-5xl mb-4">🏅</div>
-                <p className="font-semibold">No badges yet. Complete quizzes to earn them!</p>
+                <p className="font-semibold">{t('student.badges.noBadgesYet')}</p>
               </div>
             )}
           </div>

@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import AdminLayout from '../../components/layout/AdminLayout';
 import { Link } from 'react-router-dom';
 import { motion } from 'motion/react';
@@ -53,6 +54,7 @@ const emptyForm = {
 };
 
 export default function AdminLiveSessions() {
+  const { t } = useTranslation();
   const [sessions, setSessions] = useState<LiveSession[]>([]);
   const [teachers, setTeachers] = useState<Teacher[]>([]);
   const [courses, setCourses] = useState<Course[]>([]);
@@ -79,8 +81,8 @@ export default function AdminLiveSessions() {
       const res = await fetch('/api/admin/live-sessions');
       const json = await res.json();
       if (json.success) setSessions(json.sessions || []);
-      else toast.error(json.error || 'Failed to load sessions');
-    } catch { toast.error('Failed to load sessions'); }
+      else toast.error(json.error || t('liveSessions.saveFailed'));
+    } catch { toast.error(t('liveSessions.saveFailed')); }
     finally { setLoading(false); }
   };
 
@@ -114,8 +116,8 @@ export default function AdminLiveSessions() {
   };
 
   const handleSave = async () => {
-    if (!form.title.trim()) { toast.error('Title is required'); return; }
-    if (!form.scheduled_at) { toast.error('Scheduled date is required'); return; }
+    if (!form.title.trim()) { toast.error(t('liveSessions.titleRequired')); return; }
+    if (!form.scheduled_at) { toast.error(t('liveSessions.dateRequired')); return; }
     setSaving(true);
     try {
       const payload = {
@@ -130,23 +132,23 @@ export default function AdminLiveSessions() {
       const res = await fetch(url, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
       const json = await res.json();
       if (!json.success) throw new Error(json.error);
-      toast.success(editing ? 'Session updated' : 'Session created');
+      toast.success(editing ? t('liveSessions.sessionUpdated') : t('liveSessions.sessionCreated'));
       setShowModal(false);
       fetchAll();
-    } catch (e: any) { toast.error(e.message || 'Save failed'); }
+    } catch (e: any) { toast.error(e.message || t('liveSessions.saveFailed')); }
     finally { setSaving(false); }
   };
 
   const handleDelete = async (id: string) => {
-    if (!confirm('Delete this session?')) return;
+    if (!confirm(t('liveSessions.deleteConfirm'))) return;
     setDeleting(id);
     try {
       const res = await fetch(`/api/admin/live-sessions/${id}`, { method: 'DELETE' });
       const json = await res.json();
       if (!json.success) throw new Error(json.error);
-      toast.success('Session deleted');
+      toast.success(t('liveSessions.sessionDeleted'));
       setSessions(p => p.filter(s => s.id !== id));
-    } catch (e: any) { toast.error(e.message || 'Delete failed'); }
+    } catch (e: any) { toast.error(e.message || t('liveSessions.deleteFailed')); }
     finally { setDeleting(null); }
   };
 
@@ -158,18 +160,18 @@ export default function AdminLiveSessions() {
   });
 
   const statItems = [
-    { label: 'Total Sessions', value: sessions.length, gradient: 'from-indigo-500 to-violet-600', shadow: 'shadow-indigo-500/25', icon: Video },
-    { label: 'Live Now', value: sessions.filter(s => s.status === 'live').length, gradient: 'from-rose-500 to-pink-600', shadow: 'shadow-rose-500/25', icon: Radio },
-    { label: 'Upcoming', value: sessions.filter(s => s.status === 'scheduled' && !isPast(new Date(s.scheduled_at))).length, gradient: 'from-blue-500 to-cyan-600', shadow: 'shadow-blue-500/25', icon: CalendarDays },
-    { label: 'Completed', value: sessions.filter(s => s.status === 'ended').length, gradient: 'from-emerald-500 to-teal-600', shadow: 'shadow-emerald-500/25', icon: CheckCircle2 },
+    { label: t('liveSessions.totalSessions'), value: sessions.length, gradient: 'from-indigo-500 to-violet-600', shadow: 'shadow-indigo-500/25', icon: Video },
+    { label: t('liveSessions.liveNow'), value: sessions.filter(s => s.status === 'live').length, gradient: 'from-rose-500 to-pink-600', shadow: 'shadow-rose-500/25', icon: Radio },
+    { label: t('liveSessions.upcoming'), value: sessions.filter(s => s.status === 'scheduled' && !isPast(new Date(s.scheduled_at))).length, gradient: 'from-blue-500 to-cyan-600', shadow: 'shadow-blue-500/25', icon: CalendarDays },
+    { label: t('liveSessions.completed'), value: sessions.filter(s => s.status === 'ended').length, gradient: 'from-emerald-500 to-teal-600', shadow: 'shadow-emerald-500/25', icon: CheckCircle2 },
   ];
 
   return (
     <AdminLayout>
       <AdminListPageShell
-        breadcrumbLabel="Live Sessions"
-        title="Live Sessions"
-        description="Schedule and manage live video sessions for your students."
+        breadcrumbLabel={t('liveSessions.title')}
+        title={t('liveSessions.title')}
+        description={t('liveSessions.trackManage')}
         statsGridClassName="grid grid-cols-2 sm:grid-cols-4 gap-4"
         stats={statItems}
         action={
@@ -184,7 +186,7 @@ export default function AdminLiveSessions() {
               boxShadow: '0 8px 32px rgba(139,92,246,0.45), 0 2px 8px rgba(0,0,0,0.15)',
             }}
           >
-            <Plus className="w-4 h-4" /> Schedule Session
+            <Plus className="w-4 h-4" /> {t('liveSessions.scheduleSession')}
           </motion.button>
         }
         filterBar={
@@ -194,12 +196,12 @@ export default function AdminLiveSessions() {
               <input
                 value={search}
                 onChange={e => setSearch(e.target.value)}
-                placeholder="Search sessions or hosts..."
+                placeholder={t('common.search')}
                 className={ADMIN_LIST_SEARCH_INPUT}
               />
             </div>
             <select value={statusFilter} onChange={e => setStatusFilter(e.target.value)} className={ADMIN_LIST_SELECT}>
-              <option value="all">All Status</option>
+              <option value="all">{t('common.status')}</option>
               {Object.entries(STATUS_CFG).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
             </select>
           </AdminListFilterBar>
@@ -215,8 +217,8 @@ export default function AdminLiveSessions() {
           ) : filtered.length === 0 ? (
             <div className="flex flex-col items-center justify-center h-48 text-slate-400">
               <Video className="w-10 h-10 mb-3 opacity-40" />
-              <p className="font-medium">No sessions found</p>
-              <p className="text-sm mt-1">Schedule your first live session to get started</p>
+              <p className="font-medium">{t('liveSessions.noSessionsFound')}</p>
+              <p className="text-sm mt-1">{t('liveSessions.startYourFirst')}</p>
             </div>
           ) : (
             <div className={ADMIN_LIST_CARD_GRID}>
@@ -274,7 +276,7 @@ export default function AdminLiveSessions() {
                         to={`/admin/live-sessions/${s.id}/room`}
                         className="inline-flex flex-1 min-w-[120px] items-center justify-center gap-1.5 px-3 py-2 bg-indigo-600 text-white rounded-xl text-xs font-semibold hover:bg-indigo-700 transition-all shadow-sm"
                       >
-                        <Play className="w-3.5 h-3.5" /> Enter Room
+                        <Play className="w-3.5 h-3.5" /> {t('liveSessions.enterRoom')}
                       </Link>
                       <button type="button" onClick={() => openEdit(s)} className="p-2 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-xl transition-all border border-slate-100">
                         <Pencil className="w-4 h-4" />
@@ -298,8 +300,8 @@ export default function AdminLiveSessions() {
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
             <div className="flex items-center justify-between p-5 border-b border-slate-100">
               <div>
-                <h2 className="text-lg font-bold text-slate-900">{editing ? 'Edit Session' : 'Schedule Session'}</h2>
-                <p className="text-slate-400 text-sm">{editing ? 'Update session details' : 'Set up a new live session'}</p>
+                <h2 className="text-lg font-bold text-slate-900">{editing ? t('liveSessions.editSession') : t('liveSessions.scheduleSession')}</h2>
+                <p className="text-slate-400 text-sm">{editing ? t('liveSessions.description') : t('liveSessions.description')}</p>
               </div>
               <button onClick={() => setShowModal(false)} className="p-2 hover:bg-slate-100 rounded-xl transition-all">
                 <X className="w-5 h-5 text-slate-500" />
@@ -307,63 +309,63 @@ export default function AdminLiveSessions() {
             </div>
             <div className="p-5 space-y-4">
               <div>
-                <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">Title <span className="text-red-400">*</span></label>
+                <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">{t('common.name')} <span className="text-red-400">*</span></label>
                 <input value={form.title} onChange={e => set('title', e.target.value)}
                   className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
                   placeholder="e.g. Python Q&A Session" />
               </div>
               <div>
-                <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">Description</label>
+                <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">{t('liveSessions.description')}</label>
                 <textarea rows={3} value={form.description} onChange={e => set('description', e.target.value)}
                   className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 resize-none"
                   placeholder="What will be covered in this session?" />
               </div>
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">Host (Teacher)</label>
+                  <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">{t('liveSessions.host')}</label>
                   <select value={form.host_id} onChange={e => set('host_id', e.target.value)}
                     className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500">
-                    <option value="">— Select host —</option>
+                    <option value="">{t('liveSessions.selectHost')}</option>
                     {teachers.map(t => <option key={t.id} value={t.id}>{t.displayName}</option>)}
                   </select>
                 </div>
                 <div>
-                  <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">Course</label>
+                  <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">{t('liveSessions.course')}</label>
                   <select value={form.course_id} onChange={e => set('course_id', e.target.value)}
                     className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500">
-                    <option value="">— Optional —</option>
+                    <option value="">{t('liveSessions.optional')}</option>
                     {courses.map(c => <option key={c.id} value={c.id}>{c.title}</option>)}
                   </select>
                 </div>
               </div>
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">Date & Time <span className="text-red-400">*</span></label>
+                  <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">{t('liveSessions.dateTime')} <span className="text-red-400">*</span></label>
                   <input type="datetime-local" value={form.scheduled_at} onChange={e => set('scheduled_at', e.target.value)}
                     className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500" />
                 </div>
                 <div>
-                  <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">Duration (min)</label>
+                  <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">{t('liveSessions.duration')}</label>
                   <input type="number" min={15} max={480} value={form.duration_minutes} onChange={e => set('duration_minutes', parseInt(e.target.value) || 60)}
                     className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500" />
                 </div>
               </div>
               <div>
-                <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">Meeting URL</label>
+                <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">{t('liveSessions.meetingUrl')}</label>
                 <input value={form.meeting_url} onChange={e => set('meeting_url', e.target.value)}
                   className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
                   placeholder="https://zoom.us/j/..." />
               </div>
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">Status</label>
+                  <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">{t('liveSessions.status')}</label>
                   <select value={form.status} onChange={e => set('status', e.target.value as SessionStatus)}
                     className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500">
                     {Object.entries(STATUS_CFG).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
                   </select>
                 </div>
                 <div>
-                  <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">Max Participants</label>
+                  <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">{t('liveSessions.maxParticipants')}</label>
                   <input type="number" min={1} value={form.max_participants} onChange={e => set('max_participants', parseInt(e.target.value) || 100)}
                     className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500" />
                 </div>
@@ -372,11 +374,11 @@ export default function AdminLiveSessions() {
             <div className="flex gap-3 p-5 border-t border-slate-100">
               <button onClick={() => setShowModal(false)}
                 className="flex-1 py-3 bg-slate-100 text-slate-600 rounded-xl font-semibold text-sm hover:bg-slate-200 transition-all">
-                Cancel
+                {t('common.cancel')}
               </button>
               <button onClick={handleSave} disabled={saving}
                 className="flex-1 py-3 bg-indigo-600 text-white rounded-xl font-semibold text-sm hover:bg-indigo-700 transition-all disabled:opacity-50 shadow-lg shadow-indigo-200">
-                {saving ? 'Saving...' : editing ? 'Update Session' : 'Schedule Session'}
+                {saving ? t('common.loading') : editing ? t('liveSessions.editSession') : t('liveSessions.scheduleSession')}
               </button>
             </div>
           </div>

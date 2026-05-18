@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { supabase } from '../../supabase';
 import AdminLayout from '../../components/layout/AdminLayout';
 import { toast } from 'sonner';
@@ -42,11 +43,11 @@ interface ClassRecord {
 interface Course { id: string; title: string }
 interface Teacher { id: string; displayName: string; email: string }
 
-const STATUS_CONFIG: Record<ClassStatus, { label: string; bg: string; text: string; dot: string; icon: React.ElementType }> = {
-  active:    { label: 'Active',    bg: 'bg-emerald-50', text: 'text-emerald-700', dot: 'bg-emerald-500', icon: CheckCircle2 },
-  upcoming:  { label: 'Upcoming',  bg: 'bg-indigo-50',  text: 'text-indigo-700',  dot: 'bg-indigo-500',  icon: Clock        },
-  completed: { label: 'Completed', bg: 'bg-slate-100',  text: 'text-slate-600',   dot: 'bg-slate-400',   icon: Archive      },
-  archived:  { label: 'Archived',  bg: 'bg-amber-50',   text: 'text-amber-700',   dot: 'bg-amber-500',   icon: AlertCircle  },
+const STATUS_CONFIG: Record<ClassStatus, { labelKey: string; bg: string; text: string; dot: string; icon: React.ElementType }> = {
+  active:    { labelKey: 'common.active',    bg: 'bg-emerald-50', text: 'text-emerald-700', dot: 'bg-emerald-500', icon: CheckCircle2 },
+  upcoming:  { labelKey: 'liveSessions.upcoming',  bg: 'bg-indigo-50',  text: 'text-indigo-700',  dot: 'bg-indigo-500',  icon: Clock        },
+  completed: { labelKey: 'dashboard.stats.completed', bg: 'bg-slate-100',  text: 'text-slate-600',   dot: 'bg-slate-400',   icon: Archive      },
+  archived:  { labelKey: 'common.archived',  bg: 'bg-amber-50',   text: 'text-amber-700',   dot: 'bg-amber-500',   icon: AlertCircle  },
 };
 
 const AVATAR_COLORS = [
@@ -75,6 +76,7 @@ const emptyForm = {
 };
 
 export default function AdminClasses() {
+  const { t } = useTranslation();
   const [classes, setClasses] = useState<ClassRecord[]>([]);
   const [courses, setCourses] = useState<Course[]>([]);
   const [teachers, setTeachers] = useState<Teacher[]>([]);
@@ -146,7 +148,7 @@ export default function AdminClasses() {
         email: t.email,
       })));
     } catch (err: any) {
-      toast.error('Failed to load classes: ' + err.message);
+      toast.error(t('errors.loadFailed') + ': ' + err.message);
     } finally {
       setLoading(false);
     }
@@ -194,31 +196,31 @@ export default function AdminClasses() {
       if (editingClass) {
         const { error } = await saveClassRow(supabase, { mode: 'update', id: editingClass.id, payload });
         if (error) throw error;
-        toast.success('Class updated successfully');
+        toast.success(t('success.updated'));
       } else {
         payload.student_ids = [];
         const { error } = await saveClassRow(supabase, { mode: 'insert', payload });
         if (error) throw error;
-        toast.success('Class created successfully');
+        toast.success(t('success.created'));
       }
       setShowModal(false);
       fetchAll();
     } catch (err: any) {
-      toast.error(err.message || 'Failed to save class');
+      toast.error(err.message || t('errors.saveFailed'));
     } finally {
       setSubmitting(false);
     }
   };
 
   const handleDelete = async (cls: ClassRecord) => {
-    if (!confirm(`Delete "${cls.name}"? This cannot be undone.`)) return;
+    if (!confirm(t('dashboard.deleteClassConfirm', { name: cls.name }))) return;
     try {
       const { error } = await supabase.from('classes').delete().eq('id', cls.id);
       if (error) throw error;
-      toast.success('Class deleted');
+      toast.success(t('success.deleted'));
       fetchAll();
     } catch (err: any) {
-      toast.error(err.message || 'Failed to delete class');
+      toast.error(err.message || t('errors.deleteFailed'));
     }
     setActiveMenu(null);
   };
@@ -227,7 +229,7 @@ export default function AdminClasses() {
     try {
       const { error } = await supabase.from('classes').update({ status }).eq('id', cls.id);
       if (error) throw error;
-      toast.success(`Class marked as ${status}`);
+      toast.success(t('dashboard.statusUpdated'));
       fetchAll();
     } catch (err: any) {
       toast.error(err.message);
@@ -252,21 +254,21 @@ export default function AdminClasses() {
   };
 
   const formatDate = (d: string | null) =>
-    d ? new Date(d).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '—';
+    d ? new Date(d).toLocaleDateString(t('language.code') === 'sq' ? 'sq-AL' : 'en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '—';
 
   const statItems = [
-    { label: 'Total Classes', value: stats.total, gradient: 'from-indigo-500 to-indigo-600', shadow: 'shadow-indigo-500/25', icon: School },
-    { label: 'Active Now', value: stats.active, gradient: 'from-emerald-500 to-emerald-600', shadow: 'shadow-emerald-500/25', icon: CheckCircle2 },
-    { label: 'Total Students', value: stats.students, gradient: 'from-violet-500 to-violet-600', shadow: 'shadow-violet-500/25', icon: Users },
-    { label: 'Completed', value: stats.completed, gradient: 'from-amber-500 to-amber-600', shadow: 'shadow-amber-500/25', icon: TrendingUp },
+    { label: t('dashboard.totalClasses'), value: stats.total, gradient: 'from-indigo-500 to-indigo-600', shadow: 'shadow-indigo-500/25', icon: School },
+    { label: t('dashboard.activeNow'), value: stats.active, gradient: 'from-emerald-500 to-emerald-600', shadow: 'shadow-emerald-500/25', icon: CheckCircle2 },
+    { label: t('dashboard.totalStudents'), value: stats.students, gradient: 'from-violet-500 to-violet-600', shadow: 'shadow-violet-500/25', icon: Users },
+    { label: t('dashboard.stats.completed'), value: stats.completed, gradient: 'from-amber-500 to-amber-600', shadow: 'shadow-amber-500/25', icon: TrendingUp },
   ];
 
   return (
     <AdminLayout>
       <AdminListPageShell
-        breadcrumbLabel="Classes"
-        title="Classes"
-        description="Manage all classes, assign teachers and track enrollment."
+        breadcrumbLabel={t('nav.classes')}
+        title={t('nav.classes')}
+        description={t('dashboard.manageClasses')}
         action={
           <motion.button
             type="button"
@@ -280,7 +282,7 @@ export default function AdminClasses() {
             }}
           >
             <Plus className="w-4 h-4" />
-            New Class
+            {t('dashboard.newClass')}
           </motion.button>
         }
         stats={statItems}
@@ -290,7 +292,7 @@ export default function AdminClasses() {
               <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-indigo-400" />
               <input
                 type="text"
-                placeholder="Search classes..."
+                placeholder={t('dashboard.searchClasses')}
                 value={searchQuery}
                 onChange={e => setSearchQuery(e.target.value)}
                 className={ADMIN_LIST_SEARCH_INPUT}
@@ -303,19 +305,19 @@ export default function AdminClasses() {
               className="rounded-full border-indigo-100 bg-white/80 py-2.5 shadow-sm focus:ring-2 focus:ring-violet-400 focus:border-transparent min-w-[160px]"
               wrapperClassName="min-w-[160px]"
             >
-              <option value="all">All Statuses</option>
-              <option value="active">Active</option>
-              <option value="upcoming">Upcoming</option>
-              <option value="completed">Completed</option>
-              <option value="archived">Archived</option>
+              <option value="all">{t('dashboard.allStatuses')}</option>
+              <option value="active">{t('common.active')}</option>
+              <option value="upcoming">{t('liveSessions.upcoming')}</option>
+              <option value="completed">{t('dashboard.stats.completed')}</option>
+              <option value="archived">{t('common.archived')}</option>
             </StyledSelect>
           </AdminListFilterBar>
         }
       >
         <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
           <div className="px-5 py-4 border-b border-slate-100">
-            <h2 className="text-base font-bold text-slate-900">All Classes</h2>
-            <p className="text-xs text-slate-400 mt-0.5">{filtered.length} class{filtered.length !== 1 ? 'es' : ''}</p>
+            <h2 className="text-base font-bold text-slate-900">{t('nav.classes')}</h2>
+            <p className="text-xs text-slate-400 mt-0.5">{t('dashboard.showingXofY', { count: filtered.length, total: classes.length, items: t('dashboard.items.classes') })}</p>
           </div>
 
           {loading ? (
@@ -329,9 +331,9 @@ export default function AdminClasses() {
               <div className="w-14 h-14 bg-slate-50 rounded-2xl flex items-center justify-center mx-auto mb-3 border border-slate-100">
                 <School className="w-7 h-7 text-slate-300" />
               </div>
-              <p className="text-slate-500 text-sm font-semibold">No classes found</p>
+              <p className="text-slate-500 text-sm font-semibold">{t('classes.noClasses')}</p>
               <p className="text-slate-400 text-xs mt-1">
-                {searchQuery || statusFilter !== 'all' ? 'Try adjusting your search or filter' : 'Create your first class to get started'}
+                {searchQuery || statusFilter !== 'all' ? t('dashboard.adjustSearch') : t('dashboard.createFirstClass')}
               </p>
               {!searchQuery && statusFilter === 'all' && (
                 <button
@@ -339,7 +341,7 @@ export default function AdminClasses() {
                   onClick={openCreate}
                   className="mt-4 inline-flex items-center gap-1.5 px-4 py-2 bg-indigo-600 text-white rounded-xl text-sm font-semibold hover:bg-indigo-700 transition-all shadow-sm"
                 >
-                  <Plus className="w-3.5 h-3.5" /> New Class
+                  <Plus className="w-3.5 h-3.5" /> {t('dashboard.newClass')}
                 </button>
               )}
             </div>
@@ -363,7 +365,7 @@ export default function AdminClasses() {
                           )}
                           <span className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-lg text-[10px] font-semibold mt-2 ${sc.bg} ${sc.text}`}>
                             <span className={`w-1.5 h-1.5 rounded-full ${sc.dot}`} />
-                            {sc.label}
+                            {t(sc.labelKey)}
                           </span>
                         </div>
                       </div>
@@ -372,7 +374,7 @@ export default function AdminClasses() {
                           type="button"
                           onClick={() => setViewClass(cls)}
                           className="p-2 rounded-lg text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 transition-all"
-                          title="View details"
+                          title={t('dashboard.classDetails')}
                         >
                           <Eye className="w-4 h-4" />
                         </button>
@@ -380,7 +382,7 @@ export default function AdminClasses() {
                           type="button"
                           onClick={() => openEdit(cls)}
                           className="p-2 rounded-lg text-slate-400 hover:text-violet-600 hover:bg-violet-50 transition-all"
-                          title="Edit"
+                          title={t('common.edit')}
                         >
                           <Pencil className="w-4 h-4" />
                         </button>
@@ -404,7 +406,7 @@ export default function AdminClasses() {
                                     className="w-full text-left px-4 py-2 text-sm text-slate-600 hover:bg-slate-50 flex items-center gap-2 capitalize"
                                   >
                                     <span className={`w-2 h-2 rounded-full ${STATUS_CONFIG[s].dot}`} />
-                                    Mark as {s}
+                                    {t('dashboard.markAs', { status: t(STATUS_CONFIG[s].labelKey) })}
                                   </button>
                                 ))}
                               <div className="border-t border-slate-100 mt-1 pt-1">
@@ -414,7 +416,7 @@ export default function AdminClasses() {
                                   className="w-full text-left px-4 py-2 text-sm text-red-500 hover:bg-red-50 flex items-center gap-2"
                                 >
                                   <Trash2 className="w-4 h-4" />
-                                  Delete Class
+                                  {t('common.delete')}
                                 </button>
                               </div>
                             </div>
@@ -424,7 +426,7 @@ export default function AdminClasses() {
                     </div>
                     <div className="mt-4 space-y-3 text-xs border-t border-slate-100 pt-4">
                       <div className="flex items-start justify-between gap-2">
-                        <span className="text-slate-400 font-semibold uppercase tracking-wider shrink-0">Course</span>
+                        <span className="text-slate-400 font-semibold uppercase tracking-wider shrink-0">{t('courses.courseTitle')}</span>
                         {cls.course ? (
                           <span className="flex items-center gap-1.5 text-slate-700 font-medium text-right">
                             <BookOpen className="w-3.5 h-3.5 text-indigo-500 shrink-0" />
@@ -435,20 +437,20 @@ export default function AdminClasses() {
                         )}
                       </div>
                       <div className="flex items-start justify-between gap-2">
-                        <span className="text-slate-400 font-semibold uppercase tracking-wider shrink-0">Teacher</span>
+                        <span className="text-slate-400 font-semibold uppercase tracking-wider shrink-0">{t('dashboard.tableHeaders.teacher')}</span>
                         {cls.teacher ? (
                           <span className="flex items-center gap-1.5 text-slate-700 font-medium text-right">
                             <GraduationCap className="w-3.5 h-3.5 text-violet-500 shrink-0" />
                             <span className="truncate">{cls.teacher.display_name}</span>
                           </span>
                         ) : (
-                          <span className="text-slate-400">Unassigned</span>
+                          <span className="text-slate-400">{t('dashboard.unassigned')}</span>
                         )}
                       </div>
                       <div>
                         <div className="flex items-center justify-between text-slate-600 mb-1">
                           <span className="flex items-center gap-1 font-semibold text-slate-400 uppercase tracking-wider">
-                            <Users className="w-3.5 h-3.5" /> Enrollment
+                            <Users className="w-3.5 h-3.5" /> {t('dashboard.enrollment')}
                           </span>
                           <span className="font-semibold text-slate-800">{enrolledCount} / {cls.capacity}</span>
                         </div>
@@ -460,7 +462,7 @@ export default function AdminClasses() {
                         </div>
                       </div>
                       <div className="flex items-start justify-between gap-2">
-                        <span className="text-slate-400 font-semibold uppercase tracking-wider shrink-0">Schedule</span>
+                        <span className="text-slate-400 font-semibold uppercase tracking-wider shrink-0">{t('dashboard.schedule')}</span>
                         {cls.start_date ? (
                           <span className="text-right text-slate-600">
                             <span className="flex items-center justify-end gap-1 font-medium">
@@ -470,7 +472,7 @@ export default function AdminClasses() {
                             {cls.end_date && <span className="text-slate-400 block">→ {formatDate(cls.end_date)}</span>}
                           </span>
                         ) : (
-                          <span className="text-slate-300">No schedule</span>
+                          <span className="text-slate-300">{t('dashboard.noSchedule')}</span>
                         )}
                       </div>
                     </div>
@@ -493,8 +495,8 @@ export default function AdminClasses() {
                   <School className="w-4.5 h-4.5 text-indigo-600" />
                 </div>
                 <div>
-                  <h2 className="text-base font-bold text-slate-900">{editingClass ? 'Edit Class' : 'Create New Class'}</h2>
-                  <p className="text-xs text-slate-400 mt-0.5">{editingClass ? 'Update class details' : 'Set up a new class session'}</p>
+                  <h2 className="text-base font-bold text-slate-900">{editingClass ? t('dashboard.editClass') : t('dashboard.newClass')}</h2>
+                  <p className="text-xs text-slate-400 mt-0.5">{editingClass ? t('dashboard.updateClassDetails') : t('dashboard.setupNewClass')}</p>
                 </div>
               </div>
               <button onClick={() => setShowModal(false)} className="p-2 hover:bg-slate-100 rounded-xl transition-colors">
@@ -507,25 +509,25 @@ export default function AdminClasses() {
               <div className="px-6 py-5 space-y-4">
                 {/* Name */}
                 <div>
-                  <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1.5">Class Name <span className="text-red-400">*</span></label>
+                  <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1.5">{t('classes.className')} <span className="text-red-400">*</span></label>
                   <input
                     required
                     type="text"
                     value={form.name}
                     onChange={e => setForm({ ...form, name: e.target.value })}
-                    placeholder="e.g. Advanced English – Batch A"
+                    placeholder={t('classes.classNamePlaceholder')}
                     className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/30 focus:border-indigo-400 transition-all"
                   />
                 </div>
 
                 {/* Description */}
                 <div>
-                  <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1.5">Description</label>
+                  <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1.5">{t('classes.description')}</label>
                   <textarea
                     rows={2}
                     value={form.description}
                     onChange={e => setForm({ ...form, description: e.target.value })}
-                    placeholder="Optional short description..."
+                    placeholder={t('classes.descriptionPlaceholder')}
                     className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/30 focus:border-indigo-400 transition-all resize-none"
                   />
                 </div>
@@ -533,24 +535,24 @@ export default function AdminClasses() {
                 {/* Course + Teacher */}
                 <div className="grid grid-cols-2 gap-3">
                   <div>
-                    <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1.5">Course</label>
+                    <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1.5">{t('classes.course')}</label>
                     <StyledSelect
                       value={form.course_id}
                       onChange={e => setForm({ ...form, course_id: e.target.value })}
                       wrapperClassName="w-full"
                     >
-                      <option value="">None</option>
+                      <option value="">{t('classes.none')}</option>
                       {courses.map(c => <option key={c.id} value={c.id}>{c.title}</option>)}
                     </StyledSelect>
                   </div>
                   <div>
-                    <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1.5">Teacher</label>
+                    <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1.5">{t('classes.teacher')}</label>
                     <StyledSelect
                       value={form.teacher_id}
                       onChange={e => setForm({ ...form, teacher_id: e.target.value })}
                       wrapperClassName="w-full"
                     >
-                      <option value="">Unassigned</option>
+                      <option value="">{t('classes.unassigned')}</option>
                       {teachers.map(t => <option key={t.id} value={t.id}>{t.displayName}</option>)}
                     </StyledSelect>
                   </div>
@@ -559,7 +561,7 @@ export default function AdminClasses() {
                 {/* Start / End date */}
                 <div className="grid grid-cols-2 gap-3">
                   <div>
-                    <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1.5">Start Date</label>
+                    <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1.5">{t('classes.startDate')}</label>
                     <input
                       type="date"
                       value={form.start_date}
@@ -568,7 +570,7 @@ export default function AdminClasses() {
                     />
                   </div>
                   <div>
-                    <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1.5">End Date</label>
+                    <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1.5">{t('classes.endDate')}</label>
                     <input
                       type="date"
                       value={form.end_date}
@@ -581,7 +583,7 @@ export default function AdminClasses() {
                 {/* Capacity + Status */}
                 <div className="grid grid-cols-2 gap-3">
                   <div>
-                    <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1.5">Capacity</label>
+                    <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1.5">{t('classes.capacity')}</label>
                     <input
                       type="number"
                       min={1}
@@ -592,16 +594,16 @@ export default function AdminClasses() {
                     />
                   </div>
                   <div>
-                    <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1.5">Status</label>
+                    <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1.5">{t('classes.status')}</label>
                     <StyledSelect
                       value={form.status}
                       onChange={e => setForm({ ...form, status: e.target.value as ClassStatus })}
                       wrapperClassName="w-full"
                     >
-                      <option value="upcoming">Upcoming</option>
-                      <option value="active">Active</option>
-                      <option value="completed">Completed</option>
-                      <option value="archived">Archived</option>
+                      <option value="upcoming">{t('classes.upcoming')}</option>
+                      <option value="active">{t('classes.active')}</option>
+                      <option value="completed">{t('classes.completed')}</option>
+                      <option value="archived">{t('classes.archived')}</option>
                     </StyledSelect>
                   </div>
                 </div>
@@ -614,14 +616,14 @@ export default function AdminClasses() {
                   onClick={() => setShowModal(false)}
                   className="flex-1 px-4 py-2.5 bg-slate-100 text-slate-600 rounded-xl font-semibold text-sm hover:bg-slate-200 transition-all"
                 >
-                  Cancel
+                  {t('classes.cancel')}
                 </button>
                 <button
                   type="submit"
                   disabled={submitting}
                   className="flex-1 px-4 py-2.5 bg-indigo-600 text-white rounded-xl font-semibold text-sm hover:bg-indigo-700 transition-all disabled:opacity-50 shadow-lg shadow-indigo-500/20"
                 >
-                  {submitting ? 'Saving...' : editingClass ? 'Save Changes' : 'Create Class'}
+                  {submitting ? t('classes.saving') : editingClass ? t('classes.save') : t('classes.createClass')}
                 </button>
               </div>
             </form>
@@ -648,21 +650,21 @@ export default function AdminClasses() {
               <div className="mt-3">
                 <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[11px] font-semibold bg-white/20 text-white`}>
                   <span className="w-1.5 h-1.5 rounded-full bg-white" />
-                  {STATUS_CONFIG[viewClass.status].label}
+                  {t(STATUS_CONFIG[viewClass.status].labelKey)}
                 </span>
               </div>
             </div>
             <div className="p-6 space-y-4">
               <div className="grid grid-cols-2 gap-4">
                 {[
-                  { icon: BookOpen, label: 'Course', value: viewClass.course?.title || 'Not assigned', color: 'text-indigo-500', bg: 'bg-indigo-50' },
-                  { icon: GraduationCap, label: 'Teacher', value: viewClass.teacher?.display_name || 'Unassigned', color: 'text-violet-500', bg: 'bg-violet-50' },
-                  { icon: Users, label: 'Enrolled', value: `${viewClass.student_ids?.length || 0} / ${viewClass.capacity}`, color: 'text-emerald-500', bg: 'bg-emerald-50' },
-                  { icon: CalendarDays, label: 'Start Date', value: formatDate(viewClass.start_date), color: 'text-amber-500', bg: 'bg-amber-50' },
+                  { icon: BookOpen, labelKey: 'classes.course', value: viewClass.course?.title || t('classes.notAssigned'), color: 'text-indigo-500', bg: 'bg-indigo-50' },
+                  { icon: GraduationCap, labelKey: 'classes.teacher', value: viewClass.teacher?.display_name || t('classes.unassigned'), color: 'text-violet-500', bg: 'bg-violet-50' },
+                  { icon: Users, labelKey: 'classes.enrolledLabel', value: `${viewClass.student_ids?.length || 0} / ${viewClass.capacity}`, color: 'text-emerald-500', bg: 'bg-emerald-50' },
+                  { icon: CalendarDays, labelKey: 'classes.startDateLabel', value: formatDate(viewClass.start_date), color: 'text-amber-500', bg: 'bg-amber-50' },
                 ].map(item => (
-                  <div key={item.label} className={`${item.bg} rounded-xl p-3.5`}>
+                  <div key={item.labelKey} className={`${item.bg} rounded-xl p-3.5`}>
                     <item.icon className={`w-4 h-4 ${item.color} mb-2`} />
-                    <div className="text-[10px] text-slate-400 uppercase font-bold tracking-wider">{item.label}</div>
+                    <div className="text-[10px] text-slate-400 uppercase font-bold tracking-wider">{t(item.labelKey)}</div>
                     <div className="text-sm font-semibold text-slate-700 mt-0.5 truncate">{item.value}</div>
                   </div>
                 ))}
@@ -670,7 +672,7 @@ export default function AdminClasses() {
               {viewClass.end_date && (
                 <div className="flex items-center gap-2 text-xs text-slate-500 bg-slate-50 rounded-xl px-4 py-3">
                   <CalendarDays className="w-4 h-4 text-slate-400 shrink-0" />
-                  <span>Ends on <strong className="text-slate-700">{formatDate(viewClass.end_date)}</strong></span>
+                  <span>{t('classes.endsOn')} <strong className="text-slate-700">{formatDate(viewClass.end_date)}</strong></span>
                 </div>
               )}
               <div className="flex gap-3 pt-2">
@@ -678,13 +680,13 @@ export default function AdminClasses() {
                   onClick={() => { setViewClass(null); openEdit(viewClass); }}
                   className="flex-1 flex items-center justify-center gap-2 px-4 py-2.5 bg-indigo-600 text-white rounded-xl font-semibold text-sm hover:bg-indigo-700 transition-all shadow-md shadow-indigo-200"
                 >
-                  <Pencil className="w-4 h-4" /> Edit Class
+                  <Pencil className="w-4 h-4" /> {t('classes.editButton')}
                 </button>
                 <button
                   onClick={() => setViewClass(null)}
                   className="px-4 py-2.5 bg-slate-100 text-slate-600 rounded-xl font-semibold text-sm hover:bg-slate-200 transition-all"
                 >
-                  Close
+                  {t('classes.close')}
                 </button>
               </div>
             </div>

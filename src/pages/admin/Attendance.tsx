@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import AdminLayout from '../../components/layout/AdminLayout';
 import { toast } from 'sonner';
 import GenderAvatar from '../../components/ui/GenderAvatar';
@@ -37,12 +38,12 @@ interface AttendanceRecord {
 interface ClassRec { id: string; name: string }
 interface StudentRec { id: string; display_name: string; email: string }
 
-const STATUS_CFG: Record<AttendanceStatus, { label: string; bg: string; text: string; dot: string; icon: React.ElementType }> = {
-  present: { label: 'Present', bg: 'bg-emerald-50', text: 'text-emerald-700', dot: 'bg-emerald-500', icon: CheckCircle2 },
-  absent:  { label: 'Absent',  bg: 'bg-rose-50',    text: 'text-rose-700',   dot: 'bg-rose-500',    icon: XCircle     },
-  late:    { label: 'Late',    bg: 'bg-amber-50',   text: 'text-amber-700',  dot: 'bg-amber-500',   icon: Clock       },
-  excused: { label: 'Excused', bg: 'bg-blue-50',    text: 'text-blue-700',   dot: 'bg-blue-500',    icon: AlertTriangle },
-};
+const getStatusCfg = (t: (key: string) => string): Record<AttendanceStatus, { label: string; bg: string; text: string; dot: string; icon: React.ElementType }> => ({
+  present: { label: t('attendance.present'), bg: 'bg-emerald-50', text: 'text-emerald-700', dot: 'bg-emerald-500', icon: CheckCircle2 },
+  absent:  { label: t('attendance.absent'),  bg: 'bg-rose-50',    text: 'text-rose-700',   dot: 'bg-rose-500',    icon: XCircle     },
+  late:    { label: t('attendance.late'),    bg: 'bg-amber-50',   text: 'text-amber-700',  dot: 'bg-amber-500',   icon: Clock       },
+  excused: { label: t('attendance.excused'), bg: 'bg-blue-50',    text: 'text-blue-700',   dot: 'bg-blue-500',    icon: AlertTriangle },
+});
 
 const AVATAR_COLORS = [
   'from-sky-500 to-blue-600',
@@ -64,6 +65,7 @@ const emptyForm = {
 };
 
 export default function AdminAttendance() {
+  const { t } = useTranslation();
   const [records, setRecords] = useState<AttendanceRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
@@ -116,7 +118,7 @@ export default function AdminAttendance() {
       setStudents(stu || []);
       setTeachers(tch || []);
     } catch {
-      toast.error('Failed to load attendance records');
+      toast.error(t('common.error'));
     } finally {
       setLoading(false);
     }
@@ -140,10 +142,10 @@ export default function AdminAttendance() {
     : 0;
 
   const stats = [
-    { label: 'Total Records', value: records.length, gradient: 'from-sky-500 to-cyan-600', shadow: 'shadow-sky-500/25', icon: CalendarCheck },
-    { label: 'Present', value: records.filter(r => r.status === 'present').length, gradient: 'from-emerald-500 to-emerald-600', shadow: 'shadow-emerald-500/25', icon: CheckCircle2 },
-    { label: 'Absent', value: records.filter(r => r.status === 'absent').length, gradient: 'from-rose-500 to-pink-600', shadow: 'shadow-rose-500/25', icon: XCircle },
-    { label: 'Late / Excused', value: records.filter(r => r.status === 'late' || r.status === 'excused').length, gradient: 'from-amber-500 to-orange-600', shadow: 'shadow-amber-500/25', icon: Clock },
+    { label: t('attendance.totalRecords'), value: records.length, gradient: 'from-sky-500 to-cyan-600', shadow: 'shadow-sky-500/25', icon: CalendarCheck },
+    { label: t('attendance.present'), value: records.filter(r => r.status === 'present').length, gradient: 'from-emerald-500 to-emerald-600', shadow: 'shadow-emerald-500/25', icon: CheckCircle2 },
+    { label: t('attendance.absent'), value: records.filter(r => r.status === 'absent').length, gradient: 'from-rose-500 to-pink-600', shadow: 'shadow-rose-500/25', icon: XCircle },
+    { label: `${t('attendance.late')} / ${t('attendance.excused')}`, value: records.filter(r => r.status === 'late' || r.status === 'excused').length, gradient: 'from-amber-500 to-orange-600', shadow: 'shadow-amber-500/25', icon: Clock },
   ];
 
   const rateAppend = (
@@ -158,7 +160,7 @@ export default function AdminAttendance() {
       <div className="flex items-start justify-between">
         <div>
           <div className="text-3xl font-extrabold tracking-tight">{attendanceRate}%</div>
-          <div className="text-xs font-semibold text-white/75 mt-1">Attendance rate</div>
+          <div className="text-xs font-semibold text-white/75 mt-1">{t('attendance.attendanceRate')}</div>
         </div>
         <div className="w-10 h-10 rounded-xl flex items-center justify-center bg-white/20">
           <CalendarCheck className="w-5 h-5 text-white" />
@@ -191,8 +193,8 @@ export default function AdminAttendance() {
   };
 
   const handleSave = async () => {
-    if (!form.student_id) { toast.error('Student is required'); return; }
-    if (!form.date) { toast.error('Date is required'); return; }
+    if (!form.student_id) { toast.error(t('attendance.studentRequired')); return; }
+    if (!form.date) { toast.error(t('attendance.dateRequired')); return; }
     setSaving(true);
     try {
       const payload: any = {
@@ -206,17 +208,17 @@ export default function AdminAttendance() {
       if (editId) {
         const { error } = await supabase.from('attendance').update(payload).eq('id', editId);
         if (error) throw error;
-        toast.success('Attendance updated');
+        toast.success(t('attendance.attendanceUpdated'));
       } else {
         payload.created_at = new Date().toISOString();
         const { error } = await supabase.from('attendance').insert(payload);
         if (error) throw error;
-        toast.success('Attendance marked');
+        toast.success(t('attendance.attendanceMarked'));
       }
       setShowModal(false);
       fetchData();
     } catch (e: any) {
-      toast.error(e.message || 'Failed to save');
+      toast.error(e.message || t('common.error'));
     } finally {
       setSaving(false);
     }
@@ -226,18 +228,18 @@ export default function AdminAttendance() {
     try {
       const { error } = await supabase.from('attendance').delete().eq('id', id);
       if (error) throw error;
-      toast.success('Record deleted');
+      toast.success(t('attendance.recordDeleted'));
       setDeleteId(null);
       fetchData();
-    } catch { toast.error('Failed to delete'); }
+    } catch { toast.error(t('attendance.failedToDelete')); }
   };
 
   return (
     <AdminLayout>
       <AdminListPageShell
-        breadcrumbLabel="Attendance"
-        title="Attendance"
-        description="Track and manage student attendance records."
+        breadcrumbLabel={t('attendance.title')}
+        title={t('attendance.title')}
+        description={t('dashboard.manageAttendance')}
         statsGridClassName="grid grid-cols-2 lg:grid-cols-5 gap-4"
         stats={stats}
         statsAppend={rateAppend}
@@ -254,7 +256,7 @@ export default function AdminAttendance() {
             }}
           >
             <Plus className="w-4 h-4" />
-            Mark Attendance
+            {t('attendance.markAttendance')}
           </motion.button>
         }
         filterBar={
@@ -264,19 +266,19 @@ export default function AdminAttendance() {
               <input
                 value={search}
                 onChange={e => setSearch(e.target.value)}
-                placeholder="Search students or classes..."
+                placeholder={t('attendance.searchPlaceholder')}
                 className={ADMIN_LIST_SEARCH_INPUT}
               />
             </div>
             <select value={statusFilter} onChange={e => setStatusFilter(e.target.value)} className={ADMIN_LIST_SELECT}>
-              <option value="all">All Status</option>
-              <option value="present">Present</option>
-              <option value="absent">Absent</option>
-              <option value="late">Late</option>
-              <option value="excused">Excused</option>
+              <option value="all">{t('attendance.allStatus')}</option>
+              <option value="present">{t('attendance.present')}</option>
+              <option value="absent">{t('attendance.absent')}</option>
+              <option value="late">{t('attendance.late')}</option>
+              <option value="excused">{t('attendance.excused')}</option>
             </select>
             <select value={classFilter} onChange={e => setClassFilter(e.target.value)} className={ADMIN_LIST_SELECT}>
-              <option value="all">All Classes</option>
+              <option value="all">{t('attendance.allClasses')}</option>
               {classes.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
             </select>
           </AdminListFilterBar>
@@ -292,13 +294,14 @@ export default function AdminAttendance() {
           ) : filtered.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-20 gap-3 text-slate-400">
               <CalendarCheck className="w-10 h-10 opacity-30" />
-              <p className="text-sm">No attendance records found</p>
-              <button type="button" onClick={openAdd} className="text-xs text-indigo-600 font-semibold hover:underline">Mark attendance now</button>
+              <p className="text-sm">{t('attendance.noAttendanceFound')}</p>
+              <button type="button" onClick={openAdd} className="text-xs text-indigo-600 font-semibold hover:underline">{t('attendance.markAttendanceNow')}</button>
             </div>
           ) : (
             <>
               <div className={ADMIN_LIST_CARD_GRID}>
                 {filtered.map(r => {
+                  const STATUS_CFG = getStatusCfg(t);
                   const sc = STATUS_CFG[r.status];
                   const name = r.student?.display_name || 'Unknown';
                   return (
@@ -366,63 +369,63 @@ export default function AdminAttendance() {
         <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md max-h-[90vh] overflow-y-auto">
             <div className="flex items-center justify-between p-5 border-b border-slate-100">
-              <h2 className="text-lg font-bold text-slate-800">{editId ? 'Edit Record' : 'Mark Attendance'}</h2>
+              <h2 className="text-lg font-bold text-slate-800">{editId ? t('attendance.editRecord') : t('attendance.markAttendance')}</h2>
               <button onClick={() => setShowModal(false)} className="p-2 hover:bg-slate-100 rounded-lg"><X className="w-4 h-4" /></button>
             </div>
             <div className="p-5 space-y-4">
               <div>
-                <label className="text-xs font-semibold text-slate-600 uppercase tracking-wide">Student *</label>
+                <label className="text-xs font-semibold text-slate-600 uppercase tracking-wide">{t('attendance.student')} *</label>
                 <select value={form.student_id} onChange={e => setForm(f => ({ ...f, student_id: e.target.value }))}
                   className="mt-1 w-full px-3 py-2.5 text-sm border border-slate-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-sky-500/30">
-                  <option value="">Select student</option>
+                  <option value="">{t('attendance.selectStudent')}</option>
                   {students.map(s => <option key={s.id} value={s.id}>{s.display_name} ({s.email})</option>)}
                 </select>
               </div>
               <div>
-                <label className="text-xs font-semibold text-slate-600 uppercase tracking-wide">Class</label>
+                <label className="text-xs font-semibold text-slate-600 uppercase tracking-wide">{t('attendance.class')}</label>
                 <select value={form.class_id} onChange={e => setForm(f => ({ ...f, class_id: e.target.value }))}
                   className="mt-1 w-full px-3 py-2.5 text-sm border border-slate-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-sky-500/30">
-                  <option value="">No class</option>
+                  <option value="">{t('attendance.noClass')}</option>
                   {classes.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
                 </select>
               </div>
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="text-xs font-semibold text-slate-600 uppercase tracking-wide">Date *</label>
+                  <label className="text-xs font-semibold text-slate-600 uppercase tracking-wide">{t('attendance.date')} *</label>
                   <input type="date" value={form.date} onChange={e => setForm(f => ({ ...f, date: e.target.value }))}
                     className="mt-1 w-full px-3 py-2.5 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-sky-500/30" />
                 </div>
                 <div>
-                  <label className="text-xs font-semibold text-slate-600 uppercase tracking-wide">Status</label>
+                  <label className="text-xs font-semibold text-slate-600 uppercase tracking-wide">{t('common.status')}</label>
                   <select value={form.status} onChange={e => setForm(f => ({ ...f, status: e.target.value as AttendanceStatus }))}
                     className="mt-1 w-full px-3 py-2.5 text-sm border border-slate-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-sky-500/30">
-                    <option value="present">Present</option>
-                    <option value="absent">Absent</option>
-                    <option value="late">Late</option>
-                    <option value="excused">Excused</option>
+                    <option value="present">{t('attendance.present')}</option>
+                    <option value="absent">{t('attendance.absent')}</option>
+                    <option value="late">{t('attendance.late')}</option>
+                    <option value="excused">{t('attendance.excused')}</option>
                   </select>
                 </div>
               </div>
               <div>
-                <label className="text-xs font-semibold text-slate-600 uppercase tracking-wide">Notes</label>
+                <label className="text-xs font-semibold text-slate-600 uppercase tracking-wide">{t('attendance.notes')}</label>
                 <textarea value={form.notes} onChange={e => setForm(f => ({ ...f, notes: e.target.value }))}
                   rows={2} className="mt-1 w-full px-3 py-2.5 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-sky-500/30 resize-none"
-                  placeholder="Optional notes..." />
+                  placeholder={t('attendance.optionalNotes')} />
               </div>
               <div>
-                <label className="text-xs font-semibold text-slate-600 uppercase tracking-wide">Marked By (Teacher)</label>
+                <label className="text-xs font-semibold text-slate-600 uppercase tracking-wide">{t('attendance.markedByTeacher')}</label>
                 <select value={form.marked_by} onChange={e => setForm(f => ({ ...f, marked_by: e.target.value }))}
                   className="mt-1 w-full px-3 py-2.5 text-sm border border-slate-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-sky-500/30">
-                  <option value="">Not specified</option>
+                  <option value="">{t('attendance.notSpecified')}</option>
                   {teachers.map(t => <option key={t.id} value={t.id}>{t.display_name}</option>)}
                 </select>
               </div>
             </div>
             <div className="flex justify-end gap-3 p-5 border-t border-slate-100">
-              <button onClick={() => setShowModal(false)} className="px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-100 rounded-lg transition-colors">Cancel</button>
+              <button onClick={() => setShowModal(false)} className="px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-100 rounded-lg transition-colors">{t('common.cancel')}</button>
               <button onClick={handleSave} disabled={saving}
                 className="px-4 py-2 text-sm font-semibold bg-sky-500 hover:bg-sky-600 text-white rounded-lg transition-colors disabled:opacity-50">
-                {saving ? 'Saving...' : editId ? 'Update' : 'Mark'}
+                {saving ? t('common.loading') : editId ? t('common.update') : t('attendance.markAttendance')}
               </button>
             </div>
           </div>
@@ -436,11 +439,11 @@ export default function AdminAttendance() {
             <div className="w-12 h-12 bg-rose-50 rounded-full flex items-center justify-center mx-auto mb-3">
               <Trash2 className="w-6 h-6 text-rose-500" />
             </div>
-            <h3 className="text-lg font-bold text-slate-800 mb-1">Delete Record?</h3>
-            <p className="text-sm text-slate-500 mb-5">This attendance record will be permanently removed.</p>
+            <h3 className="text-lg font-bold text-slate-800 mb-1">{t('attendance.confirmDelete')}</h3>
+            <p className="text-sm text-slate-500 mb-5">{t('attendance.deleteRecordDesc')}</p>
             <div className="flex gap-3 justify-center">
-              <button onClick={() => setDeleteId(null)} className="px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-100 rounded-lg">Cancel</button>
-              <button onClick={() => handleDelete(deleteId)} className="px-4 py-2 text-sm font-semibold bg-rose-500 hover:bg-rose-600 text-white rounded-lg">Delete</button>
+              <button onClick={() => setDeleteId(null)} className="px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-100 rounded-lg">{t('common.cancel')}</button>
+              <button onClick={() => handleDelete(deleteId)} className="px-4 py-2 text-sm font-semibold bg-rose-500 hover:bg-rose-600 text-white rounded-lg">{t('common.delete')}</button>
             </div>
           </div>
         </div>

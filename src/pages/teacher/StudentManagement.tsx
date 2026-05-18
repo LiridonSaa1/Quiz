@@ -1,4 +1,5 @@
 import React, { useEffect, useState, useMemo } from 'react';
+import { useTranslation } from 'react-i18next';
 import { supabase } from '../../supabase';
 import TeacherLayout from '../../components/layout/TeacherLayout';
 import { Users, UserPlus, Search, UserCheck, UserX, BookOpen, X, Pencil, Trash2 } from 'lucide-react';
@@ -61,6 +62,7 @@ const STAT_CONFIG = [
 ];
 
 export default function StudentManagement() {
+  const { t } = useTranslation();
   const [students, setStudents] = useState<StudentWithCourses[]>([]);
   const [courses, setCourses] = useState<{ id: string; name: string; studentIds: string[] }[]>([]);
   const [classes, setClasses] = useState<Array<{ id: string; name: string; studentIds: string[] }>>([]);
@@ -260,15 +262,15 @@ export default function StudentManagement() {
     try {
       const { error } = await supabase.from('profiles').update({ status: newStatus }).eq('id', student.uid);
       if (error) throw error;
-      toast.success(`Student ${newStatus === 'active' ? 'activated' : 'deactivated'}`);
+      toast.success(newStatus === 'active' ? t('teacher.studentManagement.studentActivated') : t('teacher.studentManagement.studentDeactivated'));
       fetchData();
-    } catch { toast.error('Failed to update status'); }
+    } catch { toast.error(t('teacher.studentManagement.failedUpdateStatus')); }
   };
 
   const editStudent = async (student: StudentWithCourses) => {
-    const displayName = window.prompt('Student name', student.displayName || '');
+    const displayName = window.prompt(t('teacher.studentManagement.addStudent'), student.displayName || '');
     if (displayName === null) return;
-    const email = window.prompt('Student email', student.email || '');
+    const email = window.prompt('Email', student.email || '');
     if (email === null) return;
     try {
       const res = await authFetch(`/api/teacher/students/${encodeURIComponent(student.uid)}`, {
@@ -276,24 +278,24 @@ export default function StudentManagement() {
         body: JSON.stringify({ display_name: displayName, email }),
       });
       const json = await res.json().catch(() => ({}));
-      if (!res.ok || !json?.success) throw new Error(json?.error || 'Failed to update student');
-      toast.success('Student updated');
+      if (!res.ok || !json?.success) throw new Error(json?.error || t('teacher.studentManagement.failedUpdateStudent'));
+      toast.success(t('teacher.studentManagement.studentUpdated'));
       fetchData();
     } catch (e: any) {
-      toast.error(e?.message || 'Failed to update student');
+      toast.error(e?.message || t('teacher.studentManagement.failedUpdateStudent'));
     }
   };
 
   const deleteStudent = async (student: StudentWithCourses) => {
-    if (!window.confirm(`Delete student "${student.displayName || student.email}"?`)) return;
+    if (!window.confirm(t('teacher.studentManagement.deleteStudent', { name: student.displayName || student.email }))) return;
     try {
       const res = await authFetch(`/api/teacher/students/${encodeURIComponent(student.uid)}`, { method: 'DELETE' });
       const json = await res.json().catch(() => ({}));
-      if (!res.ok || !json?.success) throw new Error(json?.error || 'Failed to delete student');
-      toast.success('Student deleted');
+      if (!res.ok || !json?.success) throw new Error(json?.error || t('teacher.studentManagement.failedDeleteStudent'));
+      toast.success(t('teacher.studentManagement.studentDeleted'));
       fetchData();
     } catch (e: any) {
-      toast.error(e?.message || 'Failed to delete student');
+      toast.error(e?.message || t('teacher.studentManagement.failedDeleteStudent'));
     }
   };
 
@@ -325,10 +327,10 @@ export default function StudentManagement() {
   return (
     <TeacherLayout>
       <AdminListPageShell
-        breadcrumbPortalLabel="Teacher Portal"
-        breadcrumbLabel="Students"
-        title="Students"
-        description="Students linked to your account and their course enrollments."
+        breadcrumbPortalLabel={t('nav.teacherPortal')}
+        breadcrumbLabel={t('teacher.studentManagement.title')}
+        title={t('teacher.studentManagement.title')}
+        description={t('teacher.studentManagement.description')}
         action={
           <motion.button
             type="button"
@@ -342,7 +344,7 @@ export default function StudentManagement() {
             }}
           >
             <UserPlus className="w-4 h-4" />
-            Add Student
+            {t('teacher.studentManagement.addStudent')}
           </motion.button>
         }
         stats={stats}
@@ -352,26 +354,26 @@ export default function StudentManagement() {
               <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-indigo-400" />
               <input
                 type="text"
-                placeholder="Search by name, email or course..."
+                placeholder={t('teacher.studentManagement.searchPlaceholder')}
                 value={search}
                 onChange={e => setSearch(e.target.value)}
                 className={ADMIN_LIST_SEARCH_INPUT}
               />
             </div>
             <select value={statusFilter} onChange={e => setStatusFilter(e.target.value)} className={ADMIN_LIST_SELECT}>
-              <option value="all">All statuses</option>
-              <option value="active">Active</option>
-              <option value="inactive">Inactive</option>
+              <option value="all">{t('teacher.studentManagement.allStatuses')}</option>
+              <option value="active">{t('teacher.studentManagement.active')}</option>
+              <option value="inactive">{t('teacher.studentManagement.inactive')}</option>
             </select>
             {courses.length > 0 && (
               <select value={courseFilter} onChange={e => setCourseFilter(e.target.value)} className={ADMIN_LIST_SELECT}>
-                <option value="all">All courses</option>
+                <option value="all">{t('teacher.studentManagement.allCourses')}</option>
                 {courses.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
               </select>
             )}
             {classes.length > 0 && (
               <select value={classFilter} onChange={e => setClassFilter(e.target.value)} className={ADMIN_LIST_SELECT}>
-                <option value="all">All classes</option>
+                <option value="all">{t('teacher.studentManagement.allClasses')}</option>
                 {classes.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
               </select>
             )}
@@ -381,7 +383,7 @@ export default function StudentManagement() {
                 onClick={() => { setSearch(''); setStatusFilter('all'); setCourseFilter('all'); setClassFilter('all'); }}
                 className="flex items-center gap-1.5 px-3 py-2 rounded-full text-xs font-semibold text-slate-500 hover:text-slate-800 hover:bg-slate-100 transition-all"
               >
-                <X className="w-3.5 h-3.5" /> Clear
+                <X className="w-3.5 h-3.5" /> {t('teacher.studentManagement.clear')}
               </button>
             )}
           </AdminListFilterBar>
@@ -398,12 +400,12 @@ export default function StudentManagement() {
             <div className="py-20 flex flex-col items-center justify-center px-4">
               <EmptyIllustration />
               <h3 className="text-xl font-extrabold text-slate-800 mt-6 mb-2">
-                {hasActiveFilters ? 'No results found' : 'No students yet'}
+                {hasActiveFilters ? t('teacher.studentManagement.noResults') : t('teacher.studentManagement.noStudentsYet')}
               </h3>
               <p className="text-slate-400 text-sm mb-6 max-w-xs text-center">
                 {hasActiveFilters
-                  ? 'Try adjusting your search or filters.'
-                  : 'No students have been added yet.'}
+                  ? t('teacher.studentManagement.adjustSearch')
+                  : t('teacher.studentManagement.noStudentsAdded')}
               </p>
             </div>
           ) : (
@@ -452,22 +454,22 @@ export default function StudentManagement() {
                     </div>
                     <div className="mt-4 space-y-2 text-xs">
                       <div className="flex items-center justify-between gap-2 text-slate-500">
-                        <span className="font-semibold text-slate-400 uppercase tracking-wider">Status</span>
-                        <span className="text-slate-700 font-medium">{student.status === 'active' ? 'Active' : 'Inactive'}</span>
+                        <span className="font-semibold text-slate-400 uppercase tracking-wider">{t('teacher.studentManagement.status')}</span>
+                        <span className="text-slate-700 font-medium">{student.status === 'active' ? t('teacher.studentManagement.active') : t('teacher.studentManagement.inactive')}</span>
                       </div>
                       <div className="flex items-center justify-between gap-2">
-                        <span className="font-semibold text-slate-400 uppercase tracking-wider">Courses</span>
+                        <span className="font-semibold text-slate-400 uppercase tracking-wider">{t('teacher.studentManagement.courses')}</span>
                         {enrolledCount > 0 ? (
                           <span className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-indigo-50 text-indigo-600 text-xs font-semibold rounded-lg">
                             <BookOpen className="w-3 h-3" />
                             {enrolledCount}
                           </span>
                         ) : (
-                          <span className="text-slate-300 italic">None</span>
+                          <span className="text-slate-300 italic">{t('teacher.studentManagement.none')}</span>
                         )}
                       </div>
                       <div className="flex items-center justify-between gap-2 text-slate-500">
-                        <span className="font-semibold text-slate-400 uppercase tracking-wider">Joined</span>
+                        <span className="font-semibold text-slate-400 uppercase tracking-wider">{t('teacher.studentManagement.joined')}</span>
                         <span>{new Date(student.createdAt).toLocaleDateString()}</span>
                       </div>
                     </div>

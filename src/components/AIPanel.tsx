@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Sparkles, X, Send, Loader2, AlertCircle, Paperclip, Image as ImageIcon } from 'lucide-react';
 
 export interface AIPanelAttachment {
@@ -31,25 +32,26 @@ const DEFAULT_TEXT_FILE_TYPES = '.txt,.md,.srt,.vtt,.json,.csv,text/plain,text/v
 const DEFAULT_IMAGE_TYPES = 'image/*';
 
 export function AIPanel({
-  placeholder = 'Describe what you want to create...',
-  label = 'AI Assistant',
+  placeholder = '',
+  label = '',
   description,
-  buttonLabel = 'Generate',
-  loadingLabel = 'Generating...',
+  buttonLabel = '',
+  loadingLabel = '',
   onSubmit,
   open,
   onClose,
   allowTextFileUpload = false,
   acceptedTextFileTypes = DEFAULT_TEXT_FILE_TYPES,
-  fileUploadLabel = 'Attach transcript/text file',
-  fileUploadHint = 'Supported: .txt, .md, .srt, .vtt, .json, .csv',
+  fileUploadLabel = '',
+  fileUploadHint = '',
   maxTextFileChars = 20000,
   allowImageUpload = false,
   acceptedImageTypes = DEFAULT_IMAGE_TYPES,
-  imageUploadLabel = 'Attach image or screenshot',
-  imageUploadHint = 'Supported: JPG, PNG, WEBP, GIF, BMP, TIFF',
+  imageUploadLabel = '',
+  imageUploadHint = '',
   maxImageFiles = 4,
 }: AIPanelProps) {
+  const { t } = useTranslation();
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -76,7 +78,7 @@ export function AIPanel({
       const raw = await file.text();
       const cleaned = raw.replace(/\r/g, '\n').replace(/\u0000/g, '').trim();
       if (!cleaned) {
-        setError('The uploaded file is empty. Please upload a file with transcript/text content.');
+        setError(t('aiPanel.fileEmpty'));
         return;
       }
 
@@ -89,7 +91,7 @@ export function AIPanel({
       );
       setError(null);
     } catch {
-      setError('Could not read this file. Please upload a plain text or transcript file.');
+      setError(t('aiPanel.fileReadError'));
     }
   };
 
@@ -100,7 +102,7 @@ export function AIPanel({
 
     const validImages = picked.filter((file) => file.type.startsWith('image/'));
     if (!validImages.length) {
-      setError('Please upload an image file such as JPG or PNG.');
+      setError(t('aiPanel.imageError'));
       return;
     }
 
@@ -122,7 +124,7 @@ export function AIPanel({
       setAttachedImages([]);
       onClose();
     } catch (e: any) {
-      setError(e?.message || 'Something went wrong. Check your AI key/configuration.');
+      setError(e?.message || t('aiPanel.errorGeneral') || 'Something went wrong. Check your AI key/configuration.');
     } finally {
       setLoading(false);
     }
@@ -146,7 +148,7 @@ export function AIPanel({
               <Sparkles className="w-4 h-4 text-white" />
             </div>
             <div>
-              <div className="text-sm font-bold text-white">{label}</div>
+              <div className="text-sm font-bold text-white">{label || t('aiPanel.assistant')}</div>
               {description && <div className="text-[11px] text-slate-500 mt-0.5">{description}</div>}
             </div>
           </div>
@@ -167,7 +169,7 @@ export function AIPanel({
             onKeyDown={(e) => {
               if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) handleSubmit();
             }}
-            placeholder={placeholder}
+            placeholder={placeholder || t('aiPanel.placeholder')}
             rows={6}
             disabled={loading}
             className="w-full rounded-xl px-4 py-3 text-sm text-white placeholder:text-slate-600 bg-white/[0.05] border border-white/[0.08] focus:outline-none focus:border-violet-500/50 focus:bg-violet-500/5 transition-all resize-none leading-relaxed disabled:opacity-50"
@@ -178,7 +180,7 @@ export function AIPanel({
               <label className="flex items-center justify-between gap-3 cursor-pointer">
                 <span className="inline-flex items-center gap-2 text-xs font-semibold text-slate-200">
                   <Paperclip className="w-3.5 h-3.5 text-violet-400" />
-                  {fileUploadLabel}
+                  {fileUploadLabel || t('aiPanel.attachTranscript')}
                 </span>
                 <input
                   type="file"
@@ -188,11 +190,11 @@ export function AIPanel({
                   disabled={loading}
                 />
                 <span className="text-[11px] font-semibold text-violet-300 px-2.5 py-1 rounded-lg bg-violet-500/10 border border-violet-500/20">
-                  Upload
+                  {t('aiPanel.upload')}
                 </span>
               </label>
-              <p className="text-[11px] text-slate-500 mt-2">{fileUploadHint}</p>
-              {attachedFile && <p className="text-[11px] text-emerald-300 mt-1.5">Attached: {attachedFile}</p>}
+              <p className="text-[11px] text-slate-500 mt-2">{fileUploadHint || t('aiPanel.attachTranscriptHint')}</p>
+              {attachedFile && <p className="text-[11px] text-emerald-300 mt-1.5">{t('aiPanel.attached', { file: attachedFile })}</p>}
             </div>
           )}
 
@@ -201,7 +203,7 @@ export function AIPanel({
               <div className="flex items-center justify-between gap-3">
                 <label className="flex items-center gap-2 text-xs font-semibold text-slate-200 cursor-pointer">
                   <ImageIcon className="w-3.5 h-3.5 text-violet-400" />
-                  {imageUploadLabel}
+                  {imageUploadLabel || t('aiPanel.attachImage')}
                   <input
                     type="file"
                     accept={acceptedImageTypes}
@@ -219,11 +221,11 @@ export function AIPanel({
                       disabled={loading}
                       className="text-[11px] font-semibold text-slate-400 hover:text-slate-200 transition-colors"
                     >
-                      Clear
+                      {t('aiPanel.clear')}
                     </button>
                   )}
                   <label className="text-[11px] font-semibold text-violet-300 px-2.5 py-1 rounded-lg bg-violet-500/10 border border-violet-500/20 cursor-pointer">
-                    Upload
+                    {t('aiPanel.upload')}
                     <input
                       type="file"
                       accept={acceptedImageTypes}
@@ -235,10 +237,10 @@ export function AIPanel({
                   </label>
                 </div>
               </div>
-              <p className="text-[11px] text-slate-500 mt-2">{imageUploadHint}</p>
+              <p className="text-[11px] text-slate-500 mt-2">{imageUploadHint || t('aiPanel.attachImageHint')}</p>
               {attachedImages.length > 0 && (
                 <p className="text-[11px] text-emerald-300 mt-1.5">
-                  Attached images: {attachedImages.map((file) => file.name).join(', ')}
+                  {t('aiPanel.attachedImages', { files: attachedImages.map((file) => file.name).join(', ') })}
                 </p>
               )}
             </div>
@@ -252,14 +254,14 @@ export function AIPanel({
           )}
 
           <div className="flex items-center justify-between gap-3">
-            <span className="text-[11px] text-slate-600">Ctrl/Cmd + Enter to generate</span>
+            <span className="text-[11px] text-slate-600">{t('aiPanel.shortcut')}</span>
             <div className="flex items-center gap-2">
               <button
                 onClick={onClose}
                 disabled={loading}
                 className="px-4 py-2 rounded-xl text-xs font-semibold text-slate-500 hover:text-slate-300 hover:bg-white/6 transition-all disabled:opacity-40"
               >
-                Cancel
+                {t('aiPanel.cancel')}
               </button>
               <button
                 onClick={handleSubmit}
@@ -268,11 +270,11 @@ export function AIPanel({
               >
                 {loading ? (
                   <>
-                    <Loader2 className="w-3.5 h-3.5 animate-spin" /> {loadingLabel}
+                    <Loader2 className="w-3.5 h-3.5 animate-spin" /> {loadingLabel || t('aiPanel.generating')}
                   </>
                 ) : (
                   <>
-                    <Send className="w-3.5 h-3.5" /> {buttonLabel}
+                    <Send className="w-3.5 h-3.5" /> {buttonLabel || t('aiPanel.generate')}
                   </>
                 )}
               </button>

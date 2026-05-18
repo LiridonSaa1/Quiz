@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { supabase } from '../../supabase';
 import { UserProfile } from '../../types';
 import { Users, UserPlus, Search, UserCheck, UserX, BookOpen, X, Pencil, Trash2, PartyPopper } from 'lucide-react';
@@ -53,13 +54,14 @@ const getAvatarColor = (name: string) => {
 };
 
 const STAT_CONFIG = [
-  { label: 'Total Students', gradient: 'from-indigo-500 to-indigo-600', shadow: 'shadow-indigo-500/25', icon: Users },
-  { label: 'Active', gradient: 'from-emerald-500 to-emerald-600', shadow: 'shadow-emerald-500/25', icon: UserCheck },
-  { label: 'Inactive', gradient: 'from-amber-500 to-amber-600', shadow: 'shadow-amber-500/25', icon: UserX },
-  { label: 'With enrollments', gradient: 'from-violet-500 to-violet-600', shadow: 'shadow-violet-500/25', icon: BookOpen },
+  { labelKey: 'dashboard.totalStudents', gradient: 'from-indigo-500 to-indigo-600', shadow: 'shadow-indigo-500/25', icon: Users },
+  { labelKey: 'common.active', gradient: 'from-emerald-500 to-emerald-600', shadow: 'shadow-emerald-500/25', icon: UserCheck },
+  { labelKey: 'common.inactive', gradient: 'from-amber-500 to-amber-600', shadow: 'shadow-amber-500/25', icon: UserX },
+  { labelKey: 'dashboard.withEnrollments', gradient: 'from-violet-500 to-violet-600', shadow: 'shadow-violet-500/25', icon: BookOpen },
 ];
 
 export default function AdminStudents() {
+  const { t } = useTranslation();
   const [students, setStudents] = useState<StudentWithMeta[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
@@ -77,7 +79,7 @@ export default function AdminStudents() {
       setStudents(json.students);
       setTeacherOptions(json.teacherOptions);
     } catch {
-      toast.error('Failed to load students');
+      toast.error(t('errors.loadFailed'));
     } finally {
       setLoading(false);
     }
@@ -90,15 +92,15 @@ export default function AdminStudents() {
     try {
       const { error } = await supabase.from('profiles').update({ status: newStatus }).eq('id', student.uid);
       if (error) throw error;
-      toast.success(`Student ${newStatus === 'active' ? 'activated' : 'deactivated'}`);
+      toast.success(newStatus === 'active' ? t('students.studentEnabled') : t('students.studentDisabled'));
       fetchData();
-    } catch { toast.error('Failed to update status'); }
+    } catch { toast.error(t('errors.saveFailed')); }
   };
 
   const editStudent = async (student: StudentWithMeta) => {
-    const displayName = window.prompt('Student name', student.displayName || '');
+    const displayName = window.prompt(t('dashboard.studentNamePrompt'), student.displayName || '');
     if (displayName === null) return;
-    const email = window.prompt('Student email', student.email || '');
+    const email = window.prompt(t('dashboard.studentEmailPrompt'), student.email || '');
     if (email === null) return;
     try {
       const res = await authFetch(apiUrl(`/api/admin/students/${encodeURIComponent(student.uid)}`), {
@@ -106,11 +108,11 @@ export default function AdminStudents() {
         body: JSON.stringify({ display_name: displayName, email }),
       });
       const json = await res.json().catch(() => ({}));
-      if (!res.ok || !json?.success) throw new Error(json?.error || 'Failed to update student');
-      toast.success('Student updated');
+      if (!res.ok || !json?.success) throw new Error(json?.error || t('errors.saveFailed'));
+      toast.success(t('dashboard.studentUpdated'));
       fetchData();
     } catch (e: any) {
-      toast.error(e?.message || 'Failed to update student');
+      toast.error(e?.message || t('errors.saveFailed'));
     }
   };
 
@@ -118,41 +120,41 @@ export default function AdminStudents() {
     try {
       const res = await authFetch(apiUrl(`/api/admin/reset-welcome/${encodeURIComponent(student.uid)}`), { method: 'POST' });
       const json = await res.json().catch(() => ({}));
-      if (!res.ok || !json?.success) throw new Error(json?.error || 'Failed');
+      if (!res.ok || !json?.success) throw new Error(json?.error || t('errors.saveFailed'));
       // Also clear localStorage so the browser shows celebration on next login
       try { localStorage.removeItem(`quizmaster_welcomed_v1_${student.uid}`); } catch {}
-      toast.success(`Welcome celebration reset for ${student.displayName || student.email}`);
+      toast.success(t('dashboard.resetWelcomeSuccess', { name: student.displayName || student.email }));
     } catch (e: any) {
-      toast.error(e?.message || 'Failed to reset welcome');
+      toast.error(e?.message || t('errors.saveFailed'));
     }
   };
 
   const resetAllWelcome = async () => {
-    if (!window.confirm('Reset welcome celebration for ALL students? They will see the celebration on their next login.')) return;
+    if (!window.confirm(t('dashboard.resetAllWelcomeConfirm'))) return;
     try {
       const res = await authFetch(apiUrl('/api/admin/reset-all-welcome'), { method: 'POST' });
       const json = await res.json().catch(() => ({}));
-      if (!res.ok || !json?.success) throw new Error(json?.error || 'Failed');
+      if (!res.ok || !json?.success) throw new Error(json?.error || t('errors.saveFailed'));
       // Clear localStorage for all known students
       students.forEach(s => {
         try { localStorage.removeItem(`quizmaster_welcomed_v1_${s.uid}`); } catch {}
       });
-      toast.success(`Welcome celebration reset for ${json.count} student${json.count !== 1 ? 's' : ''}`);
+      toast.success(t('dashboard.resetAllWelcomeSuccess', { count: json.count }));
     } catch (e: any) {
-      toast.error(e?.message || 'Failed to reset welcome flags');
+      toast.error(e?.message || t('errors.saveFailed'));
     }
   };
 
   const deleteStudent = async (student: StudentWithMeta) => {
-    if (!window.confirm(`Delete student "${student.displayName || student.email}"?`)) return;
+    if (!window.confirm(t('dashboard.deleteStudentConfirm', { name: student.displayName || student.email }))) return;
     try {
       const res = await authFetch(apiUrl(`/api/admin/students/${encodeURIComponent(student.uid)}`), { method: 'DELETE' });
       const json = await res.json().catch(() => ({}));
-      if (!res.ok || !json?.success) throw new Error(json?.error || 'Failed to delete student');
-      toast.success('Student deleted');
+      if (!res.ok || !json?.success) throw new Error(json?.error || t('errors.deleteFailed'));
+      toast.success(t('success.deleted'));
       fetchData();
     } catch (e: any) {
-      toast.error(e?.message || 'Failed to delete student');
+      toast.error(e?.message || t('errors.deleteFailed'));
     }
   };
 
@@ -167,10 +169,10 @@ export default function AdminStudents() {
   });
 
   const stats = [
-    { ...STAT_CONFIG[0], value: students.length },
-    { ...STAT_CONFIG[1], value: students.filter(s => s.status === 'active').length },
-    { ...STAT_CONFIG[2], value: students.filter(s => s.status !== 'active').length },
-    { ...STAT_CONFIG[3], value: students.filter(s => s.enrolledCourseCount > 0).length },
+    { ...STAT_CONFIG[0], label: t(STAT_CONFIG[0].labelKey), value: students.length },
+    { ...STAT_CONFIG[1], label: t(STAT_CONFIG[1].labelKey), value: students.filter(s => s.status === 'active').length },
+    { ...STAT_CONFIG[2], label: t(STAT_CONFIG[2].labelKey), value: students.filter(s => s.status !== 'active').length },
+    { ...STAT_CONFIG[3], label: t(STAT_CONFIG[3].labelKey), value: students.filter(s => s.enrolledCourseCount > 0).length },
   ];
 
   const hasActiveFilters = search || statusFilter !== 'all' || teacherFilter !== 'all';
@@ -178,9 +180,9 @@ export default function AdminStudents() {
   return (
     <AdminLayout>
       <AdminListPageShell
-        breadcrumbLabel="Students"
-        title="Students"
-        description="Platform-wide view of all student accounts and enrollments."
+        breadcrumbLabel={t('nav.students')}
+        title={t('nav.students')}
+        description={t('dashboard.platformWideStudents')}
         action={
           <div className="flex items-center gap-2">
           <motion.button
@@ -188,12 +190,12 @@ export default function AdminStudents() {
             onClick={resetAllWelcome}
             whileHover={{ scale: 1.04, y: -2 }}
             whileTap={{ scale: 0.97 }}
-            title="Reset welcome celebration for all students"
+            title={t('dashboard.resetAllWelcome')}
             className="inline-flex items-center gap-2 px-4 py-3 rounded-2xl font-bold text-sm shrink-0 transition-all border border-violet-200 text-violet-600 bg-white hover:bg-violet-50"
             style={{ boxShadow: '0 2px 8px rgba(139,92,246,0.12)' }}
           >
             <PartyPopper className="w-4 h-4" />
-            Reset All Welcome
+            {t('dashboard.resetAllWelcome')}
           </motion.button>
           <motion.button
             type="button"
@@ -207,7 +209,7 @@ export default function AdminStudents() {
             }}
           >
             <UserPlus className="w-4 h-4" />
-            Add Student
+            {t('students.addStudent')}
           </motion.button>
           </div>
         }
@@ -218,20 +220,20 @@ export default function AdminStudents() {
               <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-indigo-400" />
               <input
                 type="text"
-                placeholder="Search by name, email or teacher..."
+                placeholder={t('dashboard.searchStudents')}
                 value={search}
                 onChange={e => setSearch(e.target.value)}
                 className={ADMIN_LIST_SEARCH_INPUT}
               />
             </div>
             <select value={statusFilter} onChange={e => setStatusFilter(e.target.value)} className={ADMIN_LIST_SELECT}>
-              <option value="all">All statuses</option>
-              <option value="active">Active</option>
-              <option value="inactive">Inactive</option>
+              <option value="all">{t('dashboard.allStatuses')}</option>
+              <option value="active">{t('common.active')}</option>
+              <option value="inactive">{t('common.inactive')}</option>
             </select>
             {teacherOptions.length > 0 && (
               <select value={teacherFilter} onChange={e => setTeacherFilter(e.target.value)} className={ADMIN_LIST_SELECT}>
-                <option value="all">All Teachers</option>
+                <option value="all">{t('dashboard.allTeachers')}</option>
                 {teacherOptions.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
               </select>
             )}
@@ -241,7 +243,7 @@ export default function AdminStudents() {
                 onClick={() => { setSearch(''); setStatusFilter('all'); setTeacherFilter('all'); }}
                 className="flex items-center gap-1.5 px-3 py-2 rounded-full text-xs font-semibold text-slate-500 hover:text-slate-800 hover:bg-slate-100 transition-all"
               >
-                <X className="w-3.5 h-3.5" /> Clear
+                <X className="w-3.5 h-3.5" /> {t('dashboard.clearFilters')}
               </button>
             )}
           </AdminListFilterBar>
@@ -258,12 +260,12 @@ export default function AdminStudents() {
                 <div className="py-20 flex flex-col items-center justify-center px-4">
                   <EmptyIllustration />
                   <h3 className="text-xl font-extrabold text-slate-800 mt-6 mb-2">
-                    {hasActiveFilters ? 'No results found' : 'No students yet'}
+                    {hasActiveFilters ? t('common.noResults') : t('dashboard.noStudentsYet')}
                   </h3>
                   <p className="text-slate-400 text-sm mb-6 max-w-xs text-center">
                     {hasActiveFilters
-                      ? 'Try adjusting your search or filters.'
-                      : 'No students have been added yet.'}
+                      ? t('dashboard.adjustSearch')
+                      : t('dashboard.noStudentsAdded')}
                   </p>
                 </div>
               ) : (
@@ -280,7 +282,7 @@ export default function AdminStudents() {
                           <button
                             type="button"
                             onClick={() => resetWelcome(student)}
-                            title="Reset welcome celebration"
+                            title={t('students.resetWelcome')}
                             className="p-2 rounded-lg text-slate-400 hover:text-violet-600 hover:bg-violet-50 transition-all"
                           >
                             <PartyPopper className="w-4 h-4" />
@@ -288,7 +290,7 @@ export default function AdminStudents() {
                           <button
                             type="button"
                             onClick={() => editStudent(student)}
-                            title="Edit"
+                            title={t('common.edit')}
                             className="p-2 rounded-lg text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 transition-all"
                           >
                             <Pencil className="w-4 h-4" />
@@ -296,7 +298,7 @@ export default function AdminStudents() {
                           <button
                             type="button"
                             onClick={() => toggleStatus(student)}
-                            title={student.status === 'active' ? 'Deactivate' : 'Activate'}
+                            title={student.status === 'active' ? t('common.disable') : t('common.enable')}
                             className={cn(
                               'p-2 rounded-lg transition-all',
                               student.status === 'active'
@@ -309,7 +311,7 @@ export default function AdminStudents() {
                           <button
                             type="button"
                             onClick={() => deleteStudent(student)}
-                            title="Delete"
+                            title={t('common.delete')}
                             className="p-2 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 transition-all"
                           >
                             <Trash2 className="w-4 h-4" />
@@ -318,22 +320,22 @@ export default function AdminStudents() {
                       </div>
                       <div className="mt-4 space-y-2 text-xs">
                         <div className="flex items-center justify-between gap-2 text-slate-500">
-                          <span className="font-semibold text-slate-400 uppercase tracking-wider">Teacher</span>
+                          <span className="font-semibold text-slate-400 uppercase tracking-wider">{t('dashboard.tableHeaders.teacher')}</span>
                           <span className="text-slate-700 truncate text-right">{student.teacherName}</span>
                         </div>
                         <div className="flex items-center justify-between gap-2">
-                          <span className="font-semibold text-slate-400 uppercase tracking-wider">Courses</span>
+                          <span className="font-semibold text-slate-400 uppercase tracking-wider">{t('courses.title')}</span>
                           {student.enrolledCourseCount > 0 ? (
                             <span className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-indigo-50 text-indigo-600 text-xs font-semibold rounded-lg">
                               <BookOpen className="w-3 h-3" />
                               {student.enrolledCourseCount}
                             </span>
                           ) : (
-                            <span className="text-slate-300 italic">None</span>
+                            <span className="text-slate-300 italic">{t('dashboard.none')}</span>
                           )}
                         </div>
                         <div className="flex items-center justify-between gap-2 text-slate-500">
-                          <span className="font-semibold text-slate-400 uppercase tracking-wider">Joined</span>
+                          <span className="font-semibold text-slate-400 uppercase tracking-wider">{t('common.joinedDate')}</span>
                           <span>{new Date(student.createdAt).toLocaleDateString()}</span>
                         </div>
                       </div>

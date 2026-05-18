@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import AdminLayout from '../../components/layout/AdminLayout';
 import { toast } from 'sonner';
 import { format } from 'date-fns';
+import { useTranslation } from 'react-i18next';
 import {
   GraduationCap, BookOpen, FileText, Download,
   Search, RefreshCw, ChevronUp, ChevronDown,
@@ -54,6 +55,7 @@ const ScoreBadge = ({ value }: { value: number | null }) => {
 };
 
 export default function AdminReports() {
+  const { t } = useTranslation();
   const [reportType, setReportType] = useState<ReportType>('students');
   const [studentData, setStudentData] = useState<StudentRow[]>([]);
   const [courseData, setCourseData] = useState<CourseRow[]>([]);
@@ -78,7 +80,7 @@ export default function AdminReports() {
       if (type === 'courses') setCourseData(json.report);
       if (type === 'quizzes') setQuizData(json.report);
       if (type === 'roles') setRoleData(json.report);
-    } catch (e: any) { toast.error(e.message || 'Failed to load report'); }
+    } catch (e: any) { toast.error(e.message || t('errors.loadFailed')); }
     finally { setLoading(false); }
   };
 
@@ -155,7 +157,7 @@ export default function AdminReports() {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a'); a.href = url; a.download = filename; a.click();
     URL.revokeObjectURL(url);
-    toast.success(`${filename} downloaded`);
+    toast.success(t('success.downloaded', { filename }));
   };
 
   const students = sortAndFilter<StudentRow>(studentData, ['name', 'email']);
@@ -169,17 +171,17 @@ export default function AdminReports() {
         {/* Header */}
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
           <div>
-            <h1 className="text-2xl font-bold text-slate-900">Reports</h1>
-            <p className="text-slate-500 text-sm mt-0.5">Detailed data exports and performance breakdowns</p>
+            <h1 className="text-2xl font-bold text-slate-900">{t('analytics.reports')}</h1>
+            <p className="text-slate-500 text-sm mt-0.5">{t('analytics.detailedDataExports')}</p>
           </div>
           <div className="flex items-center gap-2">
             <button onClick={() => fetchReport(reportType)}
               className="flex items-center gap-2 px-4 py-2 bg-white border border-slate-200 text-slate-600 rounded-xl text-sm font-semibold hover:bg-slate-50 transition-all">
-              <RefreshCw className="w-4 h-4" /> Refresh
+              <RefreshCw className="w-4 h-4" /> {t('common.refresh')}
             </button>
             <button onClick={exportCSV}
               className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-xl text-sm font-semibold hover:bg-indigo-700 transition-all shadow-lg shadow-indigo-200">
-              <Download className="w-4 h-4" /> Export CSV
+              <Download className="w-4 h-4" /> {t('analytics.exportCSV')}
             </button>
           </div>
         </div>
@@ -188,6 +190,12 @@ export default function AdminReports() {
         <div className="flex gap-2 flex-wrap">
           {REPORT_TABS.map(tab => {
             const Icon = tab.icon;
+            const labels: Record<string, string> = {
+              students: t('analytics.tabs.studentPerformance'),
+              courses: t('analytics.tabs.courseOverview'),
+              quizzes: t('analytics.tabs.quizStatistics'),
+              roles: t('analytics.tabs.roleBreakdown')
+            };
             return (
               <button key={tab.id} onClick={() => setReportType(tab.id)}
                 className={cn(
@@ -197,7 +205,7 @@ export default function AdminReports() {
                     : 'bg-white text-slate-600 border-slate-200 hover:border-indigo-300 hover:text-indigo-600'
                 )}>
                 <Icon className="w-4 h-4" />
-                {tab.label}
+                {labels[tab.id]}
               </button>
             );
           })}
@@ -210,7 +218,7 @@ export default function AdminReports() {
             <div className="relative max-w-sm">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
               <input value={search} onChange={e => setSearch(e.target.value)}
-                placeholder={reportType === 'students' ? 'Search by name or email…' : reportType === 'courses' ? 'Search by title or category…' : 'Search by quiz title…'}
+                placeholder={reportType === 'students' ? t('analytics.placeholders.searchStudents') : reportType === 'courses' ? t('analytics.placeholders.searchCourses') : t('analytics.placeholders.searchQuizzes')}
                 className="w-full pl-9 pr-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500" />
             </div>
           </div>
@@ -226,20 +234,20 @@ export default function AdminReports() {
                   {students.length === 0 ? (
                     <div className="flex flex-col items-center justify-center h-48 text-slate-400">
                       <GraduationCap className="w-10 h-10 mb-2 opacity-40" />
-                      <p className="font-medium">No students found</p>
+                      <p className="font-medium">{t('analytics.noResults.students')}</p>
                     </div>
                   ) : (
                     <table className="w-full text-sm">
                       <thead>
                         <tr className="bg-slate-50/70 border-b border-slate-100">
-                          <TH label="Student" col="name" />
-                          <TH label="Status" />
-                          <TH label="Joined" col="joinedAt" />
-                          <TH label="Courses" col="enrolledCourses" />
-                          <TH label="Attempts" col="totalAttempts" />
-                          <TH label="Completed" col="completedQuizzes" />
-                          <TH label="Avg Score" col="avgScore" />
-                          <TH label="Certs" col="certificates" />
+                          <TH label={t('analytics.table.student')} col="name" />
+                          <TH label={t('analytics.table.status')} />
+                          <TH label={t('analytics.table.joined')} col="joinedAt" />
+                          <TH label={t('analytics.table.courses')} col="enrolledCourses" />
+                          <TH label={t('analytics.table.attempts')} col="totalAttempts" />
+                          <TH label={t('analytics.table.completed')} col="completedQuizzes" />
+                          <TH label={t('analytics.table.avgScore')} col="avgScore" />
+                          <TH label={t('analytics.table.certs')} col="certificates" />
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-slate-50">
@@ -284,20 +292,20 @@ export default function AdminReports() {
                   {courses.length === 0 ? (
                     <div className="flex flex-col items-center justify-center h-48 text-slate-400">
                       <BookOpen className="w-10 h-10 mb-2 opacity-40" />
-                      <p className="font-medium">No courses found</p>
+                      <p className="font-medium">{t('analytics.noResults.courses')}</p>
                     </div>
                   ) : (
                     <table className="w-full text-sm">
                       <thead>
                         <tr className="bg-slate-50/70 border-b border-slate-100">
-                          <TH label="Course" col="title" />
-                          <TH label="Category" col="category" />
-                          <TH label="Level" col="level" />
-                          <TH label="Status" col="status" />
-                          <TH label="Created" col="createdAt" />
-                          <TH label="Students" col="enrolledStudents" />
-                          <TH label="Lessons" col="totalLessons" />
-                          <TH label="Certificates" col="certificatesIssued" />
+                          <TH label={t('analytics.table.course')} col="title" />
+                          <TH label={t('analytics.table.category')} col="category" />
+                          <TH label={t('analytics.table.level')} col="level" />
+                          <TH label={t('analytics.table.status')} col="status" />
+                          <TH label={t('analytics.table.created')} col="createdAt" />
+                          <TH label={t('analytics.table.students')} col="enrolledStudents" />
+                          <TH label={t('analytics.table.lessons')} col="totalLessons" />
+                          <TH label={t('analytics.table.certificates')} col="certificatesIssued" />
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-slate-50">
@@ -347,20 +355,20 @@ export default function AdminReports() {
                   {quizzes.length === 0 ? (
                     <div className="flex flex-col items-center justify-center h-48 text-slate-400">
                       <FileText className="w-10 h-10 mb-2 opacity-40" />
-                      <p className="font-medium">No quizzes found</p>
+                      <p className="font-medium">{t('analytics.noResults.quizzes')}</p>
                     </div>
                   ) : (
                     <table className="w-full text-sm">
                       <thead>
                         <tr className="bg-slate-50/70 border-b border-slate-100">
-                          <TH label="Quiz" col="title" />
-                          <TH label="Status" col="published" />
-                          <TH label="Passing Score" col="passingScore" />
-                          <TH label="Attempts" col="totalAttempts" />
-                          <TH label="Completed" col="completedAttempts" />
-                          <TH label="Pass Rate" col="passRate" />
-                          <TH label="Avg Score" col="avgScore" />
-                          <TH label="Students" col="uniqueStudents" />
+                          <TH label={t('analytics.table.quiz')} col="title" />
+                          <TH label={t('analytics.table.status')} col="published" />
+                          <TH label={t('analytics.table.passingScore')} col="passingScore" />
+                          <TH label={t('analytics.table.attempts')} col="totalAttempts" />
+                          <TH label={t('analytics.table.completed')} col="completedAttempts" />
+                          <TH label={t('analytics.table.passRate')} col="passRate" />
+                          <TH label={t('analytics.table.avgScore')} col="avgScore" />
+                          <TH label={t('analytics.table.students')} col="uniqueStudents" />
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-slate-50">
@@ -373,11 +381,11 @@ export default function AdminReports() {
                             <td className="px-4 py-3.5">
                               {q.published ? (
                                 <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-emerald-50 text-emerald-700 rounded-full text-xs font-bold">
-                                  <CheckCircle2 className="w-3 h-3" /> Published
+                                  <CheckCircle2 className="w-3 h-3" /> {t('common.published')}
                                 </span>
                               ) : (
                                 <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-slate-100 text-slate-500 rounded-full text-xs font-bold">
-                                  <Clock className="w-3 h-3" /> Draft
+                                  <Clock className="w-3 h-3" /> {t('common.draft')}
                                 </span>
                               )}
                             </td>
@@ -415,20 +423,20 @@ export default function AdminReports() {
                   {roles.length === 0 ? (
                     <div className="flex flex-col items-center justify-center h-48 text-slate-400">
                       <Crown className="w-10 h-10 mb-2 opacity-40" />
-                      <p className="font-medium">No role data found</p>
+                      <p className="font-medium">{t('analytics.noResults.roles')}</p>
                     </div>
                   ) : (
                     <table className="w-full text-sm">
                       <thead>
                         <tr className="bg-slate-50/70 border-b border-slate-100">
-                          <TH label="Role" col="role" />
-                          <TH label="Users" col="users" />
-                          <TH label="Active" col="activeUsers" />
-                          <TH label="New (30d)" col="newUsers30d" />
-                          <TH label="Courses" col="coursesCreated" />
-                          <TH label="Quizzes" col="quizzesCreated" />
-                          <TH label="Attempts" col="attempts" />
-                          <TH label="Certificates" col="certificates" />
+                          <TH label={t('analytics.table.role')} col="role" />
+                          <TH label={t('analytics.table.users')} col="users" />
+                          <TH label={t('analytics.table.active')} col="activeUsers" />
+                          <TH label={t('analytics.table.new30d')} col="newUsers30d" />
+                          <TH label={t('analytics.table.courses')} col="coursesCreated" />
+                          <TH label={t('analytics.table.quizzes')} col="quizzesCreated" />
+                          <TH label={t('analytics.table.attempts')} col="attempts" />
+                          <TH label={t('analytics.table.certificates')} col="certificates" />
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-slate-50">

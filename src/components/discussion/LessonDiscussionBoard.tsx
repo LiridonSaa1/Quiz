@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { toast } from 'sonner';
 import { MessageSquare, Pin, Search, ThumbsUp, Database, RefreshCw, Clock, User } from 'lucide-react';
 import { formatDistanceToNow } from 'date-fns';
@@ -24,6 +25,7 @@ type LocalDiscussionStore = {
 };
 
 function DiscussionSetupBanner({ onRetry }: { onRetry: () => void }) {
+  const { t } = useTranslation();
   const [retrying, setRetrying] = useState(false);
   const handleRetry = async () => {
     setRetrying(true);
@@ -36,9 +38,9 @@ function DiscussionSetupBanner({ onRetry }: { onRetry: () => void }) {
       <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-slate-100">
         <Database className="h-7 w-7 text-slate-400" />
       </div>
-      <p className="text-base font-bold text-slate-700">Discussions are being set up</p>
+      <p className="text-base font-bold text-slate-700">{t('discussion.settingUp')}</p>
       <p className="mt-1 text-sm text-slate-500 max-w-sm mx-auto">
-        The discussion tables are being installed. This only takes a moment — please refresh and try again.
+        {t('discussion.setupMessage')}
       </p>
       <button
         type="button"
@@ -47,9 +49,9 @@ function DiscussionSetupBanner({ onRetry }: { onRetry: () => void }) {
         className="mt-4 inline-flex items-center gap-2 rounded-xl bg-indigo-600 px-5 py-2.5 text-sm font-semibold text-white shadow hover:bg-indigo-700 disabled:opacity-60 transition"
       >
         <RefreshCw className={`h-4 w-4 ${retrying ? 'animate-spin' : ''}`} />
-        {retrying ? 'Checking…' : 'Try Again'}
+        {retrying ? t('discussion.checking') : t('discussion.tryAgain')}
       </button>
-      <p className="mt-3 text-xs text-slate-400">Your locally saved posts are still here and will sync when ready.</p>
+      <p className="mt-3 text-xs text-slate-400">{t('discussion.localSavedPosts')}</p>
     </div>
   );
 }
@@ -61,6 +63,7 @@ type Props = {
 };
 
 export default function LessonDiscussionBoard({ lessonId, canModerate = false, title = 'Lesson Discussion' }: Props) {
+  const { t } = useTranslation();
   const [loading, setLoading] = useState(true);
   const [discussionDisabled, setDiscussionDisabled] = useState(false);
   const [questions, setQuestions] = useState<QuestionRow[]>([]);
@@ -240,8 +243,8 @@ export default function LessonDiscussionBoard({ lessonId, canModerate = false, t
       <div className="flex items-center justify-between gap-3">
         <h2 className="text-lg font-black text-slate-900">{title}</h2>
         <div className="text-right">
-          <div className="text-xs text-slate-400">{questions.length} questions</div>
-          {myStats ? <div className="text-xs text-indigo-600 font-semibold">Reputation: {myStats.reputation || 0}</div> : null}
+          <div className="text-xs text-slate-400">{t('discussion.questionsCount', { count: questions.length })}</div>
+          {myStats ? <div className="text-xs text-indigo-600 font-semibold">{t('discussion.reputation', { count: myStats.reputation || 0 })}</div> : null}
         </div>
       </div>
       {myBadges.length > 0 ? (
@@ -261,15 +264,15 @@ export default function LessonDiscussionBoard({ lessonId, canModerate = false, t
         <div className="space-y-3">
           <div className="relative">
             <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
-            <input value={q} onChange={(e) => setQ(e.target.value)} className="w-full rounded-xl border border-slate-200 pl-9 pr-3 py-2 text-sm" placeholder="Search questions" />
+            <input value={q} onChange={(e) => setQ(e.target.value)} className="w-full rounded-xl border border-slate-200 pl-9 pr-3 py-2 text-sm" placeholder={t('discussion.searchPlaceholder')} />
           </div>
           <select value={sort} onChange={(e) => setSort(e.target.value as any)} className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm">
-            <option value="recent">Most recent</option>
-            <option value="helpful">Most helpful</option>
-            <option value="unanswered">Unanswered</option>
+            <option value="recent">{t('discussion.sortRecent')}</option>
+            <option value="helpful">{t('discussion.sortHelpful')}</option>
+            <option value="unanswered">{t('discussion.sortUnanswered')}</option>
           </select>
           <div className="space-y-2 max-h-[440px] overflow-auto pr-1">
-            {loading ? <p className="text-sm text-slate-400">Loading questions...</p> : null}
+            {loading ? <p className="text-sm text-slate-400">{t('discussion.loadingQuestions')}</p> : null}
             {questions.map((row) => (
               <button key={row.id} type="button" onClick={() => setActiveQuestionId(String(row.id))}
                 className={`w-full text-left rounded-xl border px-3 py-2 ${activeQuestionId === String(row.id) ? 'border-indigo-400 bg-indigo-50' : 'border-slate-200 hover:border-indigo-200'}`}>
@@ -279,19 +282,19 @@ export default function LessonDiscussionBoard({ lessonId, canModerate = false, t
                 </div>
                 <p className="text-xs text-slate-500 mt-1 line-clamp-2">{row.body}</p>
                 <div className="text-[11px] text-slate-400 mt-1">
-                  {row.answers_count || 0} answers · {formatDistanceToNow(new Date(row.created_at), { addSuffix: true })}
+                  {t('discussion.answers', { count: row.answers_count || 0 })} · {formatDistanceToNow(new Date(row.created_at), { addSuffix: true })}
                 </div>
               </button>
             ))}
           </div>
-          {hasMore ? <button type="button" onClick={() => void loadQuestions(true)} className="w-full text-sm rounded-xl border border-slate-200 py-2 hover:bg-slate-50">Load more</button> : null}
+          {hasMore ? <button type="button" onClick={() => void loadQuestions(true)} className="w-full text-sm rounded-xl border border-slate-200 py-2 hover:bg-slate-50">{t('common.viewAll')}</button> : null}
         </div>
 
         <div className="space-y-4">
           <div className="rounded-2xl border border-slate-200 p-3 space-y-2">
-            <p className="text-sm font-bold text-slate-800">Ask a question</p>
-            <input value={formTitle} onChange={(e) => setFormTitle(e.target.value)} className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" placeholder="Question title" />
-            <textarea value={formBody} onChange={(e) => setFormBody(e.target.value)} className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm min-h-[84px]" placeholder="Describe your question" />
+            <p className="text-sm font-bold text-slate-800">{t('discussion.askQuestion')}</p>
+            <input value={formTitle} onChange={(e) => setFormTitle(e.target.value)} className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" placeholder={t('discussion.questionTitle')} />
+            <textarea value={formBody} onChange={(e) => setFormBody(e.target.value)} className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm min-h-[84px]" placeholder={t('discussion.questionPlaceholder')} />
             <button
               type="button"
               onClick={async () => {
@@ -319,17 +322,17 @@ export default function LessonDiscussionBoard({ lessonId, canModerate = false, t
                   if (discussionDisabled) loadLocalQuestions();
                   else await loadQuestions(false);
                 } catch (e: any) {
-                  toast.error(e.message || 'Failed to create question');
+                  toast.error(e.message || t('discussion.failedToCreate'));
                 }
               }}
               className="rounded-lg bg-indigo-600 text-white text-sm px-3 py-2"
             >
-              Post question
+              {t('discussion.postQuestion')}
             </button>
           </div>
 
           {!activeQuestion ? (
-            <div className="rounded-2xl border border-dashed border-slate-300 p-8 text-sm text-slate-500 text-center">Select a question to view replies.</div>
+            <div className="rounded-2xl border border-dashed border-slate-300 p-8 text-sm text-slate-500 text-center">{t('discussion.selectQuestionToView')}</div>
           ) : (
             <div className="space-y-3">
               <div className="rounded-2xl border border-slate-200 p-4">
@@ -343,11 +346,11 @@ export default function LessonDiscussionBoard({ lessonId, canModerate = false, t
                           await pinQuestion(String(activeQuestion.id), !Boolean(activeQuestion.is_pinned));
                           await loadQuestions(false);
                         } catch (e: any) {
-                          toast.error(e.message || 'Failed to update pin');
+                          toast.error(e.message || t('discussion.failedToUpdate'));
                         }
                       }}
                     >
-                      {activeQuestion.is_pinned ? 'Unpin' : 'Pin'}
+                      {activeQuestion.is_pinned ? t('discussion.unpin') : t('discussion.pin')}
                     </button>
                   ) : null}
                 </div>
@@ -364,7 +367,7 @@ export default function LessonDiscussionBoard({ lessonId, canModerate = false, t
                   )}
                   {activeQuestion.is_pinned && (
                     <span className="inline-flex items-center gap-1 text-xs text-indigo-600 font-medium">
-                      <Pin className="w-3 h-3" /> Pinned
+                      <Pin className="w-3 h-3" /> {t('discussion.pinned')}
                     </span>
                   )}
                 </div>
@@ -372,7 +375,7 @@ export default function LessonDiscussionBoard({ lessonId, canModerate = false, t
               </div>
 
               <div className="rounded-2xl border border-slate-200 p-3 space-y-2">
-                <textarea value={answerBody} onChange={(e) => setAnswerBody(e.target.value)} className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm min-h-[72px]" placeholder="Write an answer" />
+                <textarea value={answerBody} onChange={(e) => setAnswerBody(e.target.value)} className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm min-h-[72px]" placeholder={t('discussion.writeAnswer')} />
                 <button
                   type="button"
                   onClick={async () => {
@@ -407,12 +410,12 @@ export default function LessonDiscussionBoard({ lessonId, canModerate = false, t
                         await loadQuestions(false);
                       }
                     } catch (e: any) {
-                      toast.error(e.message || 'Failed to post answer');
+                      toast.error(e.message || t('discussion.failedToPostAnswer'));
                     }
                   }}
                   className="rounded-lg bg-slate-900 text-white text-sm px-3 py-2"
                 >
-                  Post answer
+                  {t('discussion.postAnswer')}
                 </button>
               </div>
 
@@ -431,12 +434,12 @@ export default function LessonDiscussionBoard({ lessonId, canModerate = false, t
                         </span>
                       )}
                       {answer.is_best && (
-                        <span className="text-xs font-semibold text-emerald-700 bg-emerald-100 px-2 py-0.5 rounded-full">Best answer</span>
+                        <span className="text-xs font-semibold text-emerald-700 bg-emerald-100 px-2 py-0.5 rounded-full">{t('discussion.bestAnswer')}</span>
                       )}
                     </div>
                     <div className="flex items-center gap-2 shrink-0">
                       <button onClick={() => void reactToDiscussion('answer', String(answer.id), 'helpful')} className="text-xs inline-flex items-center gap-1 border border-slate-300 rounded-md px-2 py-1 hover:bg-slate-50">
-                        <ThumbsUp className="w-3 h-3" /> Helpful
+                        <ThumbsUp className="w-3 h-3" /> {t('discussion.helpful')}
                       </button>
                       {canModerate && !answer.is_best ? (
                         <button
@@ -447,11 +450,11 @@ export default function LessonDiscussionBoard({ lessonId, canModerate = false, t
                               await loadThread(String(activeQuestion.id));
                               await loadQuestions(false);
                             } catch (e: any) {
-                              toast.error(e.message || 'Failed to mark best answer');
+                              toast.error(e.message || t('discussion.failedToMarkBest'));
                             }
                           }}
                         >
-                          Mark best
+                          {t('discussion.markBest')}
                         </button>
                       ) : null}
                     </div>
@@ -481,7 +484,7 @@ export default function LessonDiscussionBoard({ lessonId, canModerate = false, t
                         value={replyDrafts[String(answer.id)] || ''}
                         onChange={(e) => setReplyDrafts((prev) => ({ ...prev, [String(answer.id)]: e.target.value }))}
                         className="flex-1 rounded-lg border border-slate-200 px-3 py-2 text-sm"
-                        placeholder="Reply to this answer"
+                        placeholder={t('discussion.replyPlaceholder')}
                       />
                       <button
                         type="button"
@@ -507,7 +510,7 @@ export default function LessonDiscussionBoard({ lessonId, canModerate = false, t
                             if (discussionDisabled) loadLocalThread(String(activeQuestion.id));
                             else await loadThread(String(activeQuestion.id));
                           } catch (e: any) {
-                            toast.error(e.message || 'Failed to post reply');
+                            toast.error(e.message || t('discussion.failedToPostAnswer'));
                           }
                         }}
                       >
@@ -519,9 +522,9 @@ export default function LessonDiscussionBoard({ lessonId, canModerate = false, t
                         onClick={async () => {
                           try {
                             await reportDiscussion('answer', String(answer.id), 'Inappropriate content');
-                            toast.success('Reported');
+                            toast.success(t('common.done'));
                           } catch (e: any) {
-                            toast.error(e.message || 'Failed to report');
+                            toast.error(e.message || t('common.error'));
                           }
                         }}
                       >

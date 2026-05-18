@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { supabase } from '../../supabase';
 import TeacherLayout from '../../components/layout/TeacherLayout';
 import { motion, AnimatePresence, useMotionValue, useSpring, useTransform } from 'motion/react';
@@ -77,6 +78,7 @@ const STAT_CONFIG = [
 ];
 
 export default function Exams() {
+  const { t } = useTranslation();
   const [exams, setExams] = useState<Exam[]>([]);
   const [courses, setCourses] = useState<Course[]>([]);
   const [loading, setLoading] = useState(true);

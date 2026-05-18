@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import TeacherLayout from '../../components/layout/TeacherLayout';
 import { toast } from 'sonner';
 import { motion } from 'motion/react';
@@ -212,6 +213,7 @@ function BrevoStatusBanner() {
 }
 
 export default function TeacherAnnouncements() {
+  const { t } = useTranslation();
   const [announcements, setAnnouncements] = useState<Announcement[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');

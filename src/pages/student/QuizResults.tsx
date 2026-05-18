@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import { supabase } from '../../supabase';
 import StudentLayout from '../../components/layout/StudentLayout';
@@ -35,8 +36,9 @@ const GRADABLE_QUESTION_TYPES = new Set([
 ]);
 
 function ScoreRing({ pct, passed }: { pct: number; passed: boolean }) {
+  const { t } = useTranslation();
   const data = [
-    { name: 'Score', value: pct, fill: passed ? '#10b981' : '#ef4444' },
+    { name: t('common.score'), value: pct, fill: passed ? '#10b981' : '#ef4444' },
     { name: 'Rest', value: 100 - pct, fill: '#f1f5f9' },
   ];
   return (
@@ -56,7 +58,7 @@ function ScoreRing({ pct, passed }: { pct: number; passed: boolean }) {
       <div className="absolute inset-0 flex flex-col items-center justify-center">
         <span className={cn('text-3xl font-black', passed ? 'text-emerald-600' : 'text-red-500')}>{pct}%</span>
         <span className={cn('text-xs font-bold', passed ? 'text-emerald-500' : 'text-red-400')}>
-          {passed ? 'Kaluar' : 'Dështuar'}
+          {passed ? t('student.quizResults.passedStatus') : t('student.quizResults.failedStatus')}
         </span>
       </div>
     </div>
@@ -64,10 +66,11 @@ function ScoreRing({ pct, passed }: { pct: number; passed: boolean }) {
 }
 
 function CorrectnessPie({ correct, incorrect, skipped }: { correct: number; incorrect: number; skipped: number }) {
+  const { t } = useTranslation();
   const data = [
-    { name: 'Korrekte', value: correct, color: '#10b981' },
-    { name: 'Gabim', value: incorrect, color: '#ef4444' },
-    ...(skipped > 0 ? [{ name: 'Pa përgjigje', value: skipped, color: '#94a3b8' }] : []),
+    { name: t('student.quizResults.correctLabel'), value: correct, color: '#10b981' },
+    { name: t('student.quizResults.incorrectLabel'), value: incorrect, color: '#ef4444' },
+    ...(skipped > 0 ? [{ name: t('student.quizResults.skippedLabel'), value: skipped, color: '#94a3b8' }] : []),
   ].filter(d => d.value > 0);
 
   return (
@@ -88,7 +91,7 @@ function CorrectnessPie({ correct, incorrect, skipped }: { correct: number; inco
             ))}
           </Pie>
           <Tooltip
-            formatter={(val: any, name: any) => [`${val} pyetje`, name]}
+            formatter={(val: any, name: any) => [`${val} questions`, name]}
             contentStyle={{ borderRadius: 12, border: '1px solid #e2e8f0', fontSize: 12 }}
           />
           <Legend iconType="circle" iconSize={8} wrapperStyle={{ fontSize: 11 }} />
@@ -103,13 +106,14 @@ function PerQuestionBar({ questions, isCorrectFn, answers }: {
   isCorrectFn: (q: Question, ans: unknown) => boolean;
   answers: Record<string, unknown>;
 }) {
+  const { t } = useTranslation();
   const gradable = questions.filter(q => GRADABLE_QUESTION_TYPES.has(String(q.type).toLowerCase()));
   if (gradable.length === 0) return null;
 
   const data = gradable.map((q, i) => ({
-    name: `P${i + 1}`,
-    pikë: Number(q.points) || 0,
-    fituar: isCorrectFn(q, answers[q.id]) ? (Number(q.points) || 0) : 0,
+    name: `Q${i + 1}`,
+    total: Number(q.points) || 0,
+    earned: isCorrectFn(q, answers[q.id]) ? (Number(q.points) || 0) : 0,
   }));
 
   return (
@@ -120,10 +124,10 @@ function PerQuestionBar({ questions, isCorrectFn, answers }: {
           <YAxis tick={{ fontSize: 10, fill: '#94a3b8' }} axisLine={false} tickLine={false} />
           <Tooltip
             contentStyle={{ borderRadius: 10, border: '1px solid #e2e8f0', fontSize: 11 }}
-            formatter={(val: any, name: string) => [val, name === 'pikë' ? 'Pikë totale' : 'Pikë fituar']}
+            formatter={(val: any, name: string) => [val, name === 'total' ? t('common.score') : t('student.quizResults.pointsEarned')]}
           />
-          <Bar dataKey="pikë" fill="#e2e8f0" radius={[4, 4, 0, 0]} />
-          <Bar dataKey="fituar" fill="#10b981" radius={[4, 4, 0, 0]} />
+          <Bar dataKey="total" fill="#e2e8f0" radius={[4, 4, 0, 0]} />
+          <Bar dataKey="earned" fill="#10b981" radius={[4, 4, 0, 0]} />
         </BarChart>
       </ResponsiveContainer>
     </div>
@@ -131,6 +135,7 @@ function PerQuestionBar({ questions, isCorrectFn, answers }: {
 }
 
 export default function QuizResults() {
+  const { t } = useTranslation();
   const { attemptId } = useParams();
   const navigate = useNavigate();
   const [attempt, setAttempt] = useState<any>(null);
@@ -256,7 +261,7 @@ export default function QuizResults() {
   };
 
   const resolveText = (question: Question, val: unknown): string => {
-    if (val === null || val === undefined || String(val).trim() === '') return 'Pa përgjigje';
+    if (val === null || val === undefined || String(val).trim() === '') return t('student.quizResults.noAnswer');
     const norm = String(val);
     if (Array.isArray(question.options)) {
       const found = question.options.find(o => String(o.id) === norm);
@@ -298,7 +303,7 @@ export default function QuizResults() {
             <h1 className="text-xl font-black text-slate-900">{quiz.title}</h1>
             {attempt.completedAt && (
               <p className="text-xs text-slate-400">
-                Përfunduar {formatDistanceToNow(new Date(attempt.completedAt), { addSuffix: true })}
+                {t('student.quizResults.completedAt', { time: formatDistanceToNow(new Date(attempt.completedAt), { addSuffix: true }) })}
               </p>
             )}
           </div>
@@ -318,7 +323,7 @@ export default function QuizResults() {
             <div className="flex flex-col items-center gap-2">
               <ScoreRing pct={scorePercent} passed={passed} />
               <div className="text-xs text-slate-500 font-medium">
-                {effectiveScore} / {effectiveTotal} pikë
+                {t('student.quizResults.pointsDisplay', { score: effectiveScore, total: effectiveTotal })}
               </div>
             </div>
 
@@ -327,29 +332,29 @@ export default function QuizResults() {
               {[
                 {
                   icon: passed ? Trophy : XCircle,
-                  label: 'Rezultati',
-                  value: passed ? 'KALUAR ✓' : 'DËSHTUAR ✗',
+                  label: t('student.quizResults.resultLabel'),
+                  value: passed ? t('student.quizResults.passedStatus') : t('student.quizResults.failedStatus'),
                   color: passed ? 'text-emerald-700' : 'text-red-600',
                   bg: passed ? 'bg-emerald-100' : 'bg-red-100',
                 },
                 {
                   icon: Target,
-                  label: 'Nota kaluse',
+                  label: t('student.quizResults.passMarkLabel'),
                   value: `${passMark}%`,
                   color: 'text-slate-700',
                   bg: 'bg-slate-100',
                 },
                 {
                   icon: CheckCircle2,
-                  label: 'Korrekte',
+                  label: t('student.quizResults.correctLabel'),
                   value: `${correctCount} / ${gradable.length}`,
                   color: 'text-emerald-700',
                   bg: 'bg-emerald-100',
                 },
                 {
                   icon: Clock,
-                  label: 'Kohëzgjatja',
-                  value: duration != null ? `${duration} min` : '—',
+                  label: t('student.quizResults.durationLabel'),
+                  value: duration != null ? t('student.quizResults.durationValue', { count: duration }) : '—',
                   color: 'text-slate-700',
                   bg: 'bg-slate-100',
                 },
@@ -374,7 +379,7 @@ export default function QuizResults() {
                 <div className="w-7 h-7 rounded-lg bg-indigo-50 flex items-center justify-center">
                   <BarChart2 className="w-4 h-4 text-indigo-500" />
                 </div>
-                <h3 className="text-sm font-bold text-slate-700">Korrekte vs Gabim</h3>
+                <h3 className="text-sm font-bold text-slate-700">{t('student.quizResults.correctVsIncorrect')}</h3>
               </div>
               <CorrectnessPie correct={correctCount} incorrect={incorrectCount} skipped={skippedCount} />
             </div>
@@ -384,7 +389,7 @@ export default function QuizResults() {
                 <div className="w-7 h-7 rounded-lg bg-emerald-50 flex items-center justify-center">
                   <TrendingUp className="w-4 h-4 text-emerald-500" />
                 </div>
-                <h3 className="text-sm font-bold text-slate-700">Pikët për pyetje</h3>
+                <h3 className="text-sm font-bold text-slate-700">{t('student.quizResults.pointsPerQuestion')}</h3>
               </div>
               <PerQuestionBar
                 questions={gradable}
@@ -408,7 +413,7 @@ export default function QuizResults() {
                   : 'bg-white border-slate-200 text-slate-600 hover:border-slate-400',
               )}
             >
-              {t === 'overview' ? 'Përmbledhje' : 'Rishiko Përgjigjet'}
+              {t === 'overview' ? t('student.quizResults.overviewTab') : t('student.quizResults.reviewTab')}
             </button>
           ))}
         </div>
@@ -425,14 +430,14 @@ export default function QuizResults() {
             >
               <h2 className="text-base font-bold text-slate-800 flex items-center gap-2">
                 <HelpCircle className="w-4 h-4 text-slate-400" />
-                Informacion i kuizit
+                {t('student.quizResults.quizInfo')}
               </h2>
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
                 {[
-                  { label: 'Total pyetje', value: questions.length },
-                  { label: 'Pyetje me pikë', value: gradable.length },
-                  { label: 'Pikë totale', value: effectiveTotal },
-                  { label: 'Pikë fituar', value: effectiveScore },
+                  { label: t('student.quizResults.totalQuestions'), value: questions.length },
+                  { label: t('student.quizResults.gradableQuestions'), value: gradable.length },
+                  { label: t('student.quizResults.totalPoints'), value: effectiveTotal },
+                  { label: t('student.quizResults.pointsEarned'), value: effectiveScore },
                 ].map(s => (
                   <div key={s.label} className="bg-slate-50 rounded-xl p-3 text-center border border-slate-100">
                     <div className="text-lg font-black text-slate-900">{s.value}</div>
@@ -442,7 +447,7 @@ export default function QuizResults() {
               </div>
               {attempt.completedAt && (
                 <p className="text-xs text-slate-400">
-                  Data e plotësimit: {format(new Date(attempt.completedAt), 'dd MMM yyyy, HH:mm')}
+                  {t('student.quizResults.completionDate', { date: format(new Date(attempt.completedAt), 'dd MMM yyyy, HH:mm') })}
                 </p>
               )}
             </motion.div>
@@ -459,7 +464,7 @@ export default function QuizResults() {
             >
               {questions.length === 0 && (
                 <div className="rounded-xl border border-amber-200 bg-amber-50 px-5 py-4 text-sm text-amber-700">
-                  Nuk mund të ngarkoheshin detajet e pyetjeve për këtë tentim.
+                  {t('student.quizResults.errorNoDetails')}
                 </div>
               )}
               {questions.map((q, index) => {
@@ -501,14 +506,14 @@ export default function QuizResults() {
                               : 'bg-red-100 text-red-600',
                           )}>
                             {isCorrect
-                              ? <><CheckCircle2 className="w-3 h-3" />Korrekte</>
-                              : <><XCircle className="w-3 h-3" />Gabim</>}
+                              ? <><CheckCircle2 className="w-3 h-3" />{t('student.quizResults.correctLabel')}</>
+                              : <><XCircle className="w-3 h-3" />{t('student.quizResults.incorrectLabel')}</>}
                           </span>
                         )}
                       </div>
                       {!isInstruction && (
                         <span className="text-xs font-bold text-slate-400">
-                          {isCorrect ? q.points : 0} / {q.points} pikë
+                          {t('student.quizResults.pointsDisplayShort', { score: isCorrect ? q.points : 0, total: q.points })}
                         </span>
                       )}
                     </div>
@@ -549,7 +554,7 @@ export default function QuizResults() {
                                 </div>
                                 <span className="font-medium">{opt.text}</span>
                                 {isSelected && (
-                                  <span className="ml-auto text-xs font-semibold text-red-500">Zgjedhja jote</span>
+                                  <span className="ml-auto text-xs font-semibold text-red-500">{t('student.quizResults.yourChoice')}</span>
                                 )}
                               </div>
                             );
@@ -565,7 +570,7 @@ export default function QuizResults() {
                             isCorrect ? 'bg-slate-50 border-slate-100' : 'bg-red-50 border-red-100',
                           )}>
                             <div className={cn('text-[10px] font-bold uppercase tracking-wider mb-1', isCorrect ? 'text-slate-400' : 'text-red-500')}>
-                              Përgjigja jote
+                              {t('student.quizResults.yourAnswer')}
                             </div>
                             <div className={cn('text-sm font-semibold', isCorrect ? 'text-slate-800' : 'text-red-700')}>
                               {studentText}
@@ -573,7 +578,7 @@ export default function QuizResults() {
                           </div>
                           <div className="p-3 rounded-xl border border-emerald-100 bg-emerald-50">
                             <div className="text-[10px] font-bold uppercase tracking-wider mb-1 text-emerald-500">
-                              Përgjigja korrekte
+                              {t('student.quizResults.correctAnswer')}
                             </div>
                             <div className="text-sm font-semibold text-emerald-800">{correctText}</div>
                           </div>
@@ -585,7 +590,7 @@ export default function QuizResults() {
                         <div className="flex items-start gap-2.5 p-3 bg-blue-50 border border-blue-100 rounded-xl">
                           <Info className="w-4 h-4 text-blue-500 shrink-0 mt-0.5" />
                           <p className="text-xs text-blue-700 leading-relaxed">
-                            <span className="font-bold">Shpjegim: </span>
+                            <span className="font-bold">{t('quizzes.explanation')}: </span>
                             {(q as any).explanation}
                           </p>
                         </div>
@@ -605,7 +610,7 @@ export default function QuizResults() {
             className="inline-flex items-center gap-2 bg-slate-900 text-white px-8 py-3 rounded-xl font-bold hover:bg-slate-800 transition-all shadow-lg"
           >
             <ChevronLeft className="w-4 h-4" />
-            Kthehu te Rezultatet
+            {t('student.quizResults.backToResults')}
           </Link>
         </div>
       </div>

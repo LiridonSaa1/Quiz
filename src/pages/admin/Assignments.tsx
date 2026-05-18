@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import AdminLayout from '../../components/layout/AdminLayout';
 import { toast } from 'sonner';
 import { motion } from 'motion/react';
@@ -45,21 +46,21 @@ interface Course { id: string; title: string }
 interface Teacher { id: string; display_name: string }
 interface ClassRec { id: string; name: string }
 
-const STATUS_CFG: Record<AssignmentStatus, { label: string; bg: string; text: string; dot: string; icon: React.ElementType }> = {
-  draft:     { label: 'Draft',     bg: 'bg-slate-100',   text: 'text-slate-600',  dot: 'bg-slate-400',   icon: FileText     },
-  published: { label: 'Published', bg: 'bg-emerald-50',  text: 'text-emerald-700',dot: 'bg-emerald-500', icon: CheckCircle2 },
-  closed:    { label: 'Closed',    bg: 'bg-amber-50',    text: 'text-amber-700',  dot: 'bg-amber-500',   icon: Archive      },
+const STATUS_CFG: Record<AssignmentStatus, { labelKey: string; bg: string; text: string; dot: string; icon: React.ElementType }> = {
+  draft:     { labelKey: 'dashboard.drafts',     bg: 'bg-slate-100',   text: 'text-slate-600',  dot: 'bg-slate-400',   icon: FileText     },
+  published: { labelKey: 'common.published', bg: 'bg-emerald-50',  text: 'text-emerald-700',dot: 'bg-emerald-500', icon: CheckCircle2 },
+  closed:    { labelKey: 'common.status.closed',    bg: 'bg-amber-50',    text: 'text-amber-700',  dot: 'bg-amber-500',   icon: Archive      },
 };
 
-const TYPE_CFG: Record<AssignmentType, { label: string; color: string; bg: string }> = {
-  homework: { label: 'Homework',  color: 'text-blue-700',   bg: 'bg-blue-50'   },
-  project:  { label: 'Project',   color: 'text-violet-700', bg: 'bg-violet-50' },
-  essay:    { label: 'Essay',     color: 'text-rose-700',   bg: 'bg-rose-50'   },
-  quiz:     { label: 'Quiz',      color: 'text-amber-700',  bg: 'bg-amber-50'  },
-  lab:      { label: 'Lab',       color: 'text-teal-700',   bg: 'bg-teal-50'   },
-  exercise: { label: 'Exercise',  color: 'text-cyan-700',   bg: 'bg-cyan-50'   },
-  research: { label: 'Research',  color: 'text-indigo-700', bg: 'bg-indigo-50' },
-  other:    { label: 'Other',     color: 'text-slate-600',  bg: 'bg-slate-100' },
+const TYPE_CFG: Record<AssignmentType, { labelKey: string; color: string; bg: string }> = {
+  homework: { labelKey: 'assignments.homework',  color: 'text-blue-700',   bg: 'bg-blue-50'   },
+  project:  { labelKey: 'assignments.project',   color: 'text-violet-700', bg: 'bg-violet-50' },
+  essay:    { labelKey: 'assignments.essay',     color: 'text-rose-700',   bg: 'bg-rose-50'   },
+  quiz:     { labelKey: 'assignments.quiz',      color: 'text-amber-700',  bg: 'bg-amber-50'  },
+  lab:      { labelKey: 'assignments.lab',       color: 'text-teal-700',   bg: 'bg-teal-50'   },
+  exercise: { labelKey: 'assignments.exercise',  color: 'text-cyan-700',   bg: 'bg-cyan-50'   },
+  research: { labelKey: 'assignments.research',  color: 'text-indigo-700', bg: 'bg-indigo-50' },
+  other:    { labelKey: 'assignments.other',     color: 'text-slate-600',  bg: 'bg-slate-100' },
 };
 
 const AVATAR_COLORS = [
@@ -80,6 +81,7 @@ const emptyForm = {
 };
 
 export default function AdminAssignments() {
+  const { t } = useTranslation();
   const [assignments, setAssignments] = useState<Assignment[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
@@ -210,14 +212,14 @@ export default function AdminAssignments() {
   return (
     <AdminLayout>
       <AdminListPageShell
-        breadcrumbLabel="Assignments"
-        title="Assignments"
-        description="Create and manage all course assignments."
+        breadcrumbLabel={t('assignments.title')}
+        title={t('assignments.title')}
+        description={t('assignments.manageDesc')}
         action={
           <motion.button type="button" onClick={openAdd} whileHover={{ scale: 1.04, y: -2 }} whileTap={{ scale: 0.97 }}
             className="inline-flex items-center gap-2 px-6 py-3 rounded-2xl font-bold text-sm text-white shrink-0"
             style={{ background: 'linear-gradient(135deg,#818cf8 0%,#a78bfa 100%)', boxShadow: '0 8px 32px rgba(139,92,246,0.45)' }}>
-            <Plus className="w-4 h-4" />New Assignment
+            <Plus className="w-4 h-4" />{t('assignments.newAssignment')}
           </motion.button>
         }
         stats={stats}
@@ -225,20 +227,20 @@ export default function AdminAssignments() {
           <AdminListFilterBar>
             <div className="relative flex-1 min-w-[200px]">
               <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-indigo-400" />
-              <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search assignments..." className={ADMIN_LIST_SEARCH_INPUT} />
+              <input value={search} onChange={e => setSearch(e.target.value)} placeholder={t('assignments.searchPlaceholder')} className={ADMIN_LIST_SEARCH_INPUT} />
             </div>
             <select value={statusFilter} onChange={e => setStatusFilter(e.target.value)} className={ADMIN_LIST_SELECT}>
-              <option value="all">All Status</option>
-              <option value="draft">Draft</option>
-              <option value="published">Published</option>
-              <option value="closed">Closed</option>
+              <option value="all">{t('assignments.allStatus')}</option>
+              <option value="draft">{t('assignments.draft')}</option>
+              <option value="published">{t('assignments.published')}</option>
+              <option value="closed">{t('assignments.closed')}</option>
             </select>
             <select value={typeFilter} onChange={e => setTypeFilter(e.target.value)} className={ADMIN_LIST_SELECT}>
-              <option value="all">All Types</option>
-              {Object.entries(TYPE_CFG).map(([v, c]) => <option key={v} value={v}>{c.label}</option>)}
+              <option value="all">{t('assignments.allTypes')}</option>
+              {Object.entries(TYPE_CFG).map(([v, c]) => <option key={v} value={v}>{t(c.labelKey)}</option>)}
             </select>
             <select value={courseFilter} onChange={e => setCourseFilter(e.target.value)} className={ADMIN_LIST_SELECT}>
-              <option value="all">All Courses</option>
+              <option value="all">{t('assignments.allCourses')}</option>
               {courses.map(c => <option key={c.id} value={c.id}>{c.title}</option>)}
             </select>
           </AdminListFilterBar>
@@ -252,8 +254,8 @@ export default function AdminAssignments() {
           ) : filtered.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-20 gap-3 text-slate-400">
               <ClipboardList className="w-10 h-10 opacity-30" />
-              <p className="text-sm">No assignments found</p>
-              <button type="button" onClick={openAdd} className="text-xs text-indigo-600 font-semibold hover:underline">Create one now</button>
+              <p className="text-sm">{t('assignments.noAssignments')}</p>
+              <button type="button" onClick={openAdd} className="text-xs text-indigo-600 font-semibold hover:underline">{t('assignments.createOne')}</button>
             </div>
           ) : (
             <>
@@ -295,31 +297,31 @@ export default function AdminAssignments() {
                       </div>
                       <div className="mt-4 space-y-2 text-xs text-slate-600 border-t border-slate-100 pt-3">
                         <div className="flex justify-between gap-2">
-                          <span className="text-slate-400 font-semibold uppercase tracking-wider">Course</span>
+                          <span className="text-slate-400 font-semibold uppercase tracking-wider">{t('assignments.courseLabel')}</span>
                           <span className="text-right truncate">{a.course?.title || '—'}</span>
                         </div>
                         {a.teacher && (
                           <div className="flex justify-between gap-2">
-                            <span className="text-slate-400 font-semibold uppercase tracking-wider">Teacher</span>
+                            <span className="text-slate-400 font-semibold uppercase tracking-wider">{t('assignments.teacherLabel')}</span>
                             <span className="text-right truncate">{a.teacher.display_name}</span>
                           </div>
                         )}
                         {a.class_name && (
                           <div className="flex justify-between gap-2">
-                            <span className="text-slate-400 font-semibold uppercase tracking-wider">Class</span>
+                            <span className="text-slate-400 font-semibold uppercase tracking-wider">{t('assignments.classLabel')}</span>
                             <span className="text-right truncate">{a.class_name}</span>
                           </div>
                         )}
                         <div className="flex justify-between gap-2 items-start">
-                          <span className="text-slate-400 font-semibold uppercase tracking-wider shrink-0">Due</span>
+                          <span className="text-slate-400 font-semibold uppercase tracking-wider shrink-0">{t('assignments.dueDate')}</span>
                           <span className="text-right">
                             {a.due_date ? <><span className="block">{format(new Date(a.due_date), 'MMM d, yyyy')}</span>{dueBadge}</> : '—'}
                           </span>
                         </div>
                         <div className="flex justify-between gap-2 items-center">
-                          <span className="text-slate-400 font-semibold uppercase tracking-wider">Score</span>
+                          <span className="text-slate-400 font-semibold uppercase tracking-wider">{t('dashboard.score')}</span>
                           <span className="inline-flex items-center gap-1 font-medium text-slate-800">
-                            <Star className="w-3.5 h-3.5 text-amber-400" />{a.max_score} pts
+                            <Star className="w-3.5 h-3.5 text-amber-400" />{a.max_score} {t('assignments.pts')}
                           </span>
                         </div>
                       </div>
@@ -340,79 +342,79 @@ export default function AdminAssignments() {
         <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto">
             <div className="flex items-center justify-between p-5 border-b border-slate-100">
-              <h2 className="text-lg font-bold text-slate-800">{editId ? 'Edit Assignment' : 'New Assignment'}</h2>
+              <h2 className="text-lg font-bold text-slate-800">{editId ? t('assignments.editAssignment') : t('assignments.newAssignment')}</h2>
               <button onClick={() => setShowModal(false)} className="p-2 hover:bg-slate-100 rounded-lg"><X className="w-4 h-4" /></button>
             </div>
             <div className="p-5 space-y-4">
               <div>
-                <label className="text-xs font-semibold text-slate-600 uppercase tracking-wide">Title *</label>
+                <label className="text-xs font-semibold text-slate-600 uppercase tracking-wide">{t('assignments.titleLabel')} *</label>
                 <input value={form.title} onChange={e => setForm(f => ({ ...f, title: e.target.value }))}
                   className="mt-1 w-full px-3 py-2.5 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-500/30"
-                  placeholder="Assignment title" />
+                  placeholder={t('assignments.titlePlaceholder')} />
               </div>
               <div>
-                <label className="text-xs font-semibold text-slate-600 uppercase tracking-wide">Description</label>
+                <label className="text-xs font-semibold text-slate-600 uppercase tracking-wide">{t('assignments.descLabel')}</label>
                 <textarea value={form.description} onChange={e => setForm(f => ({ ...f, description: e.target.value }))}
                   rows={2} className="mt-1 w-full px-3 py-2.5 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-500/30 resize-none"
-                  placeholder="Brief overview..." />
+                  placeholder={t('assignments.descPlaceholder')} />
               </div>
               <div>
-                <label className="text-xs font-semibold text-slate-600 uppercase tracking-wide">Instructions</label>
+                <label className="text-xs font-semibold text-slate-600 uppercase tracking-wide">{t('assignments.instructionsLabel')}</label>
                 <textarea value={form.instructions} onChange={e => setForm(f => ({ ...f, instructions: e.target.value }))}
                   rows={4} className="mt-1 w-full px-3 py-2.5 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-500/30 resize-none"
-                  placeholder="Detailed step-by-step instructions for students..." />
+                  placeholder={t('assignments.instructionsPlaceholder')} />
               </div>
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="text-xs font-semibold text-slate-600 uppercase tracking-wide">Type</label>
+                  <label className="text-xs font-semibold text-slate-600 uppercase tracking-wide">{t('assignments.typeLabel')}</label>
                   <select value={form.type} onChange={e => setForm(f => ({ ...f, type: e.target.value as AssignmentType }))}
                     className="mt-1 w-full px-3 py-2.5 text-sm border border-slate-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-amber-500/30">
-                    {Object.entries(TYPE_CFG).map(([v, c]) => <option key={v} value={v}>{c.label}</option>)}
+                    {Object.entries(TYPE_CFG).map(([v, c]) => <option key={v} value={v}>{t(c.labelKey)}</option>)}
                   </select>
                 </div>
                 <div>
-                  <label className="text-xs font-semibold text-slate-600 uppercase tracking-wide">Status</label>
+                  <label className="text-xs font-semibold text-slate-600 uppercase tracking-wide">{t('assignments.statusLabel')}</label>
                   <select value={form.status} onChange={e => setForm(f => ({ ...f, status: e.target.value as AssignmentStatus }))}
                     className="mt-1 w-full px-3 py-2.5 text-sm border border-slate-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-amber-500/30">
-                    <option value="draft">Draft</option>
-                    <option value="published">Published</option>
-                    <option value="closed">Closed</option>
+                    <option value="draft">{t('assignments.draft')}</option>
+                    <option value="published">{t('assignments.published')}</option>
+                    <option value="closed">{t('assignments.closed')}</option>
                   </select>
                 </div>
               </div>
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="text-xs font-semibold text-slate-600 uppercase tracking-wide">Due Date</label>
+                  <label className="text-xs font-semibold text-slate-600 uppercase tracking-wide">{t('assignments.dueDateLabel')}</label>
                   <input type="date" value={form.due_date} onChange={e => setForm(f => ({ ...f, due_date: e.target.value }))}
                     className="mt-1 w-full px-3 py-2.5 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-500/30" />
                 </div>
                 <div>
-                  <label className="text-xs font-semibold text-slate-600 uppercase tracking-wide">Max Score</label>
+                  <label className="text-xs font-semibold text-slate-600 uppercase tracking-wide">{t('assignments.maxScoreLabel')}</label>
                   <input type="number" min={0} value={form.max_score} onChange={e => setForm(f => ({ ...f, max_score: Number(e.target.value) }))}
                     className="mt-1 w-full px-3 py-2.5 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-500/30" />
                 </div>
               </div>
               <div>
-                <label className="text-xs font-semibold text-slate-600 uppercase tracking-wide">Course</label>
+                <label className="text-xs font-semibold text-slate-600 uppercase tracking-wide">{t('assignments.courseLabel')}</label>
                 <select value={form.course_id} onChange={e => setForm(f => ({ ...f, course_id: e.target.value }))}
                   className="mt-1 w-full px-3 py-2.5 text-sm border border-slate-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-amber-500/30">
-                  <option value="">No course</option>
+                  <option value="">{t('assignments.noCourse')}</option>
                   {courses.map(c => <option key={c.id} value={c.id}>{c.title}</option>)}
                 </select>
               </div>
               <div>
-                <label className="text-xs font-semibold text-slate-600 uppercase tracking-wide">Class</label>
+                <label className="text-xs font-semibold text-slate-600 uppercase tracking-wide">{t('assignments.classLabel')}</label>
                 <select value={form.class_id} onChange={e => setForm(f => ({ ...f, class_id: e.target.value }))}
                   className="mt-1 w-full px-3 py-2.5 text-sm border border-slate-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-amber-500/30">
-                  <option value="">No class</option>
+                  <option value="">{t('assignments.noClass')}</option>
                   {classes.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
                 </select>
               </div>
               <div>
-                <label className="text-xs font-semibold text-slate-600 uppercase tracking-wide">Teacher</label>
+                <label className="text-xs font-semibold text-slate-600 uppercase tracking-wide">{t('assignments.teacherLabel')}</label>
                 <select value={form.teacher_id} onChange={e => setForm(f => ({ ...f, teacher_id: e.target.value }))}
                   className="mt-1 w-full px-3 py-2.5 text-sm border border-slate-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-amber-500/30">
-                  <option value="">No teacher</option>
+                  <option value="">{t('assignments.noTeacher')}</option>
                   {teachers.map(t => <option key={t.id} value={t.id}>{t.display_name}</option>)}
                 </select>
               </div>
@@ -423,14 +425,14 @@ export default function AdminAssignments() {
                 >
                   <span className={cn('absolute top-0.5 left-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform', form.allow_late_submission ? 'translate-x-5' : '')} />
                 </div>
-                <span className="text-sm font-medium text-slate-700">Allow late submission</span>
+                <span className="text-sm font-medium text-slate-700">{t('assignments.allowLateSubmission')}</span>
               </label>
             </div>
             <div className="flex justify-end gap-3 p-5 border-t border-slate-100">
-              <button onClick={() => setShowModal(false)} className="px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-100 rounded-lg transition-colors">Cancel</button>
+              <button onClick={() => setShowModal(false)} className="px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-100 rounded-lg transition-colors">{t('assignments.cancel')}</button>
               <button onClick={handleSave} disabled={saving}
                 className="px-4 py-2 text-sm font-semibold bg-amber-500 hover:bg-amber-600 text-white rounded-lg transition-colors disabled:opacity-50">
-                {saving ? 'Saving...' : editId ? 'Update' : 'Create'}
+                {saving ? t('assignments.saving') : editId ? t('common.update') : t('common.create')}
               </button>
             </div>
           </div>

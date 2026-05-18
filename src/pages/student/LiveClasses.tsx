@@ -1,4 +1,5 @@
 import React, { useEffect, useState, useMemo } from 'react';
+import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '../../supabase';
 import StudentLayout from '../../components/layout/StudentLayout';
@@ -43,6 +44,7 @@ const TABS: { key: 'all' | SessionStatus; label: string }[] = [
 ];
 
 export default function StudentLiveClasses() {
+  const { t } = useTranslation();
   const navigate = useNavigate();
   const [sessions, setSessions] = useState<LiveSession[]>([]);
   const [loading, setLoading] = useState(true);
@@ -104,24 +106,24 @@ export default function StudentLiveClasses() {
             <div>
               <div className="inline-flex items-center gap-2 bg-white/10 border border-white/20 rounded-full px-3 py-1.5 mb-3">
                 <Video className="w-3.5 h-3.5 text-rose-300" />
-                <span className="text-white/80 text-xs font-semibold">Live Classes</span>
+                <span className="text-white/80 text-xs font-semibold">{t('liveClasses.liveClassesTitle')}</span>
               </div>
-              <h1 className="text-3xl font-black text-white">Live Classes</h1>
-              <p className="text-slate-400 text-sm mt-1">Join live sessions with your instructors.</p>
+              <h1 className="text-3xl font-black text-white">{t('liveClasses.liveClassesTitle')}</h1>
+              <p className="text-slate-400 text-sm mt-1">{t('liveClasses.joinLiveSessions')}</p>
               {liveSessions.length > 0 && (
                 <motion.div initial={{ scale: 0 }} animate={{ scale: 1 }} transition={{ type: 'spring', delay: 0.3 }}
                   className="mt-3 inline-flex items-center gap-2 bg-rose-500/30 border border-rose-400/40 rounded-xl px-3 py-1.5">
                   <motion.div className="w-2 h-2 rounded-full bg-rose-400"
                     animate={{ scale: [1, 1.5, 1], opacity: [1, 0.5, 1] }} transition={{ duration: 1.5, repeat: Infinity }} />
-                  <span className="text-rose-200 text-xs font-bold">{liveSessions.length} session{liveSessions.length > 1 ? 's' : ''} live now!</span>
+                  <span className="text-rose-200 text-xs font-bold">{t('liveClasses.sessionLiveNow', { count: liveSessions.length })}</span>
                 </motion.div>
               )}
             </div>
             <div className="flex gap-3">
               {[
-                { label: 'Total',    value: sessions.length  },
-                { label: 'Live',     value: liveSessions.length },
-                { label: 'Upcoming', value: upcoming.length  },
+                { label: t('liveClasses.total'),    value: sessions.length  },
+                { label: t('liveClasses.live'),     value: liveSessions.length },
+                { label: t('liveClasses.upcoming'), value: upcoming.length  },
               ].map((s, i) => (
                 <motion.div key={s.label} initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 + i * 0.08 }}
                   className="bg-white/8 border border-white/10 rounded-2xl p-3 text-center min-w-[64px]">
@@ -137,15 +139,15 @@ export default function StudentLiveClasses() {
         <div className="flex flex-col gap-3">
           <div className="relative">
             <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
-            <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search sessions..."
+            <input value={search} onChange={e => setSearch(e.target.value)} placeholder={t('liveClasses.searchSessions')}
               className="w-full pl-10 pr-4 py-2.5 bg-white border border-slate-200 rounded-2xl text-sm text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-rose-500/30 focus:border-rose-400 shadow-sm" />
           </div>
           <div className="flex gap-2 flex-wrap">
-            {TABS.map(t => (
-              <button key={t.key} onClick={() => setTab(t.key)}
+            {TABS.map(tabItem => (
+              <button key={tabItem.key} onClick={() => setTab(tabItem.key)}
                 className={cn('px-4 py-2.5 rounded-2xl text-sm font-semibold transition-all border',
-                  tab === t.key ? 'bg-rose-600 text-white border-transparent shadow-lg shadow-rose-200' : 'bg-white border-slate-200 text-slate-600 hover:border-rose-300')}>
-                {t.label}
+                  tab === tabItem.key ? 'bg-rose-600 text-white border-transparent shadow-lg shadow-rose-200' : 'bg-white border-slate-200 text-slate-600 hover:border-rose-300')}>
+                {tabItem.label}
               </button>
             ))}
           </div>
@@ -163,8 +165,8 @@ export default function StudentLiveClasses() {
               className="w-16 h-16 bg-rose-50 rounded-3xl flex items-center justify-center mb-4 shadow-lg">
               <Video className="w-8 h-8 text-rose-400" />
             </motion.div>
-            <p className="text-slate-600 font-bold">No sessions found</p>
-            <p className="text-slate-400 text-sm mt-1">No live classes scheduled for your courses yet.</p>
+            <p className="text-slate-600 font-bold">{t('liveClasses.noSessionsFound')}</p>
+            <p className="text-slate-400 text-sm mt-1">{t('liveClasses.noClassesScheduled')}</p>
           </motion.div>
         ) : (
           <div className="space-y-4">
@@ -214,13 +216,13 @@ export default function StudentLiveClasses() {
                         <button
                           onClick={() => navigate(`/student/live-sessions/${s.id}`)}
                           className="shrink-0 flex items-center gap-2 bg-gradient-to-r from-rose-500 to-pink-500 text-white text-xs font-bold px-4 py-2 rounded-xl hover:opacity-90 transition-all shadow-lg shadow-rose-200/60 active:scale-95">
-                          <Play className="w-3.5 h-3.5" /> Enter Room
+                          <Play className="w-3.5 h-3.5" /> {t('liveClasses.enterRoom')}
                         </button>
                       )}
                       {s.status === 'scheduled' && s.meeting_url && (
                         <a href={s.meeting_url} target="_blank" rel="noreferrer"
                           className="shrink-0 flex items-center gap-2 bg-blue-50 border border-blue-200 text-blue-700 text-xs font-bold px-4 py-2 rounded-xl hover:bg-blue-100 transition-all">
-                          <Link2 className="w-3.5 h-3.5" /> Link
+                          <Link2 className="w-3.5 h-3.5" /> {t('liveClasses.link')}
                         </a>
                       )}
                     </div>

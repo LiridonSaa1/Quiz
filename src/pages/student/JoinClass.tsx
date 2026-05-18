@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { useTranslation } from 'react-i18next';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import StudentLayout from '../../components/layout/StudentLayout';
 import { authFetch } from '../../lib/apiUrl';
@@ -18,6 +19,7 @@ interface ClassInfo {
 }
 
 export default function JoinClass() {
+  const { t } = useTranslation();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const [code, setCode] = useState(searchParams.get('code') || '');
@@ -38,16 +40,16 @@ export default function JoinClass() {
 
   const handleLookup = async (overrideCode?: string) => {
     const c = (overrideCode ?? code).trim().toUpperCase();
-    if (!c) { toast.error('Enter an invite code.'); return; }
+    if (!c) { toast.error(t('joinClass.enterCodeMsg')); return; }
     setLoading(true);
     setLookupError('');
     setClassInfo(null);
     try {
       const res = await authFetch(`/api/classes/invite/${encodeURIComponent(c)}`);
       const json = await res.json();
-      if (!res.ok || !json.success) { setLookupError(json.error || 'Invalid invite code.'); return; }
+      if (!res.ok || !json.success) { setLookupError(json.error || t('joinClass.enterCodeMsg')); return; }
       setClassInfo(json.class);
-    } catch { setLookupError('Network error. Please try again.'); }
+    } catch { setLookupError(t('common.error')); }
     finally { setLoading(false); }
   };
 
@@ -61,11 +63,11 @@ export default function JoinClass() {
         body: JSON.stringify({ code: code.trim().toUpperCase() }),
       });
       const json = await res.json();
-      if (!res.ok || !json.success) { toast.error(json.error || 'Failed to join class.'); return; }
+      if (!res.ok || !json.success) { toast.error(json.error || t('common.error')); return; }
       setJoined(true);
-      toast.success(`Joined "${classInfo.name}" successfully!`);
+      toast.success(t('joinClass.redirecting', { name: classInfo.name }));
       setTimeout(() => navigate('/student/courses'), 1800);
-    } catch { toast.error('Network error.'); }
+    } catch { toast.error(t('common.error')); }
     finally { setJoining(false); }
   };
 
@@ -77,15 +79,15 @@ export default function JoinClass() {
             <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-2xl bg-gradient-to-br from-indigo-500 to-violet-600 shadow-lg shadow-indigo-200">
               <Link2 className="h-8 w-8 text-white" />
             </div>
-            <h1 className="text-3xl font-black text-slate-900">Join a Class</h1>
-            <p className="mt-2 text-slate-500">Enter the invite code shared by your teacher</p>
+            <h1 className="text-3xl font-black text-slate-900">{t('joinClass.joinClassTitle')}</h1>
+            <p className="mt-2 text-slate-500">{t('joinClass.enterInviteCode')}</p>
           </div>
 
           <div className="rounded-3xl border border-indigo-100 bg-white p-8 shadow-xl shadow-indigo-100/40">
             {!joined ? (
               <>
                 <div className="mb-6">
-                  <label className="mb-2 block text-sm font-semibold text-slate-700">Invite Code</label>
+                  <label className="mb-2 block text-sm font-semibold text-slate-700">{t('joinClass.inviteCode')}</label>
                   <input
                     value={code}
                     onChange={e => { setCode(e.target.value.toUpperCase()); setClassInfo(null); setLookupError(''); }}
@@ -106,7 +108,7 @@ export default function JoinClass() {
                     className="flex w-full items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-indigo-600 to-violet-600 px-6 py-3.5 text-sm font-bold text-white shadow-lg shadow-indigo-200 transition hover:shadow-xl disabled:opacity-50"
                   >
                     {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <ArrowRight className="h-4 w-4" />}
-                    {loading ? 'Looking up…' : 'Find Class'}
+                    {loading ? t('joinClass.lookingUp') : t('joinClass.findClass')}
                   </button>
                 )}
 
@@ -139,12 +141,12 @@ export default function JoinClass() {
                     <div className="flex gap-3">
                       <button onClick={() => { setClassInfo(null); setCode(''); }}
                         className="flex-1 rounded-2xl border border-slate-200 py-3 text-sm font-bold text-slate-600 hover:bg-slate-50 transition">
-                        Cancel
+                        {t('joinClass.cancelBtn')}
                       </button>
                       <button onClick={handleJoin} disabled={joining}
                         className="flex-1 flex items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-indigo-600 to-violet-600 py-3 text-sm font-bold text-white shadow-lg shadow-indigo-200 hover:shadow-xl transition disabled:opacity-50">
                         {joining ? <Loader2 className="h-4 w-4 animate-spin" /> : <Users className="h-4 w-4" />}
-                        {joining ? 'Joining…' : 'Join Class'}
+                        {joining ? t('joinClass.joiningBtn') : t('joinClass.joinClassBtn')}
                       </button>
                     </div>
                   </motion.div>
@@ -155,15 +157,15 @@ export default function JoinClass() {
                 <div className="mx-auto mb-4 flex h-20 w-20 items-center justify-center rounded-3xl bg-emerald-100">
                   <CheckCircle2 className="h-10 w-10 text-emerald-600" />
                 </div>
-                <h2 className="text-2xl font-black text-slate-900">You're in!</h2>
-                <p className="mt-2 text-slate-500">Successfully joined <strong>{classInfo?.name}</strong>. Redirecting…</p>
+                <h2 className="text-2xl font-black text-slate-900">{t('joinClass.youreIn')}</h2>
+                <p className="mt-2 text-slate-500">{t('joinClass.redirecting', { name: classInfo?.name || '' })}</p>
               </motion.div>
             )}
           </div>
 
           <div className="mt-6 rounded-2xl border border-slate-200 bg-white p-5 text-sm text-slate-500">
-            <p className="font-semibold text-slate-700 mb-1">How to get an invite code?</p>
-            <p>Ask your teacher to share the invite code or link from their Classes page. The code is usually 6–10 characters long.</p>
+            <p className="font-semibold text-slate-700 mb-1">{t('joinClass.howToGetCode')}</p>
+            <p>{t('joinClass.askTeacher')}</p>
           </div>
         </div>
       </div>

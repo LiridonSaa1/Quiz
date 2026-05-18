@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { useTranslation } from 'react-i18next';
 import TeacherLayout from '../../components/layout/TeacherLayout';
 import { authFetch } from '../../lib/apiUrl';
 import { motion, AnimatePresence } from 'motion/react';
@@ -50,6 +51,7 @@ function formatDuration(startTs: number, endTs: number) {
 }
 
 export default function RealtimeQuizReports() {
+  const { t } = useTranslation();
   const [reports, setReports] = useState<ReportSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [selected, setSelected] = useState<ReportDetail | null>(null);
@@ -91,7 +93,7 @@ export default function RealtimeQuizReports() {
               <div className="mb-6 flex items-center gap-4">
                 <button onClick={() => setSelected(null)}
                   className="flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-600 shadow-sm hover:bg-slate-50 transition">
-                  <ArrowLeft className="h-4 w-4" /> Back
+                  <ArrowLeft className="h-4 w-4" /> {t('quizReports.back')}
                 </button>
                 <div>
                   <h1 className="text-2xl font-black text-slate-900">{selected.quizTitle}</h1>
@@ -104,11 +106,11 @@ export default function RealtimeQuizReports() {
               {/* Stats row */}
               <div className="mb-6 grid grid-cols-2 gap-4 sm:grid-cols-4">
                 {[
-                  { icon: Users, label: 'Participants', value: selected.participantCount, color: 'text-violet-600', bg: 'bg-violet-50' },
-                  { icon: HelpCircle, label: 'Questions', value: selected.totalQuestions, color: 'text-blue-600', bg: 'bg-blue-50' },
-                  { icon: Trophy, label: 'Top Score', value: selected.leaderboard[0]?.score ?? 0, color: 'text-amber-600', bg: 'bg-amber-50' },
+                  { icon: Users, label: t('quizReports.participants'), value: selected.participantCount, color: 'text-violet-600', bg: 'bg-violet-50' },
+                  { icon: HelpCircle, label: t('quizReports.questions'), value: selected.totalQuestions, color: 'text-blue-600', bg: 'bg-blue-50' },
+                  { icon: Trophy, label: t('quizReports.topScore'), value: selected.leaderboard[0]?.score ?? 0, color: 'text-amber-600', bg: 'bg-amber-50' },
                   {
-                    icon: Target, label: 'Avg Accuracy',
+                    icon: Target, label: t('quizReports.avgAccuracy'),
                     value: selected.leaderboard.length > 0
                       ? `${Math.round(selected.leaderboard.reduce((s, p) => s + p.accuracy, 0) / selected.leaderboard.length)}%`
                       : '0%',
@@ -129,23 +131,23 @@ export default function RealtimeQuizReports() {
               <div className="mb-6 overflow-hidden rounded-3xl border border-slate-100 bg-white shadow-xl shadow-slate-100/60">
                 <div className="flex items-center gap-3 border-b border-slate-100 px-6 py-4">
                   <Trophy className="h-5 w-5 text-amber-500" />
-                  <h2 className="text-lg font-black text-slate-900">Leaderboard</h2>
+                  <h2 className="text-lg font-black text-slate-900">{t('quizReports.leaderboard')}</h2>
                 </div>
                 <div className="overflow-x-auto">
                   <table className="w-full text-sm">
                     <thead>
                       <tr className="border-b border-slate-100 bg-slate-50 text-xs font-bold uppercase tracking-wider text-slate-400">
-                        <th className="px-6 py-3 text-left">Rank</th>
-                        <th className="px-6 py-3 text-left">Student</th>
-                        <th className="px-6 py-3 text-center">Score</th>
-                        <th className="px-6 py-3 text-center">Correct</th>
-                        <th className="px-6 py-3 text-center">Answered</th>
-                        <th className="px-6 py-3 text-center">Accuracy</th>
+                        <th className="px-6 py-3 text-left">{t('quizReports.rank')}</th>
+                        <th className="px-6 py-3 text-left">{t('quizReports.student')}</th>
+                        <th className="px-6 py-3 text-center">{t('quizReports.score')}</th>
+                        <th className="px-6 py-3 text-center">{t('quizReports.correct')}</th>
+                        <th className="px-6 py-3 text-center">{t('quizReports.answered')}</th>
+                        <th className="px-6 py-3 text-center">{t('quizReports.accuracy')}</th>
                       </tr>
                     </thead>
                     <tbody>
                       {selected.leaderboard.length === 0 ? (
-                        <tr><td colSpan={6} className="px-6 py-12 text-center text-slate-400">No participants recorded</td></tr>
+                        <tr><td colSpan={6} className="px-6 py-12 text-center text-slate-400">{t('quizReports.noParticipantsRecorded')}</td></tr>
                       ) : selected.leaderboard.map((p, i) => (
                         <motion.tr key={p.userId}
                           initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }}
@@ -207,7 +209,7 @@ export default function RealtimeQuizReports() {
               <div className="overflow-hidden rounded-3xl border border-slate-100 bg-white shadow-xl shadow-slate-100/60">
                 <div className="flex items-center gap-3 border-b border-slate-100 px-6 py-4">
                   <BarChart3 className="h-5 w-5 text-blue-500" />
-                  <h2 className="text-lg font-black text-slate-900">Question Breakdown</h2>
+                  <h2 className="text-lg font-black text-slate-900">{t('quizReports.questionBreakdown')}</h2>
                 </div>
                 <div className="divide-y divide-slate-50">
                   {selected.questionStats.map((q, i) => (
@@ -220,13 +222,13 @@ export default function RealtimeQuizReports() {
                       </div>
                       <div className="ml-10 flex flex-wrap items-center gap-4 text-xs">
                         <span className="flex items-center gap-1 text-slate-400">
-                          <Users className="h-3.5 w-3.5" />{q.totalAnswered} answered
+                          <Users className="h-3.5 w-3.5" />{t('quizReports.answered_count', { count: q.totalAnswered })}
                         </span>
                         <span className="flex items-center gap-1 text-emerald-600 font-semibold">
-                          <CheckCircle2 className="h-3.5 w-3.5" />{q.correctCount} correct
+                          <CheckCircle2 className="h-3.5 w-3.5" />{t('quizReports.correctCount', { count: q.correctCount })}
                         </span>
                         <span className="flex items-center gap-1 text-red-500 font-semibold">
-                          <XCircle className="h-3.5 w-3.5" />{q.totalAnswered - q.correctCount} wrong
+                          <XCircle className="h-3.5 w-3.5" />{t('quizReports.wrongCount', { count: q.totalAnswered - q.correctCount })}
                         </span>
                         <div className="flex items-center gap-2">
                           <div className="h-2 w-32 rounded-full bg-slate-100 overflow-hidden">
@@ -266,8 +268,8 @@ export default function RealtimeQuizReports() {
                   <FileBarChart2 className="h-7 w-7 text-white" />
                 </div>
                 <div>
-                  <h1 className="text-3xl font-black text-slate-900">Live Quiz Reports</h1>
-                  <p className="text-slate-500">Session history and student rankings</p>
+                  <h1 className="text-3xl font-black text-slate-900">{t('quizReports.title')}</h1>
+                  <p className="text-slate-500">{t('quizReports.description')}</p>
                 </div>
               </div>
 
@@ -280,9 +282,9 @@ export default function RealtimeQuizReports() {
                   <div className="mb-4 flex h-16 w-16 items-center justify-center rounded-2xl bg-slate-100">
                     <FileBarChart2 className="h-8 w-8 text-slate-400" />
                   </div>
-                  <h2 className="text-xl font-bold text-slate-700">No reports yet</h2>
+                  <h2 className="text-xl font-bold text-slate-700">{t('quizReports.noReports')}</h2>
                   <p className="mt-2 max-w-xs text-sm text-slate-400">
-                    Reports are generated automatically when a Live Quiz session ends. Start a session to see results here.
+                    {t('quizReports.noReportsDesc')}
                   </p>
                 </div>
               ) : (
@@ -346,7 +348,7 @@ export default function RealtimeQuizReports() {
                             className="flex w-full items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-violet-600 to-indigo-600 py-2.5 text-xs font-bold text-white shadow-md shadow-violet-200 transition group-hover:shadow-lg"
                           >
                             {detailLoading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <ChevronRight className="h-3.5 w-3.5" />}
-                            View Details
+                            {t('quizReports.viewDetails')}
                           </button>
                         </div>
                       </motion.div>

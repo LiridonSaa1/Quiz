@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState, useCallback, useRef } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Link, useParams } from 'react-router-dom';
 import StudentLayout from '../../components/layout/StudentLayout';
 import { supabase } from '../../supabase';
@@ -121,6 +122,7 @@ function isValidUrl(s: string): boolean {
 const DRAFT_LS_KEY = (id: string) => `assignment_draft_${id}`;
 
 export default function StudentAssignmentDetail() {
+  const { t } = useTranslation();
   const { assignmentId = '' } = useParams();
   const [loading, setLoading] = useState(true);
   const [assignment, setAssignment] = useState<AssignmentRow | null>(null);
@@ -410,7 +412,7 @@ export default function StudentAssignmentDetail() {
     <StudentLayout>
       <div className="max-w-3xl mx-auto space-y-5">
         <Link to="/student/assignments" className="inline-flex items-center gap-2 text-sm font-semibold text-slate-500 hover:text-slate-800 transition-colors">
-          <ArrowLeft className="w-4 h-4" />Back to assignments
+          <ArrowLeft className="w-4 h-4" />{t('student.assignments.backToAssignments')}
         </Link>
 
         {loading ? (
@@ -425,8 +427,8 @@ export default function StudentAssignmentDetail() {
         ) : !assignment ? (
           <div className="bg-white rounded-2xl border border-slate-100 p-12 text-center">
             <ClipboardList className="w-10 h-10 text-slate-300 mx-auto mb-3" />
-            <h2 className="text-lg font-bold text-slate-900">Assignment not available</h2>
-            <p className="text-sm text-slate-500 mt-1">You do not have access to this assignment.</p>
+            <h2 className="text-lg font-bold text-slate-900">{t('student.assignments.assignmentNotAvailable')}</h2>
+            <p className="text-sm text-slate-500 mt-1">{t('student.assignments.noAccessAssignment')}</p>
           </div>
         ) : (
           <>
@@ -502,7 +504,7 @@ export default function StudentAssignmentDetail() {
               <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 }} className="bg-white rounded-2xl border border-slate-100 shadow-sm p-6">
                 <div className="flex items-center gap-2 mb-4">
                   <div className="w-7 h-7 rounded-lg bg-blue-50 flex items-center justify-center"><FileText className="w-4 h-4 text-blue-500" /></div>
-                  <h2 className="text-base font-bold text-slate-800">Instructions</h2>
+                  <h2 className="text-base font-bold text-slate-800">{t('common.instructions')}</h2>
                 </div>
                 <p className="text-sm text-slate-700 leading-relaxed whitespace-pre-wrap">{assignment.instructions}</p>
               </motion.div>
@@ -513,27 +515,29 @@ export default function StudentAssignmentDetail() {
               <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className="bg-white rounded-2xl border border-emerald-100 shadow-sm p-6">
                 <div className="flex items-center gap-2 mb-4">
                   <div className="w-7 h-7 rounded-lg bg-emerald-50 flex items-center justify-center"><Award className="w-4 h-4 text-emerald-600" /></div>
-                  <h2 className="text-base font-bold text-slate-800">Your Grade</h2>
+                  <h2 className="text-base font-bold text-slate-800">{t('student.assignments.yourGrade')}</h2>
                 </div>
                 <div className="flex items-center gap-6">
                   {submission.grade != null && (
                     <div className="text-center">
                       <div className="text-4xl font-black text-emerald-600">{submission.grade}</div>
-                      <div className="text-xs text-slate-400 font-semibold">out of {assignment.max_score ?? 0}</div>
+                      <div className="text-xs text-slate-400 font-semibold">{t('student.assignments.outOf', { count: assignment.max_score ?? 0 })}</div>
                     </div>
                   )}
                   {submission.feedback && (
                     <div className="flex-1 bg-emerald-50 rounded-xl p-4">
                       <div className="flex items-center gap-1.5 mb-1.5">
                         <MessageSquare className="w-3.5 h-3.5 text-emerald-600" />
-                        <span className="text-xs font-bold text-emerald-700 uppercase tracking-wide">Teacher's feedback</span>
+                        <span className="text-xs font-bold text-emerald-700 uppercase tracking-wide">{t('student.assignments.teacherFeedback')}</span>
                       </div>
                       <p className="text-sm text-emerald-800 leading-relaxed">{submission.feedback}</p>
                     </div>
                   )}
                 </div>
                 {submission.graded_at && (
-                  <p className="text-xs text-slate-400 mt-3">Graded {formatDistanceToNow(new Date(submission.graded_at), { addSuffix: true })}</p>
+                  <p className="text-xs text-slate-400 mt-3">
+                    {t('student.assignments.gradedAt', { date: formatDistanceToNow(new Date(submission.graded_at), { addSuffix: true }) })}
+                  </p>
                 )}
               </motion.div>
             )}
@@ -544,11 +548,11 @@ export default function StudentAssignmentDetail() {
                 <div className="flex items-center justify-between mb-4">
                   <div className="flex items-center gap-2">
                     <div className="w-7 h-7 rounded-lg bg-indigo-50 flex items-center justify-center"><Send className="w-4 h-4 text-indigo-500" /></div>
-                    <h2 className="text-base font-bold text-slate-800">{submission ? 'Your Submission' : 'Submit Your Work'}</h2>
+                    <h2 className="text-base font-bold text-slate-800">{submission ? t('student.assignments.yourSubmission') : t('student.assignments.submitWork')}</h2>
                   </div>
                   {submission && !showForm && (
                     <button onClick={openEditForm} className="inline-flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-lg bg-slate-100 text-slate-600 hover:bg-slate-200 transition-colors">
-                      <RefreshCw className="w-3 h-3" />Edit
+                      <RefreshCw className="w-3 h-3" />{t('common.edit')}
                     </button>
                   )}
                 </div>
@@ -560,8 +564,8 @@ export default function StudentAssignmentDetail() {
                       <div className="bg-slate-50 rounded-xl p-4">
                         <div className="flex items-center gap-2 mb-2">
                           <CheckCircle2 className="w-4 h-4 text-emerald-500" />
-                          <span className="text-xs font-bold text-emerald-700 uppercase tracking-wide">Text answer</span>
-                          {submission.is_late && <span className="text-xs px-2 py-0.5 rounded-full bg-orange-100 text-orange-600 font-semibold">Late</span>}
+                          <span className="text-xs font-bold text-emerald-700 uppercase tracking-wide">{t('student.assignments.textAnswer')}</span>
+                          {submission.is_late && <span className="text-xs px-2 py-0.5 rounded-full bg-orange-100 text-orange-600 font-semibold">{t('common.late')}</span>}
                         </div>
                         <p className="text-sm text-slate-700 leading-relaxed whitespace-pre-wrap">{submission.content}</p>
                       </div>
@@ -570,7 +574,9 @@ export default function StudentAssignmentDetail() {
                       <div className="bg-slate-50 rounded-xl p-4">
                         <div className="flex items-center gap-2 mb-2">
                           <Paperclip className="w-4 h-4 text-blue-500" />
-                          <span className="text-xs font-bold text-blue-700 uppercase tracking-wide">{submission.file_urls.length} file{submission.file_urls.length !== 1 ? 's' : ''} attached</span>
+                          <span className="text-xs font-bold text-blue-700 uppercase tracking-wide">
+                            {t('student.assignments.filesCount', { count: submission.file_urls.length })}
+                          </span>
                         </div>
                         <div className="space-y-2">
                           {submission.file_urls.map((f, i) => (
@@ -590,7 +596,9 @@ export default function StudentAssignmentDetail() {
                       <div className="bg-slate-50 rounded-xl p-4">
                         <div className="flex items-center gap-2 mb-2">
                           <Link2 className="w-4 h-4 text-violet-500" />
-                          <span className="text-xs font-bold text-violet-700 uppercase tracking-wide">{submission.link_urls.length} link{submission.link_urls.length !== 1 ? 's' : ''} submitted</span>
+                          <span className="text-xs font-bold text-violet-700 uppercase tracking-wide">
+                            {t('student.assignments.linksCount', { count: submission.link_urls.length })}
+                          </span>
                         </div>
                         <div className="space-y-1.5">
                           {submission.link_urls.map((l, i) => (
@@ -603,8 +611,8 @@ export default function StudentAssignmentDetail() {
                       </div>
                     )}
                     <p className="text-xs text-slate-400">
-                      Submitted {formatDistanceToNow(new Date(submission.submitted_at), { addSuffix: true })}
-                      {submission.is_late && ' · Marked as late'}
+                      {t('student.assignments.submittedAt', { date: formatDistanceToNow(new Date(submission.submitted_at), { addSuffix: true }) })}
+                      {submission.is_late && ` · ${t('student.assignments.markedAsLate')}`}
                     </p>
                   </div>
                 ) : (
@@ -612,7 +620,7 @@ export default function StudentAssignmentDetail() {
                   <div className="space-y-4">
                     {submission && (
                       <div className="bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 text-xs text-amber-700 font-medium">
-                        Editing will replace your previous submission.
+                        {t('student.assignments.editWillReplace')}
                       </div>
                     )}
 
@@ -620,7 +628,7 @@ export default function StudentAssignmentDetail() {
                     {draftSavedAt && (
                       <div className="flex items-center gap-1.5 text-xs text-slate-400">
                         <Save className="w-3 h-3" />
-                        Draft saved {formatDistanceToNow(draftSavedAt, { addSuffix: true })}
+                        {t('student.assignments.draftSaved', { date: formatDistanceToNow(draftSavedAt, { addSuffix: true }) })}
                       </div>
                     )}
 
@@ -635,7 +643,7 @@ export default function StudentAssignmentDetail() {
                               activeTab === tab.key ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500 hover:text-slate-700')}
                           >
                             <tab.icon className="w-3.5 h-3.5" />
-                            {tab.label}
+                            {t(`common.${tab.key}`)}
                             {tab.key === 'files' && files.length > 0 && (
                               <span className="bg-blue-500 text-white text-[10px] rounded-full w-4 h-4 flex items-center justify-center">{files.length}</span>
                             )}

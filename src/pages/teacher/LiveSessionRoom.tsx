@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
 import { supabase } from '../../supabase';
 import { authFetch, readApiError } from '../../lib/apiUrl';
 import { toast } from 'sonner';
@@ -134,6 +135,7 @@ function loadJitsiExternalAPI(
 }
 
 export default function TeacherLiveSessionRoom() {
+  const { t } = useTranslation();
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
 
@@ -291,11 +293,11 @@ export default function TeacherLiveSessionRoom() {
         if (json.session.recording_url) setSavedRecordings([json.session.recording_url]);
         if (json.session.status === 'live') setMeetingActive(true);
       } else {
-        toast.error('Session not found');
+        toast.error(t('liveSessions.sessionNotFound'));
         navigate('/teacher/live-sessions');
       }
     } catch {
-      toast.error('Failed to load session');
+      toast.error(t('liveSessions.failedToLoadSession'));
     } finally {
       setLoading(false);
     }
@@ -364,7 +366,7 @@ export default function TeacherLiveSessionRoom() {
   };
 
   const endMeeting = async (auto = false) => {
-    if (!auto && !confirm('End the live session for everyone?')) return;
+    if (!auto && !confirm(t('liveSessions.endSessionConfirm'))) return;
     if (recordingState === 'recording') await stopRecording();
     // Dispose Jitsi API before marking ended
     if (jitsiApiRef.current) { jitsiApiRef.current.dispose(); jitsiApiRef.current = null; }
@@ -377,7 +379,7 @@ export default function TeacherLiveSessionRoom() {
     }
     setSession(prev => prev ? { ...prev, status: 'ended' } : prev);
     setMeetingActive(false);
-    toast.success(auto ? 'Session ended automatically (time is up)' : 'Session ended');
+    toast.success(auto ? t('liveSessions.sessionEndedAuto') : t('liveSessions.sessionEnded'));
   };
 
   const sendChat = async () => {
@@ -438,14 +440,14 @@ export default function TeacherLiveSessionRoom() {
   };
 
   const removeParticipant = async (p: Participant) => {
-    if (!confirm(`Remove ${p.user?.display_name} from session? They will not be able to rejoin.`)) return;
+    if (!confirm(t('liveSessions.removeParticipantConfirm', { name: p.user?.display_name }))) return;
     try {
       await authFetch(`/api/teacher/live-sessions/${id}/participants/${p.user_id}`, {
         method: 'PATCH',
         body: JSON.stringify({ is_removed: true, left_at: new Date().toISOString() }),
       });
       setParticipants(prev => prev.filter(x => x.user_id !== p.user_id));
-      toast.success('Participant removed');
+      toast.success(t('liveSessions.participantRemoved'));
     } catch { /* silent */ }
   };
 
@@ -466,9 +468,9 @@ export default function TeacherLiveSessionRoom() {
       setRecordingState('recording');
       setRecordingTime(0);
       timerRef.current = setInterval(() => setRecordingTime(t => t + 1), 1000);
-      toast.success('Recording started');
+      toast.success(t('liveSessions.recordingStarted'));
     } catch (e: any) {
-      if (e.name !== 'NotAllowedError') toast.error('Could not start recording: ' + e.message);
+      if (e.name !== 'NotAllowedError') toast.error(t('liveSessions.recordingError') + ': ' + e.message);
     }
   };
 
@@ -539,7 +541,7 @@ export default function TeacherLiveSessionRoom() {
       <div className="min-h-screen bg-slate-950 flex items-center justify-center">
         <div className="flex items-center gap-3 text-slate-400">
           <Loader2 className="w-6 h-6 animate-spin text-violet-400" />
-          <span>Loading session...</span>
+          <span>{t('liveSessions.loadingSession')}</span>
         </div>
       </div>
     );
@@ -555,7 +557,7 @@ export default function TeacherLiveSessionRoom() {
           onClick={() => navigate('/teacher/live-sessions')}
           className="flex items-center gap-1.5 text-slate-400 hover:text-white text-sm transition-colors"
         >
-          <ChevronLeft className="w-4 h-4" /> Back
+          <ChevronLeft className="w-4 h-4" /> {t('common.back')}
         </button>
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2">
@@ -605,14 +607,14 @@ export default function TeacherLiveSessionRoom() {
                 </div>
                 <div className="text-center">
                   <p className="text-xl font-semibold text-white mb-2">
-                    {session.status === 'ended' ? 'Session Ended' : 'Meeting Room Ready'}
+                    {session.status === 'ended' ? t('liveSessions.sessionEnded') : t('liveSessions.meetingRoomReady')}
                   </p>
                   {session.status !== 'ended' && session.status !== 'cancelled' ? (
                     <p className="text-sm text-white/50 mb-6">
-                      Click <span className="text-violet-400 font-semibold">Start Meeting</span> to launch
+                      {t('liveSessions.startMeetingPrompt')}
                     </p>
                   ) : (
-                    <p className="text-sm text-white/40 mb-6">This session has ended</p>
+                    <p className="text-sm text-white/40 mb-6">{t('liveSessions.sessionHasEnded')}</p>
                   )}
                   <p className="text-xs text-white/20 font-mono">Room: {jitsiRoomName}</p>
                 </div>
@@ -621,7 +623,7 @@ export default function TeacherLiveSessionRoom() {
                     onClick={startMeeting}
                     className="flex items-center gap-2 px-6 py-3 bg-violet-600 text-white rounded-xl font-semibold hover:bg-violet-700 transition-all shadow-lg shadow-violet-900/50"
                   >
-                    <Video className="w-5 h-5" /> Start Meeting
+                    <Video className="w-5 h-5" /> {t('liveSessions.startMeeting')}
                   </button>
                 )}
               </div>
@@ -650,7 +652,7 @@ export default function TeacherLiveSessionRoom() {
           {savedRecordings.length > 0 && (
             <div className="bg-slate-900 border-t border-slate-800 p-3">
               <p className="text-slate-400 text-xs font-semibold mb-2 flex items-center gap-1.5">
-                <Film className="w-3.5 h-3.5" /> Recordings ({savedRecordings.length})
+                <Film className="w-3.5 h-3.5" /> {t('liveSessions.recordings', { count: savedRecordings.length })}
               </p>
               <div className="flex gap-2 overflow-x-auto">
                 {savedRecordings.map((url, i) => (

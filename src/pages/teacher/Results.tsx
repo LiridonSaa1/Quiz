@@ -1,4 +1,5 @@
 import React, { useEffect, useState, useMemo, useCallback, useRef } from 'react';
+import { useTranslation } from 'react-i18next';
 import * as XLSX from 'xlsx';
 import { supabase } from '../../supabase';
 import TeacherLayout from '../../components/layout/TeacherLayout';
@@ -59,6 +60,7 @@ const avatarColor = (s: string) => {
 };
 
 export default function TeacherResults() {
+  const { t } = useTranslation();
   const [attempts, setAttempts] = useState<UiAttempt[]>([]);
   const [quizzes, setQuizzes] = useState<Record<string, string>>({});
   const [students, setStudents] = useState<Record<string, { name: string; email: string }>>({});
@@ -250,12 +252,12 @@ export default function TeacherResults() {
           : 'from-rose-400 to-red-500';
 
   const statItems = [
-    { label: 'Total attempts', value: stats.total, gradient: 'from-indigo-500 to-violet-600', shadow: 'shadow-indigo-500/25', icon: FileText },
-    { label: 'Completed', value: stats.completed, gradient: 'from-blue-500 to-cyan-600', shadow: 'shadow-blue-500/25', icon: ClipboardList },
-    { label: 'Pass rate %', value: stats.passRate, gradient: 'from-emerald-500 to-teal-600', shadow: 'shadow-emerald-500/25', icon: Trophy },
-    { label: 'Avg score %', value: stats.avgScore, gradient: 'from-violet-500 to-purple-600', shadow: 'shadow-violet-500/25', icon: TrendingUp },
-    { label: 'Best score %', value: stats.highScore, gradient: 'from-amber-500 to-orange-600', shadow: 'shadow-amber-500/25', icon: BarChart3 },
-    { label: 'Avg time (min)', value: stats.avgDuration || 0, gradient: 'from-sky-500 to-indigo-600', shadow: 'shadow-sky-500/25', icon: Clock },
+    { label: t('teacher.results.totalAttempts'), value: stats.total, gradient: 'from-indigo-500 to-violet-600', shadow: 'shadow-indigo-500/25', icon: FileText },
+    { label: t('teacher.results.completed'), value: stats.completed, gradient: 'from-blue-500 to-cyan-600', shadow: 'shadow-blue-500/25', icon: ClipboardList },
+    { label: t('teacher.results.passRate'), value: stats.passRate, gradient: 'from-emerald-500 to-teal-600', shadow: 'shadow-emerald-500/25', icon: Trophy },
+    { label: t('teacher.results.avgScore'), value: stats.avgScore, gradient: 'from-violet-500 to-purple-600', shadow: 'shadow-violet-500/25', icon: TrendingUp },
+    { label: t('teacher.results.bestScore'), value: stats.highScore, gradient: 'from-amber-500 to-orange-600', shadow: 'shadow-amber-500/25', icon: BarChart3 },
+    { label: t('teacher.results.avgTime'), value: stats.avgDuration || 0, gradient: 'from-sky-500 to-indigo-600', shadow: 'shadow-sky-500/25', icon: Clock },
   ];
 
   const [exportOpen, setExportOpen] = useState(false);
@@ -338,10 +340,10 @@ export default function TeacherResults() {
   return (
     <TeacherLayout>
       <AdminListPageShell
-        breadcrumbPortalLabel="Teacher Portal"
-        breadcrumbLabel="Results"
-        title="Quiz Results"
-        description="Review attempts, scores, and trends for quizzes linked to your courses."
+        breadcrumbPortalLabel={t('nav.teacherPortal')}
+        breadcrumbLabel={t('teacher.results.title')}
+        title={t('teacher.results.title')}
+        description={t('teacher.results.description')}
         statsGridClassName="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-4"
         stats={statItems}
         action={
@@ -355,18 +357,18 @@ export default function TeacherResults() {
               style={{ background: 'linear-gradient(135deg, #818cf8 0%, #a78bfa 100%)', boxShadow: '0 8px 32px rgba(139,92,246,0.45), 0 2px 8px rgba(0,0,0,0.15)' }}
             >
               <Download className="w-4 h-4" />
-              Export <ChevronDown className="w-3.5 h-3.5" />
+              {t('teacher.results.export')} <ChevronDown className="w-3.5 h-3.5" />
             </motion.button>
             {exportOpen && (
               <div className="absolute right-0 top-full mt-2 w-48 bg-white rounded-2xl shadow-2xl border border-slate-100 overflow-hidden z-50">
                 <button onClick={exportCsv} className="flex items-center gap-2.5 w-full px-4 py-3 text-sm font-semibold text-slate-700 hover:bg-slate-50 transition">
-                  <FileText className="w-4 h-4 text-emerald-500" /> CSV
+                  <FileText className="w-4 h-4 text-emerald-500" /> {t('teacher.results.exportCSV')}
                 </button>
                 <button onClick={exportExcel} className="flex items-center gap-2.5 w-full px-4 py-3 text-sm font-semibold text-slate-700 hover:bg-slate-50 transition border-t border-slate-100">
-                  <BarChart3 className="w-4 h-4 text-indigo-500" /> Excel (.xlsx)
+                  <BarChart3 className="w-4 h-4 text-indigo-500" /> {t('teacher.results.exportExcel')}
                 </button>
                 <button onClick={exportPdf} className="flex items-center gap-2.5 w-full px-4 py-3 text-sm font-semibold text-slate-700 hover:bg-slate-50 transition border-t border-slate-100">
-                  <Download className="w-4 h-4 text-red-500" /> PDF (Print)
+                  <Download className="w-4 h-4 text-red-500" /> {t('teacher.results.exportPDF')}
                 </button>
               </div>
             )}
@@ -379,7 +381,7 @@ export default function TeacherResults() {
               <input
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
-                placeholder="Search student, email, or quiz..."
+                placeholder={t('teacher.results.searchPlaceholder')}
                 className={ADMIN_LIST_SEARCH_INPUT}
               />
             </div>
@@ -388,10 +390,10 @@ export default function TeacherResults() {
               onChange={(e) => setTab(e.target.value as TabFilter)}
               className={ADMIN_LIST_SELECT}
             >
-              <option value="all">All ({attempts.length})</option>
-              <option value="passed">Passed ({attempts.filter((a) => a.passed).length})</option>
+              <option value="all">{t('teacher.results.all')} ({attempts.length})</option>
+              <option value="passed">{t('teacher.results.passed')} ({attempts.filter((a) => a.passed).length})</option>
               <option value="failed">
-                Failed ({attempts.filter((a) => !a.passed && a.status === 'completed').length})
+                {t('teacher.results.failed')} ({attempts.filter((a) => !a.passed && a.status === 'completed').length})
               </option>
             </select>
             {quizOptions.length > 0 && (
@@ -400,7 +402,7 @@ export default function TeacherResults() {
                 onChange={(e) => setSelectedQuiz(e.target.value)}
                 className={ADMIN_LIST_SELECT}
               >
-                <option value="all">All quizzes</option>
+                <option value="all">{t('teacher.results.allQuizzes')}</option>
                 {quizOptions.map(([id, title]) => (
                   <option key={id} value={id}>
                     {title}
@@ -417,12 +419,12 @@ export default function TeacherResults() {
               }}
               className={ADMIN_LIST_SELECT}
             >
-              <option value="date:desc">Newest first</option>
-              <option value="date:asc">Oldest first</option>
-              <option value="score:desc">Score high → low</option>
-              <option value="score:asc">Score low → high</option>
-              <option value="student:asc">Student A–Z</option>
-              <option value="quiz:asc">Quiz A–Z</option>
+              <option value="date:desc">{t('teacher.results.newestFirst')}</option>
+              <option value="date:asc">{t('teacher.results.oldestFirst')}</option>
+              <option value="score:desc">{t('teacher.results.scoreHighLow')}</option>
+              <option value="score:asc">{t('teacher.results.scoreLowHigh')}</option>
+              <option value="student:asc">{t('teacher.results.studentAZ')}</option>
+              <option value="quiz:asc">{t('teacher.results.quizAZ')}</option>
             </select>
           </AdminListFilterBar>
         }
@@ -439,8 +441,8 @@ export default function TeacherResults() {
               <div className="p-6">
                 <div className="flex items-center justify-between mb-5">
                   <div>
-                    <h2 className="text-base font-bold text-slate-900">Activity trend</h2>
-                    <p className="text-xs text-slate-400 mt-0.5">Attempts over the last 7 days</p>
+                    <h2 className="text-base font-bold text-slate-900">{t('teacher.results.activityTrend')}</h2>
+                    <p className="text-xs text-slate-400 mt-0.5">{t('teacher.results.attemptsLast7Days')}</p>
                   </div>
                   <Activity className="w-5 h-5 text-indigo-400" />
                 </div>
@@ -484,12 +486,12 @@ export default function TeacherResults() {
               <div className="p-6">
                 <div className="flex items-center gap-2 mb-1">
                   <Flame className="w-4 h-4 text-orange-500" />
-                  <h2 className="text-base font-bold text-slate-900">Top quizzes</h2>
+                  <h2 className="text-base font-bold text-slate-900">{t('teacher.results.topQuizzes')}</h2>
                 </div>
-                <p className="text-xs text-slate-400 mb-4">By attempt volume</p>
+                <p className="text-xs text-slate-400 mb-4">{t('teacher.results.byAttemptVolume')}</p>
                 <div className="space-y-3">
                   {quizBreakdown.length === 0 ? (
-                    <p className="text-slate-400 text-sm text-center py-6">No breakdown yet</p>
+                    <p className="text-slate-400 text-sm text-center py-6">{t('teacher.results.noBreakdown')}</p>
                   ) : (
                     quizBreakdown.map((q, i) => (
                       <div key={q.id} className="flex items-center gap-3">
@@ -514,7 +516,7 @@ export default function TeacherResults() {
                                 style={{ width: `${Math.min(q.avgScore, 100)}%` }}
                               />
                             </div>
-                            <span className="text-[10px] text-slate-500 font-medium shrink-0">{q.avgScore}% avg</span>
+                            <span className="text-[10px] text-slate-500 font-medium shrink-0">{q.avgScore}% {t('teacher.results.avg')}</span>
                           </div>
                         </div>
                         <span className="text-xs font-bold text-slate-600 shrink-0">{q.count}</span>
@@ -537,17 +539,17 @@ export default function TeacherResults() {
           ) : filtered.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-20 px-6 text-slate-400">
               <BarChart3 className="w-12 h-12 mb-3 opacity-30" />
-              <p className="font-medium text-slate-600">No results found</p>
+              <p className="font-medium text-slate-600">{t('teacher.results.noResults')}</p>
               <p className="text-sm mt-1 text-center max-w-md">
                 {search || tab !== 'all' || selectedQuiz !== 'all'
-                  ? 'Try adjusting filters or search.'
-                  : 'Results appear when students complete quizzes for your courses.'}
+                  ? t('teacher.results.adjustFilters')
+                  : t('teacher.results.resultsAppearWhen')}
               </p>
             </div>
           ) : (
             <>
               <div className="px-4 sm:px-6 py-3 border-b border-slate-100 flex flex-wrap items-center gap-2 text-xs text-slate-500">
-                <span className="font-semibold uppercase tracking-wider">Sort by column</span>
+                <span className="font-semibold uppercase tracking-wider">{t('teacher.results.sortByColumn')}</span>
                 {(['student', 'quiz', 'score', 'duration', 'date'] as SortField[]).map((col) => (
                   <button
                     key={col}
@@ -560,7 +562,7 @@ export default function TeacherResults() {
                         : 'border-slate-200 bg-white text-slate-600 hover:border-indigo-100',
                     )}
                   >
-                    {col === 'student' ? 'Student' : col === 'quiz' ? 'Quiz' : col === 'score' ? 'Score' : col === 'duration' ? 'Time' : 'Date'}
+                    {col === 'student' ? t('teacher.results.columnStudent') : col === 'quiz' ? t('teacher.results.columnQuiz') : col === 'score' ? t('teacher.results.columnScore') : col === 'duration' ? t('teacher.results.columnTime') : t('teacher.results.columnDate')}
                     <SortIcon col={col} />
                   </button>
                 ))}
@@ -587,7 +589,7 @@ export default function TeacherResults() {
                       </div>
                       <div className="mt-4 space-y-3 text-xs border-t border-slate-100 pt-3">
                         <div className="flex items-center gap-2">
-                          <span className="text-slate-400 font-semibold uppercase tracking-wider w-16 shrink-0">Score</span>
+                          <span className="text-slate-400 font-semibold uppercase tracking-wider w-16 shrink-0">{t('teacher.results.score')}</span>
                           <div className="flex-1 flex items-center gap-2 min-w-0">
                             <div className="flex-1 h-2 bg-slate-100 rounded-full overflow-hidden">
                               <div
@@ -600,7 +602,7 @@ export default function TeacherResults() {
                         </div>
                         {attempt.totalQuestions != null && attempt.totalQuestions > 0 && (
                           <p className="text-[11px] text-slate-400 pl-16">
-                            {attempt.correctAnswers ?? '—'}/{attempt.totalQuestions} correct
+                            {attempt.correctAnswers ?? '—'}/{attempt.totalQuestions} {t('teacher.results.correct')}
                           </p>
                         )}
                         <div className="flex flex-wrap items-center gap-2 justify-between">
@@ -621,7 +623,7 @@ export default function TeacherResults() {
                             ) : (
                               <Clock className="w-3.5 h-3.5" />
                             )}
-                            {attempt.passed ? 'Passed' : attempt.status === 'completed' ? 'Failed' : 'In progress'}
+                            {attempt.passed ? t('teacher.results.passed') : attempt.status === 'completed' ? t('teacher.results.failed') : t('teacher.results.inProgress')}
                           </span>
                           <div className="flex items-center gap-3 text-slate-500">
                             {duration != null && (
@@ -644,7 +646,7 @@ export default function TeacherResults() {
               </div>
               <div className="px-5 py-3 border-t border-slate-100 bg-slate-50/60 text-xs text-slate-500 flex flex-wrap items-center justify-between gap-2">
                 <span>
-                  Showing {filtered.length} of {attempts.length} attempts
+                  {t('teacher.results.showing', { count: filtered.length, total: attempts.length })}
                 </span>
                 {(tab !== 'all' || selectedQuiz !== 'all' || search.trim()) && (
                   <button
@@ -656,7 +658,7 @@ export default function TeacherResults() {
                     }}
                     className="text-indigo-600 font-semibold hover:underline"
                   >
-                    Clear filters
+                    {t('teacher.results.clearFilters')}
                   </button>
                 )}
               </div>

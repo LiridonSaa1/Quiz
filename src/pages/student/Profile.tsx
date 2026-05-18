@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
+import { useTranslation } from 'react-i18next';
 import { supabase } from '../../supabase';
 import {
   User, Mail, Shield, Save, Loader2, Lock, Eye, EyeOff,
@@ -43,6 +44,7 @@ const emptyProfile: ProfileData = {
 };
 
 export default function StudentProfile() {
+  const { t } = useTranslation();
   const [profile, setProfile] = useState<ProfileData>(emptyProfile);
   const [stats, setStats] = useState<Stats>({ coursesEnrolled: 0, lessonsCompleted: 0, quizzesTaken: 0, certificatesEarned: 0 });
   const [loading, setLoading] = useState(true);
@@ -107,7 +109,7 @@ export default function StudentProfile() {
       }
     } catch (e) {
       console.error(e);
-      toast.error('Failed to load profile');
+      toast.error(t('errors.loadFailed'));
     } finally {
       setLoading(false);
     }
@@ -119,8 +121,8 @@ export default function StudentProfile() {
 
   const handleSave = async () => {
     const { data: { session } } = await supabase.auth.getSession();
-    if (!session?.user?.id) { toast.error('Not signed in'); return; }
-    if (!profile.displayName.trim()) { toast.error('Display name is required'); return; }
+    if (!session?.user?.id) { toast.error(t('errors.notFound')); return; }
+    if (!profile.displayName.trim()) { toast.error(t('student.profile.displayName') + ' ' + t('common.required')); return; }
     setSaving(true);
     try {
       const payload: Record<string, unknown> = {
@@ -141,30 +143,30 @@ export default function StudentProfile() {
             .update({ display_name: profile.displayName.trim(), updated_at: new Date().toISOString() })
             .eq('id', session.user.id);
           if (e2) throw e2;
-          toast.success('Display name saved. Add optional columns (bio, phone, …) in Supabase for full profile.');
+          toast.success(t('success.saved'));
         } else {
           throw error;
         }
       } else {
-        toast.success('Profile saved');
+        toast.success(t('success.saved'));
       }
       setDirty(false);
       await loadAll();
     } catch (e: unknown) {
-      toast.error((e as Error)?.message || 'Failed to save profile');
+      toast.error((e as Error)?.message || t('errors.saveFailed'));
     } finally {
       setSaving(false);
     }
   };
 
   const handlePasswordChange = async () => {
-    if (passwords.next !== passwords.confirm) { toast.error('Passwords do not match'); return; }
-    if (passwords.next.length < 8) { toast.error('Minimum 8 characters'); return; }
+    if (passwords.next !== passwords.confirm) { toast.error(t('security.passwordMismatch')); return; }
+    if (passwords.next.length < 8) { toast.error(t('security.toasts.minChars')); return; }
     setChangingPass(true);
     const { error } = await supabase.auth.updateUser({ password: passwords.next });
     if (error) toast.error(error.message);
     else {
-      toast.success('Password updated');
+      toast.success(t('security.toasts.updated'));
       setPasswords({ next: '', confirm: '' });
     }
     setChangingPass(false);
@@ -177,10 +179,10 @@ export default function StudentProfile() {
   const memberYear = profile.createdAt ? new Date(profile.createdAt).getFullYear() : new Date().getFullYear();
 
   const statItems = [
-    { label: 'Courses', value: stats.coursesEnrolled, gradient: 'from-indigo-500 to-violet-600', shadow: 'shadow-indigo-500/25', icon: BookOpen },
-    { label: 'Lessons Done', value: stats.lessonsCompleted, gradient: 'from-blue-500 to-cyan-600', shadow: 'shadow-blue-500/25', icon: FileText },
-    { label: 'Quizzes Taken', value: stats.quizzesTaken, gradient: 'from-violet-500 to-purple-600', shadow: 'shadow-violet-500/25', icon: HelpCircle },
-    { label: 'Certificates', value: stats.certificatesEarned, gradient: 'from-emerald-500 to-teal-600', shadow: 'shadow-emerald-500/25', icon: Award },
+    { label: t('student.profile.courses'), value: stats.coursesEnrolled, gradient: 'from-indigo-500 to-violet-600', shadow: 'shadow-indigo-500/25', icon: BookOpen },
+    { label: t('student.profile.lessons'), value: stats.lessonsCompleted, gradient: 'from-blue-500 to-cyan-600', shadow: 'shadow-blue-500/25', icon: FileText },
+    { label: t('student.profile.quizzes'), value: stats.quizzesTaken, gradient: 'from-violet-500 to-purple-600', shadow: 'shadow-violet-500/25', icon: HelpCircle },
+    { label: t('student.profile.badges'), value: stats.certificatesEarned, gradient: 'from-emerald-500 to-teal-600', shadow: 'shadow-emerald-500/25', icon: Award },
   ];
 
   const inputCls =
@@ -190,10 +192,10 @@ export default function StudentProfile() {
   return (
     <StudentLayout>
       <AdminListPageShell
-        breadcrumbPortalLabel="Student Portal"
-        breadcrumbLabel="Profile"
-        title="Your profile"
-        description="Update your personal information and account security."
+        breadcrumbPortalLabel={t('nav.studentPortal')}
+        breadcrumbLabel={t('nav.profile')}
+        title={t('nav.profile')}
+        description={t('student.profile.profileDetails')}
         statsGridClassName="grid grid-cols-2 sm:grid-cols-4 gap-4"
         stats={statItems}
         action={
@@ -212,7 +214,7 @@ export default function StudentProfile() {
             }}
           >
             {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
-            Save changes
+            {t('common.saveChanges')}
           </motion.button>
         }
       >
@@ -236,21 +238,27 @@ export default function StudentProfile() {
                     <Camera className="w-4 h-4 text-slate-400" />
                   </span>
                 </div>
-                <p className="mt-4 font-bold text-slate-900">{profile.displayName || 'Your name'}</p>
+                <p className="mt-4 font-bold text-slate-900">{profile.displayName || t('student.profile.fullNamePlaceholder')}</p>
                 <span className="mt-2 inline-flex items-center gap-1 text-xs font-semibold text-slate-500 bg-slate-100 px-2 py-1 rounded-full">
-                  <Shield className="w-3.5 h-3.5" /> Student · Since {memberYear}
+                  <Shield className="w-3.5 h-3.5" /> {t('roles.meta.student.label')} · {t('common.joinedDate')} {memberYear}
                 </span>
                 {profile.email && (
                   <p className="mt-2 text-xs text-slate-400 break-all">{profile.email}</p>
                 )}
               </div>
+            </div>
 
-              <div className="mt-5 pt-5 border-t border-slate-100 space-y-3">
+            <div className="bg-white rounded-3xl p-6 shadow-sm border border-slate-100">
+              <h2 className="text-sm font-black text-slate-900 uppercase tracking-wider mb-4 flex items-center gap-2">
+                <TrendingUp className="w-4 h-4 text-emerald-500" />
+                {t('student.profile.yourStats')}
+              </h2>
+              <div className="grid grid-cols-2 gap-4">
                 {[
-                  { label: 'Courses enrolled', value: stats.coursesEnrolled, icon: BookOpen, color: 'text-indigo-600', bg: 'bg-indigo-50' },
-                  { label: 'Lessons completed', value: stats.lessonsCompleted, icon: TrendingUp, color: 'text-blue-600', bg: 'bg-blue-50' },
-                  { label: 'Quizzes taken', value: stats.quizzesTaken, icon: HelpCircle, color: 'text-violet-600', bg: 'bg-violet-50' },
-                  { label: 'Certificates earned', value: stats.certificatesEarned, icon: Award, color: 'text-emerald-600', bg: 'bg-emerald-50' },
+                  { label: t('student.profile.courses'), value: stats.coursesEnrolled, icon: BookOpen, color: 'text-indigo-600', bg: 'bg-indigo-50' },
+                  { label: t('student.profile.lessons'), value: stats.lessonsCompleted, icon: TrendingUp, color: 'text-blue-600', bg: 'bg-blue-50' },
+                  { label: t('student.profile.quizzes'), value: stats.quizzesTaken, icon: HelpCircle, color: 'text-violet-600', bg: 'bg-violet-50' },
+                  { label: t('student.profile.badges'), value: stats.certificatesEarned, icon: Award, color: 'text-emerald-600', bg: 'bg-emerald-50' },
                 ].map((item) => (
                   <div key={item.label} className="flex items-center justify-between">
                     <div className="flex items-center gap-2">
@@ -270,7 +278,7 @@ export default function StudentProfile() {
             <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
               <div className="px-5 py-4 border-b border-slate-100 flex items-center gap-2">
                 <Sparkles className="w-5 h-5 text-emerald-500" />
-                <h2 className="font-bold text-slate-900">Profile details</h2>
+                <h2 className="font-bold text-slate-900">{t('student.profile.profileDetails')}</h2>
               </div>
               <div className="p-5 space-y-4">
                 {loading ? (
@@ -282,19 +290,19 @@ export default function StudentProfile() {
                 ) : (
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div className="sm:col-span-2">
-                      <label className={labelCls}>Display name *</label>
+                      <label className={labelCls}>{t('student.profile.displayName')} *</label>
                       <div className="relative">
                         <User className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
                         <input
                           value={profile.displayName}
                           onChange={(e) => updateField('displayName', e.target.value)}
                           className={cn(inputCls, 'pl-10')}
-                          placeholder="Your full name"
+                          placeholder={t('student.profile.fullNamePlaceholder')}
                         />
                       </div>
                     </div>
                     <div>
-                      <label className={labelCls}>Phone</label>
+                      <label className={labelCls}>{t('student.profile.phone')}</label>
                       <div className="relative">
                         <Phone className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
                         <input
@@ -306,7 +314,7 @@ export default function StudentProfile() {
                       </div>
                     </div>
                     <div>
-                      <label className={labelCls}>Website / Social</label>
+                      <label className={labelCls}>{t('student.profile.website')}</label>
                       <div className="relative">
                         <Globe className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
                         <input
@@ -318,26 +326,26 @@ export default function StudentProfile() {
                       </div>
                     </div>
                     <div className="sm:col-span-2">
-                      <label className={labelCls}>Avatar image URL</label>
+                      <label className={labelCls}>{t('student.profile.avatarUrl')}</label>
                       <input
                         value={profile.avatarUrl}
                         onChange={(e) => updateField('avatarUrl', e.target.value)}
                         className={inputCls}
-                        placeholder="https://… (link to your photo)"
+                        placeholder={t('student.profile.avatarUrlPlaceholder')}
                       />
                     </div>
                     <div className="sm:col-span-2">
-                      <label className={labelCls}>Bio</label>
+                      <label className={labelCls}>{t('student.profile.bio')}</label>
                       <textarea
                         value={profile.bio}
                         onChange={(e) => updateField('bio', e.target.value)}
                         rows={4}
                         className={cn(inputCls, 'resize-none')}
-                        placeholder="Tell a little about yourself and your learning goals."
+                        placeholder={t('student.profile.bioPlaceholder')}
                       />
                     </div>
                     <div className="sm:col-span-2">
-                      <label className={labelCls}>Email</label>
+                      <label className={labelCls}>{t('student.profile.email')}</label>
                       <div className="relative">
                         <Mail className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
                         <input
@@ -346,7 +354,7 @@ export default function StudentProfile() {
                           className="w-full pl-10 pr-4 py-3 bg-slate-100 border border-slate-200 rounded-xl text-sm text-slate-500 cursor-not-allowed"
                         />
                       </div>
-                      <p className="text-[11px] text-slate-400 mt-1">Email is managed by your login provider.</p>
+                      <p className="text-[11px] text-slate-400 mt-1">{t('student.profile.emailManaged')}</p>
                     </div>
                   </div>
                 )}
@@ -356,11 +364,11 @@ export default function StudentProfile() {
             <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
               <div className="px-5 py-4 border-b border-slate-100 flex items-center gap-2">
                 <Lock className="w-5 h-5 text-emerald-600" />
-                <h2 className="font-bold text-slate-900">Security</h2>
+                <h2 className="font-bold text-slate-900">{t('student.profile.security')}</h2>
               </div>
               <div className="p-5 space-y-4">
                 <div>
-                  <label className={labelCls}>New password</label>
+                  <label className={labelCls}>{t('student.profile.newPassword')}</label>
                   <div className="relative">
                     <Lock className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
                     <input
@@ -380,7 +388,7 @@ export default function StudentProfile() {
                   </div>
                 </div>
                 <div>
-                  <label className={labelCls}>Confirm password</label>
+                  <label className={labelCls}>{t('student.profile.confirmPassword')}</label>
                   <div className="relative">
                     <Lock className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
                     <input
@@ -411,11 +419,11 @@ export default function StudentProfile() {
                   className="w-full sm:w-auto px-6 py-3 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-semibold text-sm disabled:opacity-40 inline-flex items-center justify-center gap-2 transition-all"
                 >
                   {changingPass ? <Loader2 className="w-4 h-4 animate-spin" /> : <CheckCircle2 className="w-4 h-4" />}
-                  Update password
+                  {t('student.profile.updatePassword')}
                 </button>
                 <div className="flex items-start gap-2 p-3 rounded-xl bg-amber-50 border border-amber-100 text-xs text-amber-800">
                   <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
-                  Use a strong password you don't reuse elsewhere. Minimum 8 characters.
+                  {t('student.profile.passwordRules')}
                 </div>
               </div>
             </div>

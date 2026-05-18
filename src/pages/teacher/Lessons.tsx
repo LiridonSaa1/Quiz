@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { supabase } from '../../supabase';
 import { authFetch, readApiError } from '../../lib/apiUrl';
 import LoadingButton from '../../components/ui/LoadingButton';
@@ -72,6 +73,7 @@ const emptyForm = {
 };
 
 export default function TeacherLessons() {
+  const { t } = useTranslation();
   const [lessons, setLessons] = useState<Lesson[]>([]);
   const [courses, setCourses] = useState<any[]>([]);
   const [modules, setModules] = useState<any[]>([]);
@@ -182,7 +184,7 @@ export default function TeacherLessons() {
         updatedAt: l.updated_at,
       })));
     } catch {
-      toast.error('Failed to load lessons');
+      toast.error(t('lessons.failedToLoadLessons'));
     } finally {
       setLoading(false);
     }
@@ -239,10 +241,10 @@ export default function TeacherLessons() {
   };
 
   const handleSave = async () => {
-    if (!form.title.trim()) { toast.error('Title is required'); return; }
-    if (!formCourseId) { toast.error('Please select a course'); return; }
-    if (!formModuleId) { toast.error('Please select a module'); return; }
-    if (form.autoPublish && !form.publishAt) { toast.error('Please select a date and time for auto-publish'); return; }
+    if (!form.title.trim()) { toast.error(t('lessons.titleRequired')); return; }
+    if (!formCourseId) { toast.error(t('lessons.selectCourse')); return; }
+    if (!formModuleId) { toast.error(t('lessons.selectModule')); return; }
+    if (form.autoPublish && !form.publishAt) { toast.error(t('lessons.selectPublishDateTime')); return; }
     setSaving(true);
     try {
       const payload: Record<string, unknown> = {
@@ -268,19 +270,19 @@ export default function TeacherLessons() {
           body: JSON.stringify(payload),
         });
         if (!res.ok) throw new Error(await readApiError(res));
-        toast.success('Lesson updated');
+        toast.success(t('lessons.lessonUpdated'));
       } else {
         const res = await authFetch('/api/teacher/lessons', {
           method: 'POST',
           body: JSON.stringify(payload),
         });
         if (!res.ok) throw new Error(await readApiError(res));
-        toast.success('Lesson created');
+        toast.success(t('lessons.lessonCreated'));
       }
       closeModal();
       fetchData();
     } catch (err: any) {
-      toast.error(err.message || 'Failed to save lesson');
+      toast.error(err.message || t('lessons.failedToSaveLesson'));
     } finally {
       setSaving(false);
     }
@@ -296,11 +298,11 @@ export default function TeacherLessons() {
     try {
       const res = await authFetch(`/api/teacher/lessons/${deleteTarget.id}?userId=${encodeURIComponent(userId)}`, { method: 'DELETE' });
       if (!res.ok) throw new Error(await readApiError(res));
-      toast.success('Lesson deleted');
+      toast.success(t('lessons.lessonDeleted'));
       setDeleteTarget(null);
       fetchData();
     } catch (err: any) {
-      toast.error(err.message || 'Failed to delete lesson');
+      toast.error(err.message || t('lessons.failedToDeleteLesson'));
     } finally {
       setDeleting(false);
     }
@@ -314,9 +316,9 @@ export default function TeacherLessons() {
         body: JSON.stringify({ status: newStatus }),
       });
       if (!res.ok) throw new Error(await readApiError(res));
-      toast.success(`Lesson ${newStatus === 'published' ? 'published' : 'set to draft'}`);
+      toast.success(newStatus === 'published' ? t('lessons.lessonPublished') : t('lessons.lessonSetToDraft'));
       fetchData();
-    } catch (err: any) { toast.error(err.message || 'Failed to update status'); }
+    } catch (err: any) { toast.error(err.message || t('lessons.failedToUpdateStatus')); }
   };
 
   const handleToggleFreePreview = async (lesson: Lesson) => {
@@ -326,9 +328,9 @@ export default function TeacherLessons() {
         body: JSON.stringify({ is_free_preview: !lesson.isFreePreview }),
       });
       if (!res.ok) throw new Error(await readApiError(res));
-      toast.success(lesson.isFreePreview ? 'Free preview removed' : 'Set as free preview');
+      toast.success(lesson.isFreePreview ? t('lessons.freePreviewRemoved') : t('lessons.setAsFreePreview'));
       fetchData();
-    } catch (err: any) { toast.error(err.message || 'Failed to update'); }
+    } catch (err: any) { toast.error(err.message || t('lessons.failedToUpdateStatus')); }
   };
 
   const getModuleName = (id: string) =>
@@ -373,13 +375,13 @@ export default function TeacherLessons() {
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-6">
                 <div>
                   <nav className="flex items-center gap-1.5 text-xs font-semibold mb-3" aria-label="Breadcrumb">
-                    <span className="text-indigo-400 tracking-wider uppercase">Teacher Portal</span>
+                    <span className="text-indigo-400 tracking-wider uppercase">{t('lessons.teacherPortal')}</span>
                     <ChevronRight className="w-3.5 h-3.5 text-indigo-500/50" />
-                    <span className="text-indigo-200 tracking-wider uppercase">Lessons</span>
+                    <span className="text-indigo-200 tracking-wider uppercase">{t('lessons.title')}</span>
                   </nav>
-                  <h1 className="text-3xl sm:text-4xl font-extrabold text-white tracking-tight leading-tight">Lessons</h1>
+                  <h1 className="text-3xl sm:text-4xl font-extrabold text-white tracking-tight leading-tight">{t('lessons.title')}</h1>
                   <p className="text-indigo-200 text-sm mt-2 max-w-md">
-                    Create and manage lesson content inside your modules to guide students through your courses.
+                    {t('lessons.createManageContent')}
                   </p>
                 </div>
                 {can('actions.teacher.lessons.manage') && (
@@ -392,7 +394,7 @@ export default function TeacherLessons() {
                     style={{ background: 'linear-gradient(135deg, #818cf8 0%, #a78bfa 100%)', boxShadow: '0 8px 32px rgba(139,92,246,0.45), 0 2px 8px rgba(0,0,0,0.15)' }}
                   >
                     <Plus className="w-4 h-4" />
-                    New Lesson
+                    {t('lessons.newLesson')}
                   </motion.button>
                 )}
               </div>
@@ -406,8 +408,8 @@ export default function TeacherLessons() {
               <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className="bg-amber-50 border border-amber-200 rounded-2xl p-5 flex items-start gap-3">
                 <BookOpen className="w-5 h-5 text-amber-500 mt-0.5 shrink-0" />
                 <div>
-                  <p className="text-sm font-semibold text-amber-800">No courses found</p>
-                  <p className="text-xs text-amber-600 mt-0.5">You need at least one course and module before adding lessons.</p>
+                  <p className="text-sm font-semibold text-amber-800">{t('lessons.noCoursesFound')}</p>
+                  <p className="text-xs text-amber-600 mt-0.5">{t('lessons.needCourseModule')}</p>
                 </div>
               </motion.div>
             )}
@@ -444,30 +446,30 @@ export default function TeacherLessons() {
               className="rounded-2xl border border-white/60 shadow-sm p-4 flex flex-wrap gap-3 items-center"
               style={{ background: 'rgba(255,255,255,0.75)', backdropFilter: 'blur(12px)' }}
             >
-              <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mr-1">Filters</p>
+              <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mr-1">{t('lessons.filters')}</p>
               <div className="relative flex-1 min-w-[180px]">
                 <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-indigo-400" />
                 <input
-                  type="text" placeholder="Search lessons..." value={search}
+                  type="text" placeholder={t('lessons.searchLessons')} value={search}
                   onChange={e => setSearch(e.target.value)}
                   className="w-full pl-11 pr-4 py-2.5 rounded-full text-sm border border-indigo-100 bg-white/80 focus:outline-none focus:ring-2 focus:ring-violet-400 focus:border-transparent transition-all shadow-sm placeholder-slate-400"
                 />
               </div>
               <select value={courseFilter} onChange={e => { setCourseFilter(e.target.value); setClassFilter('all'); setModuleFilter('all'); }}
                 className="px-4 py-2.5 rounded-full text-sm border border-indigo-100 bg-white/80 focus:outline-none focus:ring-2 focus:ring-violet-400 focus:border-transparent transition-all shadow-sm text-slate-700">
-                <option value="all">All Courses</option>
+                <option value="all">{t('lessons.allCourses')}</option>
                 {courses.map(c => <option key={c.id} value={c.id}>{c.name || c.title}</option>)}
               </select>
               {classes.length > 0 && (
                 <select value={classFilter} onChange={e => { setClassFilter(e.target.value); setModuleFilter('all'); }}
                   className="px-4 py-2.5 rounded-full text-sm border border-indigo-100 bg-white/80 focus:outline-none focus:ring-2 focus:ring-violet-400 focus:border-transparent transition-all shadow-sm text-slate-700">
-                  <option value="all">All Classes</option>
+                  <option value="all">{t('lessons.allClasses')}</option>
                   {classes.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
                 </select>
               )}
               <select value={moduleFilter} onChange={e => setModuleFilter(e.target.value)}
                 className="px-4 py-2.5 rounded-full text-sm border border-indigo-100 bg-white/80 focus:outline-none focus:ring-2 focus:ring-violet-400 focus:border-transparent transition-all shadow-sm text-slate-700">
-                <option value="all">All Modules</option>
+                <option value="all">{t('lessons.allModules')}</option>
                 {(classFilter !== 'all'
                   ? (() => { const sc = classes.find(c => c.id === classFilter); return sc?.course_id ? modules.filter(m => m.course_id === sc.course_id) : []; })()
                   : courseFilter !== 'all' ? modules.filter(m => m.course_id === courseFilter) : modules
@@ -475,7 +477,7 @@ export default function TeacherLessons() {
               </select>
               <select value={typeFilter} onChange={e => setTypeFilter(e.target.value)}
                 className="px-4 py-2.5 rounded-full text-sm border border-indigo-100 bg-white/80 focus:outline-none focus:ring-2 focus:ring-violet-400 focus:border-transparent transition-all shadow-sm text-slate-700">
-                <option value="all">All Types</option>
+                <option value="all">{t('lessons.allTypes')}</option>
                 {LESSON_TYPES.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
               </select>
               {hasActiveFilters && (

@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { createPortal } from 'react-dom';
 import confetti from 'canvas-confetti';
 
@@ -130,6 +131,7 @@ function WelcomeModal({
   phase: 'entering' | 'leaving';
   onClose: () => void;
 }) {
+  const { t } = useTranslation();
   const first = displayName?.split(' ')[0] || 'Student';
 
   return createPortal(
@@ -155,10 +157,10 @@ function WelcomeModal({
             margin: 0, color: '#fff', fontWeight: 800,
             fontSize: 'clamp(20px, 5vw, 26px)', letterSpacing: '-0.5px',
           }}>
-            Mirë se erdhe, {first}!
+            {t('welcomeCelebration.greeting', { name: first })}
           </h2>
           <p style={{ margin: '8px 0 0', color: 'rgba(255,255,255,0.8)', fontSize: '14px', fontWeight: 500 }}>
-            Llogaria jote është gati. Fillojmë!
+            {t('welcomeCelebration.accountReady')}
           </p>
         </div>
 
@@ -170,16 +172,16 @@ function WelcomeModal({
         }}>
           <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', marginBottom: '28px' }}>
             {[
-              { emoji: '📚', text: 'Eksploro kurset e disponueshme' },
-              { emoji: '🧠', text: 'Zgjidh kuize dhe testo njohuritë' },
-              { emoji: '🏆', text: ' Merr certifikata dhe gjurmo progresin' },
-            ].map(({ emoji, text }) => (
-              <div key={text} style={{
+              { emoji: '📚', key: 'exploreCourses' },
+              { emoji: '🧠', key: 'takeQuizzes' },
+              { emoji: '🏆', key: 'earnCertificates' },
+            ].map(({ emoji, key }) => (
+              <div key={key} style={{
                 display: 'flex', alignItems: 'center', gap: '12px',
                 background: '#f8f7ff', borderRadius: '12px', padding: '12px 16px', textAlign: 'left',
               }}>
                 <span style={{ fontSize: '22px', flexShrink: 0 }}>{emoji}</span>
-                <span style={{ fontSize: '14px', color: '#374151', fontWeight: 500 }}>{text}</span>
+                <span style={{ fontSize: '14px', color: '#374151', fontWeight: 500 }}>{t(`welcomeCelebration.${key}`)}</span>
               </div>
             ))}
           </div>
@@ -195,7 +197,7 @@ function WelcomeModal({
               boxShadow: '0 8px 24px rgba(99,102,241,0.4)',
             }}
           >
-            Fillo tani →
+            {t('welcomeCelebration.getStarted')}
           </button>
         </div>
       </div>
@@ -205,6 +207,7 @@ function WelcomeModal({
 }
 
 export default function WelcomeCelebration({ displayName, onDone }: WelcomeCelebrationProps) {
+  const { t } = useTranslation();
   const [modalPhase, setModalPhase] = useState<'hidden' | 'entering' | 'leaving'>('hidden');
 
   const handleClose = () => {

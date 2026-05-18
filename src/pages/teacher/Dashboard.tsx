@@ -1,4 +1,5 @@
 import React, { useEffect, useState, useRef } from 'react';
+import { useTranslation } from 'react-i18next';
 import { supabase } from '../../supabase';
 import TeacherLayout from '../../components/layout/TeacherLayout';
 import { Link } from 'react-router-dom';
@@ -105,6 +106,7 @@ function StatCard({
 }
 
 export default function TeacherDashboard() {
+  const { t } = useTranslation();
   const [stats, setStats]     = useState<Stats>({ courses: 0, students: 0, quizzes: 0, avgScore: 0, passRate: 0, avgDuration: 0, certificates: 0 });
   const [loading, setLoading] = useState(true);
   const [displayName, setDisplayName] = useState('');
@@ -141,14 +143,15 @@ export default function TeacherDashboard() {
   }, []);
 
   const STAT_CARDS = [
-    { label: 'Total Courses',  value: stats.courses,  icon: BookOpen,    trend: '+12%', gradient: 'from-violet-500 to-indigo-600',  bg: 'bg-violet-50',  text: 'text-violet-600',  ring: 'ring-violet-100' },
-    { label: 'My Students',    value: stats.students, icon: Users,        trend: '+5%',  gradient: 'from-indigo-500 to-blue-600',    bg: 'bg-indigo-50',  text: 'text-indigo-600',  ring: 'ring-indigo-100' },
-    { label: 'Total Quizzes',  value: stats.quizzes,  icon: FileText,     trend: '+8%',  gradient: 'from-amber-500 to-orange-600',   bg: 'bg-amber-50',   text: 'text-amber-600',   ring: 'ring-amber-100'  },
-    { label: 'Avg. Score',     value: `${stats.avgScore}%`, icon: TrendingUp, trend: 'N/A', gradient: 'from-emerald-500 to-teal-600', bg: 'bg-emerald-50', text: 'text-emerald-600', ring: 'ring-emerald-100' },
+    { label: t('dashboard.stats.totalCourses'),  value: stats.courses,  icon: BookOpen,    trend: '+12%', gradient: 'from-violet-500 to-indigo-600',  bg: 'bg-violet-50',  text: 'text-violet-600',  ring: 'ring-violet-100' },
+    { label: t('dashboard.stats.myStudents'),    value: stats.students, icon: Users,        trend: '+5%',  gradient: 'from-indigo-500 to-blue-600',    bg: 'bg-indigo-50',  text: 'text-indigo-600',  ring: 'ring-indigo-100' },
+    { label: t('dashboard.stats.totalQuizzes'),  value: stats.quizzes,  icon: FileText,     trend: '+8%',  gradient: 'from-amber-500 to-orange-600',   bg: 'bg-amber-50',   text: 'text-amber-600',   ring: 'ring-amber-100'  },
+    { label: t('dashboard.stats.avgScore'),     value: `${stats.avgScore}%`, icon: TrendingUp, trend: 'N/A', gradient: 'from-emerald-500 to-teal-600', bg: 'bg-emerald-50', text: 'text-emerald-600', ring: 'ring-emerald-100' },
   ];
 
   const hour = new Date().getHours();
-  const greeting = hour < 12 ? 'Good morning' : hour < 18 ? 'Good afternoon' : 'Good evening';
+  const greetingKey = hour < 12 ? 'dashboard.goodMorning' : hour < 18 ? 'dashboard.goodAfternoon' : 'dashboard.goodEvening';
+  const greeting = t(greetingKey);
 
   return (
     <TeacherLayout>
@@ -167,17 +170,17 @@ export default function TeacherDashboard() {
                 <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
                 <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500" />
               </span>
-              <span className="text-xs font-semibold text-slate-400 uppercase tracking-widest">Live Dashboard</span>
+              <span className="text-xs font-semibold text-slate-400 uppercase tracking-widest">{t('dashboard.liveDashboard')}</span>
             </div>
             <h1 className="text-2xl font-bold text-slate-900 tracking-tight">
               {greeting}, <span className="text-transparent bg-clip-text bg-gradient-to-r from-violet-600 to-indigo-600">{displayName}</span> 👋
             </h1>
-            <p className="text-slate-400 text-sm mt-1">Here's what's happening in your courses today.</p>
+            <p className="text-slate-400 text-sm mt-1">{t('dashboard.greetingMsg')}</p>
           </div>
           <div className="flex items-center gap-2.5">
             <div className="flex items-center gap-1.5 bg-gradient-to-r from-violet-50 to-indigo-50 border border-violet-100 text-violet-700 text-xs font-semibold px-3.5 py-2 rounded-xl shadow-sm shadow-violet-100">
               <Sparkles className="w-3.5 h-3.5" />
-              Teacher Portal
+              {t('nav.teacherPortal')}
             </div>
           </div>
         </motion.div>
@@ -203,12 +206,12 @@ export default function TeacherDashboard() {
             <div className="p-6">
               <div className="flex items-center justify-between mb-6">
                 <div>
-                  <h2 className="text-base font-bold text-slate-900">Quiz Activity</h2>
-                  <p className="text-xs text-slate-400 mt-0.5">Attempts over the last 7 days</p>
+                  <h2 className="text-base font-bold text-slate-900">{t('dashboard.quizActivity')}</h2>
+                  <p className="text-xs text-slate-400 mt-0.5">{t('dashboard.attemptsLast7Days')}</p>
                 </div>
                 <select className="bg-slate-50 border border-slate-200 rounded-xl px-3 py-1.5 text-xs font-medium focus:outline-none focus:ring-2 focus:ring-violet-500 text-slate-600 cursor-pointer">
-                  <option>Last 7 days</option>
-                  <option>Last 30 days</option>
+                  <option>{t('common.last7Days')}</option>
+                  <option>{t('common.last30Days')}</option>
                 </select>
               </div>
               <div className="h-[240px] w-full">
@@ -246,20 +249,26 @@ export default function TeacherDashboard() {
             >
               <div className="h-0.5 bg-gradient-to-r from-indigo-500 to-violet-500" />
               <div className="p-5">
-                <h2 className="text-sm font-bold text-slate-900 mb-4">Quick Actions</h2>
+                <h2 className="text-sm font-bold text-slate-900 mb-4">{t('dashboard.quickActions.title')}</h2>
                 <div className="grid grid-cols-2 gap-2.5">
-                  {QUICK_ACTIONS.map(({ icon: Icon, label, to, color, shadow }) => (
-                    <Link
-                      key={label}
-                      to={to}
-                      className="group flex flex-col items-center gap-2.5 p-3.5 rounded-xl border border-slate-100 hover:border-violet-200 hover:bg-violet-50/40 transition-all duration-200 active:scale-95"
-                    >
-                      <div className={`w-10 h-10 rounded-xl bg-gradient-to-br ${color} flex items-center justify-center shadow-md ${shadow} group-hover:scale-110 group-hover:shadow-lg transition-all duration-200`}>
-                        <Icon className="w-4 h-4 text-white" />
-                      </div>
-                      <span className="text-xs font-semibold text-slate-600 group-hover:text-violet-700 text-center leading-tight transition-colors">{label}</span>
-                    </Link>
-                  ))}
+                  {QUICK_ACTIONS.map(({ icon: Icon, label, to, color, shadow }) => {
+                    const actionLabel = label === 'New Course' ? t('dashboard.quickActions.newCourse') :
+                                       label === 'New Quiz' ? t('dashboard.quickActions.newQuiz') :
+                                       label === 'Add Student' ? t('dashboard.quickActions.addStudent') :
+                                       label === 'View Results' ? t('dashboard.quickActions.viewResults') : label;
+                    return (
+                      <Link
+                        key={label}
+                        to={to}
+                        className="group flex flex-col items-center gap-2.5 p-3.5 rounded-xl border border-slate-100 hover:border-violet-200 hover:bg-violet-50/40 transition-all duration-200 active:scale-95"
+                      >
+                        <div className={`w-10 h-10 rounded-xl bg-gradient-to-br ${color} flex items-center justify-center shadow-md ${shadow} group-hover:scale-110 group-hover:shadow-lg transition-all duration-200`}>
+                          <Icon className="w-4 h-4 text-white" />
+                        </div>
+                        <span className="text-xs font-semibold text-slate-600 group-hover:text-violet-700 text-center leading-tight transition-colors">{actionLabel}</span>
+                      </Link>
+                    );
+                  })}
                 </div>
               </div>
             </motion.div>
@@ -271,12 +280,12 @@ export default function TeacherDashboard() {
               transition={{ delay: 0.42, duration: 0.45, ease: [0.22, 1, 0.36, 1] }}
               className="bg-white rounded-2xl border border-slate-100 shadow-sm p-5 hover:shadow-md transition-shadow duration-300"
             >
-              <h2 className="text-sm font-bold text-slate-900 mb-4">At a Glance</h2>
+              <h2 className="text-sm font-bold text-slate-900 mb-4">{t('dashboard.overview')}</h2>
               <div className="space-y-1">
                 {[
-                  { icon: Target, label: 'Pass rate',      value: `${stats.passRate}%`, color: 'text-violet-500',  bg: 'bg-violet-50',  ring: 'ring-violet-100'  },
-                  { icon: Clock,  label: 'Avg. time/quiz', value: `${stats.avgDuration}m`, color: 'text-indigo-500',  bg: 'bg-indigo-50',  ring: 'ring-indigo-100'  },
-                  { icon: Award,  label: 'Certs issued',   value: String(stats.certificates), color: 'text-amber-500',   bg: 'bg-amber-50',   ring: 'ring-amber-100'   },
+                  { icon: Target, label: t('dashboard.passRate'),      value: `${stats.passRate}%`, color: 'text-violet-500',  bg: 'bg-violet-50',  ring: 'ring-violet-100'  },
+                  { icon: Clock,  label: t('dashboard.avgTimePerQuiz'), value: `${stats.avgDuration}m`, color: 'text-indigo-500',  bg: 'bg-indigo-50',  ring: 'ring-indigo-100'  },
+                  { icon: Award,  label: t('dashboard.certsIssued'),   value: String(stats.certificates), color: 'text-amber-500',   bg: 'bg-amber-50',   ring: 'ring-amber-100'   },
                 ].map((row) => (
                   <div key={row.label} className="flex items-center gap-3 py-2.5 border-b border-slate-50 last:border-0 group">
                     <div className={`w-8 h-8 rounded-lg ${row.bg} ring-2 ${row.ring} flex items-center justify-center shrink-0 transition-transform group-hover:scale-105 duration-200`}>
@@ -293,7 +302,7 @@ export default function TeacherDashboard() {
                 to="/teacher/results"
                 className="mt-4 flex items-center justify-center gap-1.5 text-xs font-semibold text-violet-600 hover:text-violet-700 py-2 hover:bg-violet-50 rounded-xl transition-all duration-200"
               >
-                View full analytics <ChevronRight className="w-3.5 h-3.5" />
+                {t('dashboard.viewFullAnalytics')} <ChevronRight className="w-3.5 h-3.5" />
               </Link>
             </motion.div>
           </div>

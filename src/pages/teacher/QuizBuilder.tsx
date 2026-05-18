@@ -1,4 +1,5 @@
 import React, { useEffect, useState, useCallback } from 'react';
+import { useTranslation } from 'react-i18next';
 import { supabase } from '../../supabase';
 import TeacherLayout from '../../components/layout/TeacherLayout';
 import LoadingButton from '../../components/ui/LoadingButton';
@@ -188,6 +189,7 @@ function resolveImportedCorrectAnswerId(
 }
 
 export default function QuizBuilder() {
+  const { t } = useTranslation();
   const { quizId } = useParams();
   const navigate = useNavigate();
   const [aiOpen, setAiOpen] = useState(false);
@@ -331,14 +333,14 @@ export default function QuizBuilder() {
           } as Question)));
         }
       } catch {
-        toast.error('Failed to fetch data');
+        toast.error(t('common.error'));
       } finally {
         setLoading(false);
       }
     };
 
     fetchData();
-  }, [quizId]);
+  }, [quizId, t]);
 
   const appendImportedQuestions = useCallback((incoming: ImportedQuizQuestion[], sourceLabel: string) => {
     const existingTexts = new Set(
@@ -409,12 +411,12 @@ export default function QuizBuilder() {
     }
 
     if (!mapped.length) {
-      throw new Error(`No new questions were imported from ${sourceLabel}.`);
+      throw new Error(t('quizzes.noQuestionsFromContent'));
     }
 
     setQuestions((prev) => [...prev, ...mapped]);
-    toast.success(`Added ${mapped.length} question${mapped.length === 1 ? '' : 's'} from ${sourceLabel}.`);
-  }, [questions]);
+    toast.success(mapped.length === 1 ? t('quizzes.questionImported', { count: mapped.length, source: sourceLabel }) : t('quizzes.questionImportedPlural', { count: mapped.length, source: sourceLabel }));
+  }, [questions, t]);
 
   const handleQuestionIntake = async (input: string, attachments: AIPanelAttachment[] = []) => {
     const imageFiles = attachments
@@ -435,7 +437,7 @@ export default function QuizBuilder() {
 
     const generated = await generateQuizQuestions(input);
     if (!generated.length) {
-      throw new Error('No questions could be generated from this content. Please add more source text.');
+      throw new Error(t('quizzes.noQuestionsFromContent'));
     }
 
     const existingTexts = new Set(
@@ -479,11 +481,11 @@ export default function QuizBuilder() {
     }
 
     if (!mapped.length) {
-      throw new Error('No new unique questions were generated. Try adding more content detail.');
+      throw new Error(t('quizzes.noNewQuestionsGenerated'));
     }
 
     setQuestions((prev) => [...prev, ...mapped]);
-    toast.success(`Added ${mapped.length} AI-generated multiple-choice questions.`);
+    toast.success(t('quizzes.aiGeneratedQuestions', { count: mapped.length }));
   };
 
   const addQuestion = (type: QuestionType) => {
@@ -531,11 +533,11 @@ export default function QuizBuilder() {
     if (!session) return;
     const introType = (quizData.settings as QuizSettingsExtended)?.introMediaType || 'video';
     if (introType === 'video' && !file.type.startsWith('video/')) {
-      toast.error('Choose a video file for intro, or switch intro type to Image.');
+      toast.error(t('quizzes.youtube'));
       return;
     }
     if (introType === 'image' && !file.type.startsWith('image/')) {
-      toast.error('Choose an image file.');
+      toast.error(t('quizzes.imageUrl'));
       return;
     }
     setUploading('intro');
@@ -543,9 +545,9 @@ export default function QuizBuilder() {
       const folder = quizId ? `quiz-${quizId}-intro` : `draft-intro`;
       const url = await uploadQuizAsset(file, session.user.id, folder);
       setSettings({ introMediaUrl: url });
-      toast.success('Intro media uploaded');
+      toast.success(t('quizzes.uploaded'));
     } catch (err: unknown) {
-      toast.error(err instanceof Error ? err.message : 'Upload failed');
+      toast.error(err instanceof Error ? err.message : t('quizzes.uploadFailed'));
     } finally {
       setUploading(null);
     }
@@ -560,11 +562,11 @@ export default function QuizBuilder() {
     const q = questions[index];
     const expectVideo = q.type === 'video';
     if (expectVideo && !file.type.startsWith('video/')) {
-      toast.error('Upload a video file, or paste a link instead.');
+      toast.error(t('quizzes.youtube'));
       return;
     }
     if (q.type === 'image' && !file.type.startsWith('image/')) {
-      toast.error('Upload an image file, or paste an image URL.');
+      toast.error(t('quizzes.imageUrl'));
       return;
     }
     setUploading(index);
@@ -575,9 +577,9 @@ export default function QuizBuilder() {
         mediaUrl: url,
         mediaType: expectVideo ? 'video' : 'image',
       });
-      toast.success('Media uploaded');
+      toast.success(t('quizzes.uploaded'));
     } catch (err: unknown) {
-      toast.error(err instanceof Error ? err.message : 'Upload failed');
+      toast.error(err instanceof Error ? err.message : t('quizzes.uploadFailed'));
     } finally {
       setUploading(null);
     }
@@ -587,7 +589,7 @@ export default function QuizBuilder() {
     const { data: { session } } = await supabase.auth.getSession();
     if (!session) return;
     if (!quizData.title || !quizData.courseId) {
-      toast.error('Please fill in quiz title and select a course');
+      toast.error(t('quizzes.fillAllRequiredFields'));
       return;
     }
 
@@ -633,7 +635,7 @@ export default function QuizBuilder() {
       }
 
       const quizIdForQuestions = currentQuizId || quizId;
-      if (!quizIdForQuestions) throw new Error('Missing quiz id');
+      if (!quizIdForQuestions) throw new Error(t('common.error'));
 
       const questionsPayload = questions.map((q, idx) => ({
         quiz_id: quizIdForQuestions,

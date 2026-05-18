@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { useTranslation } from 'react-i18next';
 import { supabase } from '../supabase';
 import { Notification } from '../types';
 import { motion, AnimatePresence } from 'motion/react';
@@ -117,6 +118,7 @@ function NotifItem({
 }
 
 export default function NotificationCenter() {
+  const { t } = useTranslation();
   const navigate = useNavigate();
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [isOpen, setIsOpen] = useState(false);
@@ -262,11 +264,11 @@ export default function NotificationCenter() {
   const visible = filter === 'all' ? notifications : notifications.filter(n => n.type === filter);
 
   const FILTER_TABS: { key: 'all' | NotifType; label: string }[] = [
-    { key: 'all',     label: 'All'     },
-    { key: 'info',    label: 'Info'    },
-    { key: 'success', label: 'Success' },
-    { key: 'warning', label: 'Warning' },
-    { key: 'error',   label: 'Error'   },
+    { key: 'all',     label: t('notificationCenter.filterAll')     },
+    { key: 'info',    label: t('notificationCenter.filterInfo')    },
+    { key: 'success', label: t('notificationCenter.filterSuccess') },
+    { key: 'warning', label: t('notificationCenter.filterWarning') },
+    { key: 'error',   label: t('notificationCenter.filterError')   },
   ];
 
   return (
@@ -305,9 +307,9 @@ export default function NotificationCenter() {
                     <Bell className="w-3.5 h-3.5 text-white" />
                   </div>
                   <div>
-                    <h3 className="text-sm font-bold text-white leading-none">Notifications</h3>
+                    <h3 className="text-sm font-bold text-white leading-none">{t('notificationCenter.title')}</h3>
                     <p className="text-[10px] text-slate-400 mt-0.5">
-                      {unreadCount > 0 ? `${unreadCount} unread` : 'All caught up!'}
+                      {unreadCount > 0 ? t('notificationCenter.unreadCount', { count: unreadCount }) : t('notificationCenter.allCaughtUp')}
                     </p>
                   </div>
                 </div>
@@ -315,13 +317,13 @@ export default function NotificationCenter() {
                   {unreadCount > 0 && (
                     <button onClick={markAllAsRead}
                       className="flex items-center gap-1 bg-white/10 hover:bg-white/20 text-white text-[10px] font-semibold px-2.5 py-1.5 rounded-lg transition-all border border-white/10">
-                      <Check className="w-3 h-3" /> Mark all read
+                      <Check className="w-3 h-3" /> {t('notificationCenter.markAllRead')}
                     </button>
                   )}
                   {notifications.length > 0 && (
                     <button onClick={clearAll}
                       className="flex items-center gap-1 bg-white/10 hover:bg-rose-500/30 text-white/70 hover:text-white text-[10px] font-semibold px-2.5 py-1.5 rounded-lg transition-all border border-white/10">
-                      <Trash2 className="w-3 h-3" /> Clear
+                      <Trash2 className="w-3 h-3" /> {t('notificationCenter.clear')}
                     </button>
                   )}
                 </div>
@@ -374,10 +376,10 @@ export default function NotificationCenter() {
                       <BellOff className="w-6 h-6 text-slate-400" />
                     </motion.div>
                     <p className="text-slate-700 font-bold text-sm">
-                      {filter === 'all' ? 'No notifications yet' : `No ${filter} notifications`}
+                      {filter === 'all' ? t('notificationCenter.noNotifications') : t('notificationCenter.noNotificationsOfType', { type: t(`notificationCenter.filter${filter.charAt(0).toUpperCase() + filter.slice(1)}`) })}
                     </p>
                     <p className="text-slate-400 text-xs mt-1">
-                      {filter === 'all' ? "You're all caught up! Check back later." : 'Try selecting a different filter.'}
+                      {filter === 'all' ? t('notificationCenter.caughtUp') : t('notificationCenter.tryOtherFilter')}
                     </p>
                   </motion.div>
                 ) : (
@@ -391,9 +393,9 @@ export default function NotificationCenter() {
             {/* Footer */}
             {notifications.length > 0 && (
               <div className="border-t border-slate-100 px-4 py-2.5 bg-slate-50/60 flex items-center justify-between">
-                <span className="text-[11px] text-slate-400 font-medium">{notifications.length} total notifications</span>
+                <span className="text-[11px] text-slate-400 font-medium">{t('notificationCenter.totalNotifications', { count: notifications.length })}</span>
                 <span className="flex items-center gap-1 text-[11px] text-slate-400 font-medium">
-                  <Sparkles className="w-3 h-3" /> Live updates on
+                  <Sparkles className="w-3 h-3" /> {t('notificationCenter.liveUpdatesOn')}
                 </span>
               </div>
             )}

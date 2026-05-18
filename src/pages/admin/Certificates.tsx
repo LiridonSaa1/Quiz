@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import AdminLayout from '../../components/layout/AdminLayout';
 import { toast } from 'sonner';
 import GenderAvatar from '../../components/ui/GenderAvatar';
@@ -41,9 +42,9 @@ interface Course { id: string; title: string }
 interface StudentRec { id: string; display_name: string; email: string }
 interface StudentApiRow { uid?: string; id?: string; displayName?: string; display_name?: string; email?: string }
 
-const STATUS_CFG: Record<CertStatus, { label: string; bg: string; text: string; dot: string; icon: React.ElementType }> = {
-  issued:  { label: 'Issued',  bg: 'bg-emerald-50', text: 'text-emerald-700', dot: 'bg-emerald-500', icon: CheckCircle2 },
-  revoked: { label: 'Revoked', bg: 'bg-rose-50',    text: 'text-rose-700',   dot: 'bg-rose-500',    icon: XCircle     },
+const STATUS_CFG: Record<CertStatus, { labelKey: string; bg: string; text: string; dot: string; icon: React.ElementType }> = {
+  issued:  { labelKey: 'dashboard.issued',  bg: 'bg-emerald-50', text: 'text-emerald-700', dot: 'bg-emerald-500', icon: CheckCircle2 },
+  revoked: { labelKey: 'dashboard.revoked', bg: 'bg-rose-50',    text: 'text-rose-700',   dot: 'bg-rose-500',    icon: XCircle     },
 };
 
 const GRADE_COLORS: Record<string, string> = {
@@ -85,6 +86,7 @@ const emptyForm = {
 };
 
 export default function AdminCertificates() {
+  const { t } = useTranslation();
   const [certs, setCerts] = useState<Certificate[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
@@ -146,7 +148,7 @@ export default function AdminCertificates() {
       setCourses(c || []);
       setStudents(s || []);
     } catch {
-      toast.error('Failed to load certificates');
+      toast.error(t('common.error'));
     } finally {
       setLoading(false);
     }
@@ -166,10 +168,10 @@ export default function AdminCertificates() {
   });
 
   const stats = [
-    { label: 'Total Issued', value: certs.length, gradient: 'from-amber-500 to-orange-600', shadow: 'shadow-amber-500/25', icon: Award },
-    { label: 'Active', value: certs.filter(c => c.status === 'issued').length, gradient: 'from-emerald-500 to-teal-600', shadow: 'shadow-emerald-500/25', icon: CheckCircle2 },
-    { label: 'Revoked', value: certs.filter(c => c.status === 'revoked').length, gradient: 'from-rose-500 to-pink-600', shadow: 'shadow-rose-500/25', icon: XCircle },
-    { label: 'This Month', value: certs.filter(c => { const d = new Date(c.issued_at); const n = new Date(); return d.getMonth() === n.getMonth() && d.getFullYear() === n.getFullYear(); }).length, gradient: 'from-violet-500 to-violet-600', shadow: 'shadow-violet-500/25', icon: Calendar },
+    { label: t('certificates.totalIssued'), value: certs.length, gradient: 'from-amber-500 to-orange-600', shadow: 'shadow-amber-500/25', icon: Award },
+    { label: t('certificates.active'), value: certs.filter(c => c.status === 'issued').length, gradient: 'from-emerald-500 to-teal-600', shadow: 'shadow-emerald-500/25', icon: CheckCircle2 },
+    { label: t('certificates.revoked'), value: certs.filter(c => c.status === 'revoked').length, gradient: 'from-rose-500 to-pink-600', shadow: 'shadow-rose-500/25', icon: XCircle },
+    { label: t('certificates.thisMonth'), value: certs.filter(c => { const d = new Date(c.issued_at); const n = new Date(); return d.getMonth() === n.getMonth() && d.getFullYear() === n.getFullYear(); }).length, gradient: 'from-violet-500 to-violet-600', shadow: 'shadow-violet-500/25', icon: Calendar },
   ];
 
   const openAdd = () => {
@@ -194,9 +196,9 @@ export default function AdminCertificates() {
   };
 
   const handleSave = async () => {
-    if (!form.student_id) { toast.error('Student is required'); return; }
-    if (!form.title.trim()) { toast.error('Title is required'); return; }
-    if (!form.certificate_number.trim()) { toast.error('Certificate number is required'); return; }
+    if (!form.student_id) { toast.error(t('certificates.studentRequired')); return; }
+    if (!form.title.trim()) { toast.error(t('certificates.titleRequired')); return; }
+    if (!form.certificate_number.trim()) { toast.error(t('certificates.numberRequired')); return; }
     setSaving(true);
     try {
       const payload: any = {
@@ -212,7 +214,7 @@ export default function AdminCertificates() {
       if (editId) {
         const { error } = await supabase.from('certificates').update(payload).eq('id', editId);
         if (error) throw error;
-        toast.success('Certificate updated');
+        toast.success(t('certificates.certificateUpdated'));
       } else {
         payload.created_at = new Date().toISOString();
         const { data: inserted, error } = await supabase
@@ -221,7 +223,7 @@ export default function AdminCertificates() {
           .select('id')
           .single();
         if (error) throw error;
-        toast.success('Certificate issued');
+        toast.success(t('certificates.issue'));
 
         // Fan out an in-app notification to the student, the course's teacher,
         // and all admins — gated by the admin Settings → "Certificate Issued" toggle.
@@ -248,7 +250,7 @@ export default function AdminCertificates() {
       setShowModal(false);
       fetchData();
     } catch (e: any) {
-      toast.error(e.message || 'Failed to save');
+      toast.error(e.message || t('common.error'));
     } finally {
       setSaving(false);
     }
@@ -258,10 +260,10 @@ export default function AdminCertificates() {
     try {
       const { error } = await supabase.from('certificates').delete().eq('id', id);
       if (error) throw error;
-      toast.success('Certificate deleted');
+      toast.success(t('certificates.certificateDeleted'));
       setDeleteId(null);
       fetchData();
-    } catch { toast.error('Failed to delete'); }
+    } catch { toast.error(t('certificates.failedToDelete')); }
   };
 
   const toggleStatus = async (cert: Certificate) => {
@@ -269,17 +271,17 @@ export default function AdminCertificates() {
     try {
       const { error } = await supabase.from('certificates').update({ status: newStatus }).eq('id', cert.id);
       if (error) throw error;
-      toast.success(`Certificate ${newStatus}`);
+      toast.success(`${t('certificates.title')} ${newStatus}`);
       fetchData();
-    } catch { toast.error('Failed to update status'); }
+    } catch { toast.error(t('certificates.failedToUpdate')); }
   };
 
   return (
     <AdminLayout>
       <AdminListPageShell
-        breadcrumbLabel="Certificates"
-        title="Certificates"
-        description="Issue and manage student achievement certificates."
+        breadcrumbLabel={t('certificates.title')}
+        title={t('certificates.title')}
+        description={t('dashboard.manageCertificates')}
         action={
           <motion.button
             type="button"
@@ -293,7 +295,7 @@ export default function AdminCertificates() {
             }}
           >
             <Plus className="w-4 h-4" />
-            Issue Certificate
+            {t('certificates.issue')}
           </motion.button>
         }
         stats={stats}
@@ -304,17 +306,17 @@ export default function AdminCertificates() {
               <input
                 value={search}
                 onChange={e => setSearch(e.target.value)}
-                placeholder="Search student, course, certificate #..."
+                placeholder={t('dashboard.searchCertificates')}
                 className={ADMIN_LIST_SEARCH_INPUT}
               />
             </div>
             <select value={statusFilter} onChange={e => setStatusFilter(e.target.value)} className={ADMIN_LIST_SELECT}>
-              <option value="all">All Status</option>
-              <option value="issued">Issued</option>
-              <option value="revoked">Revoked</option>
+              <option value="all">{t('common.status')}</option>
+              <option value="issued">{t('certificates.issued')}</option>
+              <option value="revoked">{t('certificates.revoked')}</option>
             </select>
             <select value={courseFilter} onChange={e => setCourseFilter(e.target.value)} className={ADMIN_LIST_SELECT}>
-              <option value="all">All Courses</option>
+              <option value="all">{t('common.course') || 'All Courses'}</option>
               {courses.map(c => <option key={c.id} value={c.id}>{c.title}</option>)}
             </select>
           </AdminListFilterBar>
@@ -331,8 +333,8 @@ export default function AdminCertificates() {
         ) : filtered.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-20 gap-3 text-slate-400 bg-white rounded-2xl border border-slate-100 shadow-sm">
             <Award className="w-10 h-10 opacity-30" />
-            <p className="text-sm">No certificates found</p>
-            <button type="button" onClick={openAdd} className="text-xs text-indigo-600 font-semibold hover:underline">Issue the first one</button>
+            <p className="text-sm">{t('certificates.noCertificatesFound')}</p>
+            <button type="button" onClick={openAdd} className="text-xs text-indigo-600 font-semibold hover:underline">{t('certificates.issueFirstCert')}</button>
           </div>
         ) : (
           <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
@@ -419,44 +421,44 @@ export default function AdminCertificates() {
                 <div className="w-8 h-8 bg-amber-100 rounded-lg flex items-center justify-center">
                   <Award className="w-4 h-4 text-amber-600" />
                 </div>
-                <h2 className="text-lg font-bold text-slate-800">{editId ? 'Edit Certificate' : 'Issue Certificate'}</h2>
+                <h2 className="text-lg font-bold text-slate-800">{editId ? t('certificates.editCertificate') : t('certificates.issue')}</h2>
               </div>
               <button onClick={() => setShowModal(false)} className="p-2 hover:bg-slate-100 rounded-lg"><X className="w-4 h-4" /></button>
             </div>
             <div className="p-5 space-y-4">
               <div>
-                <label className="text-xs font-semibold text-slate-600 uppercase tracking-wide">Student *</label>
+                <label className="text-xs font-semibold text-slate-600 uppercase tracking-wide">{t('common.name')} *</label>
                 <select value={form.student_id} onChange={e => setForm(f => ({ ...f, student_id: e.target.value }))}
                   className="mt-1 w-full px-3 py-2.5 text-sm border border-slate-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-amber-500/30">
-                  <option value="">Select student</option>
+                  <option value="">{t('certificates.selectStudent')}</option>
                   {students.map(s => <option key={s.id} value={s.id}>{s.display_name} ({s.email})</option>)}
                 </select>
               </div>
               <div>
-                <label className="text-xs font-semibold text-slate-600 uppercase tracking-wide">Certificate Title *</label>
+                <label className="text-xs font-semibold text-slate-600 uppercase tracking-wide">{t('certificates.certificateTitle')} *</label>
                 <input value={form.title} onChange={e => setForm(f => ({ ...f, title: e.target.value }))}
                   className="mt-1 w-full px-3 py-2.5 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-500/30"
-                  placeholder="e.g. Certificate of Completion" />
+                  placeholder={t('certificates.certificateTitlePlaceholder')} />
               </div>
               <div>
-                <label className="text-xs font-semibold text-slate-600 uppercase tracking-wide">Course</label>
+                <label className="text-xs font-semibold text-slate-600 uppercase tracking-wide">{t('certificates.courseLabel')}</label>
                 <select value={form.course_id} onChange={e => setForm(f => ({ ...f, course_id: e.target.value }))}
                   className="mt-1 w-full px-3 py-2.5 text-sm border border-slate-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-amber-500/30">
-                  <option value="">No course</option>
+                  <option value="">{t('certificates.noCourse')}</option>
                   {courses.map(c => <option key={c.id} value={c.id}>{c.title}</option>)}
                 </select>
               </div>
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="text-xs font-semibold text-slate-600 uppercase tracking-wide">Grade</label>
+                  <label className="text-xs font-semibold text-slate-600 uppercase tracking-wide">{t('certificates.gradeLabel')}</label>
                   <select value={form.grade} onChange={e => setForm(f => ({ ...f, grade: e.target.value }))}
                     className="mt-1 w-full px-3 py-2.5 text-sm border border-slate-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-amber-500/30">
-                    <option value="">No grade</option>
+                    <option value="">{t('certificates.noGrade')}</option>
                     {['A+','A','A-','B+','B','B-','C+','C','D','F'].map(g => <option key={g} value={g}>{g}</option>)}
                   </select>
                 </div>
                 <div>
-                  <label className="text-xs font-semibold text-slate-600 uppercase tracking-wide">Score (%)</label>
+                  <label className="text-xs font-semibold text-slate-600 uppercase tracking-wide">{t('certificates.scorePercent')}</label>
                   <input type="number" min={0} max={100} value={form.score} onChange={e => setForm(f => ({ ...f, score: e.target.value }))}
                     className="mt-1 w-full px-3 py-2.5 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-500/30"
                     placeholder="0–100" />
@@ -464,21 +466,21 @@ export default function AdminCertificates() {
               </div>
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="text-xs font-semibold text-slate-600 uppercase tracking-wide">Issue Date</label>
+                  <label className="text-xs font-semibold text-slate-600 uppercase tracking-wide">{t('certificates.issueDate')}</label>
                   <input type="date" value={form.issued_at} onChange={e => setForm(f => ({ ...f, issued_at: e.target.value }))}
                     className="mt-1 w-full px-3 py-2.5 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-500/30" />
                 </div>
                 <div>
-                  <label className="text-xs font-semibold text-slate-600 uppercase tracking-wide">Status</label>
+                  <label className="text-xs font-semibold text-slate-600 uppercase tracking-wide">{t('certificates.status')}</label>
                   <select value={form.status} onChange={e => setForm(f => ({ ...f, status: e.target.value as CertStatus }))}
                     className="mt-1 w-full px-3 py-2.5 text-sm border border-slate-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-amber-500/30">
-                    <option value="issued">Issued</option>
-                    <option value="revoked">Revoked</option>
+                    <option value="issued">{t('certificates.issued')}</option>
+                    <option value="revoked">{t('certificates.revoked')}</option>
                   </select>
                 </div>
               </div>
               <div>
-                <label className="text-xs font-semibold text-slate-600 uppercase tracking-wide">Certificate Number *</label>
+                <label className="text-xs font-semibold text-slate-600 uppercase tracking-wide">{t('certificates.certNumber')} *</label>
                 <div className="flex gap-2 mt-1">
                   <input value={form.certificate_number} onChange={e => setForm(f => ({ ...f, certificate_number: e.target.value }))}
                     className="flex-1 px-3 py-2.5 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-500/30 font-mono"
@@ -491,10 +493,10 @@ export default function AdminCertificates() {
               </div>
             </div>
             <div className="flex justify-end gap-3 p-5 border-t border-slate-100">
-              <button onClick={() => setShowModal(false)} className="px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-100 rounded-lg transition-colors">Cancel</button>
+              <button onClick={() => setShowModal(false)} className="px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-100 rounded-lg transition-colors">{t('common.cancel')}</button>
               <button onClick={handleSave} disabled={saving}
                 className="px-4 py-2 text-sm font-semibold bg-amber-500 hover:bg-amber-600 text-white rounded-lg transition-colors disabled:opacity-50">
-                {saving ? 'Saving...' : editId ? 'Update' : 'Issue'}
+                {saving ? t('common.loading') : editId ? t('common.update') : t('certificates.issue')}
               </button>
             </div>
           </div>
@@ -568,11 +570,11 @@ export default function AdminCertificates() {
             <div className="w-12 h-12 bg-rose-50 rounded-full flex items-center justify-center mx-auto mb-3">
               <Trash2 className="w-6 h-6 text-rose-500" />
             </div>
-            <h3 className="text-lg font-bold text-slate-800 mb-1">Delete Certificate?</h3>
-            <p className="text-sm text-slate-500 mb-5">This action cannot be undone.</p>
+            <h3 className="text-lg font-bold text-slate-800 mb-1">{t('certificates.confirmDelete')}</h3>
+            <p className="text-sm text-slate-500 mb-5">{t('certificates.deleteCertDesc')}</p>
             <div className="flex gap-3 justify-center">
-              <button onClick={() => setDeleteId(null)} className="px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-100 rounded-lg">Cancel</button>
-              <button onClick={() => handleDelete(deleteId)} className="px-4 py-2 text-sm font-semibold bg-rose-500 hover:bg-rose-600 text-white rounded-lg">Delete</button>
+              <button onClick={() => setDeleteId(null)} className="px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-100 rounded-lg">{t('common.cancel')}</button>
+              <button onClick={() => handleDelete(deleteId)} className="px-4 py-2 text-sm font-semibold bg-rose-500 hover:bg-rose-600 text-white rounded-lg">{t('common.delete')}</button>
             </div>
           </div>
         </div>

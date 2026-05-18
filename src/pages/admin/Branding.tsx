@@ -3,6 +3,7 @@ import AdminLayout from '../../components/layout/AdminLayout';
 import { cn } from '../../lib/utils';
 import { toast } from 'sonner';
 import { authFetch } from '../../lib/apiUrl';
+import { useTranslation } from 'react-i18next';
 import {
   Palette, Upload, Save, RefreshCw, Eye,
   Type, Image, Monitor, Smartphone, Sun, Moon
@@ -20,6 +21,7 @@ const PRESET_PALETTES = [
 const FONT_OPTIONS = ['Inter', 'Poppins', 'Roboto', 'Open Sans', 'Lato', 'Nunito', 'Montserrat', 'Raleway'];
 
 export default function AdminBranding() {
+  const { t } = useTranslation();
   const [saving, setSaving] = useState(false);
   const [preview, setPreview] = useState<'desktop' | 'mobile'>('desktop');
   const [darkMode, setDarkMode] = useState(false);
@@ -53,7 +55,7 @@ export default function AdminBranding() {
 
   const applyPreset = (p: typeof PRESET_PALETTES[0]) => {
     setColors(prev => ({ ...prev, primary: p.primary, accent: p.accent, background: p.bg }));
-    toast.success(`Applied "${p.name}" palette`);
+    toast.success(t('branding.toasts.applied', { name: p.name }));
   };
 
   const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>, type: 'logo' | 'favicon') => {
@@ -96,15 +98,15 @@ export default function AdminBranding() {
         }),
       });
       const json = await res.json();
-      if (!res.ok || !json?.success) throw new Error(json?.error || 'Failed to save branding');
+      if (!res.ok || !json?.success) throw new Error(json?.error || t('branding.toasts.saveFailed'));
       window.dispatchEvent(
         new CustomEvent('branding-updated', {
           detail: { logoUrl, faviconUrl, logoText, colors, typography, copy, darkMode },
         }),
       );
-      toast.success('Branding saved successfully.');
+      toast.success(t('branding.toasts.saved'));
     } catch (e: any) {
-      toast.error(e?.message || 'Failed to save branding');
+      toast.error(e?.message || t('branding.toasts.saveFailed'));
     } finally {
       setSaving(false);
     }
@@ -137,8 +139,8 @@ export default function AdminBranding() {
         {/* Header */}
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
           <div>
-            <h1 className="text-2xl font-bold text-slate-900">Branding</h1>
-            <p className="text-sm text-slate-500 mt-0.5">Customize the look and feel of your platform</p>
+            <h1 className="text-2xl font-bold text-slate-900">{t('branding.title')}</h1>
+            <p className="text-sm text-slate-500 mt-0.5">{t('branding.subtitle')}</p>
           </div>
           <button
             onClick={handleSave}
@@ -146,7 +148,7 @@ export default function AdminBranding() {
             className="inline-flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-60 text-white text-sm font-semibold px-4 py-2.5 rounded-xl transition-colors"
           >
             <Save className="w-4 h-4" />
-            {saving ? 'Saving…' : 'Save Branding'}
+            {saving ? t('branding.saving') : t('branding.saveBranding')}
           </button>
         </div>
 
@@ -155,11 +157,11 @@ export default function AdminBranding() {
           <div className="xl:col-span-2 space-y-5">
 
             {/* Logo & Favicon */}
-            <Card title="Logo & Favicon" subtitle="Upload your school logo and browser favicon" icon={Image}>
+            <Card title={t('branding.logoFavicon')} subtitle={t('branding.logoFaviconDesc')} icon={Image}>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
                 {/* Logo */}
                 <div>
-                  <label className="block text-xs font-semibold text-slate-600 uppercase tracking-wide mb-2">School Logo</label>
+                  <label className="block text-xs font-semibold text-slate-600 uppercase tracking-wide mb-2">{t('branding.schoolLogo')}</label>
                   <div
                     onClick={() => logoInputRef.current?.click()}
                     className="relative border-2 border-dashed border-slate-200 rounded-xl h-28 flex flex-col items-center justify-center cursor-pointer hover:border-indigo-400 hover:bg-indigo-50/30 transition-all group overflow-hidden"
@@ -169,19 +171,19 @@ export default function AdminBranding() {
                     ) : (
                       <>
                         <Upload className="w-6 h-6 text-slate-400 group-hover:text-indigo-500 transition-colors mb-2" />
-                        <span className="text-xs text-slate-400 group-hover:text-indigo-500">Click to upload</span>
-                        <span className="text-xs text-slate-300 mt-0.5">PNG, SVG (max 2MB)</span>
+                        <span className="text-xs text-slate-400 group-hover:text-indigo-500">{t('branding.clickUpload')}</span>
+                        <span className="text-xs text-slate-300 mt-0.5">{t('branding.fileFormats')}</span>
                       </>
                     )}
                     <input ref={logoInputRef} type="file" accept="image/*" className="hidden" onChange={e => handleImageUpload(e, 'logo')} />
                   </div>
                   {logoUrl && (
-                    <button onClick={() => setLogoUrl(null)} className="mt-2 text-xs text-rose-500 hover:underline font-medium">Remove logo</button>
+                    <button onClick={() => setLogoUrl(null)} className="mt-2 text-xs text-rose-500 hover:underline font-medium">{t('branding.removeLogo')}</button>
                   )}
                 </div>
                 {/* Favicon */}
                 <div>
-                  <label className="block text-xs font-semibold text-slate-600 uppercase tracking-wide mb-2">Favicon</label>
+                  <label className="block text-xs font-semibold text-slate-600 uppercase tracking-wide mb-2">{t('branding.favicon')}</label>
                   <div
                     onClick={() => faviconInputRef.current?.click()}
                     className="relative border-2 border-dashed border-slate-200 rounded-xl h-28 flex flex-col items-center justify-center cursor-pointer hover:border-indigo-400 hover:bg-indigo-50/30 transition-all group overflow-hidden"
@@ -191,22 +193,22 @@ export default function AdminBranding() {
                     ) : (
                       <>
                         <Upload className="w-6 h-6 text-slate-400 group-hover:text-indigo-500 transition-colors mb-2" />
-                        <span className="text-xs text-slate-400 group-hover:text-indigo-500">Click to upload</span>
-                        <span className="text-xs text-slate-300 mt-0.5">ICO, PNG 32×32</span>
+                        <span className="text-xs text-slate-400 group-hover:text-indigo-500">{t('branding.clickUpload')}</span>
+                        <span className="text-xs text-slate-300 mt-0.5">{t('branding.faviconFormat')}</span>
                       </>
                     )}
                     <input ref={faviconInputRef} type="file" accept="image/*" className="hidden" onChange={e => handleImageUpload(e, 'favicon')} />
                   </div>
                   {faviconUrl && (
-                    <button onClick={() => setFaviconUrl(null)} className="mt-2 text-xs text-rose-500 hover:underline font-medium">Remove favicon</button>
+                    <button onClick={() => setFaviconUrl(null)} className="mt-2 text-xs text-rose-500 hover:underline font-medium">{t('branding.removeFavicon')}</button>
                   )}
                 </div>
               </div>
 
               {/* App Icon Text (PWA) */}
               <div className="mt-5 pt-5 border-t border-slate-100">
-                <label className="block text-xs font-semibold text-slate-600 uppercase tracking-wide mb-1">App Icon Text</label>
-                <p className="text-xs text-slate-400 mb-3">2–3 letters shown on the installed app icon (e.g. "SC" for Britanika School). Used when the app is installed on mobile or desktop.</p>
+                <label className="block text-xs font-semibold text-slate-600 uppercase tracking-wide mb-1">{t('branding.appIconText')}</label>
+                <p className="text-xs text-slate-400 mb-3">{t('branding.appIconTextDesc')}</p>
                 <div className="flex items-center gap-4">
                   {/* Live preview of icon */}
                   <div
@@ -225,16 +227,16 @@ export default function AdminBranding() {
                       placeholder="SC"
                       className={inputCls + ' max-w-[120px] text-center font-bold text-lg tracking-widest'}
                     />
-                    <p className="text-xs text-slate-400 mt-1.5">Max 3 characters · auto uppercase</p>
+                    <p className="text-xs text-slate-400 mt-1.5">{t('branding.maxCharacters')}</p>
                   </div>
                 </div>
               </div>
             </Card>
 
             {/* Color Palettes */}
-            <Card title="Color Scheme" subtitle="Define your brand colors" icon={Palette}>
+            <Card title={t('branding.colorScheme')} subtitle={t('branding.colorSchemeDesc')} icon={Palette}>
               <div className="mb-4">
-                <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2">Quick Presets</p>
+                <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2">{t('branding.quickPresets')}</p>
                 <div className="flex flex-wrap gap-2">
                   {PRESET_PALETTES.map(p => (
                     <button
@@ -274,44 +276,44 @@ export default function AdminBranding() {
             </Card>
 
             {/* Typography */}
-            <Card title="Typography" subtitle="Fonts and sizing" icon={Type}>
+            <Card title={t('branding.typography')} subtitle={t('branding.typographyDesc')} icon={Type}>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-xs font-semibold text-slate-600 uppercase tracking-wide mb-1.5">Heading Font</label>
+                  <label className="block text-xs font-semibold text-slate-600 uppercase tracking-wide mb-1.5">{t('branding.headingFont')}</label>
                   <select value={typography.font_heading} onChange={e => setTypography(p => ({ ...p, font_heading: e.target.value }))} className={inputCls}>
                     {FONT_OPTIONS.map(f => <option key={f}>{f}</option>)}
                   </select>
                 </div>
                 <div>
-                  <label className="block text-xs font-semibold text-slate-600 uppercase tracking-wide mb-1.5">Body Font</label>
+                  <label className="block text-xs font-semibold text-slate-600 uppercase tracking-wide mb-1.5">{t('branding.bodyFont')}</label>
                   <select value={typography.font_body} onChange={e => setTypography(p => ({ ...p, font_body: e.target.value }))} className={inputCls}>
                     {FONT_OPTIONS.map(f => <option key={f}>{f}</option>)}
                   </select>
                 </div>
                 <div>
-                  <label className="block text-xs font-semibold text-slate-600 uppercase tracking-wide mb-1.5">Base Font Size (px)</label>
+                  <label className="block text-xs font-semibold text-slate-600 uppercase tracking-wide mb-1.5">{t('branding.baseFontSize')}</label>
                   <input type="number" value={typography.font_size} onChange={e => setTypography(p => ({ ...p, font_size: e.target.value }))} className={inputCls} min={12} max={18} />
                 </div>
                 <div>
-                  <label className="block text-xs font-semibold text-slate-600 uppercase tracking-wide mb-1.5">Border Radius (px)</label>
+                  <label className="block text-xs font-semibold text-slate-600 uppercase tracking-wide mb-1.5">{t('branding.borderRadius')}</label>
                   <input type="number" value={typography.border_radius} onChange={e => setTypography(p => ({ ...p, border_radius: e.target.value }))} className={inputCls} min={0} max={24} />
                 </div>
               </div>
             </Card>
 
             {/* Copy */}
-            <Card title="Platform Copy" subtitle="Text shown to students on the login page and footer">
+            <Card title={t('branding.platformCopy')} subtitle={t('branding.platformCopyDesc')}>
               <div className="space-y-4">
                 <div>
-                  <label className="block text-xs font-semibold text-slate-600 uppercase tracking-wide mb-1.5">Login Page Headline</label>
+                  <label className="block text-xs font-semibold text-slate-600 uppercase tracking-wide mb-1.5">{t('branding.loginHeadline')}</label>
                   <input value={copy.login_headline} onChange={e => setCopy(p => ({ ...p, login_headline: e.target.value }))} className={inputCls} />
                 </div>
                 <div>
-                  <label className="block text-xs font-semibold text-slate-600 uppercase tracking-wide mb-1.5">Login Page Subtext</label>
+                  <label className="block text-xs font-semibold text-slate-600 uppercase tracking-wide mb-1.5">{t('branding.loginSubtext')}</label>
                   <textarea value={copy.login_subtext} onChange={e => setCopy(p => ({ ...p, login_subtext: e.target.value }))} className={inputCls + ' resize-none'} rows={2} />
                 </div>
                 <div>
-                  <label className="block text-xs font-semibold text-slate-600 uppercase tracking-wide mb-1.5">Footer Text</label>
+                  <label className="block text-xs font-semibold text-slate-600 uppercase tracking-wide mb-1.5">{t('branding.footerText')}</label>
                   <input value={copy.footer_text} onChange={e => setCopy(p => ({ ...p, footer_text: e.target.value }))} className={inputCls} />
                 </div>
               </div>
@@ -322,7 +324,7 @@ export default function AdminBranding() {
           <div className="space-y-4">
             <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-5 sticky top-6">
               <div className="flex items-center justify-between mb-4">
-                <p className="text-sm font-bold text-slate-800">Live Preview</p>
+                <p className="text-sm font-bold text-slate-800">{t('branding.livePreview')}</p>
                 <div className="flex items-center gap-1.5">
                   <button onClick={() => setDarkMode(!darkMode)} className={cn('p-1.5 rounded-lg transition-colors', darkMode ? 'bg-slate-800 text-white' : 'hover:bg-slate-100 text-slate-500')}>
                     {darkMode ? <Moon className="w-4 h-4" /> : <Sun className="w-4 h-4" />}

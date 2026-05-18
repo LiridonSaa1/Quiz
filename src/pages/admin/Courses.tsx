@@ -1,5 +1,6 @@
 import React, { Fragment, useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
 import { supabase } from '../../supabase';
 import AdminLayout from '../../components/layout/AdminLayout';
 import {
@@ -46,6 +47,7 @@ type TeacherOption = {
 };
 
 export default function AdminCourses() {
+  const { t } = useTranslation();
   const [courses, setCourses] = useState<Record<string, unknown>[]>([]);
   const [teachers, setTeachers] = useState<TeacherOption[]>([]);
   const [loading, setLoading] = useState(true);
@@ -116,7 +118,7 @@ export default function AdminCourses() {
     try {
       const { error } = await supabase.from('courses').delete().eq('id', courseId);
       if (error) throw error;
-      toast.success('Course deleted');
+      toast.success(t('courses.courseDeleted'));
       setCourseToDelete(null);
       fetchData();
     } catch (e: unknown) {
@@ -140,7 +142,7 @@ export default function AdminCourses() {
       if (!res.ok || !json.success) throw new Error(json.error || 'Failed to update status');
 
       setCourses((prev) => prev.map((c) => (c.id === course.id ? { ...c, status: newStatus } : c)));
-      toast.success(`Course ${newStatus === 'published' ? 'published' : 'set to draft'}`);
+      toast.success(t(`courses.course${newStatus === 'published' ? 'Published' : 'Draft'}`));
     } catch {
       toast.error('Failed to update status');
     }
@@ -156,10 +158,10 @@ export default function AdminCourses() {
   });
 
   const stats = [
-    { label: 'All Courses', value: courses.length, icon: BookOpen, iconBg: 'bg-violet-100 text-violet-600', grad: 'from-violet-500 to-purple-500', ring: 'ring-violet-100' },
-    { label: 'Published', value: courses.filter(c => getNormalizedCourseStatus(c.status as string | undefined) === 'published').length, icon: CheckCircle2, iconBg: 'bg-emerald-100 text-emerald-600', grad: 'from-emerald-500 to-teal-500', ring: 'ring-emerald-100' },
-    { label: 'Drafts', value: courses.filter(c => getNormalizedCourseStatus(c.status as string | undefined) !== 'published').length, icon: FileText, iconBg: 'bg-amber-100 text-amber-600', grad: 'from-amber-500 to-orange-500', ring: 'ring-amber-100' },
-    { label: 'Total Students', value: courses.reduce((acc, c) => acc + ((c.student_ids as unknown[] | undefined)?.length || (c.total_students as number | undefined) || 0), 0), icon: GraduationCap, iconBg: 'bg-indigo-100 text-indigo-600', grad: 'from-indigo-500 to-blue-500', ring: 'ring-indigo-100' },
+    { label: t('dashboard.allStatuses'), value: courses.length, icon: BookOpen, iconBg: 'bg-violet-100 text-violet-600', grad: 'from-violet-500 to-purple-500', ring: 'ring-violet-100' },
+    { label: t('common.published'), value: courses.filter(c => getNormalizedCourseStatus(c.status as string | undefined) === 'published').length, icon: CheckCircle2, iconBg: 'bg-emerald-100 text-emerald-600', grad: 'from-emerald-500 to-teal-500', ring: 'ring-emerald-100' },
+    { label: t('common.draft'), value: courses.filter(c => getNormalizedCourseStatus(c.status as string | undefined) !== 'published').length, icon: FileText, iconBg: 'bg-amber-100 text-amber-600', grad: 'from-amber-500 to-orange-500', ring: 'ring-amber-100' },
+    { label: t('courses.totalStudents'), value: courses.reduce((acc, c) => acc + ((c.student_ids as unknown[] | undefined)?.length || (c.total_students as number | undefined) || 0), 0), icon: GraduationCap, iconBg: 'bg-indigo-100 text-indigo-600', grad: 'from-indigo-500 to-blue-500', ring: 'ring-indigo-100' },
   ];
 
   return (
@@ -167,15 +169,15 @@ export default function AdminCourses() {
       <div className="space-y-6">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
           <div>
-            <h1 className="text-2xl font-bold text-slate-900">Courses</h1>
-            <p className="text-slate-500 text-sm mt-1">Manage all platform courses.</p>
+            <h1 className="text-2xl font-bold text-slate-900">{t('courses.title')}</h1>
+            <p className="text-slate-500 text-sm mt-1">{t('courses.manageAllCourses')}</p>
           </div>
           <Link
             to="/admin/courses/new"
             className="inline-flex items-center gap-2 px-5 py-2.5 bg-slate-900 text-white rounded-xl font-semibold text-sm hover:bg-slate-800 transition-all shadow-lg shadow-slate-200 active:scale-[0.98]"
           >
             <Plus className="w-4 h-4" />
-            New Course
+            {t('dashboard.quickActions.newCourse')}
           </Link>
         </div>
 
@@ -199,7 +201,7 @@ export default function AdminCourses() {
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
             <input
               type="text"
-              placeholder="Search courses..."
+              placeholder={t('courses.searchPlaceholder')}
               value={search}
               onChange={e => setSearch(e.target.value)}
               className="w-full pl-9 pr-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-violet-500/30 focus:border-violet-400 transition-all placeholder-slate-400"
@@ -245,13 +247,13 @@ export default function AdminCourses() {
             <div className="w-16 h-16 bg-violet-50 rounded-2xl flex items-center justify-center mx-auto mb-4">
               <BookOpen className="w-8 h-8 text-violet-300" />
             </div>
-            <h3 className="text-lg font-bold text-slate-700 mb-1">No courses yet</h3>
-            <p className="text-slate-400 text-sm mb-6">{search ? `No results for "${search}"` : 'Create your first course to get started.'}</p>
+            <h3 className="text-lg font-bold text-slate-700 mb-1">{t('courses.noCourseYet')}</h3>
+            <p className="text-slate-400 text-sm mb-6">{search ? `No results for "${search}"` : t('courses.createFirstCourse')}</p>
             <Link
               to="/admin/courses/new"
               className="inline-flex items-center gap-2 px-5 py-2.5 bg-violet-600 text-white rounded-xl font-semibold text-sm hover:bg-violet-700 transition-all"
             >
-              <Plus className="w-4 h-4" /> Create Course
+              <Plus className="w-4 h-4" /> {t('courses.createCourse')}
             </Link>
           </div>
         ) : viewMode === 'grid' ? (
@@ -277,12 +279,12 @@ export default function AdminCourses() {
             <table className="w-full text-left">
               <thead>
                 <tr className="bg-slate-50 text-xs font-bold text-slate-400 uppercase tracking-wider">
-                  <th className="px-5 py-3.5">Course</th>
-                  <th className="px-5 py-3.5">Teacher</th>
-                  <th className="px-5 py-3.5">Level</th>
-                  <th className="px-5 py-3.5">Students</th>
-                  <th className="px-5 py-3.5">Status</th>
-                  <th className="px-5 py-3.5 text-right">Actions</th>
+                  <th className="px-5 py-3.5">{t('courses.courseTitle')}</th>
+                  <th className="px-5 py-3.5">{t('dashboard.tableHeaders.teacher')}</th>
+                  <th className="px-5 py-3.5">{t('courses.level')}</th>
+                  <th className="px-5 py-3.5">{t('courses.students')}</th>
+                  <th className="px-5 py-3.5">{t('common.status')}</th>
+                  <th className="px-5 py-3.5 text-right">{t('common.actions')}</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-50">
@@ -349,11 +351,11 @@ export default function AdminCourses() {
                 </div>
                 <div className="min-w-0 flex-1">
                   <h3 id="delete-course-title" className="text-lg font-bold text-slate-900">
-                    Delete this course?
+                    {t('courses.deleteThisCourse')}
                   </h3>
                   <p className="text-slate-600 text-sm mt-2 leading-relaxed">
                     <span className="font-semibold text-slate-800">&ldquo;{courseToDelete.title}&rdquo;</span>{' '}
-                    will be permanently removed. Modules, lessons, and enrollments tied to it may be affected. This cannot be undone.
+                    {t('courses.deleteConfirmMsg')}
                   </p>
                 </div>
               </div>
@@ -364,7 +366,7 @@ export default function AdminCourses() {
                   onClick={() => setCourseToDelete(null)}
                   className="px-4 py-2.5 rounded-xl text-sm font-semibold text-slate-700 bg-slate-100 hover:bg-slate-200 transition-colors disabled:opacity-50"
                 >
-                  Cancel
+                  {t('common.cancel')}
                 </button>
                 <button
                   type="button"
@@ -372,7 +374,7 @@ export default function AdminCourses() {
                   onClick={() => void performDeleteCourse()}
                   className="px-4 py-2.5 rounded-xl text-sm font-semibold text-white bg-red-600 hover:bg-red-700 transition-colors disabled:opacity-50"
                 >
-                  {deleting ? 'Deleting…' : 'Delete course'}
+                  {deleting ? t('courses.deleting') : t('courses.deleteCourseBtn')}
                 </button>
               </div>
             </div>

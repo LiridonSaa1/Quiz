@@ -1,4 +1,5 @@
 import React, { useState, useMemo, useEffect, useCallback } from "react";
+import { useTranslation } from 'react-i18next';
 import AdminLayout from "../../components/layout/AdminLayout";
 import { cn } from "../../lib/utils";
 import { format } from "date-fns";
@@ -547,6 +548,7 @@ function printInvoice(inv: Invoice, brand: InvoiceBrandProfile) {
 }
 
 export default function AdminInvoices() {
+  const { t } = useTranslation();
   const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [brand, setBrand] = useState<InvoiceBrandProfile>(DEFAULT_BRAND);
   const [loading, setLoading] = useState(true);

@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
+import { useTranslation } from 'react-i18next';
 import AdminLayout from "../../components/layout/AdminLayout";
 import { cn } from "../../lib/utils";
 import { format, subMonths } from "date-fns";
@@ -123,6 +124,7 @@ const fmtCurrency = (n: number) =>
   );
 
 export default function AdminPayments() {
+  const { t } = useTranslation();
   const [payments, setPayments] = useState<Payment[]>([]);
   const [teacherOptions, setTeacherOptions] = useState<TeacherOption[]>([]);
   const [studentOptions, setStudentOptions] = useState<StudentOption[]>([]);

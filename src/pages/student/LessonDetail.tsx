@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Link, useParams } from 'react-router-dom';
 import StudentLayout from '../../components/layout/StudentLayout';
 import { supabase } from '../../supabase';
@@ -38,6 +39,7 @@ type LessonProgressRow = {
 };
 
 export default function StudentLessonDetail() {
+  const { t } = useTranslation();
   const { lessonId = '' } = useParams();
   const [loading, setLoading] = useState(true);
   const [lesson, setLesson] = useState<LessonDetailRow | null>(null);
@@ -70,7 +72,7 @@ export default function StudentLessonDetail() {
 
         const normalized: LessonDetailRow = {
           id: String(found.id),
-          title: String(found.title || 'Untitled lesson'),
+          title: String(found.title || t('student.lessons.untitled')),
           short_description: found.short_description || null,
           type: String(found.type || 'text'),
           duration_minutes: found.duration_minutes == null ? null : Number(found.duration_minutes),
@@ -128,10 +130,10 @@ export default function StudentLessonDetail() {
   };
 
   const statusLabel = useMemo(() => {
-    if (!lesson) return 'Lesson';
-    if (completed) return 'Completed';
-    return lesson.type === 'quiz' ? 'Quiz lesson' : 'In progress';
-  }, [lesson, completed]);
+    if (!lesson) return t('common.lesson');
+    if (completed) return t('common.completed');
+    return lesson.type === 'quiz' ? t('common.quizLesson') : t('common.inProgress');
+  }, [lesson, completed, t]);
 
   const sections = useMemo(() => {
     const byType: Record<string, LessonContentRow[]> = { video: [], audio: [], pdf: [], text: [] };
@@ -143,10 +145,10 @@ export default function StudentLessonDetail() {
   }, [contents]);
 
   const tabConfig = [
-    { key: 'video', label: 'Video', icon: Video },
-    { key: 'audio', label: 'Audio', icon: Headphones },
-    { key: 'pdf', label: 'Book/PDF', icon: FileText },
-    { key: 'text', label: 'Text', icon: AlignLeft },
+    { key: 'video', label: t('common.video'), icon: Video },
+    { key: 'audio', label: t('common.audio'), icon: Headphones },
+    { key: 'pdf', label: t('common.pdf'), icon: FileText },
+    { key: 'text', label: t('common.text'), icon: AlignLeft },
   ] as const;
 
   const activeItems = sections[activeTab] || [];
@@ -156,7 +158,7 @@ export default function StudentLessonDetail() {
       <div className="space-y-6">
         <Link to="/student/lessons" className="inline-flex items-center gap-2 text-sm font-semibold text-slate-500 hover:text-slate-700">
           <ArrowLeft className="w-4 h-4" />
-          Back to lessons
+          {t('student.lessons.backToLessons')}
         </Link>
 
         {loading ? (
@@ -167,32 +169,32 @@ export default function StudentLessonDetail() {
         ) : !lesson ? (
           <div className="bg-white rounded-3xl border border-slate-100 p-10 text-center">
             <BookOpen className="w-8 h-8 text-slate-300 mx-auto mb-3" />
-            <h2 className="text-lg font-bold text-slate-900">Lesson not available</h2>
-            <p className="text-sm text-slate-500 mt-1">You do not have access to this lesson.</p>
+            <h2 className="text-lg font-bold text-slate-900">{t('student.lessons.lessonNotAvailable')}</h2>
+            <p className="text-sm text-slate-500 mt-1">{t('student.lessons.noAccessToLesson')}</p>
           </div>
         ) : (
           <div className="space-y-4">
             <div className="bg-white rounded-3xl border border-slate-100 p-6">
               <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider">
-                {lesson.course_title || 'Course'} {lesson.module_title ? `· ${lesson.module_title}` : ''}
+                {lesson.course_title || t('common.course')} {lesson.module_title ? `· ${lesson.module_title}` : ''}
               </p>
               <h1 className="text-2xl font-black text-slate-900 mt-1">{lesson.title}</h1>
-              <p className="text-sm text-slate-500 mt-2">{lesson.short_description || 'Read the lesson details and continue learning.'}</p>
+              <p className="text-sm text-slate-500 mt-2">{lesson.short_description || t('student.lessons.lessonDescriptionPlaceholder')}</p>
 
               <div className="mt-5 grid grid-cols-1 sm:grid-cols-3 gap-3">
                 <div className="rounded-2xl border border-slate-100 p-4">
-                  <p className="text-xs text-slate-400 font-semibold">Type</p>
-                  <p className="text-base font-bold text-slate-900 mt-1 capitalize">{lesson.type}</p>
+                  <p className="text-xs text-slate-400 font-semibold">{t('common.type')}</p>
+                  <p className="text-base font-bold text-slate-900 mt-1 capitalize">{t(`common.${lesson.type}`)}</p>
                 </div>
                 <div className="rounded-2xl border border-slate-100 p-4">
-                  <p className="text-xs text-slate-400 font-semibold">Duration</p>
+                  <p className="text-xs text-slate-400 font-semibold">{t('common.duration')}</p>
                   <p className="text-base font-bold text-slate-900 mt-1 inline-flex items-center gap-1.5">
                     <Clock className="w-4 h-4 text-slate-400" />
-                    {lesson.duration_minutes ?? 0} min
+                    {t('common.minutesCount', { count: lesson.duration_minutes ?? 0 })}
                   </p>
                 </div>
                 <div className="rounded-2xl border border-slate-100 p-4">
-                  <p className="text-xs text-slate-400 font-semibold">Status</p>
+                  <p className="text-xs text-slate-400 font-semibold">{t('common.status')}</p>
                   <p className="text-base font-bold text-slate-900 mt-1">{statusLabel}</p>
                 </div>
               </div>
@@ -209,7 +211,7 @@ export default function StudentLessonDetail() {
                 )}
               >
                 {completed ? <CheckCircle2 className="w-4 h-4" /> : <Circle className="w-4 h-4" />}
-                {completed ? 'Completed' : 'Mark as completed'}
+                {completed ? t('common.completed') : t('student.lessons.markAsCompleted')}
               </button>
 
               {lesson.type === 'quiz' && linkedQuizId && (
@@ -218,7 +220,7 @@ export default function StudentLessonDetail() {
                   className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold bg-gradient-to-r from-violet-500 to-indigo-500 text-white hover:opacity-90"
                 >
                   <Play className="w-4 h-4" />
-                  Start Quiz
+                  {t('common.startQuiz')}
                 </Link>
               )}
 
@@ -227,7 +229,7 @@ export default function StudentLessonDetail() {
                   to={`/student/courses/${lesson.course_id}`}
                   className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold bg-slate-100 text-slate-700 hover:bg-slate-200"
                 >
-                  Back to course
+                  {t('student.lessons.backToCourse')}
                 </Link>
               )}
             </div>
@@ -257,7 +259,7 @@ export default function StudentLessonDetail() {
                 <div className="space-y-4">
                   {activeItems.map((item) => (
                     <div key={item.id} className="rounded-2xl border border-slate-100 p-4 space-y-2">
-                      <h3 className="text-base font-bold text-slate-900">{item.title || 'Untitled content'}</h3>
+                      <h3 className="text-base font-bold text-slate-900">{item.title || t('student.lessons.untitledContent')}</h3>
                       {item.description && <p className="text-sm text-slate-500">{item.description}</p>}
 
                       {item.type === 'video' && item.signed_url && (
@@ -295,7 +297,7 @@ export default function StudentLessonDetail() {
                       {item.type === 'text' && (
                         <div
                           className="prose prose-slate max-w-none"
-                          dangerouslySetInnerHTML={{ __html: item.text_content || '<p>No text content.</p>' }}
+                          dangerouslySetInnerHTML={{ __html: item.text_content || `<p>${t('student.lessons.noTextContent')}</p>` }}
                         />
                       )}
                     </div>
@@ -304,10 +306,10 @@ export default function StudentLessonDetail() {
               </div>
             ) : (
               <div className="bg-white rounded-3xl border border-slate-100 p-8 text-sm text-slate-500">
-                No lesson content has been added yet.
+                {t('student.lessons.noContentAdded')}
               </div>
             )}
-            <LessonDiscussionBoard lessonId={lesson.id} title="Questions About This Lesson" />
+            <LessonDiscussionBoard lessonId={lesson.id} title={t('student.lessons.questionsAboutLesson')} />
           </div>
         )}
       </div>

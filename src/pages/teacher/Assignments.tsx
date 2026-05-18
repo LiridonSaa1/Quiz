@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import TeacherLayout from '../../components/layout/TeacherLayout';
 import { toast } from 'sonner';
 import { motion, AnimatePresence } from 'motion/react';
@@ -126,6 +127,7 @@ const emptyForm = {
 };
 
 function SubmissionsPanel({ assignment, onClose }: { assignment: Assignment; onClose: () => void }) {
+  const { t } = useTranslation();
   const [submissions, setSubmissions] = useState<Submission[]>([]);
   const [loading, setLoading] = useState(true);
   const [expanded, setExpanded] = useState<string | null>(null);
@@ -136,7 +138,7 @@ function SubmissionsPanel({ assignment, onClose }: { assignment: Assignment; onC
     authFetch(`/api/teacher/assignments/${assignment.id}/submissions`)
       .then(r => r.json())
       .then(json => { if (json.success) setSubmissions(json.submissions || []); })
-      .catch(() => toast.error('Failed to load submissions'))
+      .catch(() => toast.error(t('teacher.assignments.failedLoadSubmissions')))
       .finally(() => setLoading(false));
   }, [assignment.id]);
 
@@ -151,8 +153,8 @@ function SubmissionsPanel({ assignment, onClose }: { assignment: Assignment; onC
         body: JSON.stringify({ grade: g.grade, feedback: g.feedback }),
       });
       const json = await res.json();
-      if (!json.success) throw new Error(json.error || 'Failed');
-      toast.success('Graded successfully');
+      if (!json.success) throw new Error(json.error || t('teacher.assignments.failed'));
+      toast.success(t('teacher.assignments.gradedSuccessfully'));
       setSubmissions(prev => prev.map(s => s.id === subId ? { ...s, ...json.submission, student: s.student } : s));
       setExpanded(null);
     } catch (e: any) {
@@ -203,7 +205,7 @@ function SubmissionsPanel({ assignment, onClose }: { assignment: Assignment; onC
           ) : submissions.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-16 text-slate-400">
               <Users className="w-10 h-10 mb-2 opacity-30" />
-              <p className="text-sm font-medium">No submissions yet</p>
+              <p className="text-sm font-medium">{t('teacher.assignments.noSubmissions')}</p>
             </div>
           ) : submissions.map(sub => (
             <div key={sub.id} className="border border-slate-100 rounded-xl overflow-hidden">
@@ -216,14 +218,14 @@ function SubmissionsPanel({ assignment, onClose }: { assignment: Assignment; onC
                   <p className="text-xs text-slate-400">{formatDistanceToNow(new Date(sub.submitted_at), { addSuffix: true })}</p>
                 </div>
                 <div className="flex items-center gap-2">
-                  {sub.is_late && <span className="text-xs px-2 py-0.5 rounded-full bg-rose-50 text-rose-600 font-semibold">Late</span>}
+                  {sub.is_late && <span className="text-xs px-2 py-0.5 rounded-full bg-rose-50 text-rose-600 font-semibold">{t('teacher.assignments.late')}</span>}
                   {sub.status === 'graded' && sub.grade != null && (
                     <span className="text-xs px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 font-bold flex items-center gap-1">
                       <Award className="w-3 h-3" />{sub.grade}/{assignment.max_score}
                     </span>
                   )}
                   <span className={cn('text-xs px-2 py-0.5 rounded-full font-semibold', sub.status === 'graded' ? 'bg-emerald-50 text-emerald-700' : 'bg-blue-50 text-blue-700')}>
-                    {sub.status === 'graded' ? 'Graded' : 'Submitted'}
+                    {sub.status === 'graded' ? t('teacher.assignments.graded') : t('teacher.assignments.submitted')}
                   </span>
                   <button onClick={() => initGrading(sub)} className="p-1.5 rounded-lg hover:bg-slate-100 transition-colors">
                     {expanded === sub.id ? <ChevronUp className="w-4 h-4 text-slate-500" /> : <ChevronDown className="w-4 h-4 text-slate-500" />}
@@ -242,13 +244,13 @@ function SubmissionsPanel({ assignment, onClose }: { assignment: Assignment; onC
                     <div className="px-4 pb-4 space-y-3 border-t border-slate-100 pt-3">
                       {sub.content && (
                         <div>
-                          <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-1">Text Answer</p>
+                          <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-1">{t('teacher.assignments.textAnswer')}</p>
                           <div className="bg-slate-50 rounded-lg p-3 text-sm text-slate-700 whitespace-pre-wrap max-h-40 overflow-y-auto">{sub.content}</div>
                         </div>
                       )}
                       {parseJsonField<FileEntry[]>(sub.file_urls, []).length > 0 && (
                         <div>
-                          <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2 flex items-center gap-1"><Paperclip className="w-3 h-3" />Attached Files</p>
+                          <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2 flex items-center gap-1"><Paperclip className="w-3 h-3" />{t('teacher.assignments.attachedFiles')}</p>
                           <div className="space-y-1.5">
                             {parseJsonField<FileEntry[]>(sub.file_urls, []).map((f, i) => (
                               <a key={i} href={f.url} target="_blank" rel="noopener noreferrer" className="flex items-center gap-2.5 p-2 rounded-lg bg-slate-50 border border-slate-100 hover:border-blue-200 hover:bg-blue-50 transition-colors group">
@@ -262,7 +264,7 @@ function SubmissionsPanel({ assignment, onClose }: { assignment: Assignment; onC
                       )}
                       {parseJsonField<LinkEntry[]>(sub.link_urls, []).length > 0 && (
                         <div>
-                          <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2 flex items-center gap-1"><Link2 className="w-3 h-3" />Submitted Links</p>
+                          <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2 flex items-center gap-1"><Link2 className="w-3 h-3" />{t('teacher.assignments.submittedLinks')}</p>
                           <div className="space-y-1">
                             {parseJsonField<LinkEntry[]>(sub.link_urls, []).map((l, i) => (
                               <a key={i} href={l.url} target="_blank" rel="noopener noreferrer" className="flex items-center gap-2 text-xs text-violet-600 hover:text-violet-800 font-medium truncate">
@@ -273,11 +275,11 @@ function SubmissionsPanel({ assignment, onClose }: { assignment: Assignment; onC
                         </div>
                       )}
                       {!sub.content && parseJsonField<FileEntry[]>(sub.file_urls, []).length === 0 && parseJsonField<LinkEntry[]>(sub.link_urls, []).length === 0 && (
-                        <p className="text-xs text-slate-400 italic">No submission content</p>
+                        <p className="text-xs text-slate-400 italic">{t('teacher.assignments.noSubmissionContent')}</p>
                       )}
                       <div className="grid grid-cols-2 gap-3">
                         <div>
-                          <label className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Grade (/{assignment.max_score})</label>
+                          <label className="text-xs font-semibold text-slate-500 uppercase tracking-wide">{t('teacher.assignments.grade')} (/{assignment.max_score})</label>
                           <input
                             type="number" min={0} max={assignment.max_score}
                             value={grading[sub.id]?.grade ?? ''}
@@ -287,12 +289,12 @@ function SubmissionsPanel({ assignment, onClose }: { assignment: Assignment; onC
                           />
                         </div>
                         <div>
-                          <label className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Feedback</label>
+                          <label className="text-xs font-semibold text-slate-500 uppercase tracking-wide">{t('teacher.assignments.feedback')}</label>
                           <input
                             value={grading[sub.id]?.feedback ?? ''}
                             onChange={e => setGrading(prev => ({ ...prev, [sub.id]: { ...prev[sub.id], feedback: e.target.value } }))}
                             className="mt-1 w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-400/30"
-                            placeholder="Write feedback..."
+                            placeholder={t('teacher.assignments.writeFeedback')}
                           />
                         </div>
                       </div>
@@ -303,7 +305,7 @@ function SubmissionsPanel({ assignment, onClose }: { assignment: Assignment; onC
                         size="sm"
                         className="rounded-lg"
                       >
-                        Save Grade
+                        {t('teacher.assignments.saveGrade')}
                       </LoadingButton>
                     </div>
                   </motion.div>
@@ -318,6 +320,7 @@ function SubmissionsPanel({ assignment, onClose }: { assignment: Assignment; onC
 }
 
 export default function TeacherAssignments() {
+  const { t } = useTranslation();
   const [assignments, setAssignments] = useState<Assignment[]>([]);
   const [courses, setCourses] = useState<Course[]>([]);
   const [classes, setClasses] = useState<ClassRec[]>([]);
@@ -452,11 +455,11 @@ export default function TeacherAssignments() {
         const j = await res.json().catch(() => ({}));
         throw new Error((j as any).error || 'Failed to save');
       }
-      toast.success(editId ? 'Assignment updated' : 'Assignment created');
+      toast.success(editId ? t('teacher.assignments.assignmentUpdated') : t('teacher.assignments.assignmentCreated'));
       setShowModal(false);
       fetchData();
     } catch (e: any) {
-      toast.error(e.message || 'Failed to save');
+      toast.error(e.message || t('teacher.assignments.failedSave'));
     } finally {
       setSaving(false);
     }
@@ -466,19 +469,19 @@ export default function TeacherAssignments() {
     setDeleting(true);
     try {
       const res = await authFetch(`/api/teacher/assignments/${id}`, { method: 'DELETE' });
-      if (!res.ok) throw new Error('Failed to delete');
-      toast.success('Assignment deleted');
+      if (!res.ok) throw new Error(t('teacher.assignments.failedDelete'));
+      toast.success(t('teacher.assignments.assignmentDeleted'));
       setDeleteId(null);
       fetchData();
-    } catch { toast.error('Failed to delete'); }
+    } catch { toast.error(t('teacher.assignments.failedDelete')); }
     finally { setDeleting(false); }
   };
 
   const getDueBadge = (due: string | null, status: AssignmentStatus) => {
     if (!due || status === 'closed') return null;
     const d = new Date(due);
-    if (isPast(d) && !isToday(d)) return <span className="text-xs text-rose-600 font-medium">Overdue</span>;
-    if (isToday(d)) return <span className="text-xs text-amber-600 font-medium">Due today</span>;
+    if (isPast(d) && !isToday(d)) return <span className="text-xs text-rose-600 font-medium">{t('teacher.assignments.overdue')}</span>;
+    if (isToday(d)) return <span className="text-xs text-amber-600 font-medium">{t('teacher.assignments.dueToday')}</span>;
     return null;
   };
 
@@ -488,15 +491,15 @@ export default function TeacherAssignments() {
   return (
     <TeacherLayout>
       <AdminListPageShell
-        breadcrumbPortalLabel="Teacher Portal"
-        breadcrumbLabel="Assignments"
-        title="Assignments"
-        description="Create and manage your course assignments."
+        breadcrumbPortalLabel={t('nav.teacherPortal')}
+        breadcrumbLabel={t('teacher.assignments.title')}
+        title={t('teacher.assignments.title')}
+        description={t('teacher.assignments.description')}
         action={
           <motion.button type="button" onClick={openAdd} whileHover={{ scale: 1.04, y: -2 }} whileTap={{ scale: 0.97 }}
             className="inline-flex items-center gap-2 px-6 py-3 rounded-2xl font-bold text-sm text-white shrink-0"
             style={{ background: 'linear-gradient(135deg,#818cf8 0%,#a78bfa 100%)', boxShadow: '0 8px 32px rgba(139,92,246,0.45)' }}>
-            <Plus className="w-4 h-4" />New Assignment
+            <Plus className="w-4 h-4" />{t('teacher.assignments.newAssignment')}
           </motion.button>
         }
         stats={stats}
@@ -504,20 +507,20 @@ export default function TeacherAssignments() {
           <AdminListFilterBar>
             <div className="relative flex-1 min-w-[200px]">
               <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-indigo-400" />
-              <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search assignments..." className={ADMIN_LIST_SEARCH_INPUT} />
+              <input value={search} onChange={e => setSearch(e.target.value)} placeholder={t('teacher.assignments.searchPlaceholder')} className={ADMIN_LIST_SEARCH_INPUT} />
             </div>
             <select value={statusFilter} onChange={e => setStatusFilter(e.target.value)} className={ADMIN_LIST_SELECT}>
-              <option value="all">All Status</option>
-              <option value="draft">Draft</option>
-              <option value="published">Published</option>
-              <option value="closed">Closed</option>
+              <option value="all">{t('teacher.assignments.allStatus')}</option>
+              <option value="draft">{t('teacher.assignments.draft')}</option>
+              <option value="published">{t('teacher.assignments.published')}</option>
+              <option value="closed">{t('teacher.assignments.closed')}</option>
             </select>
             <select value={typeFilter} onChange={e => setTypeFilter(e.target.value)} className={ADMIN_LIST_SELECT}>
-              <option value="all">All Types</option>
+              <option value="all">{t('teacher.assignments.allTypes')}</option>
               {Object.entries(TYPE_CFG).map(([v, c]) => <option key={v} value={v}>{c.label}</option>)}
             </select>
             <select value={courseFilter} onChange={e => setCourseFilter(e.target.value)} className={ADMIN_LIST_SELECT}>
-              <option value="all">All Courses</option>
+              <option value="all">{t('teacher.assignments.allCourses')}</option>
               {courses.map(c => <option key={c.id} value={c.id}>{c.title}</option>)}
             </select>
           </AdminListFilterBar>
@@ -531,8 +534,8 @@ export default function TeacherAssignments() {
           ) : filtered.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-20 gap-3 text-slate-400">
               <ClipboardList className="w-10 h-10 opacity-30" />
-              <p className="text-sm">No assignments found</p>
-              <button type="button" onClick={openAdd} className="text-xs text-indigo-600 font-semibold hover:underline">Create one now</button>
+              <p className="text-sm">{t('teacher.assignments.noAssignments')}</p>
+              <button type="button" onClick={openAdd} className="text-xs text-indigo-600 font-semibold hover:underline">{t('teacher.assignments.createNow')}</button>
             </div>
           ) : (
             <>
@@ -579,29 +582,29 @@ export default function TeacherAssignments() {
                       </div>
                       <div className="mt-4 space-y-2 text-xs text-slate-600 border-t border-slate-100 pt-3">
                         <div className="flex justify-between gap-2">
-                          <span className="text-slate-400 font-semibold uppercase tracking-wider">Course</span>
+                          <span className="text-slate-400 font-semibold uppercase tracking-wider">{t('teacher.assignments.course')}</span>
                           <span className="text-right truncate">{a.course?.title || '—'}</span>
                         </div>
                         {a.class_name && (
                           <div className="flex justify-between gap-2">
-                            <span className="text-slate-400 font-semibold uppercase tracking-wider">Class</span>
+                            <span className="text-slate-400 font-semibold uppercase tracking-wider">{t('teacher.assignments.class')}</span>
                             <span className="text-right truncate">{a.class_name}</span>
                           </div>
                         )}
                         <div className="flex justify-between gap-2 items-start">
-                          <span className="text-slate-400 font-semibold uppercase tracking-wider shrink-0">Due</span>
+                          <span className="text-slate-400 font-semibold uppercase tracking-wider shrink-0">{t('teacher.assignments.due')}</span>
                           <span className="text-right">
                             {a.due_date ? <><span className="block">{format(new Date(a.due_date), 'MMM d, yyyy')}</span>{dueBadge}</> : '—'}
                           </span>
                         </div>
                         {a.publish_at && a.status === 'draft' && (
                           <div className="flex justify-between gap-2 items-center">
-                            <span className="text-slate-400 font-semibold uppercase tracking-wider shrink-0">Auto-publish</span>
+                            <span className="text-slate-400 font-semibold uppercase tracking-wider shrink-0">{t('teacher.assignments.autoPublish')}</span>
                             <span className="text-right text-violet-600 font-medium">{format(new Date(a.publish_at), 'MMM d, HH:mm')}</span>
                           </div>
                         )}
                         <div className="flex justify-between gap-2 items-center">
-                          <span className="text-slate-400 font-semibold uppercase tracking-wider">Score</span>
+                          <span className="text-slate-400 font-semibold uppercase tracking-wider">{t('teacher.assignments.score')}</span>
                           <span className="inline-flex items-center gap-1 font-medium text-slate-800">
                             <Star className="w-3.5 h-3.5 text-amber-400" />{a.max_score} pts
                           </span>
@@ -613,7 +616,7 @@ export default function TeacherAssignments() {
                           onClick={() => setSubmissionsFor(a)}
                           className="mt-3 w-full inline-flex items-center justify-center gap-2 py-2 rounded-xl text-xs font-bold bg-indigo-50 text-indigo-700 hover:bg-indigo-100 transition-colors"
                         >
-                          <Users className="w-3.5 h-3.5" />View Submissions
+                          <Users className="w-3.5 h-3.5" />{t('teacher.assignments.viewSubmissions')}
                         </button>
                       )}
                     </div>
@@ -621,7 +624,7 @@ export default function TeacherAssignments() {
                 })}
               </div>
               <div className="px-5 py-3 border-t border-slate-100 text-xs text-slate-400">
-                Showing {filtered.length} of {assignments.length} assignments
+                {t('teacher.assignments.showing', { count: filtered.length, total: assignments.length })}
               </div>
             </>
           )}
@@ -633,7 +636,7 @@ export default function TeacherAssignments() {
         <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto">
             <div className="flex items-center justify-between p-5 border-b border-slate-100">
-              <h2 className="text-lg font-bold text-slate-800">{editId ? 'Edit Assignment' : 'New Assignment'}</h2>
+              <h2 className="text-lg font-bold text-slate-800">{editId ? t('teacher.assignments.editAssignment') : t('teacher.assignments.newAssignment')}</h2>
               <button type="button" onClick={() => setShowModal(false)} className="p-2 hover:bg-slate-100 rounded-lg"><X className="w-4 h-4" /></button>
             </div>
             <div className="p-5 space-y-4">

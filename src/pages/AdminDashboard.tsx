@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { supabase } from '../supabase';
 import { UserProfile, UserRole } from '../types';
 import { 
@@ -38,6 +39,7 @@ const CustomTooltip = ({ active, payload, label }: any) => {
 };
 
 export default function AdminDashboard() {
+  const { t } = useTranslation();
   const [users, setUsers] = useState<UserProfile[]>([]);
   const [analytics, setAnalytics] = useState<any>(null);
   const [loading, setLoading] = useState(true);
@@ -188,10 +190,10 @@ export default function AdminDashboard() {
   const ov = analytics?.overview;
 
   const statsConfig = [
-    { label: 'Total Users', value: ov?.totalStudents ? ov.totalStudents + (ov.totalTeachers || 0) : users.length, icon: Users, bg: 'bg-indigo-500', light: 'bg-indigo-50', text: 'text-indigo-600', border: 'border-indigo-100', delay: 0.1 },
-    { label: 'Active Courses', value: ov?.publishedCourses || 0, icon: BookOpen, bg: 'bg-violet-500', light: 'bg-violet-50', text: 'text-violet-600', border: 'border-violet-100', delay: 0.2 },
-    { label: 'Avg Quiz Score', value: `${ov?.avgScore || 0}%`, icon: TrendingUp, bg: 'bg-emerald-500', light: 'bg-emerald-50', text: 'text-emerald-600', border: 'border-emerald-100', delay: 0.3 },
-    { label: 'Certificates', value: ov?.totalCertificates || 0, icon: Award, bg: 'bg-amber-500', light: 'bg-amber-50', text: 'text-amber-600', border: 'border-amber-100', delay: 0.4 },
+    { label: t('common.totalUsers'), value: ov?.totalStudents ? ov.totalStudents + (ov.totalTeachers || 0) : users.length, icon: Users, bg: 'bg-indigo-500', light: 'bg-indigo-50', text: 'text-indigo-600', border: 'border-indigo-100', delay: 0.1 },
+    { label: t('dashboard.stats.activeCourses'), value: ov?.publishedCourses || 0, icon: BookOpen, bg: 'bg-violet-500', light: 'bg-violet-50', text: 'text-violet-600', border: 'border-violet-100', delay: 0.2 },
+    { label: t('dashboard.stats.avgQuizScore'), value: `${ov?.avgScore || 0}%`, icon: TrendingUp, bg: 'bg-emerald-500', light: 'bg-emerald-50', text: 'text-emerald-600', border: 'border-emerald-100', delay: 0.3 },
+    { label: t('dashboard.stats.certificates'), value: ov?.totalCertificates || 0, icon: Award, bg: 'bg-amber-500', light: 'bg-amber-50', text: 'text-amber-600', border: 'border-amber-100', delay: 0.4 },
   ];
 
   return (
@@ -204,8 +206,8 @@ export default function AdminDashboard() {
           className="flex flex-col sm:flex-row sm:items-center justify-between gap-4"
         >
           <div>
-            <h1 className="text-3xl font-extrabold text-slate-900 tracking-tight">Dashboard Overview</h1>
-            <p className="text-slate-500 text-sm mt-1">Welcome back. Here is what's happening on your platform today.</p>
+            <h1 className="text-3xl font-extrabold text-slate-900 tracking-tight">{t('dashboard.overview')}</h1>
+            <p className="text-slate-500 text-sm mt-1">{t('dashboard.greeting')}</p>
           </div>
           <motion.button
             whileHover={{ scale: 1.02 }}
@@ -214,7 +216,7 @@ export default function AdminDashboard() {
             className="flex items-center justify-center gap-2 px-5 py-2.5 bg-indigo-600 text-white rounded-xl font-semibold text-sm hover:bg-indigo-700 transition-all shadow-lg shadow-indigo-200"
           >
             <UserPlus className="w-4 h-4" />
-            Add User
+            {t('dashboard.addUser')}
           </motion.button>
         </motion.div>
 
@@ -250,7 +252,7 @@ export default function AdminDashboard() {
             className="lg:col-span-2 bg-white rounded-2xl border border-slate-100 shadow-sm p-6"
           >
             <div className="mb-6">
-              <h3 className="text-lg font-bold text-slate-900">Signups & Activity Trend</h3>
+              <h3 className="text-lg font-bold text-slate-900">{t('dashboard.signupsActivity')}</h3>
               <p className="text-sm text-slate-500">Platform engagement over the last 30 days</p>
             </div>
             <div className="h-[300px]">
@@ -288,7 +290,7 @@ export default function AdminDashboard() {
             className="bg-white rounded-2xl border border-slate-100 shadow-sm p-6"
           >
             <div className="mb-6">
-              <h3 className="text-lg font-bold text-slate-900">Score Distribution</h3>
+              <h3 className="text-lg font-bold text-slate-900">{t('dashboard.scoreDistribution')}</h3>
               <p className="text-sm text-slate-500">Average grades across platform</p>
             </div>
             <div className="h-[300px]">
@@ -322,14 +324,14 @@ export default function AdminDashboard() {
         >
           <div className="p-5 border-b border-slate-100 flex flex-col sm:flex-row gap-3 items-center justify-between bg-slate-50/50">
             <div>
-              <h3 className="text-lg font-bold text-slate-900">User Management</h3>
+              <h3 className="text-lg font-bold text-slate-900">{t('dashboard.userManagement')}</h3>
               <p className="text-sm text-slate-500">Teacher accounts only. Disabling a teacher also disables their linked students.</p>
             </div>
             <div className="relative flex-1 sm:w-72 min-w-0">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
               <input
                 type="text"
-                placeholder="Search teachers..."
+                placeholder={t('dashboard.searchTeachers')}
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 className="w-full pl-9 pr-4 py-2 bg-white border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all shadow-sm"
@@ -342,11 +344,11 @@ export default function AdminDashboard() {
             <table className="w-full text-left">
               <thead>
                 <tr className="bg-white text-slate-400 text-xs font-bold uppercase tracking-wider border-b border-slate-100">
-                  <th className="px-6 py-4">Teacher</th>
-                  <th className="px-6 py-4">Role</th>
-                  <th className="px-6 py-4">Status</th>
-                  <th className="px-6 py-4">Joined</th>
-                  <th className="px-6 py-4 text-right">Actions</th>
+                  <th className="px-6 py-4">{t('dashboard.tableHeaders.teacher')}</th>
+                  <th className="px-6 py-4">{t('common.role')}</th>
+                  <th className="px-6 py-4">{t('common.status')}</th>
+                  <th className="px-6 py-4">{t('dashboard.tableHeaders.joined')}</th>
+                  <th className="px-6 py-4 text-right">{t('common.actions')}</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-50">
@@ -414,7 +416,7 @@ export default function AdminDashboard() {
                     ))}
                   </AnimatePresence>
                 ) : (
-                  <tr><td colSpan={5} className="px-6 py-16 text-center text-slate-400 text-sm font-medium">No users found matching your search.</td></tr>
+                  <tr><td colSpan={5} className="px-6 py-16 text-center text-slate-400 text-sm font-medium">{t('dashboard.noUsersFound')}</td></tr>
                 )}
               </tbody>
             </table>
@@ -461,7 +463,7 @@ export default function AdminDashboard() {
                 </motion.div>
               ))
             ) : (
-              <div className="p-6 text-center text-slate-400 text-sm font-medium">No users found.</div>
+              <div className="p-6 text-center text-slate-400 text-sm font-medium">{t('dashboard.noUsersFound')}</div>
             )}
           </div>
         </motion.div>
@@ -488,7 +490,7 @@ export default function AdminDashboard() {
                   { label: 'Password', key: 'password', type: 'password', placeholder: '••••••••' },
                 ].map((field) => (
                   <div key={field.key}>
-                    <label className="block text-xs font-bold text-slate-600 uppercase tracking-wider mb-1.5">{field.label}</label>
+                    <label className="block text-xs font-bold text-slate-600 uppercase tracking-wider mb-1.5">{field.label}</label> 
                     <input
                       required
                       type={field.type}
@@ -500,7 +502,7 @@ export default function AdminDashboard() {
                   </div>
                 ))}
                 <div>
-                  <label className="block text-xs font-bold text-slate-600 uppercase tracking-wider mb-1.5">Role</label>
+                  <label className="block text-xs font-bold text-slate-600 uppercase tracking-wider mb-1.5">{t('common.role')}</label>
                   <select
                     value={newUserData.role}
                     onChange={(e) => setNewUserData({...newUserData, role: e.target.value as UserRole})}
@@ -513,7 +515,7 @@ export default function AdminDashboard() {
                 <div className="flex gap-3 pt-4">
                   <button type="button" onClick={() => setShowAddModal(false)}
                     className="flex-1 px-4 py-2.5 bg-slate-100 text-slate-700 rounded-xl font-bold text-sm hover:bg-slate-200 transition-all">
-                    Cancel
+                    {t('common.cancel')}
                   </button>
                   <LoadingButton
                     type="submit"

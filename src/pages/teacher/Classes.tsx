@@ -1,4 +1,5 @@
 import React, { useEffect, useState, useMemo } from 'react';
+import { useTranslation } from 'react-i18next';
 import { supabase } from '../../supabase';
 import TeacherLayout from '../../components/layout/TeacherLayout';
 import LoadingButton from '../../components/ui/LoadingButton';
@@ -78,6 +79,7 @@ const emptyForm = {
 };
 
 export default function TeacherClasses() {
+  const { t } = useTranslation();
   const [teacherId, setTeacherId] = useState<string | null>(null);
   const [classes, setClasses] = useState<ClassRecord[]>([]);
   const [courses, setCourses] = useState<Course[]>([]);

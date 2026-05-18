@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { supabase } from '../../supabase';
 import StudentLayout from '../../components/layout/StudentLayout';
 import { motion, AnimatePresence } from 'motion/react';
@@ -37,6 +38,7 @@ const ORBS = [
 ];
 
 export default function StudentExams() {
+  const { t } = useTranslation();
   const [exams, setExams] = useState<ExamEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [activeFilter, setActiveFilter] = useState<'all' | 'available' | 'passed' | 'failed'>('all');
@@ -149,10 +151,10 @@ export default function StudentExams() {
   }, []);
 
   const filters: { key: typeof activeFilter; label: string; count: () => number }[] = [
-    { key: 'all',       label: 'All Exams', count: () => exams.length },
-    { key: 'available', label: 'Available',  count: () => exams.filter(e => e.canAttempt).length },
-    { key: 'passed',    label: 'Passed',     count: () => exams.filter(e => e.passed).length },
-    { key: 'failed',    label: 'Failed',     count: () => exams.filter(e => !e.passed && e.attemptsUsed > 0 && !e.canAttempt).length },
+    { key: 'all',       label: t('exams.allExams'), count: () => exams.length },
+    { key: 'available', label: t('exams.availableExams'),  count: () => exams.filter(e => e.canAttempt).length },
+    { key: 'passed',    label: t('exams.passedExams'),     count: () => exams.filter(e => e.passed).length },
+    { key: 'failed',    label: t('exams.failedExams'),     count: () => exams.filter(e => !e.passed && e.attemptsUsed > 0 && !e.canAttempt).length },
   ];
 
   const visible = exams.filter(e => {
@@ -188,16 +190,16 @@ export default function StudentExams() {
             <div className="w-10 h-10 bg-fuchsia-500/20 border border-fuchsia-500/30 rounded-xl flex items-center justify-center">
               <GraduationCap className="w-5 h-5 text-fuchsia-300" />
             </div>
-            <span className="text-fuchsia-300 text-sm font-semibold uppercase tracking-widest">Exam Center</span>
+            <span className="text-fuchsia-300 text-sm font-semibold uppercase tracking-widest">{t('exams.examCenter')}</span>
           </div>
-          <h1 className="text-3xl font-black text-white mb-1">My Exams</h1>
-          <p className="text-slate-400 text-sm max-w-xl">Formal assessments for your enrolled courses. Pass to earn certificates and advance your learning.</p>
+          <h1 className="text-3xl font-black text-white mb-1">{t('exams.myExams')}</h1>
+          <p className="text-slate-400 text-sm max-w-xl">{t('exams.formalAssessments')}</p>
           <div className="flex flex-wrap gap-6 mt-5">
             {[
-              { label: 'Total Exams',  value: stats.total,     icon: FileText,     color: 'text-fuchsia-300' },
-              { label: 'Passed',       value: stats.passed,    icon: CheckCircle2, color: 'text-emerald-300' },
-              { label: 'Available',    value: stats.available, icon: Unlock,       color: 'text-blue-300'    },
-              { label: 'Avg Best Score', value: `${stats.avgBest}%`, icon: Trophy, color: 'text-amber-300'  },
+              { label: t('exams.totalExams'),  value: stats.total,     icon: FileText,     color: 'text-fuchsia-300' },
+              { label: t('exams.passedExams'),       value: stats.passed,    icon: CheckCircle2, color: 'text-emerald-300' },
+              { label: t('exams.availableExams'),    value: stats.available, icon: Unlock,       color: 'text-blue-300'    },
+              { label: t('exams.avgBestScore'), value: `${stats.avgBest}%`, icon: Trophy, color: 'text-amber-300'  },
             ].map(s => (
               <motion.div key={s.label} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}
                 className="flex items-center gap-2.5">
@@ -251,9 +253,9 @@ export default function StudentExams() {
           <div className="w-16 h-16 bg-fuchsia-50 rounded-2xl flex items-center justify-center mb-4">
             <GraduationCap className="w-8 h-8 text-fuchsia-300" />
           </div>
-          <h3 className="text-slate-700 font-bold text-lg mb-1">No exams here</h3>
+          <h3 className="text-slate-700 font-bold text-lg mb-1">{t('exams.noExamsHere')}</h3>
           <p className="text-slate-400 text-sm">
-            {hasActiveFilters ? 'No results for current filter.' : 'No enrolled content yet.'}
+            {hasActiveFilters ? t('exams.noResultsForFilter') : t('exams.noEnrolledContent')}
           </p>
         </motion.div>
       ) : (
@@ -312,7 +314,7 @@ export default function StudentExams() {
                     {exam.attemptsUsed === 0 && (
                       <button onClick={() => navigate(`/student/quiz/${exam.id}`)}
                         className="flex items-center justify-center gap-2 w-full py-2.5 rounded-2xl text-sm font-bold transition-all bg-gradient-to-r from-violet-500 to-purple-500 text-white hover:opacity-90 shadow-lg shadow-violet-200/60">
-                        <Zap className="w-4 h-4" /> Start Exam
+                        <Zap className="w-4 h-4" /> {t('exams.startExam')}
                         <ChevronRight className="w-4 h-4 ml-auto" />
                       </button>
                     )}
@@ -322,7 +324,7 @@ export default function StudentExams() {
                         className="mt-2 inline-flex items-center justify-center gap-2 w-full py-2.5 rounded-2xl text-xs font-bold transition-all bg-slate-100 text-slate-600 hover:bg-slate-200"
                       >
                         <CheckCircle2 className="w-3.5 h-3.5" />
-                        View Result
+                        {t('exams.viewResult')}
                       </button>
                     )}
                   </div>
@@ -341,13 +343,13 @@ export default function StudentExams() {
             <div className="w-7 h-7 bg-fuchsia-100 rounded-lg flex items-center justify-center">
               <Shield className="w-3.5 h-3.5 text-fuchsia-600" />
             </div>
-            <h4 className="text-sm font-bold text-fuchsia-900">Exam Tips</h4>
+            <h4 className="text-sm font-bold text-fuchsia-900">{t('exams.examTips')}</h4>
           </div>
           <div className="grid sm:grid-cols-3 gap-3">
             {[
-              { icon: Timer,       tip: 'Check the time limit before starting. The timer begins immediately.' },
-              { icon: AlertCircle, tip: 'Submitting early is final. Review all answers before submitting.' },
-              { icon: Star,        tip: 'Score above the pass mark to earn your course certificate.' },
+              { icon: Timer,       tip: t('exams.checkTimeLimit') },
+              { icon: AlertCircle, tip: t('exams.submitEarly') },
+              { icon: Star,        tip: t('exams.scorePassMark') },
             ].map((t, i) => (
               <div key={i} className="flex items-start gap-2.5">
                 <t.icon className="w-4 h-4 text-fuchsia-400 mt-0.5 shrink-0" />

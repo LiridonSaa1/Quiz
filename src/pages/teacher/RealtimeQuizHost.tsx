@@ -1,5 +1,6 @@
 import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
 import TeacherLayout from '../../components/layout/TeacherLayout';
 import { supabase } from '../../supabase';
 import { authFetch } from '../../lib/apiUrl';
@@ -37,6 +38,7 @@ const resolveCorrectAnswer = (rawOptions: any[], correctAnswer: string): string 
 type HostView = 'setup' | 'lobby' | 'active' | 'ended';
 
 export default function RealtimeQuizHost() {
+  const { t } = useTranslation();
   const navigate = useNavigate();
   const [quizzes, setQuizzes] = useState<Quiz[]>([]);
   const [loadingQuizzes, setLoadingQuizzes] = useState(true);
@@ -147,7 +149,7 @@ export default function RealtimeQuizHost() {
   }, [currentQuestion?.index, view]);
 
   const handleStart = async () => {
-    if (!selectedQuizId) { toast.error('Please select a quiz.'); return; }
+    if (!selectedQuizId) { toast.error(t('realtimeQuiz.selectQuiz')); return; }
     setStarting(true);
     try {
       const res = await authFetch('/api/teacher/realtime-quiz/start', {
@@ -156,11 +158,11 @@ export default function RealtimeQuizHost() {
         body: JSON.stringify({ quizId: selectedQuizId, timerPerQuestion, teamsEnabled, teamCount }),
       });
       const json = await res.json();
-      if (!res.ok || !json.success) { toast.error(json.error || 'Failed to start.'); return; }
+      if (!res.ok || !json.success) { toast.error(json.error || t('realtimeQuiz.failedToStart')); return; }
       setSessionId(json.sessionId);
       setView('lobby');
-      toast.success(`Quiz started! PIN: ${json.pin}`);
-    } catch (e) { toast.error('Network error.'); }
+      toast.success(t('dashboard.quizStarted') + ` ${json.pin}`);
+    } catch (e) { toast.error(t('realtimeQuiz.networkError')); }
     finally { setStarting(false); }
   };
 
@@ -180,7 +182,7 @@ export default function RealtimeQuizHost() {
 
   const handleEnd = async () => {
     if (!sessionId) return;
-    if (!confirm('End this quiz session?')) return;
+    if (!confirm(t('realtimeQuiz.endQuizConfirm'))) return;
     try {
       const res = await authFetch(`/api/teacher/realtime-quiz/${sessionId}/end`, { method: 'POST' });
       const json = await res.json();
@@ -208,8 +210,8 @@ export default function RealtimeQuizHost() {
             <Zap className="h-5 w-5 text-white" />
           </div>
           <div>
-            <h1 className="text-2xl font-black text-slate-900">Live Quiz Host</h1>
-            <p className="text-sm text-slate-500">Run a Kahoot-style real-time quiz for your students</p>
+            <h1 className="text-2xl font-black text-slate-900">{t('realtimeQuiz.title')}</h1>
+            <p className="text-sm text-slate-500">{t('realtimeQuiz.description')}</p>
           </div>
         </div>
 
@@ -220,15 +222,15 @@ export default function RealtimeQuizHost() {
             <motion.div key="setup" initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -16 }}
               className="mx-auto max-w-xl">
               <div className="rounded-3xl border border-violet-100 bg-white p-8 shadow-xl shadow-violet-100/50">
-                <h2 className="mb-6 text-xl font-bold text-slate-900">Set Up Your Live Quiz</h2>
+                <h2 className="mb-6 text-xl font-bold text-slate-900">{t('realtimeQuiz.setupYourLiveQuiz')}</h2>
 
                 <div className="mb-5">
-                  <label className="mb-2 block text-sm font-semibold text-slate-700">Select Quiz</label>
+                  <label className="mb-2 block text-sm font-semibold text-slate-700">{t('realtimeQuiz.selectQuiz')}</label>
                   {loadingQuizzes ? (
-                    <div className="flex items-center gap-2 py-4 text-slate-400"><Loader2 className="h-4 w-4 animate-spin" /> Loading quizzes...</div>
+                    <div className="flex items-center gap-2 py-4 text-slate-400"><Loader2 className="h-4 w-4 animate-spin" /> {t('realtimeQuiz.loadingQuizzes')}</div>
                   ) : quizzes.length === 0 ? (
                     <div className="rounded-xl border border-dashed border-slate-200 py-6 text-center text-sm text-slate-400">
-                      No quizzes found. Create a quiz in Quizzes first.
+                      {t('realtimeQuiz.noQuizzesFound')}
                     </div>
                   ) : (
                     <select
@@ -236,7 +238,7 @@ export default function RealtimeQuizHost() {
                       onChange={e => setSelectedQuizId(e.target.value)}
                       className="w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-slate-900 focus:border-violet-400 focus:outline-none focus:ring-2 focus:ring-violet-100"
                     >
-                      <option value="">— Choose a quiz —</option>
+                      <option value="">{t('realtimeQuiz.chooseQuiz')}</option>
                       {quizzes.map(q => <option key={q.id} value={q.id}>{q.title}</option>)}
                     </select>
                   )}
@@ -244,21 +246,21 @@ export default function RealtimeQuizHost() {
 
                 <div className="mb-5">
                   <label className="mb-2 block text-sm font-semibold text-slate-700">
-                    Timer per question: <span className="text-violet-600 font-bold">{timerPerQuestion}s</span>
+                    {t('realtimeQuiz.timerPerQuestion')}: <span className="text-violet-600 font-bold">{t('realtimeQuiz.secondsLabel', { seconds: timerPerQuestion })}</span>
                   </label>
                   <input type="range" min={10} max={120} step={5} value={timerPerQuestion}
                     onChange={e => setTimerPerQuestion(Number(e.target.value))}
                     className="w-full accent-violet-600" />
                   <div className="mt-1 flex justify-between text-xs text-slate-400">
-                    <span>10s</span><span>60s</span><span>120s</span>
+                    <span>{t('realtimeQuiz.seconds10')}</span><span>{t('realtimeQuiz.seconds60')}</span><span>{t('realtimeQuiz.seconds120')}</span>
                   </div>
                 </div>
 
                 <div className="mb-8 rounded-2xl border border-violet-100 bg-violet-50 p-4">
                   <div className="flex items-center justify-between mb-3">
                     <div>
-                      <p className="text-sm font-semibold text-slate-700">Team vs Team Mode</p>
-                      <p className="text-xs text-slate-500 mt-0.5">Split students into competing teams automatically</p>
+                      <p className="text-sm font-semibold text-slate-700">{t('realtimeQuiz.teamVsTeamMode')}</p>
+                      <p className="text-xs text-slate-500 mt-0.5">{t('realtimeQuiz.splitStudents')}</p>
                     </div>
                     <button type="button"
                       onClick={() => setTeamsEnabled(v => !v)}
@@ -276,7 +278,7 @@ export default function RealtimeQuizHost() {
                   {teamsEnabled && (
                     <div>
                       <label className="mb-1.5 block text-xs font-semibold text-slate-600">
-                        Number of teams: <span className="text-violet-600 font-bold">{teamCount}</span>
+                        {t('realtimeQuiz.numberOfTeams')}: <span className="text-violet-600 font-bold">{t('realtimeQuiz.numberOfTeams_value', { count: teamCount })}</span>
                       </label>
                       <div className="flex gap-2">
                         {[2, 3, 4, 5, 6].map(n => (
@@ -290,9 +292,9 @@ export default function RealtimeQuizHost() {
                         ))}
                       </div>
                       <div className="mt-2 flex gap-2 flex-wrap">
-                        {['Red','Blue','Green','Yellow','Purple','Orange'].slice(0, teamCount).map(t => (
-                          <span key={t} className="rounded-full bg-white px-3 py-1 text-xs font-bold text-slate-700 border border-slate-200 shadow-sm">
-                            Team {t}
+                        {['Red','Blue','Green','Yellow','Purple','Orange'].slice(0, teamCount).map(colorName => (
+                          <span key={colorName} className="rounded-full bg-white px-3 py-1 text-xs font-bold text-slate-700 border border-slate-200 shadow-sm">
+                            {t('realtimeQuiz.teamLabel', { name: colorName })}
                           </span>
                         ))}
                       </div>
@@ -306,7 +308,7 @@ export default function RealtimeQuizHost() {
                   className="flex w-full items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-violet-600 to-indigo-600 px-6 py-4 text-base font-bold text-white shadow-lg shadow-violet-200 transition hover:shadow-xl disabled:opacity-50"
                 >
                   {starting ? <Loader2 className="h-5 w-5 animate-spin" /> : <Radio className="h-5 w-5" />}
-                  {starting ? 'Starting…' : 'Start Live Quiz'}
+                  {starting ? t('realtimeQuiz.starting') : t('realtimeQuiz.startLiveQuiz')}
                 </button>
               </div>
             </motion.div>
@@ -318,19 +320,19 @@ export default function RealtimeQuizHost() {
               className="mx-auto max-w-2xl">
               <div className="rounded-3xl border border-violet-100 bg-white p-8 shadow-xl shadow-violet-100/50">
                 <div className="mb-6 text-center">
-                  <p className="text-sm font-semibold uppercase tracking-widest text-violet-500">Waiting for students</p>
+                  <p className="text-sm font-semibold uppercase tracking-widest text-violet-500">{t('realtimeQuiz.waitingForStudents')}</p>
                   <h2 className="mt-1 text-2xl font-black text-slate-900">{session.quizTitle}</h2>
-                  <p className="mt-1 text-sm text-slate-400">{session.totalQuestions} questions · {timerPerQuestion}s per question</p>
+                  <p className="mt-1 text-sm text-slate-400">{t('realtimeQuiz.totalQuestions', { total: session.totalQuestions, timer: timerPerQuestion })}</p>
                 </div>
 
                 {/* PIN Display */}
                 <div className="mb-6 rounded-2xl bg-gradient-to-br from-violet-600 to-indigo-600 p-6 text-center">
-                  <p className="text-sm font-bold uppercase tracking-widest text-violet-200">Quiz PIN</p>
+                  <p className="text-sm font-bold uppercase tracking-widest text-violet-200">{t('realtimeQuiz.quizPin')}</p>
                   <p className="mt-1 font-mono text-6xl font-black tracking-wider text-white">{session.pin}</p>
                   <button onClick={copyPin}
                     className="mt-3 inline-flex items-center gap-1.5 rounded-xl bg-white/20 px-4 py-2 text-sm font-semibold text-white hover:bg-white/30 transition">
                     {pinCopied ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
-                    {pinCopied ? 'Copied!' : 'Copy PIN'}
+                    {pinCopied ? t('realtimeQuiz.copied') : t('realtimeQuiz.copyPin')}
                   </button>
                 </div>
 
@@ -338,15 +340,15 @@ export default function RealtimeQuizHost() {
                 <div className="mb-6">
                   <div className="mb-3 flex items-center justify-between">
                     <h3 className="font-semibold text-slate-700 flex items-center gap-2">
-                      <Users className="h-4 w-4" /> Players Joined
+                      <Users className="h-4 w-4" /> {t('realtimeQuiz.playersJoined')}
                     </h3>
                     <span className="rounded-full bg-violet-100 px-3 py-0.5 text-sm font-bold text-violet-700">
-                      {participants.length}
+                      {t('realtimeQuiz.players', { count: participants.length })}
                     </span>
                   </div>
                   {participants.length === 0 ? (
                     <div className="rounded-xl border border-dashed border-slate-200 py-8 text-center text-sm text-slate-400">
-                      Waiting for students to join with PIN <strong>{session.pin}</strong>…
+                      {t('realtimeQuiz.waitingForStudentsMsg', { pin: session.pin })}
                     </div>
                   ) : (
                     <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
@@ -364,7 +366,7 @@ export default function RealtimeQuizHost() {
                 <button onClick={handleNext} disabled={advancing}
                   className="flex w-full items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-emerald-500 to-teal-500 px-6 py-4 text-base font-bold text-white shadow-lg shadow-emerald-200 transition hover:shadow-xl disabled:opacity-50">
                   {advancing ? <Loader2 className="h-5 w-5 animate-spin" /> : <Play className="h-5 w-5" />}
-                  {advancing ? 'Starting…' : 'Start Quiz!'}
+                  {advancing ? t('realtimeQuiz.starting') : t('realtimeQuiz.startQuiz')}
                 </button>
               </div>
             </motion.div>
@@ -508,7 +510,7 @@ export default function RealtimeQuizHost() {
                       </div>
                     ))}
                     {leaderboard.length === 0 && (
-                      <p className="py-3 text-center text-xs text-slate-400">No answers yet</p>
+                      <p className="py-3 text-center text-xs text-slate-400">{t('realtimeQuiz.noAnswersYet')}</p>
                     )}
                   </div>
                 </div>
@@ -524,11 +526,11 @@ export default function RealtimeQuizHost() {
                 <div className="mx-auto mb-4 flex h-20 w-20 items-center justify-center rounded-3xl bg-gradient-to-br from-amber-400 to-orange-500 shadow-lg shadow-orange-200">
                   <Trophy className="h-10 w-10 text-white" />
                 </div>
-                <h2 className="text-3xl font-black text-slate-900">Quiz Complete!</h2>
+                <h2 className="text-3xl font-black text-slate-900">{t('realtimeQuiz.quizComplete')}</h2>
                 {session && <p className="mt-1 text-slate-500">{session.quizTitle}</p>}
 
                 <div className="my-8 space-y-3">
-                  <h3 className="text-left text-sm font-bold uppercase tracking-wider text-slate-400">Final Leaderboard</h3>
+                  <h3 className="text-left text-sm font-bold uppercase tracking-wider text-slate-400">{t('realtimeQuiz.finalLeaderboard')}</h3>
                   {leaderboard.slice(0, 10).map((e, i) => (
                     <motion.div key={e.userId} initial={{ opacity: 0, x: -20 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: i * 0.06 }}
                       className={cn(
@@ -547,18 +549,18 @@ export default function RealtimeQuizHost() {
                     </motion.div>
                   ))}
                   {leaderboard.length === 0 && (
-                    <p className="py-4 text-slate-400 text-sm">No participants completed the quiz.</p>
+                    <p className="py-4 text-slate-400 text-sm">{t('realtimeQuiz.noParticipantsCompleted')}</p>
                   )}
                 </div>
 
                 <div className="flex gap-3">
                   <button onClick={() => { setView('setup'); setSessionId(''); setSession(null); setParticipants([]); setLeaderboard([]); setCurrentQuestion(null); }}
                     className="flex-1 flex items-center justify-center gap-2 rounded-2xl border border-slate-200 px-5 py-3 text-sm font-bold text-slate-700 hover:bg-slate-50 transition">
-                    <RefreshCw className="h-4 w-4" /> New Quiz
+                    <RefreshCw className="h-4 w-4" /> {t('realtimeQuiz.newQuiz')}
                   </button>
                   <button onClick={() => navigate('/teacher/quizzes')}
                     className="flex-1 flex items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-violet-600 to-indigo-600 px-5 py-3 text-sm font-bold text-white shadow-lg shadow-violet-200 hover:shadow-xl transition">
-                    <ChevronLeft className="h-4 w-4" /> Back to Quizzes
+                    <ChevronLeft className="h-4 w-4" /> {t('realtimeQuiz.backToQuizzes')}
                   </button>
                 </div>
               </div>

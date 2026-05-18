@@ -1,4 +1,5 @@
 import React, { useEffect, useState, useMemo } from 'react';
+import { useTranslation } from 'react-i18next';
 import { supabase } from '../../supabase';
 import StudentLayout from '../../components/layout/StudentLayout';
 import { Link } from 'react-router-dom';
@@ -38,6 +39,7 @@ const COURSE_COLORS = [
 ];
 
 export default function StudentQuizzes() {
+  const { t } = useTranslation();
   const [quizzes, setQuizzes] = useState<QuizItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
@@ -140,10 +142,10 @@ export default function StudentQuizzes() {
   const hasActiveFilters = search.trim() !== '' || filter !== 'all';
 
   const FILTERS = [
-    { key: 'all', label: 'All' },
-    { key: 'new', label: 'New' },
-    { key: 'attempted', label: 'Attempted' },
-    { key: 'passed', label: 'Passed' },
+    { key: 'all', label: t('student.quizzes.all') },
+    { key: 'new', label: t('student.quizzes.new') },
+    { key: 'attempted', label: t('student.quizzes.attempted') },
+    { key: 'passed', label: t('student.quizzes.passed') },
   ] as const;
 
   return (
@@ -160,16 +162,16 @@ export default function StudentQuizzes() {
             <div>
               <div className="inline-flex items-center gap-2 bg-white/10 border border-white/20 rounded-full px-3 py-1.5 mb-3">
                 <HelpCircle className="w-3.5 h-3.5 text-violet-300" />
-                <span className="text-white/80 text-xs font-semibold">Quizzes</span>
+                <span className="text-white/80 text-xs font-semibold">{t('quizzes.title')}</span>
               </div>
-              <h1 className="text-3xl font-black text-white">My Quizzes</h1>
-              <p className="text-slate-400 text-sm mt-1">Test your knowledge and track your scores.</p>
+              <h1 className="text-3xl font-black text-white">{t('student.quizzes.myQuizzes')}</h1>
+              <p className="text-slate-400 text-sm mt-1">{t('student.quizzes.testKnowledge')}</p>
             </div>
             <div className="flex gap-3">
               {[
-                { label: 'Total', value: stats.total, color: 'from-violet-500 to-purple-600', icon: HelpCircle },
-                { label: 'Done', value: stats.attempted, color: 'from-blue-500 to-indigo-600', icon: CheckCircle2 },
-                { label: 'Passed', value: stats.passed, color: 'from-emerald-500 to-teal-500', icon: Trophy },
+                { label: t('student.quizzes.total'), value: stats.total, color: 'from-violet-500 to-purple-600', icon: HelpCircle },
+                { label: t('student.quizzes.done'), value: stats.attempted, color: 'from-blue-500 to-indigo-600', icon: CheckCircle2 },
+                { label: t('student.quizzes.passed'), value: stats.passed, color: 'from-emerald-500 to-teal-500', icon: Trophy },
               ].map((s, i) => (
                 <motion.div key={s.label} initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 + i * 0.08 }}
                   className="bg-white/8 border border-white/10 rounded-2xl p-3 text-center min-w-[68px]">
@@ -188,7 +190,7 @@ export default function StudentQuizzes() {
         <div className="flex flex-col sm:flex-row gap-3">
           <div className="relative flex-1">
             <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
-            <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search quizzes..."
+            <input value={search} onChange={e => setSearch(e.target.value)} placeholder={t('student.quizzes.searchPlaceholder')}
               className="w-full pl-10 pr-4 py-2.5 bg-white border border-slate-200 rounded-2xl text-sm text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-violet-500/30 focus:border-violet-400 shadow-sm" />
           </div>
           <div className="flex gap-2 flex-wrap">
@@ -223,9 +225,9 @@ export default function StudentQuizzes() {
               className="w-16 h-16 bg-violet-50 rounded-3xl flex items-center justify-center mb-4 shadow-lg">
               <HelpCircle className="w-8 h-8 text-violet-400" />
             </motion.div>
-            <p className="text-slate-600 font-bold">No quizzes found</p>
+            <p className="text-slate-600 font-bold">{t('student.quizzes.noQuizzesFound')}</p>
             <p className="text-slate-400 text-sm mt-1">
-              {hasActiveFilters ? 'No results for current filter.' : 'No enrolled content yet.'}
+              {hasActiveFilters ? t('dashboard.adjustSearch') : t('dashboard.noQuizzesAvailable')}
             </p>
           </motion.div>
         ) : (
@@ -233,7 +235,7 @@ export default function StudentQuizzes() {
             <AnimatePresence>
               {filtered.map((quiz, i) => {
                 const pct = quiz.bestScore != null && quiz.bestTotal ? Math.round((quiz.bestScore / quiz.bestTotal) * 100) : null;
-                const stateLabel = quiz.passed ? 'Passed' : quiz.attempted ? 'Completed' : 'New';
+                const stateLabel = quiz.passed ? t('student.quizzes.passed') : quiz.attempted ? t('student.quizzes.completed') : t('student.quizzes.new');
                 const actionHref = quiz.attempted && quiz.latestAttemptId
                   ? `/student/results/${quiz.latestAttemptId}`
                   : `/student/quiz/${quiz.id}`;
@@ -259,10 +261,10 @@ export default function StudentQuizzes() {
                       <div className="flex-1">
                         <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">{quiz.courseTitle}</span>
                         <h3 className="text-sm font-black text-slate-900 mt-0.5 mb-2 line-clamp-2 group-hover:text-violet-600 transition-colors">{quiz.title}</h3>
-                        <p className="text-xs text-slate-400 line-clamp-2 leading-relaxed mb-4">{quiz.description || 'Test your understanding of this topic.'}</p>
+                        <p className="text-xs text-slate-400 line-clamp-2 leading-relaxed mb-4">{quiz.description || t('student.quizzes.testTopic')}</p>
                         <div className="flex gap-2 mb-5">
                           <span className="flex items-center gap-1 bg-slate-50 border border-slate-100 text-slate-500 text-[11px] font-semibold px-2 py-1 rounded-lg">
-                            <Clock className="w-3 h-3" /> {quiz.timeLimit} min
+                            <Clock className="w-3 h-3" /> {t('student.dashboard.mins', { count: quiz.timeLimit })}
                           </span>
                           <span className={cn(
                             'flex items-center gap-1 border text-[11px] font-semibold px-2 py-1 rounded-lg',
@@ -280,7 +282,7 @@ export default function StudentQuizzes() {
                       {!quiz.attempted && (
                         <Link to={actionHref}
                           className="flex items-center justify-center gap-2 w-full py-2.5 rounded-2xl text-sm font-bold transition-all bg-gradient-to-r from-violet-500 to-purple-500 text-white hover:opacity-90 shadow-lg shadow-violet-200/60">
-                          <Play className="w-4 h-4" /> Start Quiz
+                          <Play className="w-4 h-4" /> {t('dashboard.startQuiz')}
                           <ChevronRight className="w-4 h-4 ml-auto" />
                         </Link>
                       )}
@@ -290,7 +292,7 @@ export default function StudentQuizzes() {
                           className="mt-2 inline-flex items-center justify-center gap-2 w-full py-2.5 rounded-2xl text-xs font-bold transition-all bg-slate-100 text-slate-600 hover:bg-slate-200"
                         >
                           <CheckCircle2 className="w-3.5 h-3.5" />
-                          View Result
+                          {t('dashboard.quickActions.viewResults')}
                         </Link>
                       )}
                     </div>

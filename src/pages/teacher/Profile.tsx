@@ -1,4 +1,5 @@
 import React, { useEffect, useState, useCallback } from 'react';
+import { useTranslation } from 'react-i18next';
 import { supabase } from '../../supabase';
 import TeacherLayout from '../../components/layout/TeacherLayout';
 import LoadingButton from '../../components/ui/LoadingButton';
@@ -47,6 +48,7 @@ const emptyProfile: ProfileData = {
 };
 
 export default function TeacherProfile() {
+  const { t } = useTranslation();
   const [profile, setProfile] = useState<ProfileData>(emptyProfile);
   const [stats, setStats] = useState<Stats>({ students: 0, courses: 0, quizzes: 0, passRate: 0 });
   const [loading, setLoading] = useState(true);
@@ -96,7 +98,7 @@ export default function TeacherProfile() {
       });
     } catch (e) {
       console.error(e);
-      toast.error('Failed to load profile');
+      toast.error(t('teacher.profile.failedLoadProfile'));
     } finally {
       setLoading(false);
     }
@@ -108,16 +110,16 @@ export default function TeacherProfile() {
 
   const handleSave = async () => {
     if (!can('actions.teacher.profile.edit')) {
-      toast.error('You do not have permission to edit profile');
+      toast.error(t('teacher.profile.noPermissionEdit'));
       return;
     }
     const { data: { session } } = await supabase.auth.getSession();
     if (!session?.user?.id) {
-      toast.error('Not signed in');
+      toast.error(t('teacher.profile.notSignedIn'));
       return;
     }
     if (!profile.displayName.trim()) {
-      toast.error('Display name is required');
+      toast.error(t('teacher.profile.displayNameRequired'));
       return;
     }
     setSaving(true);
@@ -135,7 +137,7 @@ export default function TeacherProfile() {
 
       const { error } = await supabase.from('profiles').update(payload).eq('id', session.user.id);
       if (error) throw error;
-      toast.success('Profile saved');
+      toast.success(t('teacher.profile.profileSaved'));
       setDirty(false);
       await loadAll();
     } catch (e: unknown) {
@@ -153,12 +155,12 @@ export default function TeacherProfile() {
           .eq('id', s2.user.id);
         if (e2) toast.error(e2.message);
         else {
-          toast.success('Saved display name and avatar. Add optional columns (bio, phone, …) in Supabase for full profile.');
+          toast.success(t('teacher.profile.savedPartial'));
           setDirty(false);
           await loadAll();
         }
       } else {
-        toast.error(msg || 'Failed to save profile');
+        toast.error(msg || t('teacher.profile.failedSaveProfile'));
       }
     } finally {
       setSaving(false);
@@ -167,22 +169,22 @@ export default function TeacherProfile() {
 
   const handlePasswordChange = async () => {
     if (!can('actions.teacher.profile.edit')) {
-      toast.error('You do not have permission to change password');
+      toast.error(t('teacher.profile.noPermissionChangePassword'));
       return;
     }
     if (passwords.next !== passwords.confirm) {
-      toast.error('Passwords do not match');
+      toast.error(t('teacher.profile.passwordsDoNotMatch'));
       return;
     }
     if (passwords.next.length < 8) {
-      toast.error('Minimum 8 characters');
+      toast.error(t('teacher.profile.minimumCharacters'));
       return;
     }
     setChangingPass(true);
     const { error } = await supabase.auth.updateUser({ password: passwords.next });
     if (error) toast.error(error.message);
     else {
-      toast.success('Password updated');
+      toast.success(t('teacher.profile.passwordUpdated'));
       setPasswords({ next: '', confirm: '' });
     }
     setChangingPass(false);
@@ -195,10 +197,10 @@ export default function TeacherProfile() {
   const memberYear = profile.createdAt ? new Date(profile.createdAt).getFullYear() : new Date().getFullYear();
 
   const statItems = [
-    { label: 'Students', value: stats.students, gradient: 'from-indigo-500 to-violet-600', shadow: 'shadow-indigo-500/25', icon: Users },
-    { label: 'Courses', value: stats.courses, gradient: 'from-blue-500 to-cyan-600', shadow: 'shadow-blue-500/25', icon: BookOpen },
-    { label: 'Quizzes', value: stats.quizzes, gradient: 'from-violet-500 to-purple-600', shadow: 'shadow-violet-500/25', icon: FileText },
-    { label: 'Pass rate %', value: stats.passRate, gradient: 'from-emerald-500 to-teal-600', shadow: 'shadow-emerald-500/25', icon: Award },
+    { label: t('teacher.profile.students'), value: stats.students, gradient: 'from-indigo-500 to-violet-600', shadow: 'shadow-indigo-500/25', icon: Users },
+    { label: t('teacher.profile.courses'), value: stats.courses, gradient: 'from-blue-500 to-cyan-600', shadow: 'shadow-blue-500/25', icon: BookOpen },
+    { label: t('teacher.profile.quizzes'), value: stats.quizzes, gradient: 'from-violet-500 to-purple-600', shadow: 'shadow-violet-500/25', icon: FileText },
+    { label: t('teacher.profile.passRate'), value: stats.passRate, gradient: 'from-emerald-500 to-teal-600', shadow: 'shadow-emerald-500/25', icon: Award },
   ];
 
   const inputCls =
@@ -208,10 +210,10 @@ export default function TeacherProfile() {
   return (
     <TeacherLayout>
       <AdminListPageShell
-        breadcrumbPortalLabel="Teacher Portal"
-        breadcrumbLabel="Profile"
-        title="Your profile"
-        description="Update how you appear to students and manage your account security."
+        breadcrumbPortalLabel={t('nav.teacherPortal')}
+        breadcrumbLabel={t('teacher.profile.title')}
+        title={t('teacher.profile.title')}
+        description={t('teacher.profile.description')}
         statsGridClassName="grid grid-cols-2 sm:grid-cols-4 gap-4"
         stats={statItems}
         action={
@@ -228,7 +230,7 @@ export default function TeacherProfile() {
               boxShadow: dirty ? '0 8px 32px rgba(139,92,246,0.45), 0 2px 8px rgba(0,0,0,0.15)' : undefined,
             }}
           >
-            Save changes
+            {t('teacher.profile.saveChanges')}
           </LoadingButton>
         }
       >
@@ -252,10 +254,10 @@ export default function TeacherProfile() {
                     <Camera className="w-4 h-4 text-slate-400" />
                   </span>
                 </div>
-                <p className="mt-4 font-bold text-slate-900">{profile.displayName || 'Your name'}</p>
+                <p className="mt-4 font-bold text-slate-900">{profile.displayName || t('teacher.profile.yourName')}</p>
                 {profile.subject ? <p className="text-sm text-indigo-600 font-medium">{profile.subject}</p> : null}
                 <span className="mt-2 inline-flex items-center gap-1 text-xs font-semibold text-slate-500 bg-slate-100 px-2 py-1 rounded-full">
-                  <GraduationCap className="w-3.5 h-3.5" /> Teacher · Since {memberYear}
+                  <GraduationCap className="w-3.5 h-3.5" /> {t('teacher.profile.teacherSince', { year: memberYear })}
                 </span>
               </div>
             </div>
@@ -265,7 +267,7 @@ export default function TeacherProfile() {
             <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
               <div className="px-5 py-4 border-b border-slate-100 flex items-center gap-2">
                 <Sparkles className="w-5 h-5 text-indigo-500" />
-                <h2 className="font-bold text-slate-900">Profile details</h2>
+                <h2 className="font-bold text-slate-900">{t('teacher.profile.profileDetails')}</h2>
               </div>
               <div className="p-5 space-y-4">
                 {loading ? (
@@ -278,40 +280,40 @@ export default function TeacherProfile() {
                   <>
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                       <div className="sm:col-span-2">
-                        <label className={labelCls}>Display name *</label>
+                        <label className={labelCls}>{t('teacher.profile.displayName')} *</label>
                         <div className="relative">
                           <User className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
                           <input
                             value={profile.displayName}
                             onChange={(e) => updateField('displayName', e.target.value)}
                             className={cn(inputCls, 'pl-10')}
-                            placeholder="Your full name"
+                            placeholder={t('teacher.profile.yourFullName')}
                           />
                         </div>
                       </div>
                       <div>
-                        <label className={labelCls}>Subject / specialty</label>
+                        <label className={labelCls}>{t('teacher.profile.subject')}</label>
                         <input
                           value={profile.subject}
                           onChange={(e) => updateField('subject', e.target.value)}
                           className={inputCls}
-                          placeholder="e.g. Mathematics"
+                          placeholder={t('teacher.profile.subjectPlaceholder')}
                         />
                       </div>
                       <div>
-                        <label className={labelCls}>Institution</label>
+                        <label className={labelCls}>{t('teacher.profile.institution')}</label>
                         <div className="relative">
                           <Building2 className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
                           <input
                             value={profile.institution}
                             onChange={(e) => updateField('institution', e.target.value)}
                             className={cn(inputCls, 'pl-10')}
-                            placeholder="School or organization"
+                            placeholder={t('teacher.profile.institutionPlaceholder')}
                           />
                         </div>
                       </div>
                       <div>
-                        <label className={labelCls}>Phone</label>
+                        <label className={labelCls}>{t('teacher.profile.phone')}</label>
                         <div className="relative">
                           <Phone className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
                           <input
@@ -323,7 +325,7 @@ export default function TeacherProfile() {
                         </div>
                       </div>
                       <div>
-                        <label className={labelCls}>Website</label>
+                        <label className={labelCls}>{t('teacher.profile.website')}</label>
                         <div className="relative">
                           <Globe className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
                           <input
@@ -335,16 +337,16 @@ export default function TeacherProfile() {
                         </div>
                       </div>
                       <div className="sm:col-span-2">
-                        <label className={labelCls}>Avatar image URL</label>
+                        <label className={labelCls}>{t('teacher.profile.avatarImageURL')}</label>
                         <input
                           value={profile.avatarUrl}
                           onChange={(e) => updateField('avatarUrl', e.target.value)}
                           className={inputCls}
-                          placeholder="https://… (link to your photo)"
+                          placeholder={t('teacher.profile.avatarImageURLPlaceholder')}
                         />
                       </div>
                       <div className="sm:col-span-2">
-                        <label className={labelCls}>Bio</label>
+                        <label className={labelCls}>{t('teacher.profile.bio')}</label>
                         <textarea
                           value={profile.bio}
                           onChange={(e) => updateField('bio', e.target.value)}

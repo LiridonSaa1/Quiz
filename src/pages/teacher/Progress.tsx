@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import TeacherLayout from '../../components/layout/TeacherLayout';
 import { supabase } from '../../supabase';
 import { toast } from 'sonner';
@@ -80,6 +81,7 @@ function formatLastSeen(dateStr: string | null): string {
 }
 
 export default function TeacherProgress() {
+  const { t } = useTranslation();
   const navigate = useNavigate();
   const [loading, setLoading] = useState(true);
   const [rows, setRows] = useState<StudentProgressRow[]>([]);

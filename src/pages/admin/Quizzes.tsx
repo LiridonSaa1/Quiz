@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import AdminLayout from '../../components/layout/AdminLayout';
 import {
   Search, FileText, BookOpen, Clock, HelpCircle, PlayCircle,
@@ -51,14 +52,15 @@ interface QuizRow {
   createdAt: string;
 }
 
-const STAT_CONFIG = [
-  { label: 'Total Quizzes', gradient: 'from-indigo-500 to-indigo-600', iconBg: 'bg-white/20', shadow: 'shadow-indigo-500/25', icon: FileText },
-  { label: 'Published', gradient: 'from-emerald-500 to-emerald-600', iconBg: 'bg-white/20', shadow: 'shadow-emerald-500/25', icon: PlayCircle },
-  { label: 'Drafts', gradient: 'from-amber-500 to-amber-600', iconBg: 'bg-white/20', shadow: 'shadow-amber-500/25', icon: X },
-  { label: 'Total Questions', gradient: 'from-violet-500 to-violet-600', iconBg: 'bg-white/20', shadow: 'shadow-violet-500/25', icon: HelpCircle },
+const getStatConfig = (t: (key: string) => string) => [
+  { label: t('quizzes.totalQuizzes'), gradient: 'from-indigo-500 to-indigo-600', iconBg: 'bg-white/20', shadow: 'shadow-indigo-500/25', icon: FileText },
+  { label: t('quizzes.published'), gradient: 'from-emerald-500 to-emerald-600', iconBg: 'bg-white/20', shadow: 'shadow-emerald-500/25', icon: PlayCircle },
+  { label: t('quizzes.drafts'), gradient: 'from-amber-500 to-amber-600', iconBg: 'bg-white/20', shadow: 'shadow-amber-500/25', icon: X },
+  { label: t('quizzes.totalQuestions'), gradient: 'from-violet-500 to-violet-600', iconBg: 'bg-white/20', shadow: 'shadow-violet-500/25', icon: HelpCircle },
 ];
 
 export default function AdminQuizzes() {
+  const { t } = useTranslation();
   const [quizzes, setQuizzes] = useState<QuizRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
@@ -97,6 +99,7 @@ export default function AdminQuizzes() {
   });
 
   const totalQuestions = quizzes.reduce((a, q) => a + q.questionCount, 0);
+  const STAT_CONFIG = getStatConfig(t);
 
   const stats = [
     { ...STAT_CONFIG[0], value: quizzes.length },
@@ -143,15 +146,15 @@ export default function AdminQuizzes() {
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-6">
                 <div>
                   <nav className="flex items-center gap-1.5 text-xs font-semibold mb-3" aria-label="Breadcrumb">
-                    <span className="text-indigo-400 tracking-wider uppercase">Admin Portal</span>
+                    <span className="text-indigo-400 tracking-wider uppercase">{t('quizzes.adminPortal')}</span>
                     <ChevronRight className="w-3.5 h-3.5 text-indigo-500/50" />
-                    <span className="text-indigo-200 tracking-wider uppercase">Quizzes</span>
+                    <span className="text-indigo-200 tracking-wider uppercase">{t('quizzes.quizzesTitle')}</span>
                   </nav>
                   <h1 className="text-3xl sm:text-4xl font-extrabold text-white tracking-tight leading-tight">
-                    Quizzes
+                    {t('quizzes.quizzesTitle')}
                   </h1>
                   <p className="text-indigo-200 text-sm mt-2 max-w-md">
-                    Overview of all quizzes and assessments across the platform.
+                    {t('quizzes.quizzesDescription')}
                   </p>
                 </div>
               </div>
@@ -209,12 +212,12 @@ export default function AdminQuizzes() {
                 backdropFilter: 'blur(12px)',
               }}
             >
-              <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mr-1">Filters</p>
+              <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mr-1">{t('common.filter')}</p>
               <div className="relative flex-1 min-w-[200px]">
                 <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-indigo-400" />
                 <input
                   type="text"
-                  placeholder="Search by title, teacher or course..."
+                  placeholder={t('quizzes.searchPlaceholder')}
                   value={search}
                   onChange={e => setSearch(e.target.value)}
                   className="w-full pl-11 pr-4 py-2.5 rounded-full text-sm border border-indigo-100 bg-white/80 focus:outline-none focus:ring-2 focus:ring-violet-400 focus:border-transparent transition-all shadow-sm placeholder-slate-400"
@@ -225,7 +228,7 @@ export default function AdminQuizzes() {
                 onChange={e => setCourseFilter(e.target.value)}
                 className="px-4 py-2.5 rounded-full text-sm border border-indigo-100 bg-white/80 focus:outline-none focus:ring-2 focus:ring-violet-400 focus:border-transparent transition-all shadow-sm text-slate-700"
               >
-                <option value="all">All Courses</option>
+                <option value="all">{t('quizzes.allCourses')}</option>
                 {courseOptions.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
               </select>
               <select
@@ -233,9 +236,9 @@ export default function AdminQuizzes() {
                 onChange={e => setStatusFilter(e.target.value)}
                 className="px-4 py-2.5 rounded-full text-sm border border-indigo-100 bg-white/80 focus:outline-none focus:ring-2 focus:ring-violet-400 focus:border-transparent transition-all shadow-sm text-slate-700"
               >
-                <option value="all">All statuses</option>
-                <option value="published">Published</option>
-                <option value="draft">Draft</option>
+                <option value="all">{t('quizzes.allStatuses')}</option>
+                <option value="published">{t('quizzes.published')}</option>
+                <option value="draft">{t('common.draft')}</option>
               </select>
               {hasActiveFilters && (
                 <button
@@ -243,7 +246,7 @@ export default function AdminQuizzes() {
                   onClick={() => { setSearch(''); setCourseFilter('all'); setStatusFilter('all'); }}
                   className="flex items-center gap-1.5 px-3 py-2 rounded-full text-xs font-semibold text-slate-500 hover:text-slate-800 hover:bg-slate-100 transition-all"
                 >
-                  <X className="w-3.5 h-3.5" /> Clear
+                  <X className="w-3.5 h-3.5" /> {t('common.close')}
                 </button>
               )}
             </motion.div>
@@ -263,12 +266,12 @@ export default function AdminQuizzes() {
               >
                 <EmptyIllustration />
                 <h3 className="text-xl font-extrabold text-slate-800 mt-6 mb-2">
-                  {hasActiveFilters ? 'No results found' : 'No quizzes yet'}
+                  {hasActiveFilters ? t('quizzes.noResults') : t('quizzes.noQuizzesYet')}
                 </h3>
                 <p className="text-slate-400 text-sm mb-8 max-w-xs text-center">
                   {hasActiveFilters
-                    ? 'Try adjusting your search or filters.'
-                    : 'Quizzes created by teachers will appear here.'}
+                    ? t('quizzes.tryAdjusting')
+                    : t('quizzes.quizzesWillAppear')}
                 </p>
               </motion.div>
             ) : (
@@ -319,7 +322,7 @@ export default function AdminQuizzes() {
                             )}
                           >
                             <span className={cn('w-1.5 h-1.5 rounded-full', published ? 'bg-emerald-500' : 'bg-amber-500')} />
-                            {published ? 'Published' : 'Draft'}
+                            {published ? t('quizzes.published') : t('common.draft')}
                           </span>
                         </div>
 
@@ -332,12 +335,12 @@ export default function AdminQuizzes() {
                           <div className="flex flex-wrap gap-1.5 mb-2">
                             {quiz.settings?.shuffleQuestions && (
                               <span className="inline-flex items-center gap-0.5 px-2 py-0.5 rounded-md bg-indigo-50 text-indigo-600 text-[10px] font-semibold">
-                                <Shuffle className="w-3 h-3" /> Shuffle
+                                <Shuffle className="w-3 h-3" /> {t('quizzes.shuffle')}
                               </span>
                             )}
                             {quiz.settings?.allowRetry && (
                               <span className="inline-flex items-center gap-0.5 px-2 py-0.5 rounded-md bg-violet-50 text-violet-600 text-[10px] font-semibold">
-                                <RotateCcw className="w-3 h-3" /> Retry
+                                <RotateCcw className="w-3 h-3" /> {t('quizzes.retry')}
                               </span>
                             )}
                           </div>
@@ -351,17 +354,17 @@ export default function AdminQuizzes() {
                             </span>
                             <span className="inline-flex items-center gap-1 text-xs text-slate-400 shrink-0">
                               <HelpCircle className="w-3.5 h-3.5 text-slate-300" />
-                              {quiz.questionCount} Q
+                              {quiz.questionCount} {t('quizzes.questions')}
                             </span>
                           </div>
                           <div className="flex items-center justify-between text-[11px] text-slate-500">
                             <span className="inline-flex items-center gap-1">
                               <Clock className="w-3.5 h-3.5 text-slate-300" />
-                              {quiz.timeLimit} min
+                              {quiz.timeLimit} {t('quizzes.minutes')}
                             </span>
                             <span className="inline-flex items-center gap-1">
                               <Target className="w-3.5 h-3.5 text-slate-300" />
-                              Pass {passLabel(quiz)}
+                              {t('quizzes.pass')} {passLabel(quiz)}
                             </span>
                           </div>
                           <div className="flex items-center gap-1.5">

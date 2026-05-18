@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { supabase } from '../../supabase';
 import TeacherLayout from '../../components/layout/TeacherLayout';
 import { sendNotification } from '../../lib/utils';
@@ -59,6 +60,7 @@ const STAT_CONFIG = [
 ];
 
 export default function QuizManagement() {
+  const { t } = useTranslation();
   const [quizzes, setQuizzes] = useState<QuizWithCount[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');

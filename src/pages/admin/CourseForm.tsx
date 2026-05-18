@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { useNavigate, useParams, Link } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
 import { supabase } from '../../supabase';
 import AdminLayout from '../../components/layout/AdminLayout';
 import {
@@ -50,6 +51,7 @@ const TABS = [
 ];
 
 export default function AdminCourseForm() {
+  const { t } = useTranslation();
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const isEditing = Boolean(id);
@@ -191,9 +193,9 @@ export default function AdminCourseForm() {
       <div className="space-y-6">
         {/* Breadcrumb */}
         <div className="flex items-center gap-2 text-sm">
-          <Link to="/admin/courses" className="text-slate-400 hover:text-slate-600 transition-colors">Courses</Link>
+          <Link to="/admin/courses" className="text-slate-400 hover:text-slate-600 transition-colors">{t('nav.courses')}</Link>
           <ChevronRight className="w-4 h-4 text-slate-300" />
-          <span className="text-slate-900 font-semibold">{isEditing ? 'Edit Course' : 'New Course'}</span>
+          <span className="text-slate-900 font-semibold">{isEditing ? t('courses.editCourse') : t('courses.createNewCourse')}</span>
         </div>
 
         <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
@@ -203,9 +205,9 @@ export default function AdminCourseForm() {
             <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
               <div className="h-1.5 bg-gradient-to-r from-indigo-500 via-violet-500 to-purple-500" />
               <div className="p-5">
-                <h1 className="text-xl font-bold text-slate-900">{isEditing ? 'Edit Course' : 'Create New Course'}</h1>
+                <h1 className="text-xl font-bold text-slate-900">{isEditing ? t('courses.editCourse') : t('courses.createNewCourse')}</h1>
                 <p className="text-slate-400 text-sm mt-0.5">
-                  {isEditing ? 'Update course details and settings.' : 'Fill in the details to create a new course.'}
+                  {isEditing ? t('courses.editCourseDesc') : t('courses.addCourseDesc')}
                 </p>
               </div>
             </div>
@@ -235,34 +237,34 @@ export default function AdminCourseForm() {
                   <div className="space-y-5">
                     <div>
                       <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">
-                        Course Title <span className="text-red-400">*</span>
+                        {t('courses.courseTitle')} <span className="text-red-400">*</span>
                       </label>
                       <input
                         type="text"
                         value={form.name}
                         onChange={e => set('name', e.target.value)}
                         className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all font-medium"
-                        placeholder="e.g. Advanced Mathematics for Grade 10"
+                        placeholder={t('courses.courseTitlePlaceholder')}
                       />
                     </div>
                     <div>
-                      <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">Short Description</label>
+                      <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">{t('courses.shortDescription')}</label>
                       <input
                         type="text"
                         value={form.short_description}
                         onChange={e => set('short_description', e.target.value)}
                         className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all"
-                        placeholder="A brief summary shown in course listings"
+                        placeholder={t('courses.shortDescriptionPlaceholder')}
                       />
                     </div>
                     <div>
-                      <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">Full Description</label>
+                      <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">{t('courses.fullDescription')}</label>
                       <textarea
                         rows={5}
                         value={form.description}
                         onChange={e => set('description', e.target.value)}
                         className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all resize-none leading-relaxed"
-                        placeholder="Describe what students will learn, who this course is for, and what's included..."
+                        placeholder={t('courses.fullDescriptionPlaceholder')}
                       />
                     </div>
                     <div>
@@ -274,7 +276,7 @@ export default function AdminCourseForm() {
                         onChange={e => set('teacher_id', e.target.value)}
                         className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 transition-all"
                       >
-                        <option value="">— Select a teacher —</option>
+                        <option value="">{t('courses.selectTeacher')}</option>
                         {teachers.map(t => (
                           <option key={t.id} value={t.id}>
                             {t.display_name} ({t.email})
@@ -283,7 +285,7 @@ export default function AdminCourseForm() {
                       </select>
                       {teachers.length === 0 && (
                         <p className="mt-1.5 text-xs text-amber-600">
-                          No teachers found. Create teacher accounts first under Users → Teachers.
+                          {t('courses.noTeachersFound')}
                         </p>
                       )}
                     </div>
@@ -295,14 +297,14 @@ export default function AdminCourseForm() {
                   <div className="space-y-5">
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
                       <div>
-                        <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">Language</label>
+                        <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">{t('courses.language')}</label>
                         <select value={form.language} onChange={e => set('language', e.target.value)}
                           className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 transition-all">
                           {LANGUAGES.map(l => <option key={l}>{l}</option>)}
                         </select>
                       </div>
                       <div>
-                        <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">Level</label>
+                        <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">{t('courses.level')}</label>
                         <select value={form.level} onChange={e => set('level', e.target.value)}
                           className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 transition-all">
                           {LEVELS.map(l => <option key={l} value={l}>{l.charAt(0).toUpperCase() + l.slice(1)}</option>)}
@@ -310,28 +312,28 @@ export default function AdminCourseForm() {
                       </div>
                     </div>
                     <div>
-                      <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">Category</label>
+                      <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">{t('courses.category')}</label>
                       <select value={form.category} onChange={e => set('category', e.target.value)}
                         className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 transition-all">
                         {CATEGORIES.map(c => <option key={c}>{c}</option>)}
                       </select>
                     </div>
                     <div>
-                      <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-3">Pricing</label>
+                      <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-3">{t('courses.pricing')}</label>
                       <div className="flex items-center gap-4 mb-4">
                         <button
                           type="button"
                           onClick={() => set('is_free', true)}
                           className={`flex-1 py-3 rounded-xl text-sm font-semibold border-2 transition-all ${form.is_free ? 'border-indigo-500 bg-indigo-50 text-indigo-700' : 'border-slate-200 text-slate-500 hover:border-slate-300'}`}
                         >
-                          Free Course
+                          {t('courses.freeCourse')}
                         </button>
                         <button
                           type="button"
                           onClick={() => set('is_free', false)}
                           className={`flex-1 py-3 rounded-xl text-sm font-semibold border-2 transition-all ${!form.is_free ? 'border-indigo-500 bg-indigo-50 text-indigo-700' : 'border-slate-200 text-slate-500 hover:border-slate-300'}`}
                         >
-                          Paid Course
+                          {t('courses.paidCourse')}
                         </button>
                       </div>
                       {!form.is_free && (
@@ -350,7 +352,7 @@ export default function AdminCourseForm() {
                       )}
                     </div>
                     <div>
-                      <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">Tags</label>
+                      <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">{t('courses.tags')}</label>
                       <div className="flex gap-2 mb-3">
                         <input
                           type="text"
@@ -358,7 +360,7 @@ export default function AdminCourseForm() {
                           onChange={e => setTagInput(e.target.value)}
                           onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); addTag(); } }}
                           className="flex-1 px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 transition-all"
-                          placeholder="Add a tag and press Enter"
+                          placeholder={t('courses.addTagPress')}
                         />
                         <button type="button" onClick={addTag}
                           className="px-4 py-2.5 bg-indigo-600 text-white rounded-xl text-sm font-semibold hover:bg-indigo-700 transition-all">
@@ -386,7 +388,7 @@ export default function AdminCourseForm() {
                 {activeTab === 'appearance' && (
                   <div className="space-y-5">
                     <div>
-                      <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-3">Course Color Theme</label>
+                      <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-3">{t('courses.courseColorTheme')}</label>
                       <div className="grid grid-cols-4 gap-3">
                         {GRADIENTS.map(g => (
                           <button
@@ -408,7 +410,7 @@ export default function AdminCourseForm() {
                       </div>
                     </div>
                     <div className="mt-4 p-4 bg-slate-50 rounded-xl border border-slate-100">
-                      <p className="text-xs text-slate-500 mb-2 font-medium">Preview</p>
+                      <p className="text-xs text-slate-500 mb-2 font-medium">{t('courses.preview')}</p>
                       <div className={`h-24 rounded-xl bg-gradient-to-br ${form.gradient} flex items-center justify-center`}>
                         <BookOpen className="w-8 h-8 text-white opacity-80" />
                       </div>
@@ -437,7 +439,7 @@ export default function AdminCourseForm() {
                       </div>
                     </div>
                     <div>
-                      <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-3">Certificate</label>
+                      <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-3">{t('courses.enableCertificate')}</label>
                       <div
                         onClick={() => set('certificate_enabled', !form.certificate_enabled)}
                         className={`flex items-center justify-between p-4 rounded-xl border-2 cursor-pointer transition-all ${
@@ -448,9 +450,9 @@ export default function AdminCourseForm() {
                           <Award className={`w-5 h-5 ${form.certificate_enabled ? 'text-indigo-600' : 'text-slate-400'}`} />
                           <div>
                             <div className={`text-sm font-semibold ${form.certificate_enabled ? 'text-indigo-700' : 'text-slate-700'}`}>
-                              Enable Certificate
+                              {t('courses.enableCertificate')}
                             </div>
-                            <div className="text-xs text-slate-400 mt-0.5">Students receive a certificate upon completion</div>
+                            <div className="text-xs text-slate-400 mt-0.5">{t('courses.enableCertificateDesc')}</div>
                           </div>
                         </div>
                         <div className={`w-11 h-6 rounded-full transition-all ${form.certificate_enabled ? 'bg-indigo-600' : 'bg-slate-200'}`}>
@@ -467,7 +469,7 @@ export default function AdminCourseForm() {
             <div className="flex flex-col sm:flex-row gap-3">
               <Link to="/admin/courses"
                 className="flex-1 px-5 py-3 bg-slate-100 text-slate-600 rounded-xl font-semibold text-sm hover:bg-slate-200 transition-all text-center">
-                Cancel
+                {t('common.cancel')}
               </Link>
               <button
                 type="button"
@@ -476,7 +478,7 @@ export default function AdminCourseForm() {
                 className="flex-1 flex items-center justify-center gap-2 px-5 py-3 bg-white border border-slate-200 text-slate-700 rounded-xl font-semibold text-sm hover:bg-slate-50 hover:border-slate-300 transition-all disabled:opacity-50"
               >
                 <Save className="w-4 h-4" />
-                Save Draft
+                {t('courses.saveDraft')}
               </button>
               <button
                 type="button"
@@ -485,7 +487,7 @@ export default function AdminCourseForm() {
                 className="flex-1 flex items-center justify-center gap-2 px-5 py-3 bg-indigo-600 text-white rounded-xl font-semibold text-sm hover:bg-indigo-700 transition-all disabled:opacity-50 shadow-lg shadow-indigo-200 active:scale-[0.98]"
               >
                 <Send className="w-4 h-4" />
-                {saving ? 'Saving...' : 'Publish Course'}
+                {saving ? t('modules.saving') : t('courses.publishCourse')}
               </button>
             </div>
           </div>
@@ -494,8 +496,8 @@ export default function AdminCourseForm() {
           <div className="space-y-5">
             <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden sticky top-20">
               <div className="p-5 border-b border-slate-50">
-                <h3 className="text-sm font-bold text-slate-700">Live Preview</h3>
-                <p className="text-xs text-slate-400 mt-0.5">How your course card will look</p>
+                <h3 className="text-sm font-bold text-slate-700">{t('courses.livePreview')}</h3>
+                <p className="text-xs text-slate-400 mt-0.5">{t('courses.howCourseWillLook')}</p>
               </div>
               <div className="p-5">
                 {/* Preview Card */}
@@ -554,13 +556,13 @@ export default function AdminCourseForm() {
 
             {/* Tips */}
             <div className="bg-indigo-50 border border-indigo-100 rounded-2xl p-5">
-              <h4 className="text-sm font-bold text-indigo-800 mb-3">Tips for a great course</h4>
+              <h4 className="text-sm font-bold text-indigo-800 mb-3">{t('courses.tipsGreatCourse')}</h4>
               <ul className="space-y-2 text-xs text-indigo-700">
                 {[
-                  'Write a clear, specific title that describes the outcome',
-                  'Use the short description to hook students in search results',
-                  'Add relevant tags to improve discoverability',
-                  'Choose the right level to attract the correct audience',
+                  t('courses.clearTitle'),
+                  t('courses.shortDesc'),
+                  t('courses.addTags'),
+                  t('courses.chooseLevel'),
                 ].map((tip, i) => (
                   <li key={i} className="flex items-start gap-2">
                     <Check className="w-3.5 h-3.5 mt-0.5 text-indigo-500 shrink-0" />

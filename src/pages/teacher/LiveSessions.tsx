@@ -1,5 +1,6 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
 import TeacherLayout from '../../components/layout/TeacherLayout';
 import LoadingButton from '../../components/ui/LoadingButton';
 import { supabase } from '../../supabase';
@@ -72,6 +73,7 @@ interface AttendanceEntry {
 }
 
 export default function TeacherLiveSessions() {
+  const { t } = useTranslation();
   const navigate = useNavigate();
   const [sessions, setSessions] = useState<LiveSession[]>([]);
   const [courses, setCourses] = useState<CourseOption[]>([]);
@@ -182,8 +184,8 @@ export default function TeacherLiveSessions() {
 
   const handleSaveEdit = async () => {
     if (!editing) return;
-    if (!form.title.trim()) { toast.error('Title is required'); return; }
-    if (!form.scheduled_at) { toast.error('Scheduled date is required'); return; }
+    if (!form.title.trim()) { toast.error(t('liveSessions.titleRequired')); return; }
+    if (!form.scheduled_at) { toast.error(t('liveSessions.scheduledDateRequired')); return; }
     setSaving(true);
     try {
       const payload: Record<string, unknown> = {
@@ -200,23 +202,23 @@ export default function TeacherLiveSessions() {
       });
       const json = await res.json();
       if (!json.success) throw new Error(json.error);
-      toast.success('Session updated');
+      toast.success(t('liveSessions.sessionUpdated'));
       setShowModal(false);
       fetchAll();
-    } catch (e: unknown) { toast.error((e as Error)?.message || 'Save failed'); }
+    } catch (e: unknown) { toast.error((e as Error)?.message || t('common.saveFailed')); }
     finally { setSaving(false); }
   };
 
   const handleDelete = async (id: string) => {
-    if (!confirm('Delete this session?')) return;
+    if (!confirm(t('liveSessions.deleteThisSession'))) return;
     setDeleting(id);
     try {
       const res = await authFetch(`/api/teacher/live-sessions/${id}`, { method: 'DELETE' });
       const json = await res.json();
       if (!json.success) throw new Error(json.error);
-      toast.success('Session deleted');
+      toast.success(t('liveSessions.sessionDeleted'));
       setSessions(p => p.filter(s => s.id !== id));
-    } catch (e: unknown) { toast.error((e as Error)?.message || 'Delete failed'); }
+    } catch (e: unknown) { toast.error((e as Error)?.message || t('common.deleteFailed')); }
     finally { setDeleting(null); }
   };
 
@@ -228,11 +230,11 @@ export default function TeacherLiveSessions() {
       });
       const json = await res.json();
       if (!json.success) throw new Error(json.error);
-      toast.success('Session started!');
+      toast.success(t('liveSessions.sessionStarted'));
       navigate(`/teacher/live-sessions/${id}/room`);
       fetchAll();
     } catch (e: unknown) {
-      toast.error((e as Error)?.message || 'Failed to start session');
+      toast.error((e as Error)?.message || t('liveSessions.failedStartSession'));
     }
   };
 
@@ -253,10 +255,10 @@ export default function TeacherLiveSessions() {
   return (
     <TeacherLayout>
       <AdminListPageShell
-        breadcrumbPortalLabel="Teacher Portal"
-        breadcrumbLabel="Live Sessions"
-        title="Live Sessions"
-        description="Schedule and manage live video sessions for your students."
+        breadcrumbPortalLabel={t('nav.teacherPortal')}
+        breadcrumbLabel={t('nav.liveSessions')}
+        title={t('nav.liveSessions')}
+        description={t('liveSessions.description')}
         statsGridClassName="grid grid-cols-2 sm:grid-cols-4 gap-4"
         stats={statItems}
         action={
@@ -271,7 +273,7 @@ export default function TeacherLiveSessions() {
               boxShadow: '0 8px 32px rgba(139,92,246,0.45), 0 2px 8px rgba(0,0,0,0.15)',
             }}
           >
-            <Plus className="w-4 h-4" /> Schedule Session
+            <Plus className="w-4 h-4" /> {t('liveSessions.scheduleSession')}
           </motion.button> : null
         }
         filterBar={
@@ -281,12 +283,12 @@ export default function TeacherLiveSessions() {
               <input
                 value={search}
                 onChange={e => setSearch(e.target.value)}
-                placeholder="Search sessions or hosts..."
+                placeholder={t('liveSessions.searchSessions')}
                 className={ADMIN_LIST_SEARCH_INPUT}
               />
             </div>
             <select value={statusFilter} onChange={e => setStatusFilter(e.target.value)} className={ADMIN_LIST_SELECT}>
-              <option value="all">All Status</option>
+              <option value="all">{t('common.status')}</option>
               {Object.entries(STATUS_CFG).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
             </select>
           </AdminListFilterBar>
@@ -302,8 +304,8 @@ export default function TeacherLiveSessions() {
           ) : filtered.length === 0 ? (
             <div className="flex flex-col items-center justify-center h-48 text-slate-400">
               <Video className="w-10 h-10 mb-3 opacity-40" />
-              <p className="font-medium">No sessions found</p>
-              <p className="text-sm mt-1">Schedule your first live session to get started</p>
+              <p className="font-medium">{t('liveSessions.noSessionsFound')}</p>
+              <p className="text-sm mt-1">{t('liveSessions.startYourFirst')}</p>
             </div>
           ) : (
             <div className={ADMIN_LIST_CARD_GRID}>
@@ -334,7 +336,7 @@ export default function TeacherLiveSessions() {
                     </div>
                     <div className="mt-4 space-y-2 text-xs text-slate-600 border-t border-slate-100 pt-3">
                       <div className="flex justify-between gap-2">
-                        <span className="text-slate-400 font-semibold uppercase tracking-wider">Host</span>
+                        <span className="text-slate-400 font-semibold uppercase tracking-wider">{t('liveSessions.host')}</span>
                         <span className="text-right truncate">
                           {s.host ? s.host.display_name : '—'}
                         </span>
@@ -343,7 +345,7 @@ export default function TeacherLiveSessions() {
                         <div className="text-[11px] text-slate-400 truncate text-right">{s.host.email}</div>
                       )}
                       <div className="flex justify-between gap-2">
-                        <span className="text-slate-400 font-semibold uppercase tracking-wider shrink-0">Scheduled</span>
+                        <span className="text-slate-400 font-semibold uppercase tracking-wider shrink-0">{t('liveSessions.scheduled')}</span>
                         <span className="text-right">
                           <span className="block font-medium text-slate-800">{format(new Date(s.scheduled_at), 'MMM d, yyyy')}</span>
                           <span className="block text-slate-400 font-normal text-[11px]">{format(new Date(s.scheduled_at), 'h:mm a')}</span>
@@ -353,11 +355,11 @@ export default function TeacherLiveSessions() {
                         </span>
                       </div>
                       <div className="flex justify-between gap-2">
-                        <span className="text-slate-400 font-semibold uppercase tracking-wider">Duration</span>
-                        <span>{s.duration_minutes} min</span>
+                        <span className="text-slate-400 font-semibold uppercase tracking-wider">{t('liveSessions.duration')}</span>
+                        <span>{t('liveSessions.duration_minutes', { duration: s.duration_minutes })}</span>
                       </div>
                       <div className="flex justify-between gap-2 items-center">
-                        <span className="text-slate-400 font-semibold uppercase tracking-wider">Participants</span>
+                        <span className="text-slate-400 font-semibold uppercase tracking-wider">{t('liveSessions.participants')}</span>
                         <span className="inline-flex items-center gap-1">
                           <Users className="w-3.5 h-3.5 text-slate-400" />
                           {pc}
@@ -372,14 +374,14 @@ export default function TeacherLiveSessions() {
                           onClick={() => handleStart(s.id)}
                           className="inline-flex flex-1 min-w-[100px] items-center justify-center gap-1.5 px-3 py-2 bg-violet-600 text-white rounded-xl text-xs font-semibold hover:bg-violet-700 transition-all shadow-sm"
                         >
-                          <Play className="w-3.5 h-3.5" /> Start
+                          <Play className="w-3.5 h-3.5" /> {t('common.play')}
                         </button>
                       )}
                       <Link
                         to={`/teacher/live-sessions/${s.id}/room`}
                         className="inline-flex flex-1 min-w-[120px] items-center justify-center gap-1.5 px-3 py-2 bg-indigo-600 text-white rounded-xl text-xs font-semibold hover:bg-indigo-700 transition-all shadow-sm"
                       >
-                        <Play className="w-3.5 h-3.5" /> Enter Room
+                        <Play className="w-3.5 h-3.5" /> {t('liveSessions.enterRoom')}
                       </Link>
                       {s.status === 'ended' && s.recording_url && (
                         <a
@@ -419,14 +421,14 @@ export default function TeacherLiveSessions() {
                     {s.status === 'ended' && expandedAttendance === s.id && (
                       <div className="mt-3 border-t border-slate-100 pt-3">
                         <p className="text-xs font-semibold text-slate-500 mb-2 flex items-center gap-1">
-                          <UserCheck className="w-3.5 h-3.5" /> Attendance List
+                          <UserCheck className="w-3.5 h-3.5" /> {t('liveSessions.attendanceList')}
                         </p>
                         {attendanceLoading === s.id ? (
                           <div className="flex items-center gap-2 text-slate-400 text-xs py-2">
-                            <Loader2 className="w-3.5 h-3.5 animate-spin" /> Loading...
+                            <Loader2 className="w-3.5 h-3.5 animate-spin" /> {t('common.loading')}
                           </div>
                         ) : (attendanceMap[s.id] || []).length === 0 ? (
-                          <p className="text-xs text-slate-400 italic">No attendance data recorded.</p>
+                          <p className="text-xs text-slate-400 italic">{t('liveSessions.noAttendanceData')}</p>
                         ) : (
                           <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
                             {(attendanceMap[s.id] || []).map((entry) => {
@@ -443,9 +445,9 @@ export default function TeacherLiveSessions() {
                                   <span className="font-medium text-slate-700 truncate">{entry.user?.display_name || 'Unknown'}</span>
                                   <span className="text-slate-400 truncate">{entry.user?.email}</span>
                                   {joined ? (
-                                    <span className="ml-auto text-emerald-600 font-semibold shrink-0">Attended</span>
+                                    <span className="ml-auto text-emerald-600 font-semibold shrink-0">{t('liveSessions.attended')}</span>
                                   ) : (
-                                    <span className="ml-auto text-slate-400 shrink-0">Invited</span>
+                                    <span className="ml-auto text-slate-400 shrink-0">{t('liveSessions.invited')}</span>
                                   )}
                                 </div>
                               );
@@ -468,8 +470,8 @@ export default function TeacherLiveSessions() {
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
             <div className="flex items-center justify-between p-5 border-b border-slate-100">
               <div>
-                <h2 className="text-lg font-bold text-slate-900">Edit Session</h2>
-                <p className="text-slate-400 text-sm">Update session details</p>
+                <h2 className="text-lg font-bold text-slate-900">{t('liveSessions.editSession')}</h2>
+                <p className="text-slate-400 text-sm">{t('liveSessions.updateSessionDetails')}</p>
               </div>
               <button onClick={() => setShowModal(false)} className="p-2 hover:bg-slate-100 rounded-xl transition-all">
                 <X className="w-5 h-5 text-slate-500" />
@@ -477,16 +479,16 @@ export default function TeacherLiveSessions() {
             </div>
             <div className="p-5 space-y-4">
               <div>
-                <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">Title <span className="text-red-400">*</span></label>
+                <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">{t('common.title')} <span className="text-red-400">*</span></label>
                 <input value={form.title} onChange={e => set('title', e.target.value)}
                   className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                  placeholder="e.g. Python Q&A Session" />
+                  placeholder={t('liveSessions.exampleSession')} />
               </div>
               <div>
-                <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">Description</label>
+                <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">{t('common.description')}</label>
                 <textarea rows={3} value={form.description} onChange={e => set('description', e.target.value)}
                   className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 resize-none"
-                  placeholder="What will be covered in this session?" />
+                  placeholder={t('liveSessions.enterDescription')} />
               </div>
               {editing.course && (
                 <p className="text-xs text-slate-500">

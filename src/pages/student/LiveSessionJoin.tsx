@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { useParams, useNavigate } from 'react-router-dom';
 import { supabase } from '../../supabase';
 import { authFetch, readApiError } from '../../lib/apiUrl';
@@ -39,6 +40,7 @@ interface ChatMessage {
 const REACTIONS = ['👏', '❤️', '😂', '🎉', '😮', '👍', '🔥'];
 
 export default function StudentLiveSessionJoin() {
+  const { t } = useTranslation();
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
 
@@ -240,7 +242,7 @@ export default function StudentLiveSessionJoin() {
       <StudentLayout>
         <div className="flex items-center justify-center h-64 gap-3 text-slate-400">
           <Loader2 className="w-6 h-6 animate-spin text-emerald-500" />
-          Loading session...
+          {t('liveSessionStudent.loadingSession')}
         </div>
       </StudentLayout>
     );
@@ -258,7 +260,7 @@ export default function StudentLiveSessionJoin() {
           onClick={() => navigate('/student/live-sessions')}
           className="inline-flex items-center gap-1.5 text-slate-500 hover:text-slate-700 text-sm font-medium transition-colors"
         >
-          <ChevronLeft className="w-4 h-4" /> Live Classes
+          <ChevronLeft className="w-4 h-4" /> {t('liveSessionStudent.liveClasses')}
         </button>
 
         {/* Session Info */}
@@ -276,14 +278,14 @@ export default function StudentLiveSessionJoin() {
                   isEnded ? 'bg-slate-100 text-slate-600' :
                   'bg-blue-100 text-blue-700'
                 )}>
-                  {isLive ? '🔴 Live Now' : isEnded ? 'Ended' : 'Upcoming'}
+                  {isLive ? t('liveSessions.liveNow2') : isEnded ? t('liveSessions.ended') : t('liveSessions.upcoming2')}
                 </span>
                 {isLive && timeRemaining !== null && (
                   <span className={cn(
                     'px-2.5 py-0.5 rounded-full text-xs font-bold tracking-wide',
                     timeRemaining < 300 ? 'bg-rose-100 text-rose-700 animate-pulse' : 'bg-slate-100 text-slate-600'
                   )}>
-                    ⏱ {formatTime(timeRemaining)} remaining
+                    {t('liveSessions.timeRemaining', { time: formatTime(timeRemaining) })}
                   </span>
                 )}
               </div>
@@ -318,8 +320,8 @@ export default function StudentLiveSessionJoin() {
             <div className="flex items-center gap-3 text-white">
               <Radio className="w-6 h-6 animate-pulse" />
               <div>
-                <p className="font-bold">Session is Live Now!</p>
-                <p className="text-rose-100 text-sm">Join to participate with your class</p>
+                <p className="font-bold">{t('liveSessionStudent.sessionIsLiveNow')}</p>
+                <p className="text-rose-100 text-sm">{t('liveSessionStudent.joinToParticipate')}</p>
               </div>
             </div>
             <button
@@ -328,7 +330,7 @@ export default function StudentLiveSessionJoin() {
               className="flex items-center gap-2 px-5 py-2.5 bg-white text-rose-600 rounded-xl font-bold text-sm hover:bg-rose-50 transition-all shadow-lg disabled:opacity-70"
             >
               {joining ? <Loader2 className="w-4 h-4 animate-spin" /> : <Video className="w-4 h-4" />}
-              Join Now
+              {t('liveSessionStudent.joinNow')}
             </button>
           </motion.div>
         )}
@@ -337,7 +339,7 @@ export default function StudentLiveSessionJoin() {
         {isEnded && session.recording_url && (
           <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-5">
             <h3 className="text-sm font-bold text-slate-900 mb-3 flex items-center gap-2">
-              <CheckCircle2 className="w-4 h-4 text-emerald-500" /> Session Recording
+              <CheckCircle2 className="w-4 h-4 text-emerald-500" /> {t('liveSessionStudent.sessionRecording')}
             </h3>
             <video src={session.recording_url} controls className="w-full rounded-xl" style={{ maxHeight: 400 }} />
           </div>
@@ -393,7 +395,7 @@ export default function StudentLiveSessionJoin() {
                       </div>
                       <div className="flex-1 overflow-y-auto p-3 space-y-3">
                         {chatMessages.length === 0 ? (
-                          <p className="text-slate-500 text-xs text-center mt-8">No messages yet</p>
+                          <p className="text-slate-500 text-xs text-center mt-8">{t('liveSessionStudent.noMessagesYet')}</p>
                         ) : (
                           chatMessages.map(msg => (
                             <div key={msg.id} className={cn('flex gap-2', msg.sender_id === userId ? 'flex-row-reverse' : '')}>
@@ -419,7 +421,7 @@ export default function StudentLiveSessionJoin() {
                           <input
                             value={chatInput}
                             onChange={e => setChatInput(e.target.value)}
-                            placeholder="Message..."
+                            placeholder={t('liveSessionStudent.messagePlaceholder')}
                             className="flex-1 bg-slate-700 border border-slate-600 rounded-lg px-2.5 py-1.5 text-xs text-white placeholder-slate-500 focus:outline-none focus:ring-1 focus:ring-emerald-500/30"
                           />
                           <button type="submit" disabled={sendingChat || !chatInput.trim()}
@@ -438,8 +440,8 @@ export default function StudentLiveSessionJoin() {
                   <Video className="w-10 h-10 text-white/30" />
                 </div>
                 <div className="text-center">
-                  <p className="text-lg font-semibold text-white mb-1">Session is Live</p>
-                  <p className="text-sm text-white/50">Click Join Now to enter the room</p>
+                  <p className="text-lg font-semibold text-white mb-1">{t('liveSessionStudent.sessionIsLive')}</p>
+                  <p className="text-sm text-white/50">{t('liveSessionStudent.clickJoinToEnter')}</p>
                 </div>
               </div>
             )}
@@ -454,7 +456,7 @@ export default function StudentLiveSessionJoin() {
               onClick={async () => {
                 const next = !handRaised;
                 setHandRaised(next);
-                toast.info(next ? 'Hand raised ✋' : 'Hand lowered');
+                toast.info(next ? t('liveSessionStudent.handRaised') : t('liveSessionStudent.handLowered'));
                 if (userId) {
                   authFetch(`/api/teacher/live-sessions/${id}/participants/${userId}`, {
                     method: 'PATCH',
@@ -470,7 +472,7 @@ export default function StudentLiveSessionJoin() {
               )}
             >
               <Hand className="w-4 h-4" />
-              {handRaised ? 'Lower Hand' : 'Raise Hand'}
+              {handRaised ? t('liveSessionStudent.lowerHand') : t('liveSessionStudent.raiseHand')}
             </button>
 
             {/* Reactions */}
@@ -479,7 +481,7 @@ export default function StudentLiveSessionJoin() {
                 onClick={() => setShowReactions(v => !v)}
                 className="flex items-center gap-2 px-4 py-2.5 bg-slate-100 text-slate-600 hover:bg-slate-200 rounded-xl text-sm font-semibold transition-all"
               >
-                <Smile className="w-4 h-4" /> Reactions
+                <Smile className="w-4 h-4" /> {t('liveSessionStudent.reactions')}
               </button>
               <AnimatePresence>
                 {showReactions && (
@@ -509,7 +511,7 @@ export default function StudentLiveSessionJoin() {
                   : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
               )}
             >
-              <MessageSquare className="w-4 h-4" /> Chat
+              <MessageSquare className="w-4 h-4" /> {t('liveSessionStudent.chat')}
               {chatMessages.length > 0 && (
                 <span className="px-1.5 py-0.5 text-[10px] bg-emerald-500 text-white rounded-full">{chatMessages.length}</span>
               )}
@@ -521,9 +523,9 @@ export default function StudentLiveSessionJoin() {
         {!isLive && !isEnded && (
           <div className="bg-blue-50 border border-blue-100 rounded-2xl p-5 text-center">
             <CalendarDays className="w-8 h-8 mx-auto mb-2 text-blue-400" />
-            <p className="font-semibold text-blue-800">Session scheduled</p>
+            <p className="font-semibold text-blue-800">{t('liveSessionStudent.sessionScheduled')}</p>
             <p className="text-sm text-blue-600 mt-1">
-              Starts {formatDistanceToNow(new Date(session.scheduled_at), { addSuffix: true })}
+              {t('liveSessionStudent.startsIn', { time: formatDistanceToNow(new Date(session.scheduled_at), { addSuffix: true }) })}
             </p>
           </div>
         )}

@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { supabase } from '../../supabase';
 import { UserProfile } from '../../types';
 import { ShieldCheck, UserPlus, Search, UserCheck, UserX, Pencil, Trash2 } from 'lucide-react';
@@ -30,6 +31,7 @@ const getAvatarColor = (name: string) => {
 };
 
 export default function AdminTeachers() {
+  const { t } = useTranslation();
   const [users, setUsers] = useState<UserProfile[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
@@ -62,7 +64,7 @@ export default function AdminTeachers() {
           uid: String(p.id),
           teacherId: teacherIdByUserId[String(p.id)] || null,
           email: String(p.email || ''),
-          displayName: String(p.display_name || p.email || 'Unknown'),
+          displayName: String(p.display_name || p.email || t('dashboard.tableHeaders.unknown')),
           role: 'teacher',
           status: p.status || 'active',
           createdAt: p.created_at || new Date().toISOString(),
@@ -70,10 +72,10 @@ export default function AdminTeachers() {
 
         setUsers(fallbackUsers);
         if (fallbackUsers.length === 0) {
-          toast.error('Unauthorized from API and no teachers found.');
+          toast.error(t('errors.loadFailed'));
         }
       } catch {
-        toast.error('Failed to load teachers');
+        toast.error(t('errors.loadFailed'));
       }
     } finally {
       setLoading(false);
@@ -87,17 +89,17 @@ export default function AdminTeachers() {
       const newStatus = user.status === 'active' ? 'inactive' : 'active';
       const { error } = await supabase.from('profiles').update({ status: newStatus }).eq('id', user.uid);
       if (error) throw error;
-      toast.success(`Teacher ${newStatus === 'active' ? 'enabled' : 'disabled'}`);
+      toast.success(newStatus === 'active' ? t('teachers.teacherEnabled') : t('teachers.teacherDisabled'));
       fetchUsers();
     } catch {
-      toast.error('Failed to update teacher status');
+      toast.error(t('errors.saveFailed'));
     }
   };
 
   const editTeacher = async (user: UserProfile) => {
-    const displayName = window.prompt('Teacher name', user.displayName || '');
+    const displayName = window.prompt(t('dashboard.teacherNamePrompt'), user.displayName || '');
     if (displayName === null) return;
-    const email = window.prompt('Teacher email', user.email || '');
+    const email = window.prompt(t('dashboard.teacherEmailPrompt'), user.email || '');
     if (email === null) return;
     try {
       const res = await authFetch(apiUrl(`/api/admin/teachers/${encodeURIComponent(user.uid)}`), {
@@ -105,24 +107,24 @@ export default function AdminTeachers() {
         body: JSON.stringify({ display_name: displayName, email }),
       });
       const json = await res.json().catch(() => ({}));
-      if (!res.ok || !json?.success) throw new Error(json?.error || 'Failed to update teacher');
-      toast.success('Teacher updated');
+      if (!res.ok || !json?.success) throw new Error(json?.error || t('errors.saveFailed'));
+      toast.success(t('dashboard.teacherUpdated'));
       fetchUsers();
     } catch (e: any) {
-      toast.error(e?.message || 'Failed to update teacher');
+      toast.error(e?.message || t('errors.saveFailed'));
     }
   };
 
   const deleteTeacher = async (user: UserProfile) => {
-    if (!window.confirm(`Delete teacher "${user.displayName || user.email}"?`)) return;
+    if (!window.confirm(t('dashboard.deleteTeacherConfirm', { name: user.displayName || user.email }))) return;
     try {
       const res = await authFetch(apiUrl(`/api/admin/teachers/${encodeURIComponent(user.uid)}`), { method: 'DELETE' });
       const json = await res.json().catch(() => ({}));
-      if (!res.ok || !json?.success) throw new Error(json?.error || 'Failed to delete teacher');
-      toast.success('Teacher deleted');
+      if (!res.ok || !json?.success) throw new Error(json?.error || t('errors.deleteFailed'));
+      toast.success(t('success.deleted'));
       fetchUsers();
     } catch (e: any) {
-      toast.error(e?.message || 'Failed to delete teacher');
+      toast.error(e?.message || t('errors.deleteFailed'));
     }
   };
 
@@ -132,17 +134,17 @@ export default function AdminTeachers() {
   );
 
   const stats = [
-    { label: 'Total Teachers', value: users.length, gradient: 'from-indigo-500 to-indigo-600', shadow: 'shadow-indigo-500/25', icon: ShieldCheck },
-    { label: 'Active', value: users.filter(u => u.status === 'active').length, gradient: 'from-emerald-500 to-emerald-600', shadow: 'shadow-emerald-500/25', icon: UserCheck },
-    { label: 'Inactive', value: users.filter(u => u.status !== 'active').length, gradient: 'from-amber-500 to-amber-600', shadow: 'shadow-amber-500/25', icon: UserX },
+    { label: t('dashboard.totalTeachers'), value: users.length, gradient: 'from-indigo-500 to-indigo-600', shadow: 'shadow-indigo-500/25', icon: ShieldCheck },
+    { label: t('common.active'), value: users.filter(u => u.status === 'active').length, gradient: 'from-emerald-500 to-emerald-600', shadow: 'shadow-emerald-500/25', icon: UserCheck },
+    { label: t('common.inactive'), value: users.filter(u => u.status !== 'active').length, gradient: 'from-amber-500 to-amber-600', shadow: 'shadow-amber-500/25', icon: UserX },
   ];
 
   return (
     <AdminLayout>
       <AdminListPageShell
-        breadcrumbLabel="Teachers"
-        title="Teachers"
-        description="Manage all teacher accounts in the system."
+        breadcrumbLabel={t('nav.teachers')}
+        title={t('nav.teachers')}
+        description={t('dashboard.manageTeachers')}
         statsGridClassName="grid grid-cols-2 sm:grid-cols-3 gap-4"
         action={
           <motion.button
@@ -157,7 +159,7 @@ export default function AdminTeachers() {
             }}
           >
             <UserPlus className="w-4 h-4" />
-            Add Teacher
+            {t('teachers.addTeacher')}
           </motion.button>
         }
         stats={stats}
@@ -167,7 +169,7 @@ export default function AdminTeachers() {
               <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-indigo-400" />
               <input
                 type="text"
-                placeholder="Search teachers..."
+                placeholder={t('teachers.searchPlaceholder')}
                 value={searchQuery}
                 onChange={e => setSearchQuery(e.target.value)}
                 className={ADMIN_LIST_SEARCH_INPUT}
@@ -188,9 +190,9 @@ export default function AdminTeachers() {
               <div className="w-14 h-14 bg-violet-50 rounded-2xl flex items-center justify-center mx-auto mb-4">
                 <ShieldCheck className="w-7 h-7 text-violet-300" />
               </div>
-              <p className="font-semibold text-slate-700">No teachers found</p>
+              <p className="font-semibold text-slate-700">{t('teachers.noTeachers')}</p>
               <p className="text-slate-400 text-sm mt-1">
-                {searchQuery ? 'Try adjusting your search.' : 'No teachers have been added yet.'}
+                {searchQuery ? t('dashboard.adjustSearch') : t('dashboard.noTeachersAdded')}
               </p>
             </div>
           ) : (
@@ -211,7 +213,7 @@ export default function AdminTeachers() {
                       <button
                         type="button"
                         onClick={() => editTeacher(user)}
-                        title="Edit"
+                        title={t('common.edit')}
                         className="p-2 rounded-lg text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 transition-all"
                       >
                         <Pencil className="w-4 h-4" />
@@ -219,7 +221,7 @@ export default function AdminTeachers() {
                       <button
                         type="button"
                         onClick={() => toggleUserStatus(user)}
-                        title={user.status === 'active' ? 'Deactivate' : 'Activate'}
+                        title={user.status === 'active' ? t('common.disable') : t('common.enable')}
                         className={cn(
                           'p-2 rounded-lg transition-all',
                           user.status === 'active'
@@ -232,7 +234,7 @@ export default function AdminTeachers() {
                       <button
                         type="button"
                         onClick={() => deleteTeacher(user)}
-                        title="Delete"
+                        title={t('common.delete')}
                         className="p-2 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 transition-all"
                       >
                         <Trash2 className="w-4 h-4" />
@@ -245,9 +247,9 @@ export default function AdminTeachers() {
                       user.status === 'active' ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-100 text-slate-500'
                     )}>
                       <span className={cn('w-1.5 h-1.5 rounded-full', user.status === 'active' ? 'bg-emerald-500' : 'bg-slate-400')} />
-                      {user.status === 'active' ? 'Active' : 'Inactive'}
+                      {user.status === 'active' ? t('common.active') : t('common.inactive')}
                     </span>
-                    <span className="text-slate-400">Joined {new Date(user.createdAt).toLocaleDateString()}</span>
+                    <span className="text-slate-400">{t('common.joinedDate')} {new Date(user.createdAt).toLocaleDateString()}</span>
                   </div>
                 </div>
               ))}

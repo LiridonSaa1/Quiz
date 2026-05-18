@@ -1,4 +1,5 @@
 import React, { useEffect, useState, useCallback, useRef } from 'react';
+import { useTranslation } from 'react-i18next';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useVoiceReading } from '../../hooks/useVoiceReading';
 import { supabase } from '../../supabase';
@@ -25,13 +26,14 @@ import { fetchStudentAccessibleQuizById } from '../../lib/studentQuizAccess';
 import { authFetch } from '../../lib/apiUrl';
 
 function VoiceButton({ text }: { text: string }) {
+  const { t } = useTranslation();
   const { isReading, isSupported, toggle } = useVoiceReading();
   if (!isSupported) return null;
   return (
     <button
       type="button"
       onClick={() => toggle(text)}
-      title={isReading ? 'Stop reading' : 'Read question aloud'}
+      title={isReading ? t('student.quizTaking.stopReading') : t('student.quizTaking.readAloud')}
       className={cn(
         'shrink-0 flex items-center justify-center w-10 h-10 rounded-xl border-2 transition-all mt-1',
         isReading
@@ -137,6 +139,7 @@ function QuizStateScreen({
   description: string;
   onBack: () => void;
 }) {
+  const { t } = useTranslation();
   return (
     <div className="min-h-screen bg-slate-50 flex items-center justify-center p-6">
       <div className="w-full max-w-lg rounded-3xl border border-slate-200 bg-white p-8 text-center shadow-xl shadow-slate-200/50">
@@ -150,7 +153,7 @@ function QuizStateScreen({
           className="mt-6 inline-flex items-center gap-2 rounded-2xl bg-slate-900 px-5 py-3 text-sm font-bold text-white transition hover:bg-slate-800"
         >
           <ChevronLeft className="h-4 w-4" />
-          Back to Quizzes
+          {t('student.quizzes.myQuizzes')}
         </button>
       </div>
     </div>
@@ -158,6 +161,7 @@ function QuizStateScreen({
 }
 
 export default function QuizTaking() {
+  const { t } = useTranslation();
   const { quizId } = useParams();
   const navigate = useNavigate();
   const [quiz, setQuiz] = useState<Quiz | null>(null);
@@ -182,7 +186,7 @@ export default function QuizTaking() {
 
   const fetchQuiz = useCallback(async () => {
     if (!quizId) {
-      setLoadError('This quiz link is incomplete.');
+      setLoadError(t('student.quizTaking.errorIncomplete'));
       setLoading(false);
       return;
     }
@@ -207,7 +211,7 @@ export default function QuizTaking() {
 
       const quizData = await fetchStudentAccessibleQuizById(quizId);
       if (!quizData) {
-        setLoadError('This quiz is not available for your account right now.');
+        setLoadError(t('student.quizTaking.errorNotAvailable'));
         return;
       }
 
@@ -307,7 +311,7 @@ export default function QuizTaking() {
             .not('completed_at', 'is', null)
             .limit(1);
           if (existingAttempts && existingAttempts.length > 0) {
-            setLoadError('You have already completed this quiz. The teacher has not enabled retries.');
+            setLoadError(t('student.quizTaking.errorAlreadyCompleted'));
             return;
           }
         } catch {
@@ -340,7 +344,7 @@ export default function QuizTaking() {
       }
 
       if (formattedQuestions.length === 0) {
-        setLoadError('This quiz has no questions yet. Ask your teacher to finish setting it up.');
+        setLoadError(t('student.quizTaking.errorNoQuestions'));
       }
 
       const now = Date.now();
@@ -398,7 +402,7 @@ export default function QuizTaking() {
       const resolvedQuestionIndex = dbQuestionIndex ?? restoredIndex;
 
       if (hasRestoredState) {
-        toast.info('Resumed from your saved progress', { duration: 3000 });
+        toast.info(t('student.quizTaking.resumedProgress'), { duration: 3000 });
       }
 
       setStartedAt(resolvedStartedAt);
@@ -412,8 +416,8 @@ export default function QuizTaking() {
       setRuntimeHydrated(true);
     } catch (error) {
       console.error('Failed to load quiz:', error);
-      setLoadError('We could not load this quiz right now.');
-      toast.error('Failed to load quiz');
+      setLoadError(t('student.quizTaking.errorFailedLoad'));
+      toast.error(t('student.quizTaking.errorFailedLoad'));
     } finally {
       setLoading(false);
     }
@@ -565,7 +569,7 @@ export default function QuizTaking() {
     const nextCount = violationCount + 1;
     setViolationCount(nextCount);
 
-    toast.warning(`Academic integrity warning (${nextCount}/${QUIZ_VIOLATION_LIMIT}).`);
+    toast.warning(t('student.quizTaking.violationWarning', { count: nextCount, limit: QUIZ_VIOLATION_LIMIT }));
 
     try {
       await authFetch('/api/student/quiz-violation', {
@@ -584,7 +588,7 @@ export default function QuizTaking() {
 
     if (nextCount >= QUIZ_VIOLATION_LIMIT && !autoSubmittingRef.current) {
       autoSubmittingRef.current = true;
-      toast.error('Quiz auto-submitted after repeated violations.');
+      toast.error(t('student.quizTaking.autoSubmittedViolations'));
       await handleSubmit();
     }
   }, [quiz, quizId, submitting, currentQuestionIndex, timeLeft, violationCount]);
@@ -778,7 +782,7 @@ export default function QuizTaking() {
         // Notifications are best-effort — don't fail the submission if dispatch fails.
       }
 
-      toast.success('Quiz submitted successfully');
+      toast.success(t('student.quizTaking.submittedSuccessToast'));
       if (quizId) {
         try {
           localStorage.removeItem(getQuizProgressStorageKey(session.user.id, quizId));
@@ -796,7 +800,7 @@ export default function QuizTaking() {
       }
       navigate(`/student/results/${attempt.id}`);
     } catch (error) {
-      toast.error('Failed to submit quiz');
+      toast.error(t('student.quizTaking.errorSubmissionFailed'));
       setSubmitting(false);
     }
   };
@@ -805,7 +809,7 @@ export default function QuizTaking() {
   if (loadError) {
     return (
       <QuizStateScreen
-        title="Quiz Unavailable"
+        title={t('student.quizTaking.quizUnavailable')}
         description={loadError}
         onBack={() => navigate('/student/quizzes')}
       />
@@ -814,8 +818,8 @@ export default function QuizTaking() {
   if (!quiz) {
     return (
       <QuizStateScreen
-        title="Quiz Unavailable"
-        description="We could not find this quiz."
+        title={t('student.quizTaking.quizUnavailable')}
+        description={t('student.quizTaking.errorNotFound')}
         onBack={() => navigate('/student/quizzes')}
       />
     );
@@ -825,8 +829,8 @@ export default function QuizTaking() {
   if (!currentQuestion) {
     return (
       <QuizStateScreen
-        title="Quiz Not Ready"
-        description="This quiz does not have any questions yet."
+        title={t('student.quizTaking.quizNotReady')}
+        description={t('student.quizTaking.errorNoQuestions')}
         onBack={() => navigate('/student/quizzes')}
       />
     );
@@ -857,7 +861,7 @@ export default function QuizTaking() {
 
   const handleNextQuestion = () => {
     if (currentQuestionNeedsAnswer && !hasCurrentAnswer && !canSkipUnanswered) {
-      toast.warning(`Wait ${remainingSkipDelay}s or select an answer before continuing.`);
+      toast.warning(t('student.quizTaking.waitToSkip', { count: remainingSkipDelay }));
       return;
     }
     setCurrentQuestionIndex((prev) => Math.min(questions.length - 1, prev + 1));
@@ -877,7 +881,7 @@ export default function QuizTaking() {
               <h1 className="text-lg font-bold text-slate-900 truncate max-w-[200px] sm:max-w-md">
                 {quiz.title}
               </h1>
-              <p className="text-xs text-slate-400">Question {currentQuestionIndex + 1} of {questions.length}</p>
+              <p className="text-xs text-slate-400">{t('student.quizTaking.questionCount', { current: currentQuestionIndex + 1, total: questions.length })}</p>
             </div>
           </div>
           <div className={cn(
@@ -912,7 +916,7 @@ export default function QuizTaking() {
               <div className="space-y-8">
                 {currentQuestionIndex === 0 && introMediaUrl && (
                   <div className="rounded-2xl border border-indigo-100 bg-gradient-to-br from-indigo-50/80 to-violet-50/50 p-5 space-y-3">
-                    <p className="text-[11px] font-bold text-indigo-600 uppercase tracking-widest">Before you start</p>
+                    <p className="text-[11px] font-bold text-indigo-600 uppercase tracking-widest">{t('student.quizTaking.beforeYouStart')}</p>
                     <QuizMediaDisplay url={introMediaUrl} mediaType={introMediaType} />
                     {quiz.description && (
                       <p className="text-sm text-slate-600 leading-relaxed">{quiz.description}</p>
@@ -948,7 +952,7 @@ export default function QuizTaking() {
 
                 {/* Options or answer — skipped for display-only instruction blocks */}
                 {currentQuestion.type === 'instruction' ? (
-                  <p className="text-sm text-slate-500 italic">Read the text above, then continue. No answer is required for this step.</p>
+                  <p className="text-sm text-slate-500 italic">{t('student.quizTaking.instructionNote')}</p>
                 ) : (
                   <div className="grid grid-cols-1 gap-4">
                     {Array.isArray(currentQuestion.options) && currentQuestion.options.length > 0 ? (
@@ -977,7 +981,7 @@ export default function QuizTaking() {
                         value={answers[currentQuestion.id] || ''}
                         onChange={(e) => handleAnswerChange(currentQuestion.id, e.target.value)}
                         className="w-full p-6 bg-slate-50 border-2 border-slate-100 rounded-2xl focus:outline-none focus:border-slate-900 focus:bg-white transition-all min-h-[150px] text-lg"
-                        placeholder="Type your answer here..."
+                        placeholder={t('student.quizTaking.typeAnswerPlaceholder')}
                       />
                     )}
                   </div>
@@ -996,7 +1000,7 @@ export default function QuizTaking() {
             disabled={currentQuestionIndex === 0}
             className="flex items-center gap-2 px-6 py-3 text-slate-600 font-bold hover:bg-slate-50 rounded-xl transition-all disabled:opacity-0"
           >
-            <ChevronLeft className="w-5 h-5" /> Previous
+            <ChevronLeft className="w-5 h-5" /> {t('common.previous')}
           </button>
 
           <div className="hidden sm:flex items-center gap-2">
@@ -1018,14 +1022,14 @@ export default function QuizTaking() {
               disabled={submitting}
               className="flex items-center gap-2 px-8 py-3 bg-green-600 text-white font-bold rounded-xl hover:bg-green-700 transition-all shadow-lg shadow-green-100 disabled:opacity-50"
             >
-              <Send className="w-5 h-5" /> {submitting ? 'Submitting...' : 'Submit Quiz'}
+              <Send className="w-5 h-5" /> {submitting ? t('student.quizTaking.submitting') : t('student.quizTaking.submitQuiz')}
             </button>
           ) : (
             <button
               onClick={handleNextQuestion}
               className="flex items-center gap-2 px-8 py-3 bg-slate-900 text-white font-bold rounded-xl hover:bg-slate-800 transition-all shadow-lg shadow-slate-200"
             >
-              Next <ChevronRight className="w-5 h-5" />
+              {t('common.next')} <ChevronRight className="w-5 h-5" />
             </button>
           )}
         </div>
@@ -1033,8 +1037,8 @@ export default function QuizTaking() {
           <div className="max-w-4xl mx-auto mt-4">
             <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3">
               <div className="flex items-center justify-between text-xs font-bold text-amber-700">
-                <span>Select an answer or wait to skip</span>
-                <span>{remainingSkipDelay > 0 ? `${remainingSkipDelay}s` : 'You can skip now'}</span>
+                <span>{t('student.quizTaking.selectToSkip')}</span>
+                <span>{remainingSkipDelay > 0 ? t('student.quizTaking.secondsRemaining', { count: remainingSkipDelay }) : t('student.quizTaking.canSkipNow')}</span>
               </div>
               <div className="mt-2 h-2 w-full overflow-hidden rounded-full bg-amber-100">
                 <div
@@ -1065,20 +1069,19 @@ export default function QuizTaking() {
               <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-amber-50 text-amber-600">
                 <AlertCircle className="h-7 w-7" />
               </div>
-              <h3 className="text-center text-xl font-black text-slate-900">Ready to Submit Quiz?</h3>
+              <h3 className="text-center text-xl font-black text-slate-900">{t('student.quizTaking.submitConfirmTitle')}</h3>
               <p className="mt-3 text-center text-sm leading-6 text-slate-500">
-                Once submitted, you will not be able to change your answers.
+                {t('student.quizTaking.submitConfirmDescription')}
               </p>
               <div className="mt-4 rounded-2xl border border-slate-100 bg-slate-50 px-4 py-3 text-center text-sm text-slate-600">
-                Answered <span className="font-bold text-slate-900">{answeredCount}</span> of{' '}
-                <span className="font-bold text-slate-900">{answerableQuestions.length}</span> gradable questions.
+                {t('student.quizTaking.answeredSummary', { answered: answeredCount, total: answerableQuestions.length })}
               </div>
               <div className="mt-6 flex items-center gap-3">
                 <button
                   onClick={() => setShowSubmitConfirm(false)}
                   className="flex-1 rounded-2xl border border-slate-200 px-4 py-3 text-sm font-bold text-slate-600 transition hover:bg-slate-50"
                 >
-                  Keep Reviewing
+                  {t('student.quizTaking.keepReviewing')}
                 </button>
                 <button
                   onClick={() => {
@@ -1088,7 +1091,7 @@ export default function QuizTaking() {
                   disabled={submitting}
                   className="flex-1 rounded-2xl bg-green-600 px-4 py-3 text-sm font-bold text-white transition hover:bg-green-700 disabled:opacity-60"
                 >
-                  {submitting ? 'Submitting...' : 'Yes, Submit'}
+                  {submitting ? t('student.quizTaking.submitting') : t('student.quizTaking.yesSubmit')}
                 </button>
               </div>
             </motion.div>

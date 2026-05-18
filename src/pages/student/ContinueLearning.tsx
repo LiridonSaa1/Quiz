@@ -1,4 +1,5 @@
 import React, { useEffect, useState, useRef } from 'react';
+import { useTranslation } from 'react-i18next';
 import { supabase } from '../../supabase';
 import StudentLayout from '../../components/layout/StudentLayout';
 import { motion, useInView, AnimatePresence } from 'motion/react';
@@ -130,6 +131,7 @@ function readLocalCompletedLessonIds(studentId: string, courseId: string): strin
 }
 
 function CourseCard({ course, index }: { course: CourseProgress; index: number }) {
+  const { t } = useTranslation();
   const meta = getMeta(course.level, index);
   const hasLessonProgress = course.totalLessonsProgress > 0;
   const pct = getCourseProgressPct(course);
@@ -181,9 +183,9 @@ function CourseCard({ course, index }: { course: CourseProgress; index: number }
               <span className="absolute inset-0 flex items-center justify-center text-[9px] font-black text-white">{pct}%</span>
             </div>
             <div>
-              <div className="text-white/60 text-[10px] font-semibold uppercase tracking-wide">Progress</div>
+              <div className="text-white/60 text-[10px] font-semibold uppercase tracking-wide">{t('continueLearning.progress')}</div>
               <div className="text-white text-xs font-bold">
-                {isCompleted ? 'Completed!' : isStarted ? 'In Progress' : 'Not Started'}
+                {isCompleted ? t('continueLearning.completed') : isStarted ? t('continueLearning.inProgressStatus') : t('continueLearning.notStarted')}
               </div>
             </div>
           </div>
@@ -201,14 +203,14 @@ function CourseCard({ course, index }: { course: CourseProgress; index: number }
           {course.title}
         </h3>
         <p className="text-xs text-slate-400 line-clamp-2 leading-relaxed mb-4 flex-1">
-          {course.description || 'Continue where you left off and master this course.'}
+          {course.description || t('continueLearning.continueWhereLoft')}
         </p>
 
         {/* Progress bar */}
         <div className="mb-4">
           <div className="flex justify-between mb-1.5">
             <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wide">
-              {hasLessonProgress ? 'Lesson Progress' : 'Quiz Progress'}
+              {hasLessonProgress ? t('continueLearning.lessonProgress') : t('continueLearning.quizProgress')}
             </span>
             <span className="text-[10px] font-bold text-slate-500">
               {hasLessonProgress
@@ -237,9 +239,9 @@ function CourseCard({ course, index }: { course: CourseProgress; index: number }
               : 'bg-slate-900 text-white hover:bg-slate-800 shadow-lg shadow-slate-200'
           )}
         >
-          {isCompleted ? <><CheckCircle2 className="w-4 h-4" /> Review</> :
-           isStarted  ? <><Play className="w-4 h-4" /> Continue</> :
-                        <><Sparkles className="w-4 h-4" /> Start</>}
+          {isCompleted ? <><CheckCircle2 className="w-4 h-4" /> {t('continueLearning.review')}</> :
+           isStarted  ? <><Play className="w-4 h-4" /> {t('continueLearning.continue')}</> :
+                        <><Sparkles className="w-4 h-4" /> {t('continueLearning.start')}</>}
           <ChevronRight className="w-4 h-4 ml-auto group-hover/btn:translate-x-0.5 transition-transform" />
         </Link>
       </div>
@@ -248,6 +250,7 @@ function CourseCard({ course, index }: { course: CourseProgress; index: number }
 }
 
 export default function ContinueLearning() {
+  const { t } = useTranslation();
   const [courses, setCourses] = useState<CourseProgress[]>([]);
   const [attempts, setAttempts] = useState<AttemptData[]>([]);
   const [studentName, setStudentName] = useState('');
@@ -426,15 +429,15 @@ export default function ContinueLearning() {
     : 0;
 
   const heroStats = [
-    { label: 'Courses Enrolled', value: courses.length, suffix: '', icon: BookOpen, color: 'from-blue-500 to-indigo-500' },
-    { label: 'In Progress',       value: inProgressCourses.length, suffix: '', icon: Flame,   color: 'from-orange-500 to-rose-500' },
-    { label: 'Completed',         value: completedCourses.length,  suffix: '', icon: Trophy,  color: 'from-emerald-500 to-teal-500' },
-    { label: 'Avg Score',         value: avgScore, suffix: '%',    icon: Target, color: 'from-violet-500 to-purple-500' },
+    { label: t('continueLearning.coursesEnrolled'), value: courses.length, suffix: '', icon: BookOpen, color: 'from-blue-500 to-indigo-500' },
+    { label: t('continueLearning.inProgress'),       value: inProgressCourses.length, suffix: '', icon: Flame,   color: 'from-orange-500 to-rose-500' },
+    { label: t('continueLearning.completedCourses'),         value: completedCourses.length,  suffix: '', icon: Trophy,  color: 'from-emerald-500 to-teal-500' },
+    { label: t('continueLearning.avgScore'),         value: avgScore, suffix: '%',    icon: Target, color: 'from-violet-500 to-purple-500' },
   ];
 
   const firstName = studentName.split(' ')[0] || 'there';
   const hour = new Date().getHours();
-  const greeting = hour < 12 ? 'Good morning' : hour < 17 ? 'Good afternoon' : 'Good evening';
+  const greeting = hour < 12 ? t('continueLearning.goodMorning') : hour < 17 ? t('continueLearning.goodAfternoon') : t('continueLearning.goodEvening');
 
   return (
     <StudentLayout>
@@ -474,7 +477,7 @@ export default function ContinueLearning() {
                   >
                     <Zap className="w-3.5 h-3.5 text-yellow-400" />
                   </motion.span>
-                  <span className="text-white/80 text-xs font-semibold">Continue Learning</span>
+                  <span className="text-white/80 text-xs font-semibold">{t('continueLearning.title')}</span>
                 </motion.div>
 
                 <motion.h1
@@ -496,8 +499,8 @@ export default function ContinueLearning() {
                   className="text-slate-400 mt-2 text-sm"
                 >
                   {inProgressCourses.length > 0
-                    ? `You have ${inProgressCourses.length} course${inProgressCourses.length > 1 ? 's' : ''} in progress — keep going!`
-                    : 'Pick up where you left off or start something new.'}
+                    ? t('continueLearning.coursesInProgress', { count: inProgressCourses.length })
+                    : t('continueLearning.pickupWhere')}
                 </motion.p>
               </div>
 
@@ -513,7 +516,7 @@ export default function ContinueLearning() {
                     className="inline-flex items-center gap-2.5 bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-400 hover:to-teal-400 text-white font-bold px-6 py-3 rounded-2xl shadow-lg shadow-emerald-900/40 transition-all hover:scale-105 active:scale-95"
                   >
                     <Play className="w-4 h-4" />
-                    Resume Learning
+                    {t('continueLearning.resumeLearning')}
                     <ArrowRight className="w-4 h-4" />
                   </Link>
                 </motion.div>
@@ -570,7 +573,7 @@ export default function ContinueLearning() {
           <>
             {/* In-Progress */}
             {inProgressCourses.length > 0 && (
-              <Section title="Continue Where You Left Off" icon={<Flame className="w-4 h-4 text-orange-500" />} badge={`${inProgressCourses.length} Active`} badgeColor="bg-orange-50 text-orange-700 border-orange-200">
+              <Section title={t('continueLearning.continueWhereYouLeftOff')} icon={<Flame className="w-4 h-4 text-orange-500" />} badge={`${inProgressCourses.length} ${t('continueLearning.active')}`} badgeColor="bg-orange-50 text-orange-700 border-orange-200">
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
                   {inProgressCourses.map((c, i) => <CourseCard key={c.id} course={c} index={i} />)}
                 </div>
@@ -579,7 +582,7 @@ export default function ContinueLearning() {
 
             {/* Not Started */}
             {notStarted.length > 0 && (
-              <Section title="Ready to Start" icon={<Sparkles className="w-4 h-4 text-blue-500" />} badge={`${notStarted.length} New`} badgeColor="bg-blue-50 text-blue-700 border-blue-200">
+              <Section title={t('continueLearning.readyToStart')} icon={<Sparkles className="w-4 h-4 text-blue-500" />} badge={`${notStarted.length} ${t('continueLearning.new')}`} badgeColor="bg-blue-50 text-blue-700 border-blue-200">
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
                   {notStarted.map((c, i) => <CourseCard key={c.id} course={c} index={i} />)}
                 </div>
@@ -588,7 +591,7 @@ export default function ContinueLearning() {
 
             {/* Completed */}
             {completedCourses.length > 0 && (
-              <Section title="Completed Courses" icon={<Trophy className="w-4 h-4 text-emerald-500" />} badge={`${completedCourses.length} Done`} badgeColor="bg-emerald-50 text-emerald-700 border-emerald-200">
+              <Section title={t('continueLearning.completedCoursesLabel')} icon={<Trophy className="w-4 h-4 text-emerald-500" />} badge={`${completedCourses.length} ${t('continueLearning.done')}`} badgeColor="bg-emerald-50 text-emerald-700 border-emerald-200">
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
                   {completedCourses.map((c, i) => <CourseCard key={c.id} course={c} index={i} />)}
                 </div>
@@ -597,7 +600,7 @@ export default function ContinueLearning() {
 
             {/* Recent Results Panel */}
             {attempts.length > 0 && (
-              <Section title="Recent Quiz Results" icon={<BarChart2 className="w-4 h-4 text-violet-500" />}>
+              <Section title={t('continueLearning.recentQuizResults')} icon={<BarChart2 className="w-4 h-4 text-violet-500" />}>
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
                   {attempts.slice(0, 6).map((attempt, i) => {
                     const pct = attempt.total_points > 0 ? Math.round((attempt.score / attempt.total_points) * 100) : 0;
@@ -619,7 +622,7 @@ export default function ContinueLearning() {
                         </div>
                         <div className="flex-1 min-w-0">
                           <div className="text-sm font-bold text-slate-900 truncate group-hover:text-emerald-600 transition-colors">
-                            {passed ? '✅ Passed' : '❌ Not Passed'}
+                            {passed ? `✅ ${t('continueLearning.passed')}` : `❌ ${t('continueLearning.notPassed')}`}
                           </div>
                           <div className="text-xs text-slate-400 mt-0.5">
                             {new Date(attempt.completed_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
@@ -640,7 +643,7 @@ export default function ContinueLearning() {
                 </div>
                 <div className="mt-4 text-center">
                   <Link to="/student/results" className="inline-flex items-center gap-1.5 text-sm font-semibold text-emerald-600 hover:text-emerald-700 transition-colors">
-                    View all results <ArrowRight className="w-4 h-4" />
+                    {t('continueLearning.viewAllResults')} <ArrowRight className="w-4 h-4" />
                   </Link>
                 </div>
               </Section>
@@ -661,8 +664,8 @@ export default function ContinueLearning() {
                 >
                   <BookOpen className="w-9 h-9 text-indigo-500" />
                 </motion.div>
-                <h3 className="text-xl font-black text-slate-900 mb-2">No courses yet</h3>
-                <p className="text-slate-400 text-sm max-w-xs">You haven't been enrolled in any courses. Contact your teacher to get started.</p>
+                <h3 className="text-xl font-black text-slate-900 mb-2">{t('continueLearning.noCoursesYet')}</h3>
+                <p className="text-slate-400 text-sm max-w-xs">{t('continueLearning.notEnrolledMessage')}</p>
               </motion.div>
             )}
           </>

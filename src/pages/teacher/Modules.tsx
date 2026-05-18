@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { supabase } from '../../supabase';
 import TeacherLayout from '../../components/layout/TeacherLayout';
 import LoadingButton from '../../components/ui/LoadingButton';
+import { useTranslation } from 'react-i18next';
 import {
   Plus, Search, Layers, Trash2, Edit2,
   BookOpen, X, Save, PlayCircle, ChevronRight, HelpCircle, AlertTriangle, Calendar
@@ -39,28 +40,28 @@ const normalizeModuleStatus = (s: string) => {
 
 const STAT_CONFIG = [
   {
-    label: 'Total Modules',
+    key: 'modules.totalModules',
     gradient: 'from-indigo-500 to-indigo-600',
     iconBg: 'bg-white/20',
     shadow: 'shadow-indigo-500/25',
     icon: Layers,
   },
   {
-    label: 'Active',
+    key: 'modules.activeModules',
     gradient: 'from-emerald-500 to-emerald-600',
     iconBg: 'bg-white/20',
     shadow: 'shadow-emerald-500/25',
     icon: PlayCircle,
   },
   {
-    label: 'Inactive',
+    key: 'modules.inactiveModules',
     gradient: 'from-amber-500 to-amber-600',
     iconBg: 'bg-white/20',
     shadow: 'shadow-amber-500/25',
     icon: X,
   },
   {
-    label: 'Total Lessons',
+    key: 'modules.totalLessons',
     gradient: 'from-violet-500 to-violet-600',
     iconBg: 'bg-white/20',
     shadow: 'shadow-violet-500/25',
@@ -83,6 +84,7 @@ function EmptyIllustration() {
 }
 
 export default function TeacherModules() {
+  const { t } = useTranslation();
   const [modules, setModules] = useState<Module[]>([]);
   const [courses, setCourses] = useState<Course[]>([]);
   const [classes, setClasses] = useState<Array<{ id: string; name: string; course_id: string | null }>>([]);
@@ -395,10 +397,10 @@ export default function TeacherModules() {
     courses.find(c => c.id === courseId)?.title || 'Unknown Course';
 
   const stats = [
-    { ...STAT_CONFIG[0], value: modules.length },
-    { ...STAT_CONFIG[1], value: modules.filter(m => normalizeModuleStatus(m.status) === 'active').length },
-    { ...STAT_CONFIG[2], value: modules.filter(m => normalizeModuleStatus(m.status) === 'inactive').length },
-    { ...STAT_CONFIG[3], value: modules.reduce((acc, m) => acc + (m.totalLessons || 0), 0) },
+    { ...STAT_CONFIG[0], label: t(STAT_CONFIG[0].key), value: modules.length },
+    { ...STAT_CONFIG[1], label: t(STAT_CONFIG[1].key), value: modules.filter(m => normalizeModuleStatus(m.status) === 'active').length },
+    { ...STAT_CONFIG[2], label: t(STAT_CONFIG[2].key), value: modules.filter(m => normalizeModuleStatus(m.status) === 'inactive').length },
+    { ...STAT_CONFIG[3], label: t(STAT_CONFIG[3].key), value: modules.reduce((acc, m) => acc + (m.totalLessons || 0), 0) },
   ];
 
   return (
@@ -435,15 +437,15 @@ export default function TeacherModules() {
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-6">
                 <div>
                   <nav className="flex items-center gap-1.5 text-xs font-semibold mb-3" aria-label="Breadcrumb">
-                    <span className="text-indigo-400 tracking-wider uppercase">Teacher Portal</span>
+                    <span className="text-indigo-400 tracking-wider uppercase">{t('modules.portalLabel')}</span>
                     <ChevronRight className="w-3.5 h-3.5 text-indigo-500/50" />
-                    <span className="text-indigo-200 tracking-wider uppercase">Modules</span>
+                    <span className="text-indigo-200 tracking-wider uppercase">{t('modules.modulesLabel')}</span>
                   </nav>
                   <h1 className="text-3xl sm:text-4xl font-extrabold text-white tracking-tight leading-tight">
-                    Modules
+                    {t('modules.modulesLabel')}
                   </h1>
                   <p className="text-indigo-200 text-sm mt-2 max-w-md">
-                    Organize your courses into structured, sequential modules that guide your students through the material.
+                    {t('modules.modulesDesc')}
                   </p>
                 </div>
                 {can('actions.teacher.modules.manage') && <motion.button
@@ -458,7 +460,7 @@ export default function TeacherModules() {
                   }}
                 >
                   <Plus className="w-4 h-4" />
-                  Create Module
+                  {t('modules.createModule')}
                 </motion.button>}
               </div>
             </div>
@@ -475,8 +477,8 @@ export default function TeacherModules() {
               >
                 <BookOpen className="w-5 h-5 text-amber-500 mt-0.5 shrink-0" />
                 <div>
-                  <p className="text-sm font-semibold text-amber-800">No courses found</p>
-                  <p className="text-xs text-amber-600 mt-0.5">Create a course first before adding modules to it.</p>
+                  <p className="text-sm font-semibold text-amber-800">{t('modules.noCoursesFound')}</p>
+                  <p className="text-xs text-amber-600 mt-0.5">{t('modules.createCourseFirst')}</p>
                 </div>
               </motion.div>
             )}
@@ -534,12 +536,12 @@ export default function TeacherModules() {
                 backdropFilter: 'blur(12px)',
               }}
             >
-              <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mr-1">Filters</p>
+              <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mr-1">{t('modules.filtersLabel')}</p>
               <div className="relative flex-1 min-w-[200px]">
                 <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-indigo-400" />
                 <input
                   type="text"
-                  placeholder="Search modules..."
+                  placeholder={t('modules.searchModules')}
                   value={search}
                   onChange={e => setSearch(e.target.value)}
                   className="w-full pl-11 pr-4 py-2.5 rounded-full text-sm border border-indigo-100 bg-white/80 focus:outline-none focus:ring-2 focus:ring-violet-400 focus:border-transparent transition-all shadow-sm placeholder-slate-400"
@@ -550,7 +552,7 @@ export default function TeacherModules() {
                 onChange={e => setCourseFilter(e.target.value)}
                 className="px-4 py-2.5 rounded-full text-sm border border-indigo-100 bg-white/80 focus:outline-none focus:ring-2 focus:ring-violet-400 focus:border-transparent transition-all shadow-sm text-slate-700"
               >
-                <option value="all">All Courses</option>
+                <option value="all">{t('modules.allCourses')}</option>
                 {courses.map(c => (
                   <option key={c.id} value={c.id}>{c.name || c.title}</option>
                 ))}
@@ -561,7 +563,7 @@ export default function TeacherModules() {
                   onChange={e => setClassFilter(e.target.value)}
                   className="px-4 py-2.5 rounded-full text-sm border border-indigo-100 bg-white/80 focus:outline-none focus:ring-2 focus:ring-violet-400 focus:border-transparent transition-all shadow-sm text-slate-700"
                 >
-                  <option value="all">All Classes</option>
+                  <option value="all">{t('modules.allClasses')}</option>
                   {classes.map(c => (
                     <option key={c.id} value={c.id}>{c.name}</option>
                   ))}
@@ -572,7 +574,7 @@ export default function TeacherModules() {
                   onClick={() => { setSearch(''); setCourseFilter('all'); setClassFilter('all'); }}
                   className="flex items-center gap-1.5 px-3 py-2 rounded-full text-xs font-semibold text-slate-500 hover:text-slate-800 hover:bg-slate-100 transition-all"
                 >
-                  <X className="w-3.5 h-3.5" /> Clear
+                  <X className="w-3.5 h-3.5" /> {t('common.refresh')}
                 </button>
               )}
             </motion.div>
@@ -593,12 +595,12 @@ export default function TeacherModules() {
               >
                 <EmptyIllustration />
                 <h3 className="text-xl font-extrabold text-slate-800 mt-6 mb-2">
-                  {search || courseFilter !== 'all' ? 'No results found' : 'No modules yet'}
+                  {search || courseFilter !== 'all' ? t('modules.noResultsMessage') : t('modules.noModulesEmpty')}
                 </h3>
                 <p className="text-slate-400 text-sm mb-8 max-w-xs text-center">
                   {search || courseFilter !== 'all'
-                    ? "Try adjusting your search or filter to find what you're looking for."
-                    : 'Create your first module to start organizing your course content into structured lessons.'}
+                    ? t('modules.tryAdjustingFilters2')
+                    : t('modules.createFirstModuleMessage')}
                 </p>
                 {courses.length > 0 && !(search || courseFilter !== 'all') && can('actions.teacher.modules.manage') && (
                   <motion.button
@@ -611,7 +613,7 @@ export default function TeacherModules() {
                       boxShadow: '0 8px 24px rgba(99,102,241,0.35)',
                     }}
                   >
-                    <Plus className="w-4 h-4" /> Create Your First Module
+                    <Plus className="w-4 h-4" /> {t('modules.createYourFirstModuleButton')}
                   </motion.button>
                 )}
               </motion.div>
@@ -665,7 +667,7 @@ export default function TeacherModules() {
                             )}
                           >
                             <span className={cn('w-1.5 h-1.5 rounded-full', isActive ? 'bg-emerald-500' : 'bg-amber-500')} />
-                            {isActive ? 'Active' : 'Inactive'}
+                            {isActive ? t('modules.activeModule') : t('modules.inactiveModule')}
                           </button>}
                         </div>
 
@@ -684,14 +686,14 @@ export default function TeacherModules() {
                             </span>
                             <span className="inline-flex items-center gap-1 text-xs text-slate-400">
                               <BookOpen className="w-3.5 h-3.5 text-slate-300" />
-                              {mod.totalLessons} lesson{mod.totalLessons !== 1 ? 's' : ''}
+                              {mod.totalLessons} {mod.totalLessons !== 1 ? t('modules.lessons') : t('modules.lesson')}
                             </span>
                           </div>
                           <div className="flex items-center justify-between">
-                            <span className="text-[11px] text-slate-400">Available quizzes</span>
+                            <span className="text-[11px] text-slate-400">{t('modules.availableQuizzesLabel')}</span>
                             <span className="inline-flex items-center gap-1 text-xs text-slate-500">
                               <HelpCircle className="w-3.5 h-3.5 text-slate-300" />
-                              {mod.totalQuizzes || 0} quiz{(mod.totalQuizzes || 0) !== 1 ? 'zes' : ''}
+                              {mod.totalQuizzes || 0} {(mod.totalQuizzes || 0) !== 1 ? t('modules.quizzes') : t('modules.quiz')}
                             </span>
                           </div>
                           <div className="flex items-center justify-between">
@@ -699,7 +701,7 @@ export default function TeacherModules() {
                               <span className="w-6 h-6 flex items-center justify-center bg-indigo-50 text-indigo-600 rounded-lg text-[11px] font-bold">
                                 {mod.order}
                               </span>
-                              <span className="text-[11px] text-slate-400">order</span>
+                              <span className="text-[11px] text-slate-400">{t('modules.orderText')}</span>
                             </div>
                             <div className="flex items-center gap-1.5">
                               <Calendar className="w-3 h-3 text-slate-300 shrink-0" />
@@ -716,13 +718,13 @@ export default function TeacherModules() {
                             onClick={() => openEdit(mod)}
                             className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-xl text-xs font-semibold text-indigo-600 bg-indigo-50 hover:bg-indigo-100 transition-all"
                           >
-                            <Edit2 className="w-3.5 h-3.5" /> Edit
+                            <Edit2 className="w-3.5 h-3.5" /> {t('modules.editAction')}
                           </button>}
                           {can('actions.teacher.modules.manage') && <button
                             onClick={() => handleDelete(mod)}
                             className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-xl text-xs font-semibold text-red-500 bg-red-50 hover:bg-red-100 transition-all"
                           >
-                            <Trash2 className="w-3.5 h-3.5" /> Delete
+                            <Trash2 className="w-3.5 h-3.5" /> {t('modules.deleteAction')}
                           </button>}
                         </div>
                       </div>
@@ -760,8 +762,8 @@ export default function TeacherModules() {
                     <Layers className="w-5 h-5 text-indigo-600" />
                   </div>
                   <div>
-                    <h2 className="text-base font-bold text-slate-900">{editing ? 'Edit Module' : 'New Module'}</h2>
-                    <p className="text-xs text-slate-400">{editing ? 'Update module details' : 'Add a module to a course'}</p>
+                    <h2 className="text-base font-bold text-slate-900">{editing ? t('modules.modalHeaderEditModule') : t('modules.modalHeaderCreateModule')}</h2>
+                    <p className="text-xs text-slate-400">{editing ? t('modules.modalDescEdit') : t('modules.modalDescCreate')}</p>
                   </div>
                 </div>
                 <button onClick={closeModal} className="p-2 hover:bg-slate-100 rounded-lg transition-all">
@@ -772,13 +774,13 @@ export default function TeacherModules() {
               {/* Modal Body */}
               <div className="p-6 space-y-4">
                 <div>
-                  <label className="block text-xs font-semibold text-slate-600 mb-1.5">Course <span className="text-red-500">*</span></label>
+                  <label className="block text-xs font-semibold text-slate-600 mb-1.5">{t('modules.courseField')} <span className="text-red-500">{t('modules.courseRequired')}</span></label>
                   <select
                     value={formCourseId}
                     onChange={e => setFormCourseId(e.target.value)}
                     className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-violet-500 transition-all"
                   >
-                    <option value="">Select a course...</option>
+                    <option value="">{t('modules.selectCourseRequired')}</option>
                     {courses.map(c => (
                       <option key={c.id} value={c.id}>{c.name || c.title}</option>
                     ))}
@@ -786,33 +788,33 @@ export default function TeacherModules() {
                 </div>
 
                 <div>
-                  <label className="block text-xs font-semibold text-slate-600 mb-1.5">Title <span className="text-red-500">*</span></label>
+                  <label className="block text-xs font-semibold text-slate-600 mb-1.5">{t('modules.titleField')} <span className="text-red-500">{t('modules.titleRequired2')}</span></label>
                   <input
                     type="text"
                     value={form.title}
                     onChange={e => setForm(f => ({ ...f, title: e.target.value }))}
-                    placeholder="e.g. Introduction to React Hooks"
+                    placeholder={t('modules.modulePlaceholder')}
                     className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-violet-500 transition-all"
                   />
                   {form.title && (
-                    <p className="text-[10px] text-slate-400 mt-1">Slug: <span className="font-mono">{slugify(form.title)}</span></p>
+                    <p className="text-[10px] text-slate-400 mt-1">{t('modules.slugPreview')} <span className="font-mono">{slugify(form.title)}</span></p>
                   )}
                 </div>
 
                 <div>
-                  <label className="block text-xs font-semibold text-slate-600 mb-1.5">Description</label>
+                  <label className="block text-xs font-semibold text-slate-600 mb-1.5">{t('modules.descriptionField')}</label>
                   <textarea
                     rows={3}
                     value={form.description}
                     onChange={e => setForm(f => ({ ...f, description: e.target.value }))}
-                    placeholder="Optional: describe what students will learn in this module..."
+                    placeholder={t('modules.descriptionPlaceholder')}
                     className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-violet-500 transition-all resize-none"
                   />
                 </div>
 
                 <div className="grid grid-cols-2 gap-4">
                   <div>
-                    <label className="block text-xs font-semibold text-slate-600 mb-1.5">Order</label>
+                    <label className="block text-xs font-semibold text-slate-600 mb-1.5">{t('modules.orderField')}</label>
                     <input
                       type="number"
                       min={1}
@@ -822,14 +824,14 @@ export default function TeacherModules() {
                     />
                   </div>
                   <div>
-                    <label className="block text-xs font-semibold text-slate-600 mb-1.5">Status</label>
+                    <label className="block text-xs font-semibold text-slate-600 mb-1.5">{t('modules.statusField')}</label>
                     <select
                       value={form.status}
                       onChange={e => setForm(f => ({ ...f, status: e.target.value as 'active' | 'inactive' }))}
                       className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-violet-500 transition-all"
                     >
-                      <option value="active">Active</option>
-                      <option value="inactive">Inactive</option>
+                      <option value="active">{t('modules.statusActive')}</option>
+                      <option value="inactive">{t('modules.statusInactive')}</option>
                     </select>
                   </div>
                 </div>
@@ -867,10 +869,10 @@ export default function TeacherModules() {
                         'text-sm font-semibold transition-colors',
                         form.autoPublish ? 'text-violet-700' : 'text-slate-600'
                       )}>
-                        Auto-publish
+                        {t('modules.autoPublishToggle')}
                       </span>
                       <p className="text-[11px] text-slate-400 mt-0.5">
-                        Publiko automatikisht në datën dhe orën e zgjedhur
+                        {t('modules.autoPublishDescText')}
                       </p>
                     </div>
                   </label>
@@ -887,7 +889,7 @@ export default function TeacherModules() {
                         <div className="px-4 pb-4 pt-1">
                           <label className="block text-xs font-semibold text-violet-600 mb-1.5">
                             <Calendar className="inline w-3.5 h-3.5 mr-1 -mt-0.5" />
-                            Data dhe ora e publikimit
+                            {t('modules.publishDateTimeLabel')}
                           </label>
                           <input
                             type="datetime-local"
@@ -898,7 +900,7 @@ export default function TeacherModules() {
                           />
                           {form.publishAt && (
                             <p className="text-[11px] text-violet-500 mt-1.5 font-medium">
-                              ✓ Do të publikohet: {new Date(form.publishAt).toLocaleString('sq-AL', { dateStyle: 'full', timeStyle: 'short' })}
+                              {t('modules.willBePublishedText', { date: new Date(form.publishAt).toLocaleString('sq-AL', { dateStyle: 'full', timeStyle: 'short' }) })}
                             </p>
                           )}
                         </div>
@@ -914,18 +916,18 @@ export default function TeacherModules() {
                   onClick={closeModal}
                   className="px-4 py-2.5 text-sm font-semibold text-slate-600 hover:bg-slate-100 rounded-xl transition-all"
                 >
-                  Cancel
+                  {t('modules.cancelButtonText')}
                 </button>}
                 {can('actions.teacher.modules.manage') && (
                   <LoadingButton
                     onClick={handleSave}
                     loading={saving}
-                    loadingText={editing ? 'Saving...' : 'Creating...'}
+                    loadingText={editing ? t('modules.savingText') : t('modules.creatingText')}
                     icon={<Save className="w-4 h-4" />}
                     className="px-5 py-2.5"
                     style={{ background: 'linear-gradient(135deg,#6366f1,#8b5cf6)' }}
                   >
-                    {editing ? 'Save Changes' : 'Create Module'}
+                    {editing ? t('modules.saveChangesButton') : t('modules.createModuleButton')}
                   </LoadingButton>
                 )}
               </div>
@@ -961,13 +963,13 @@ export default function TeacherModules() {
                   </div>
                 </div>
                 <h3 className="text-center text-lg font-bold text-slate-900 mb-1">
-                  Delete this module?
+                  {t('modules.deleteThisModuleQuestion')}
                 </h3>
                 <p className="text-center text-sm text-slate-500 mb-1">
                   <span className="font-semibold text-slate-700">"{deleteTarget.title}"</span>
                 </p>
                 <p className="text-center text-xs text-red-400 font-medium mb-6">
-                  This cannot be undone.
+                  {t('modules.deleteModuleDesc')}
                 </p>
                 <div className="flex gap-3">
                   <button
@@ -976,7 +978,7 @@ export default function TeacherModules() {
                     onClick={() => setDeleteTarget(null)}
                     className="flex-1 py-2.5 rounded-xl text-sm font-semibold text-slate-600 bg-slate-100 hover:bg-slate-200 transition-all disabled:opacity-50"
                   >
-                    Cancel
+                    {t('modules.cancelButtonText')}
                   </button>
                   <button
                     type="button"
@@ -986,7 +988,7 @@ export default function TeacherModules() {
                     style={{ background: 'linear-gradient(135deg,#ef4444,#dc2626)' }}
                   >
                     <Trash2 className="w-4 h-4" />
-                    {deleting ? 'Deleting...' : 'Delete'}
+                    {deleting ? t('modules.deletingText') : t('modules.confirmDelete')}
                   </button>
                 </div>
               </div>

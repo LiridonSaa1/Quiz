@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { useNavigate, useParams } from 'react-router-dom';
 import TeacherLayout from '../../components/layout/TeacherLayout';
 import { authFetch } from '../../lib/apiUrl';
@@ -36,10 +37,11 @@ const moveItem = <T,>(arr: T[], from: number, to: number) => {
 };
 
 export default function TeacherLessonContentManager() {
+  const { t } = useTranslation();
   const navigate = useNavigate();
   const { lessonId = '' } = useParams();
   const [userId, setUserId] = useState('');
-  const [lessonTitle, setLessonTitle] = useState('Lesson');
+  const [lessonTitle, setLessonTitle] = useState(t('lessons.title'));
   const [loading, setLoading] = useState(true);
   const [items, setItems] = useState<LessonContentRow[]>([]);
   const [savingId, setSavingId] = useState<string | null>(null);
@@ -71,14 +73,14 @@ export default function TeacherLessonContentManager() {
     const foundLesson = Array.isArray(lessonJson?.lessons)
       ? lessonJson.lessons.find((l: any) => String(l.id) === String(lessonId))
       : null;
-    setLessonTitle(String(foundLesson?.title || 'Lesson Content'));
+    setLessonTitle(String(foundLesson?.title || t('lessons.title')));
     setItems(Array.isArray(contentsJson?.contents) ? contentsJson.contents : []);
     setLoading(false);
   };
 
   useEffect(() => {
     void load();
-  }, [lessonId]);
+  }, [lessonId, t]);
 
   const addItem = async () => {
     if (!userId) return;
@@ -95,11 +97,11 @@ export default function TeacherLessonContentManager() {
     });
     const json = await res.json().catch(() => ({}));
     if (!res.ok || !json?.success) {
-      toast.error(json?.error || 'Failed to create content item');
+      toast.error(json?.error || t('lessons.failedToSaveContentItem'));
       return;
     }
     setItems((prev) => [...prev, json.content]);
-    toast.success('Content item created');
+    toast.success(t('lessons.contentItemCreated'));
   };
 
   const updateItem = async (item: LessonContentRow) => {
@@ -124,11 +126,11 @@ export default function TeacherLessonContentManager() {
     const json = await res.json().catch(() => ({}));
     setSavingId(null);
     if (!res.ok || !json?.success) {
-      toast.error(json?.error || 'Failed to save content item');
+      toast.error(json?.error || t('lessons.failedToSaveContentItem'));
       return;
     }
     setItems((prev) => prev.map((x) => (x.id === item.id ? json.content : x)));
-    toast.success('Saved');
+    toast.success(t('lessons.saved'));
   };
 
   const removeItem = async (id: string) => {
@@ -138,13 +140,13 @@ export default function TeacherLessonContentManager() {
     });
     const json = await res.json().catch(() => ({}));
     if (!res.ok || !json?.success) {
-      toast.error(json?.error || 'Failed to delete item');
+      toast.error(json?.error || t('lessons.failedToDeleteContentItem'));
       return;
     }
     const next = sorted.filter((x) => x.id !== id).map((x, idx) => ({ ...x, position: idx + 1 }));
     setItems(next);
     await saveOrder(next);
-    toast.success('Deleted');
+    toast.success(t('lessons.deleted'));
   };
 
   const saveOrder = async (current: LessonContentRow[]) => {
@@ -156,7 +158,7 @@ export default function TeacherLessonContentManager() {
     });
     if (!res.ok) {
       const json = await res.json().catch(() => ({}));
-      toast.error(json?.error || 'Failed to save order');
+      toast.error(json?.error || t('lessons.failedToSaveOrder'));
     }
   };
 
@@ -216,12 +218,12 @@ export default function TeacherLessonContentManager() {
           className="inline-flex items-center gap-2 text-sm font-semibold text-slate-600 hover:text-slate-900"
         >
           <ArrowLeft className="w-4 h-4" />
-          Back to lessons
+          {t('lessons.backToLessons')}
         </button>
 
         <div className="bg-white rounded-2xl border border-slate-100 p-5 flex items-center justify-between">
           <div>
-            <h1 className="text-xl font-bold text-slate-900">Manage Lesson Content</h1>
+            <h1 className="text-xl font-bold text-slate-900">{t('lessons.manage')}</h1>
             <p className="text-sm text-slate-500 mt-1">{lessonTitle}</p>
           </div>
           <button
@@ -229,7 +231,7 @@ export default function TeacherLessonContentManager() {
             className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-indigo-600 text-white text-sm font-semibold hover:bg-indigo-700"
           >
             <Plus className="w-4 h-4" />
-            Add Content Item
+            {t('lessons.addContentItem')}
           </button>
         </div>
 
@@ -239,7 +241,7 @@ export default function TeacherLessonContentManager() {
           </div>
         ) : sorted.length === 0 ? (
           <div className="bg-white rounded-2xl border border-dashed border-slate-300 p-10 text-center text-slate-500">
-            No content items yet. Add your first video/audio/pdf/text block.
+            {t('lessons.noContentItems')}
           </div>
         ) : (
           <div className="space-y-4">
@@ -298,13 +300,13 @@ export default function TeacherLessonContentManager() {
                   <input
                     value={item.title || ''}
                     onChange={(e) => setItems((prev) => prev.map((x) => x.id === item.id ? { ...x, title: e.target.value } : x))}
-                    placeholder="Title"
+                    placeholder={t('lessons.title')}
                     className="px-3 py-2 rounded-lg border border-slate-200 text-sm"
                   />
                   <input
                     value={item.description || ''}
                     onChange={(e) => setItems((prev) => prev.map((x) => x.id === item.id ? { ...x, description: e.target.value } : x))}
-                    placeholder="Description"
+                    placeholder={t('lessons.description')}
                     className="px-3 py-2 rounded-lg border border-slate-200 text-sm"
                   />
                 </div>
@@ -314,19 +316,19 @@ export default function TeacherLessonContentManager() {
                     value={item.text_content || ''}
                     onChange={(e) => setItems((prev) => prev.map((x) => x.id === item.id ? { ...x, text_content: e.target.value } : x))}
                     rows={4}
-                    placeholder="Rich text content (HTML/markdown/plain text)"
+                    placeholder={t('lessons.richTextContent')}
                     className="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm"
                   />
                 ) : (
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
                     <div className="md:col-span-2">
-                      <label className="block text-xs font-semibold text-slate-500 mb-1">File</label>
+                      <label className="block text-xs font-semibold text-slate-500 mb-1">{t('lessons.file')}</label>
                       <label className={cn(
                         'w-full px-3 py-3 rounded-lg border border-dashed text-sm flex items-center gap-2 cursor-pointer',
                         uploadingId === item.id ? 'opacity-60 pointer-events-none' : 'hover:bg-slate-50'
                       )}>
                         <UploadCloud className="w-4 h-4" />
-                        {uploadingId === item.id ? 'Uploading...' : 'Upload file'}
+                        {uploadingId === item.id ? t('lessons.uploading') : t('lessons.uploadFile')}
                         <input
                           type="file"
                           accept={item.type === 'video' ? 'video/*' : item.type === 'audio' ? 'audio/*' : 'application/pdf'}
@@ -341,7 +343,7 @@ export default function TeacherLessonContentManager() {
                     </div>
                     <div>
                       <label className="block text-xs font-semibold text-slate-500 mb-1">
-                        {item.type === 'pdf' ? 'Start page' : 'Duration (sec)'}
+                        {item.type === 'pdf' ? t('lessons.startPage') : t('lessons.durationSec')}
                       </label>
                       <input
                         type="number"
@@ -365,7 +367,7 @@ export default function TeacherLessonContentManager() {
                     className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-slate-900 text-white text-sm font-semibold hover:bg-slate-800 disabled:opacity-60"
                   >
                     <Save className="w-4 h-4" />
-                    {savingId === item.id ? 'Saving...' : 'Save Item'}
+                    {savingId === item.id ? t('lessons.saving') : t('lessons.saveItem')}
                   </button>
                 </div>
               </div>
