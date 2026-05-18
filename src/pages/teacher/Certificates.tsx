@@ -307,7 +307,7 @@ export default function TeacherCertificates() {
       setCourses(courseOptions.map((course) => ({ id: course.id, title: course.title })));
       setStudents(s || []);
     } catch {
-      toast.error('Failed to load certificates');
+      toast.error(t('errors.loadFailed'));
     } finally {
       setLoading(false);
     }
@@ -358,9 +358,9 @@ export default function TeacherCertificates() {
   };
 
   const handleSave = async () => {
-    if (!form.student_id) { toast.error('Student is required'); return; }
-    if (!form.title.trim()) { toast.error('Title is required'); return; }
-    if (!form.certificate_number.trim()) { toast.error('Certificate number is required'); return; }
+    if (!form.student_id) { toast.error(t('modules.titleRequired')); return; }
+    if (!form.title.trim()) { toast.error(t('modules.titleRequired')); return; }
+    if (!form.certificate_number.trim()) { toast.error(t('modules.titleRequired')); return; }
     setSaving(true);
     try {
       const payload: any = {
@@ -376,7 +376,7 @@ export default function TeacherCertificates() {
       if (editId) {
         const { error } = await supabase.from('certificates').update(payload).eq('id', editId);
         if (error) throw error;
-        toast.success('Certificate updated');
+        toast.success(t('success.updated'));
       } else {
         payload.created_at = new Date().toISOString();
         const { data: inserted, error } = await supabase
@@ -385,7 +385,7 @@ export default function TeacherCertificates() {
           .select('id')
           .single();
         if (error) throw error;
-        toast.success('Certificate issued');
+        toast.success(t('success.created'));
 
         // Fan out an in-app notification to the student, this teacher (issuer),
         // and all admins — gated by the admin Settings → "Certificate Issued" toggle.
@@ -412,7 +412,7 @@ export default function TeacherCertificates() {
       setShowModal(false);
       fetchData();
     } catch (e: any) {
-      toast.error(e.message || 'Failed to save');
+      toast.error(e.message || t('errors.saveFailed'));
     } finally {
       setSaving(false);
     }
@@ -422,10 +422,10 @@ export default function TeacherCertificates() {
     try {
       const { error } = await supabase.from('certificates').delete().eq('id', id);
       if (error) throw error;
-      toast.success('Certificate deleted');
+      toast.success(t('success.deleted'));
       setDeleteId(null);
       fetchData();
-    } catch { toast.error('Failed to delete'); }
+    } catch { toast.error(t('errors.deleteFailed')); }
   };
 
   const toggleStatus = async (cert: Certificate) => {

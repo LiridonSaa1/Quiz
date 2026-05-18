@@ -167,11 +167,11 @@ export default function StudentLiveSessionJoin() {
       if (json.success) {
         setSession(json.session);
       } else {
-        toast.error('Session not found');
+        toast.error(t('errors.notFound'));
         navigate('/student/live-sessions');
       }
     } catch {
-      toast.error('Failed to load session');
+      toast.error(t('errors.loadFailed'));
     } finally {
       setLoading(false);
     }
@@ -195,7 +195,7 @@ export default function StudentLiveSessionJoin() {
       });
       setJoined(true);
     } catch {
-      toast.error('Failed to join session');
+      toast.error(t('errors.saveFailed'));
     } finally {
       setJoining(false);
     }

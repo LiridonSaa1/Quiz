@@ -180,9 +180,9 @@ export default function AdminLessons() {
   };
 
   const handleSave = async () => {
-    if (!form.title.trim()) { toast.error('Title is required'); return; }
-    if (!formCourseId) { toast.error('Please select a course'); return; }
-    if (!formModuleId) { toast.error('Please select a module'); return; }
+    if (!form.title.trim()) { toast.error(t('lessons.titleRequired')); return; }
+    if (!formCourseId) { toast.error(t('lessons.selectCourse')); return; }
+    if (!formModuleId) { toast.error(t('lessons.selectModule')); return; }
     setSaving(true);
     try {
       const payload = {
@@ -208,7 +208,7 @@ export default function AdminLessons() {
         });
         const json = await res.json();
         if (!res.ok || !json.success) throw new Error(json.error || 'Failed to update lesson');
-        toast.success('Lesson updated');
+        toast.success(t('lessons.lessonUpdated'));
       } else {
         const res = await fetch('/api/admin/lessons', {
           method: 'POST',
@@ -220,7 +220,7 @@ export default function AdminLessons() {
         });
         const json = await res.json();
         if (!res.ok || !json.success) throw new Error(json.error || 'Failed to create lesson');
-        toast.success('Lesson created');
+        toast.success(t('lessons.lessonCreated'));
       }
       closeModal();
       fetchData();
@@ -238,7 +238,7 @@ export default function AdminLessons() {
       const res = await fetch(`/api/admin/lessons/${id}`, { method: 'DELETE' });
       const json = await res.json();
       if (!res.ok || !json.success) throw new Error(json.error || 'Failed to delete lesson');
-      toast.success('Lesson deleted');
+      toast.success(t('lessons.lessonDeleted'));
       fetchData();
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Failed to delete lesson';
@@ -256,7 +256,7 @@ export default function AdminLessons() {
       });
       const json = await res.json();
       if (!res.ok || !json.success) throw new Error(json.error || 'Failed to update status');
-      toast.success(`Lesson ${newStatus === 'published' ? 'published' : 'set to draft'}`);
+      toast.success(newStatus === 'published' ? t('lessons.lessonPublished') : t('lessons.lessonSetToDraft'));
       fetchData();
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Failed to update status';
@@ -273,7 +273,7 @@ export default function AdminLessons() {
       });
       const json = await res.json();
       if (!res.ok || !json.success) throw new Error(json.error || 'Failed to update');
-      toast.success(lesson.isFreePreview ? 'Free preview removed' : 'Set as free preview');
+      toast.success(lesson.isFreePreview ? t('lessons.freePreviewRemoved') : t('lessons.setAsFreePreview'));
       fetchData();
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Failed to update';

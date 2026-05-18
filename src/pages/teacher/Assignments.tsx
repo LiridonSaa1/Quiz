@@ -381,7 +381,7 @@ export default function TeacherAssignments() {
       setCourses(coursesData);
       setClasses(classesData);
     } catch {
-      toast.error('Failed to load assignments');
+      toast.error(t('errors.loadFailed'));
     } finally {
       setLoading(false);
     }
@@ -428,8 +428,8 @@ export default function TeacherAssignments() {
   };
 
   const handleSave = async () => {
-    if (!form.title.trim()) { toast.error('Title is required'); return; }
-    if (form.autoPublish && !form.publishAt) { toast.error('Please select a date and time for auto-publish'); return; }
+    if (!form.title.trim()) { toast.error(t('modules.titleRequired')); return; }
+    if (form.autoPublish && !form.publishAt) { toast.error(t('lessons.selectPublishDateTime')); return; }
     setSaving(true);
     try {
       const effectiveStatus = form.autoPublish ? 'draft' : form.status;

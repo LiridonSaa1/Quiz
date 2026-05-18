@@ -84,7 +84,7 @@ export default function AdminCourses() {
         setTeachers([]);
       }
     } catch {
-      toast.error('Failed to load courses');
+      toast.error(t('errors.loadFailed'));
     } finally {
       setLoading(false);
     }
@@ -144,7 +144,7 @@ export default function AdminCourses() {
       setCourses((prev) => prev.map((c) => (c.id === course.id ? { ...c, status: newStatus } : c)));
       toast.success(t(`courses.course${newStatus === 'published' ? 'Published' : 'Draft'}`));
     } catch {
-      toast.error('Failed to update status');
+      toast.error(t('errors.saveFailed'));
     }
   };
 

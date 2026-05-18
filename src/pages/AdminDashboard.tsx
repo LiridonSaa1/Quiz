@@ -82,7 +82,7 @@ export default function AdminDashboard() {
           .order('created_at', { ascending: false });
         if (fbErr) {
           console.error(fbErr);
-          toast.error(apiErr || fbErr.message || 'Failed to load teachers');
+          toast.error(apiErr || fbErr.message || t('errors.loadFailed'));
           usersSource = [];
         } else {
           usersSource = fallbackRows || [];
@@ -106,7 +106,7 @@ export default function AdminDashboard() {
         setAnalytics(analyticsRes);
       }
     } catch (error) {
-      toast.error('Failed to load dashboard data');
+      toast.error(t('errors.loadFailed'));
     } finally {
       setLoading(false);
     }
@@ -122,7 +122,7 @@ export default function AdminDashboard() {
       }
       if (cancelled) return;
       if (!session?.access_token) {
-        toast.error('You need to be signed in to load the admin dashboard.');
+        toast.error(t('errors.noAccess'));
         setLoading(false);
         return;
       }

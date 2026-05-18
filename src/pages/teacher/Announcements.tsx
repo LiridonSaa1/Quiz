@@ -244,8 +244,8 @@ export default function TeacherAnnouncements() {
       const res = await authFetch('/api/admin/announcements');
       const json = await res.json();
       if (json.success) setAnnouncements(json.announcements || []);
-      else toast.error(json.error || 'Failed to load announcements');
-    } catch { toast.error('Failed to load announcements'); }
+      else toast.error(json.error || t('errors.loadFailed'));
+    } catch { toast.error(t('errors.loadFailed')); }
     finally { setLoading(false); }
   };
 
@@ -335,7 +335,7 @@ export default function TeacherAnnouncements() {
   };
 
   const generateWithAI = async () => {
-    if (!form.title.trim() && !form.ann_type) { toast.error('Add a title or type first so AI has context'); return; }
+    if (!form.title.trim() && !form.ann_type) { toast.error(t('announcements.addTitleOrType')); return; }
     setAiGenerating(true);
     try {
       const prompt = `Write a professional school announcement for a teacher with the following details:
@@ -350,15 +350,15 @@ Write a warm, professional message (2-3 paragraphs). Start with a friendly greet
         body: JSON.stringify({ message: prompt, role: 'teacher', page: 'Announcements' }),
       });
       const json = await res.json();
-      if (json.reply) { set('content', json.reply); toast.success('AI generated your announcement!'); }
-      else toast.error(json.error || 'AI generation failed');
-    } catch { toast.error('AI generation failed. Check your GEMINI_API_KEY.'); }
+      if (json.reply) { set('content', json.reply); toast.success(t('announcements.aiGeneratedContent')); }
+      else toast.error(json.error || t('announcements.aiGenerationFailed'));
+    } catch { toast.error(t('announcements.aiGenerationError')); }
     finally { setAiGenerating(false); }
   };
 
   const handleSave = async (overrideStatus?: AnnStatus) => {
-    if (!form.title.trim()) { toast.error('Title is required'); return; }
-    if (!form.content.trim()) { toast.error('Content is required'); return; }
+    if (!form.title.trim()) { toast.error(t('announcements.titleRequired')); return; }
+    if (!form.content.trim()) { toast.error(t('announcements.contentRequired')); return; }
     setSaving(true);
     try {
       const status = overrideStatus ?? form.status;
@@ -376,7 +376,7 @@ Write a warm, professional message (2-3 paragraphs). Start with a friendly greet
       const res = await authFetch(url, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
       const json = await res.json();
       if (!json.success) throw new Error(json.error);
-      toast.success(editing ? 'Announcement updated' : status === 'published' ? 'Announcement published!' : 'Draft saved');
+      toast.success(editing ? t('announcements.announcementUpdated') : status === 'published' ? t('announcements.announcementPublished') : t('announcements.draftSaved'));
       setShowModal(false);
       fetchAll();
     } catch (e: unknown) { toast.error((e as Error).message || 'Save failed'); }
@@ -390,7 +390,7 @@ Write a warm, professional message (2-3 paragraphs). Start with a friendly greet
       const res = await authFetch(`/api/admin/announcements/${id}`, { method: 'DELETE' });
       const json = await res.json();
       if (!json.success) throw new Error(json.error);
-      toast.success('Announcement deleted');
+      toast.success(t('announcements.announcementDeleted'));
       setAnnouncements(p => p.filter(x => x.id !== id));
     } catch (e: unknown) { toast.error((e as Error).message || 'Delete failed'); }
     finally { setDeleting(null); }
@@ -404,7 +404,7 @@ Write a warm, professional message (2-3 paragraphs). Start with a friendly greet
       });
       const json = await res.json();
       if (!json.success) throw new Error(json.error);
-      toast.success('Published!');
+      toast.success(t('announcements.announcementPublished'));
       fetchAll();
     } catch (e: unknown) { toast.error((e as Error).message); }
   };

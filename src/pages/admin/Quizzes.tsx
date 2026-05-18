@@ -78,7 +78,7 @@ export default function AdminQuizzes() {
       setQuizzes(Array.isArray(json.quizzes) ? json.quizzes : []);
       setCourseOptions(Array.isArray(json.courses) ? json.courses : []);
     } catch {
-      toast.error('Failed to load quizzes');
+      toast.error(t('errors.loadFailed'));
     } finally {
       setLoading(false);
     }

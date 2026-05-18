@@ -184,9 +184,9 @@ export default function AdminModules() {
   };
 
   const handleSave = async () => {
-    if (!form.title.trim()) { toast.error('Title is required'); return; }
-    if (!formCourseId) { toast.error('Please select a course'); return; }
-    if (form.autoPublish && !form.publishAt) { toast.error('Please select a date and time for auto-publish'); return; }
+    if (!form.title.trim()) { toast.error(t('modules.titleRequired')); return; }
+    if (!formCourseId) { toast.error(t('modules.selectCourseError')); return; }
+    if (form.autoPublish && !form.publishAt) { toast.error(t('lessons.selectPublishDateTime')); return; }
     setSaving(true);
     try {
       const statusDb = form.status === 'draft' ? 'inactive' : 'active';
@@ -209,7 +209,7 @@ export default function AdminModules() {
         });
         const json = await res.json();
         if (!res.ok || !json.success) throw new Error(json.error || 'Failed to update module');
-        toast.success('Module updated');
+        toast.success(t('modules.moduleUpdated'));
       } else {
         const res = await fetch('/api/admin/modules', {
           method: 'POST',
@@ -218,7 +218,7 @@ export default function AdminModules() {
         });
         const json = await res.json();
         if (!res.ok || !json.success) throw new Error(json.error || 'Failed to create module');
-        toast.success('Module created');
+        toast.success(t('modules.moduleCreated'));
       }
       closeModal();
       fetchData();
@@ -241,7 +241,7 @@ export default function AdminModules() {
       const res = await fetch(`/api/admin/modules/${encodeURIComponent(deleteTarget.id)}`, { method: 'DELETE' });
       const json = await res.json();
       if (!res.ok || !json.success) throw new Error(json.error || 'Failed to delete module');
-      toast.success('Module deleted');
+      toast.success(t('success.deleted'));
       setDeleteTarget(null);
       fetchData();
     } catch (e: unknown) {
@@ -263,7 +263,7 @@ export default function AdminModules() {
       });
       const json = await res.json();
       if (!res.ok || !json.success) throw new Error(json.error || 'Failed to update status');
-      toast.success(`Module ${nextPublished ? 'published' : 'set to draft'}`);
+      toast.success(nextPublished ? t('modules.moduleActivated') : t('modules.moduleDeactivated'));
       fetchData();
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : 'Failed to update status';

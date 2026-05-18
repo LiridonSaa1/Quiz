@@ -126,7 +126,7 @@ export default function AdminAssignments() {
       setTeachers(t || []);
       setClasses(cl || []);
     } catch {
-      toast.error('Failed to load assignments');
+      toast.error(t('errors.loadFailed'));
     } finally {
       setLoading(false);
     }
@@ -165,7 +165,7 @@ export default function AdminAssignments() {
   };
 
   const handleSave = async () => {
-    if (!form.title.trim()) { toast.error('Title is required'); return; }
+    if (!form.title.trim()) { toast.error(t('modules.titleRequired')); return; }
     setSaving(true);
     try {
       const payload = {
@@ -181,11 +181,11 @@ export default function AdminAssignments() {
       const res = await authFetch(url, { method, body: JSON.stringify(payload) });
       const j = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error((j as any).error || 'Failed to save');
-      toast.success(editId ? 'Assignment updated' : 'Assignment created');
+      toast.success(editId ? t('teacher.assignments.assignmentUpdated') : t('teacher.assignments.assignmentCreated'));
       setShowModal(false);
       fetchData();
     } catch (e: any) {
-      toast.error(e.message || 'Failed to save');
+      toast.error(e.message || t('errors.saveFailed'));
     } finally {
       setSaving(false);
     }
@@ -194,11 +194,11 @@ export default function AdminAssignments() {
   const handleDelete = async (id: string) => {
     try {
       const res = await authFetch(`/api/teacher/assignments/${id}`, { method: 'DELETE' });
-      if (!res.ok) throw new Error('Failed to delete');
-      toast.success('Assignment deleted');
+      if (!res.ok) throw new Error(t('errors.deleteFailed'));
+      toast.success(t('teacher.assignments.assignmentDeleted'));
       setDeleteId(null);
       fetchData();
-    } catch { toast.error('Failed to delete'); }
+    } catch { toast.error(t('errors.deleteFailed')); }
   };
 
   const handleQuickPublish = async (id: string) => {
@@ -207,10 +207,10 @@ export default function AdminAssignments() {
         method: 'PATCH',
         body: JSON.stringify({ status: 'published' }),
       });
-      if (!res.ok) throw new Error('Failed to publish');
-      toast.success('Assignment published — students can now see it');
+      if (!res.ok) throw new Error(t('errors.saveFailed'));
+      toast.success(t('teacher.assignments.assignmentCreated'));
       fetchData();
-    } catch { toast.error('Failed to publish assignment'); }
+    } catch { toast.error(t('errors.saveFailed')); }
   };
 
   const getDueBadge = (due: string | null, status: AssignmentStatus) => {

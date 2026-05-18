@@ -1,0 +1,128 @@
+Kontrollo komplet aplikacionin dhe implemento sistem të plotë multilingual (i18n) për këto gjuhë:
+
+- Shqip (sq)
+- English (en)
+- Deutsch (de)
+- Français (fr)
+
+Detyra është:
+ÇDO tekst në aplikacion duhet të përkthehet dhe të mos mbetet asnjë tekst hardcoded.
+
+Kontrollo dhe përkthe:
+
+1. UI Elements
+- Buttons
+- Labels
+- Titles
+- Descriptions
+- Menus
+- Sidebar items
+- Navbar items
+- Tabs
+- Tooltips
+- Dropdowns
+- Empty states
+- Alerts
+- Toast messages
+- Success/Error messages
+- Warning messages
+- Validation messages
+
+2. Forms
+- Input labels
+- Input placeholders
+- Select placeholders
+- Search placeholders
+- Textarea placeholders
+- Checkbox labels
+- Radio labels
+- Upload text
+- Required field messages
+- Form validation errors
+
+3. Modals & Dialogs
+- Create modals
+- Edit modals
+- Delete confirmations
+- Warning dialogs
+- Success dialogs
+- Logout confirmation
+- Archive confirmation
+- Restore confirmation
+
+4. Tables & Data
+- Table headers
+- Pagination texts
+- Search texts
+- “No data found”
+- Loading texts
+- Filters
+- Sorting labels
+
+5. Authentication Pages
+- Login
+- Register
+- Forgot password
+- Reset password
+- Verify email
+- Logout messages
+
+6. Dashboard & Modules
+- Student dashboard
+- Teacher dashboard
+- Admin dashboard
+- Course modules
+- Quiz modules
+- Certificate modules
+- Notifications
+- Settings pages
+
+7. System Messages
+- API errors
+- Backend validation errors
+- Network errors
+- Unauthorized messages
+- Forbidden messages
+- 404 pages
+- Maintenance pages
+
+8. Translation System Requirements
+- Përdor strukturë profesionale i18n.
+- Mos lër asnjë tekst hardcoded.
+- Të gjitha tekstet të jenë reusable translation keys.
+- Organizo translation files sipas modules/pages.
+- Mbështet dynamic variables:
+  shembull:
+  "Welcome, {name}"
+  "You have {count} notifications"
+
+9. Language Switcher
+- Krijo language switcher global.
+- Ruaj gjuhën në:
+  - localStorage
+  - database/user settings nëse user është logged in.
+- Gjuha të mbahet pas refresh-it.
+
+10. RTL/LTR Ready
+- Struktura të jetë future-proof edhe për RTL languages.
+
+11. Performance
+- Lazy load translation files.
+- Mos ngarko të gjitha gjuhët menjëherë.
+- Optimizo rendering.
+
+12. Auto Scan
+Skano komplet projektin dhe gjej:
+- hardcoded texts
+- placeholders
+- alerts
+- modals
+- inline strings
+- validation messages
+- confirm dialogs
+- toast texts
+
+Dhe zëvendësoji me translation keys.
+
+13. Final Result
+Aplikacioni duhet të jetë 100% multilingual dhe çdo pjesë e UI të ndryshojë menjëherë kur ndryshohet gjuha.
