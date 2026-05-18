@@ -7123,8 +7123,32 @@ Assistant:`;
       if (profileErr) throw profileErr;
 
       const linkedTeacherId = profile?.teacher_id ? String(profile.teacher_id) : '';
+
+      // Helper: fetch ALL published courses (fallback when no teacher is linked or teacher_id column missing)
+      const fetchAllPublished = async () => {
+        let res = await supabaseAdmin
+          .from('courses')
+          .select('id, title, description, level, language, status, teacher_id, student_ids, total_students, total_lessons, short_description, category, created_at')
+          .eq('status', 'published')
+          .order('created_at', { ascending: false });
+        if (res.error && isMissingCoursesStudentIdsError(res.error)) {
+          res = await supabaseAdmin
+            .from('courses')
+            .select('id, title, description, level, language, status, teacher_id, total_students, total_lessons, short_description, category, created_at')
+            .eq('status', 'published')
+            .order('created_at', { ascending: false });
+        }
+        return res;
+      };
+
+      // If student has no linked teacher, return all published courses so they can see available ones
       if (!linkedTeacherId) {
-        return res.json({ success: true, courses: [] });
+        const fallbackRes = await fetchAllPublished();
+        const courses = (fallbackRes.data || []).map((c: any) => ({
+          ...c,
+          student_ids: Array.isArray(c.student_ids) ? c.student_ids : [],
+        }));
+        return res.json({ success: true, courses });
       }
 
       // Resolve all candidate IDs for the teacher (handles teachers table row id vs auth uid)
@@ -7140,7 +7164,7 @@ Assistant:`;
         .order('created_at', { ascending: false });
 
       if (coursesRes.error) {
-        // Fallback: maybe student_ids column missing — retry without it
+        // Fallback 1: student_ids column missing — retry without it
         if (isMissingCoursesStudentIdsError(coursesRes.error)) {
           coursesRes = await supabaseAdmin
             .from('courses')
@@ -7149,7 +7173,18 @@ Assistant:`;
             .eq('status', 'published')
             .order('created_at', { ascending: false });
         }
-        if (coursesRes.error) throw coursesRes.error;
+        // Fallback 2: teacher_id column missing — fetch all published courses
+        if (coursesRes.error) {
+          const fallbackRes = await fetchAllPublished();
+          if (!fallbackRes.error) {
+            const courses = (fallbackRes.data || []).map((c: any) => ({
+              ...c,
+              student_ids: Array.isArray(c.student_ids) ? c.student_ids : [],
+            }));
+            return res.json({ success: true, courses });
+          }
+          throw coursesRes.error;
+        }
       }
 
       const courses = (coursesRes.data || []).map((c: any) => ({

@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next';
 import { supabase } from '../../supabase';
 import StudentLayout from '../../components/layout/StudentLayout';
 import { authFetch } from '../../lib/apiUrl';
+import { isMissingCoursesStudentIdsError } from '../../lib/schemaErrors';
 import { selectPublishedQuizzesCompat } from '../../lib/quizzesCompat';
 import {
   BookOpen, Search, Clock, Users, Play, CheckCircle2,
@@ -327,12 +328,13 @@ export default function StudentCourses() {
           .contains('student_ids', [uid]),
         authFetch('/api/student/courses/available').then(r => r.json()).catch(() => ({ courses: [] })),
       ]);
-      if (enrolledCoursesRes.error) {
+      // Treat schema-missing errors (student_ids column absent) as empty — fall through to available courses
+      if (enrolledCoursesRes.error && !isMissingCoursesStudentIdsError(enrolledCoursesRes.error)) {
         setLoading(false);
         toast.error(enrolledCoursesRes.error.message || t('errors.loadFailed'));
         return;
       }
-      if (enrolledClassesRes.error) {
+      if (enrolledClassesRes.error && !isMissingCoursesStudentIdsError(enrolledClassesRes.error)) {
         setLoading(false);
         toast.error(enrolledClassesRes.error.message || t('errors.loadFailed'));
         return;
