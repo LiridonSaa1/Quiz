@@ -5,7 +5,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import { authFetch } from '../../lib/apiUrl';
 import {
   Presentation, Wand2, Sparkles, X, ChevronLeft, ChevronRight,
-  Monitor, Trash2, Download, Loader2, Check, GraduationCap, Briefcase, Layers,
+  Monitor, Trash2, Download, Loader2, Check, ClipboardList,
 } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { format } from 'date-fns';
@@ -21,11 +21,18 @@ interface Slide {
 interface PresentationRecord {
   id: string;
   title: string;
+  description?: string;
   theme: string;
   language: string;
   education_level?: string;
+  assignment_id?: string | null;
   slides: Slide[];
   created_at: string;
+}
+interface AssignmentOption {
+  id: string;
+  title: string;
+  courseTitle: string;
 }
 
 const THEMES = [
@@ -122,13 +129,38 @@ function SlidePresenter({ slides, theme, title, onClose }: { slides: Slide[]; th
 }
 
 /* ─── Generate Modal ─── */
-function GenerateModal({ onGenerated, onClose }: { onGenerated: (data: any, opts: any) => void; onClose: () => void }) {
+function GenerateModal({
+  onGenerated,
+  onClose,
+}: {
+  onGenerated: (data: any, opts: any) => void;
+  onClose: () => void;
+}) {
   const [topic, setTopic] = useState('');
+  const [description, setDescription] = useState('');
   const [slideCount, setSlideCount] = useState(7);
   const [theme, setTheme] = useState('modern');
   const [language, setLanguage] = useState('English');
   const [level, setLevel] = useState('General');
+  const [assignmentId, setAssignmentId] = useState<string>('');
+  const [assignments, setAssignments] = useState<AssignmentOption[]>([]);
+  const [loadingAssignments, setLoadingAssignments] = useState(true);
   const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    authFetch('/api/student/assignments')
+      .then(r => r.json())
+      .then(json => {
+        const list: AssignmentOption[] = (json.assignments || []).map((a: any) => ({
+          id: String(a.id),
+          title: String(a.title || 'Untitled'),
+          courseTitle: String(a.course_title || a.courseTitle || ''),
+        }));
+        setAssignments(list);
+      })
+      .catch(() => {})
+      .finally(() => setLoadingAssignments(false));
+  }, []);
 
   async function generate() {
     if (!topic.trim()) { toast.error('Please enter a topic'); return; }
@@ -140,7 +172,7 @@ function GenerateModal({ onGenerated, onClose }: { onGenerated: (data: any, opts
       });
       const json = await res.json();
       if (!res.ok) throw new Error(json.error || 'Generation failed');
-      onGenerated(json.data, { theme, language, educationLevel: level });
+      onGenerated(json.data, { theme, language, educationLevel: level, description, assignmentId: assignmentId || null });
     } catch (e: any) {
       toast.error(e.message || 'AI generation failed');
     } finally {
@@ -149,9 +181,9 @@ function GenerateModal({ onGenerated, onClose }: { onGenerated: (data: any, opts
   }
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
+    <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 overflow-y-auto">
       <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }}
-        className="bg-white rounded-3xl w-full max-w-lg overflow-hidden shadow-2xl">
+        className="bg-white rounded-3xl w-full max-w-lg overflow-hidden shadow-2xl my-4">
         <div className="bg-gradient-to-br from-indigo-600 via-violet-600 to-purple-700 p-8 relative">
           <div className="absolute inset-0 opacity-15" style={{
             backgroundImage: 'radial-gradient(circle at 2px 2px, white 1px, transparent 0)',
@@ -162,13 +194,63 @@ function GenerateModal({ onGenerated, onClose }: { onGenerated: (data: any, opts
           <h2 className="text-2xl font-bold text-white">AI Presentation Generator</h2>
           <p className="text-white/70 text-sm mt-1">Enter your topic and AI creates it instantly</p>
         </div>
+
         <div className="p-6 space-y-4">
+          {/* Assignment selector */}
+          <div>
+            <label className="block text-sm font-semibold text-slate-700 mb-2 flex items-center gap-2">
+              <ClipboardList className="w-4 h-4 text-indigo-400" />
+              Link to Assignment <span className="text-slate-400 font-normal">(optional)</span>
+            </label>
+            {loadingAssignments ? (
+              <div className="w-full border border-slate-200 rounded-xl px-4 py-3 text-sm text-slate-400 bg-slate-50 flex items-center gap-2">
+                <Loader2 className="w-4 h-4 animate-spin" /> Loading assignments...
+              </div>
+            ) : (
+              <select
+                value={assignmentId}
+                onChange={e => setAssignmentId(e.target.value)}
+                className="w-full border border-slate-200 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-400 bg-white"
+              >
+                <option value="">— No assignment —</option>
+                {assignments.map(a => (
+                  <option key={a.id} value={a.id}>
+                    {a.courseTitle ? `[${a.courseTitle}] ${a.title}` : a.title}
+                  </option>
+                ))}
+              </select>
+            )}
+            {!loadingAssignments && assignments.length === 0 && (
+              <p className="text-xs text-slate-400 mt-1">No published assignments found for your teacher.</p>
+            )}
+          </div>
+
+          {/* Topic */}
           <div>
             <label className="block text-sm font-semibold text-slate-700 mb-2">Topic *</label>
-            <input value={topic} onChange={e => setTopic(e.target.value)}
+            <input
+              value={topic}
+              onChange={e => setTopic(e.target.value)}
               placeholder="e.g. Photosynthesis, World War II, Artificial Intelligence..."
-              className="w-full border border-slate-200 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-400" />
+              className="w-full border border-slate-200 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-400"
+            />
           </div>
+
+          {/* Description */}
+          <div>
+            <label className="block text-sm font-semibold text-slate-700 mb-2">
+              Description <span className="text-slate-400 font-normal">(optional context for AI)</span>
+            </label>
+            <textarea
+              value={description}
+              onChange={e => setDescription(e.target.value)}
+              rows={3}
+              placeholder="Describe what the presentation should cover, key points, target audience, or any specific requirements..."
+              className="w-full border border-slate-200 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-400 resize-none leading-relaxed"
+            />
+          </div>
+
+          {/* Style */}
           <div>
             <label className="block text-sm font-semibold text-slate-700 mb-2">Style</label>
             <div className="grid grid-cols-2 gap-2">
@@ -187,6 +269,8 @@ function GenerateModal({ onGenerated, onClose }: { onGenerated: (data: any, opts
               ))}
             </div>
           </div>
+
+          {/* Slides / Language / Level */}
           <div className="grid grid-cols-3 gap-3">
             <div>
               <label className="block text-xs font-semibold text-slate-500 mb-1.5">Slides</label>
@@ -210,6 +294,7 @@ function GenerateModal({ onGenerated, onClose }: { onGenerated: (data: any, opts
               </select>
             </div>
           </div>
+
           <button onClick={generate} disabled={loading || !topic.trim()}
             className="w-full py-3.5 bg-gradient-to-r from-indigo-600 to-violet-600 text-white rounded-xl font-bold text-sm disabled:opacity-50 flex items-center justify-center gap-2 shadow-lg shadow-indigo-200">
             {loading ? <><Loader2 className="w-4 h-4 animate-spin" /> Generating...</> : <><Sparkles className="w-4 h-4" /> Generate with AI</>}
@@ -223,12 +308,25 @@ function GenerateModal({ onGenerated, onClose }: { onGenerated: (data: any, opts
 /* ─── Main Page ─── */
 export default function StudentPresentations() {
   const [presentations, setPresentations] = useState<PresentationRecord[]>([]);
+  const [assignments, setAssignments] = useState<AssignmentOption[]>([]);
   const [loading, setLoading] = useState(true);
   const [showGenerate, setShowGenerate] = useState(false);
   const [presenting, setPresenting] = useState<PresentationRecord | null>(null);
   const [saving, setSaving] = useState(false);
 
-  useEffect(() => { load(); }, []);
+  useEffect(() => {
+    load();
+    authFetch('/api/student/assignments')
+      .then(r => r.json())
+      .then(json => {
+        setAssignments((json.assignments || []).map((a: any) => ({
+          id: String(a.id),
+          title: String(a.title || 'Untitled'),
+          courseTitle: String(a.course_title || a.courseTitle || ''),
+        })));
+      })
+      .catch(() => {});
+  }, []);
 
   async function load() {
     setLoading(true);
@@ -250,7 +348,15 @@ export default function StudentPresentations() {
       }));
       const res = await authFetch('/api/presentations', {
         method: 'POST',
-        body: JSON.stringify({ title: data.title || 'My Presentation', theme: opts.theme, language: opts.language, education_level: opts.educationLevel, slides }),
+        body: JSON.stringify({
+          title: data.title || 'My Presentation',
+          description: opts.description || null,
+          theme: opts.theme,
+          language: opts.language,
+          education_level: opts.educationLevel,
+          assignment_id: opts.assignmentId || null,
+          slides,
+        }),
       });
       const json = await res.json();
       if (!res.ok) throw new Error(json.error);
@@ -293,6 +399,8 @@ export default function StudentPresentations() {
     win.document.close();
   }
 
+  const assignmentMap = Object.fromEntries(assignments.map(a => [a.id, a]));
+
   return (
     <StudentLayout>
       {presenting && <SlidePresenter slides={presenting.slides} theme={presenting.theme} title={presenting.title} onClose={() => setPresenting(null)} />}
@@ -300,18 +408,29 @@ export default function StudentPresentations() {
 
       <div className="space-y-6">
         {/* Header */}
-        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-          <div>
-            <h1 className="text-2xl font-bold text-slate-800 flex items-center gap-2">
-              <Presentation className="w-7 h-7 text-indigo-600" />
-              My Presentations
-            </h1>
-            <p className="text-slate-500 text-sm mt-1">Create AI-powered presentations for your classes</p>
+        <div className="relative rounded-3xl overflow-hidden bg-gradient-to-br from-slate-900 via-indigo-950 to-slate-900 p-8 shadow-2xl">
+          <div className="absolute top-0 right-0 w-72 h-72 bg-indigo-500/15 rounded-full blur-3xl pointer-events-none" />
+          <div className="absolute bottom-0 left-0 w-48 h-48 bg-violet-500/10 rounded-full blur-3xl pointer-events-none" />
+          <div className="relative flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+            <div>
+              <div className="inline-flex items-center gap-2 bg-white/10 border border-white/20 rounded-full px-3 py-1.5 mb-3">
+                <Presentation className="w-3.5 h-3.5 text-indigo-300" />
+                <span className="text-white/80 text-xs font-semibold">AI Presentations</span>
+              </div>
+              <h1 className="text-3xl font-black text-white">My Presentations</h1>
+              <p className="text-slate-400 text-sm mt-1">
+                {loading ? '...' : `${presentations.length} presentation${presentations.length !== 1 ? 's' : ''} created`}
+              </p>
+            </div>
+            <button
+              onClick={() => setShowGenerate(true)}
+              disabled={saving}
+              className="flex items-center gap-2 px-5 py-3 bg-gradient-to-r from-indigo-500 to-violet-500 hover:from-indigo-400 hover:to-violet-400 text-white rounded-2xl font-bold text-sm transition-all shadow-lg shadow-indigo-900/40 disabled:opacity-60 shrink-0"
+            >
+              {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Wand2 className="w-4 h-4" />}
+              {saving ? 'Saving...' : 'New with AI'}
+            </button>
           </div>
-          <button onClick={() => setShowGenerate(true)}
-            className="flex items-center gap-2 px-5 py-2.5 bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-500 hover:to-violet-500 text-white rounded-xl font-semibold text-sm transition-all shadow-lg shadow-indigo-200">
-            <Wand2 className="w-4 h-4" /> New with AI
-          </button>
         </div>
 
         {/* Hero Banner (shown only when empty) */}
@@ -328,7 +447,7 @@ export default function StudentPresentations() {
               </div>
               <div>
                 <h2 className="text-2xl font-bold text-white mb-2">Create Your First Presentation</h2>
-                <p className="text-white/75 mb-4">Just type a topic and AI will generate a complete, professional presentation with slides, content, and speaker notes.</p>
+                <p className="text-white/75 mb-4">Type a topic, link it to an assignment, and AI will generate a complete professional presentation with slides, content, and speaker notes.</p>
                 <button onClick={() => setShowGenerate(true)}
                   className="px-6 py-3 bg-white text-indigo-700 rounded-xl font-bold text-sm inline-flex items-center gap-2 hover:bg-indigo-50 transition-colors">
                   <Wand2 className="w-4 h-4" /> Generate with AI
@@ -343,7 +462,7 @@ export default function StudentPresentations() {
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
             {[...Array(3)].map((_, i) => (
               <div key={i} className="bg-slate-100 rounded-2xl overflow-hidden animate-pulse">
-                <div className="h-32 bg-slate-200" /><div className="p-4 space-y-2"><div className="h-4 bg-slate-200 rounded w-3/4" /><div className="h-3 bg-slate-100 rounded w-1/2" /></div>
+                <div className="h-36 bg-slate-200" /><div className="p-4 space-y-2"><div className="h-4 bg-slate-200 rounded w-3/4" /><div className="h-3 bg-slate-100 rounded w-1/2" /></div>
               </div>
             ))}
           </div>
@@ -354,10 +473,11 @@ export default function StudentPresentations() {
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
             {presentations.map((p, idx) => {
               const colors = THEME_META[p.theme] || THEME_META.modern;
+              const linkedAssignment = p.assignment_id ? assignmentMap[p.assignment_id] : null;
               return (
                 <motion.div key={p.id} initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: idx * 0.05 }}
                   className="bg-white rounded-2xl border border-slate-100 overflow-hidden hover:shadow-lg hover:border-slate-200 transition-all group">
-                  <div className={`h-32 bg-gradient-to-br ${colors.bg} flex flex-col justify-between p-5 relative overflow-hidden`}>
+                  <div className={`h-36 bg-gradient-to-br ${colors.bg} flex flex-col justify-between p-5 relative overflow-hidden`}>
                     <div className="absolute inset-0 opacity-10" style={{ backgroundImage: 'radial-gradient(circle at 2px 2px, white 1px, transparent 0)', backgroundSize: '20px 20px' }} />
                     <div className="flex items-start justify-between relative">
                       <span className="text-3xl">{p.slides[0]?.emoji || '📊'}</span>
@@ -369,7 +489,19 @@ export default function StudentPresentations() {
                     </div>
                   </div>
                   <div className="p-3">
-                    <p className="text-slate-400 text-xs mb-3">{format(new Date(p.created_at), 'MMM d, yyyy')}</p>
+                    {/* Description snippet */}
+                    {p.description && (
+                      <p className="text-xs text-slate-500 leading-relaxed line-clamp-2 mb-2">{p.description}</p>
+                    )}
+                    {/* Linked assignment badge */}
+                    {linkedAssignment ? (
+                      <div className="flex items-center gap-1.5 mb-2">
+                        <ClipboardList className="w-3 h-3 text-indigo-400 shrink-0" />
+                        <span className="text-xs text-indigo-600 font-semibold truncate">{linkedAssignment.title}</span>
+                      </div>
+                    ) : (
+                      <p className="text-slate-400 text-xs mb-2">{format(new Date(p.created_at), 'MMM d, yyyy')}</p>
+                    )}
                     <div className="grid grid-cols-3 gap-1.5">
                       <button onClick={() => setPresenting(p)}
                         className="col-span-2 flex items-center justify-center gap-1.5 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-semibold transition-colors">
