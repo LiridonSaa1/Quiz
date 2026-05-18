@@ -1069,13 +1069,6 @@ export async function createApp(options: CreateAppOptions = {}) {
       if (!message) return res.status(400).json({ error: "message is required" });
 
       const apiKey = (process.env.AI_INTEGRATIONS_GEMINI_API_KEY || process.env.GEMINI_API_KEY || "").trim();
-      if (!apiKey) return res.status(503).json({ error: "AI not configured. Add GEMINI_API_KEY to Secrets." });
-
-      const { GoogleGenAI } = await import("@google/genai");
-      const geminiBaseUrl = (process.env.AI_INTEGRATIONS_GEMINI_BASE_URL || "").trim();
-      const ai = geminiBaseUrl
-        ? new GoogleGenAI({ apiKey, httpOptions: { apiVersion: "", baseUrl: geminiBaseUrl } })
-        : new GoogleGenAI({ apiKey });
 
       const roleContext: Record<string, string> = {
         teacher: `You are an expert teaching assistant for an online educational platform. The teacher is currently on the "${page}" page (path: ${path || "unknown"}).
@@ -1111,17 +1104,40 @@ When giving instructions, number each step clearly. Be precise and technical whe
         .map((m) => `${m.role === "user" ? "User" : "Assistant"}: ${m.content}`)
         .join("\n");
 
-      const fullPrompt = `${systemPrompt}
+      const fullPrompt = `${historyText ? `Conversation so far:\n${historyText}\n\n` : ""}User: ${message}`;
 
-${historyText ? `Conversation so far:\n${historyText}\n\n` : ""}User: ${message}
-Assistant:`;
+      let reply = "";
 
-      const result = await ai.models.generateContent({
-        model: "gemini-2.5-flash",
-        contents: fullPrompt,
-      });
+      if (apiKey) {
+        const { GoogleGenAI } = await import("@google/genai");
+        const geminiBaseUrl = (process.env.AI_INTEGRATIONS_GEMINI_BASE_URL || "").trim();
+        const ai = geminiBaseUrl
+          ? new GoogleGenAI({ apiKey, httpOptions: { apiVersion: "", baseUrl: geminiBaseUrl } })
+          : new GoogleGenAI({ apiKey });
+        const result = await ai.models.generateContent({
+          model: "gemini-2.5-flash",
+          contents: `${systemPrompt}\n\n${fullPrompt}\nAssistant:`,
+        });
+        reply = (result.text || "").trim();
+      } else {
+        // Free fallback: Pollinations AI (no API key required)
+        const pollinationsRes = await fetch("https://text.pollinations.ai/", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            messages: [
+              { role: "system", content: systemPrompt },
+              ...history.slice(-8).map((m) => ({ role: m.role === "user" ? "user" : "assistant", content: m.content })),
+              { role: "user", content: message },
+            ],
+            model: "openai",
+          }),
+        });
+        if (!pollinationsRes.ok) throw new Error(`Pollinations AI error: ${pollinationsRes.status}`);
+        reply = (await pollinationsRes.text()).trim();
+      }
 
-      const reply = (result.text || "").trim() || "I'm sorry, I couldn't generate a response. Please try again.";
+      reply = reply || "I'm sorry, I couldn't generate a response. Please try again.";
       res.json({ success: true, reply });
     } catch (e: any) {
       res.status(500).json({ error: e?.message || "Failed to process chat message" });
@@ -10993,14 +11009,6 @@ Assistant:`;
 
       const count = Math.min(Math.max(Number(slideCount) || 8, 3), 20);
       const apiKey = (process.env.AI_INTEGRATIONS_GEMINI_API_KEY || process.env.GEMINI_API_KEY || '').trim();
-      if (!apiKey) return res.status(503).json({ error: 'AI not configured. Add GEMINI_API_KEY to Secrets.' });
-
-      const { GoogleGenAI } = await import('@google/genai');
-      const geminiBaseUrl = (process.env.AI_INTEGRATIONS_GEMINI_BASE_URL || '').trim();
-      const ai = new GoogleGenAI(geminiBaseUrl
-        ? { apiKey, httpOptions: { apiVersion: '', baseUrl: geminiBaseUrl } }
-        : { apiKey }
-      );
 
       const prompt = `You are an expert educational presentation creator. Generate a complete presentation about "${topic}".
 
@@ -11029,12 +11037,39 @@ Slide types: "title" (first slide), "content" (main slides), "quote", "stats", "
 Each content slide must have 3-5 bullet points. Keep content concise and educational.
 Make it engaging, modern, and appropriate for the education level.`;
 
-      const response = await ai.models.generateContent({
-        model: 'gemini-2.5-flash',
-        contents: prompt,
-      });
+      let rawText = '';
 
-      const rawText = response.text ?? '';
+      if (apiKey) {
+        // Use Gemini when key is available
+        const { GoogleGenAI } = await import('@google/genai');
+        const geminiBaseUrl = (process.env.AI_INTEGRATIONS_GEMINI_BASE_URL || '').trim();
+        const ai = new GoogleGenAI(geminiBaseUrl
+          ? { apiKey, httpOptions: { apiVersion: '', baseUrl: geminiBaseUrl } }
+          : { apiKey }
+        );
+        const response = await ai.models.generateContent({
+          model: 'gemini-2.5-flash',
+          contents: prompt,
+        });
+        rawText = response.text ?? '';
+      } else {
+        // Free fallback: Pollinations AI (no API key required)
+        const pollinationsRes = await fetch('https://text.pollinations.ai/', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            messages: [{ role: 'user', content: prompt }],
+            model: 'openai',
+            seed: 42,
+            jsonMode: true,
+          }),
+        });
+        if (!pollinationsRes.ok) {
+          throw new Error(`Pollinations AI error: ${pollinationsRes.status}`);
+        }
+        rawText = await pollinationsRes.text();
+      }
+
       // Extract JSON from response
       const jsonMatch = rawText.match(/\{[\s\S]*\}/);
       if (!jsonMatch) return res.status(500).json({ error: 'AI did not return valid JSON' });
