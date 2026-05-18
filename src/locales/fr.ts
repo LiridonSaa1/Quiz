@@ -66,6 +66,7 @@ const fr = {
   dashboard: {
     overview: 'Vue d\'ensemble', greeting: 'Bienvenue',
     goodMorning: 'Bonjour', goodAfternoon: 'Bon après-midi', goodEvening: 'Bonsoir',
+    greetingMsg: "Voici ce qui se passe dans vos cours aujourd'hui.",
     stats: {
       totalUsers: 'Total des utilisateurs', activeCourses: 'Cours actifs',
       avgQuizScore: 'Score moyen des quiz', certificates: 'Certificats',

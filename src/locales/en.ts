@@ -78,6 +78,7 @@ const en = {
     noResultsYet: 'No results yet',
     recentResults: 'Recent Results',
     availableQuizzes: 'Available Quizzes',
+    greetingMsg: "Here's what's happening in your courses today.",
     stats: {
       totalUsers: 'Total Users', activeCourses: 'Active Courses',
       avgQuizScore: 'Avg Quiz Score', certificates: 'Certificates',

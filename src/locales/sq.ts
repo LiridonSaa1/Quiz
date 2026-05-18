@@ -78,6 +78,7 @@ const sq = {
     noResultsYet: 'Ende pa rezultate',
     recentResults: 'Rezultate të Fundit',
     availableQuizzes: 'Teste të Disponueshme',
+    greetingMsg: 'Ja çfarë po ndodh në kurset tuaja sot.',
     stats: {
       totalUsers: 'Totali i Përdoruesve', activeCourses: 'Kurse Aktive',
       avgQuizScore: 'Nota Mesatare e Testit', certificates: 'Çertifikata',
