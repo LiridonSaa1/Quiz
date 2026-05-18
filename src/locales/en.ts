@@ -8,7 +8,7 @@ const en = {
     dashboard: 'Dashboard', courses: 'Courses', myCourses: 'My Courses', modules: 'Modules',
     lessons: 'Lessons', quizzes: 'Quizzes', exams: 'Exams', students: 'Students',
     myStudents: 'My Students', teachers: 'Teachers', classes: 'Classes',
-    assignments: 'Assignments', attendance: 'Attendance', certificates: 'Certificates',
+    assignments: 'Assignments', presentations: 'Presentations', attendance: 'Attendance', certificates: 'Certificates',
     liveSessions: 'Live Sessions', community: 'Community', announcements: 'Announcements',
     analytics: 'Analytics', reports: 'Reports', payments: 'Payments', invoices: 'Invoices',
     settings: 'Settings', branding: 'Branding', rolesPermissions: 'Roles & Permissions',

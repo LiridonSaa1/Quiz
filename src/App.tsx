@@ -60,6 +60,9 @@ import AdminDomain from './pages/admin/Domain';
 import AdminRoles from './pages/admin/Roles';
 import AdminProfile from './pages/admin/Profile';
 import AdminSecurityPage from './pages/admin/Security';
+import AdminPresentations from './pages/admin/Presentations';
+import TeacherPresentations from './pages/teacher/Presentations';
+import StudentPresentations from './pages/student/Presentations';
 import JoinClass from './pages/student/JoinClass';
 import Badges from './pages/student/Badges';
 import StudentDashboard from './pages/student/Dashboard';
@@ -358,6 +361,7 @@ function AdminRoutes({ features }: { features: FeatureFlags }) {
       <Route path="/quizzes" element={<AdminQuizzes />} />
       <Route path="/classes" element={<AdminClasses />} />
       <Route path="/assignments" element={<AdminAssignments />} />
+      <Route path="/presentations" element={<AdminPresentations />} />
       <Route path="/attendance" element={<AdminAttendance />} />
       <Route path="/certificates" element={<AdminCertificates />} />
       <Route path="/live-sessions" element={features.liveSessionsEnabled ? <AdminLiveSessions /> : <Navigate to="/not-found" replace />} />
@@ -399,6 +403,7 @@ function TeacherRoutes({ features }: { features: FeatureFlags }) {
       <Route path="/lessons" element={<TeacherLessons />} />
       <Route path="/lessons/:lessonId/content" element={<TeacherLessonContentManager />} />
       <Route path="/assignments" element={<TeacherAssignments />} />
+      <Route path="/presentations" element={<TeacherPresentations />} />
       <Route path="/attendance" element={<TeacherAttendance />} />
       <Route path="/certificates" element={<TeacherCertificates />} />
       <Route path="/live-sessions" element={features.liveSessionsEnabled ? <TeacherLiveSessions /> : <Navigate to="/not-found" replace />} />
@@ -424,6 +429,7 @@ function StudentRoutes({ features }: { features: FeatureFlags }) {
       <Route path="/quizzes" element={<StudentQuizzes />} />
       <Route path="/assignments" element={<StudentAssignments />} />
       <Route path="/assignments/:assignmentId" element={<StudentAssignmentDetail />} />
+      <Route path="/presentations" element={<StudentPresentations />} />
       <Route path="/progress" element={<StudentProgress />} />
       <Route path="/results" element={<StudentResults />} />
       <Route path="/certificates" element={<StudentCertificates />} />

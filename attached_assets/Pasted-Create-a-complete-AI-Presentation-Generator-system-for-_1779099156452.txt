@@ -1,0 +1,165 @@
+Create a complete AI Presentation Generator system for an online learning platform like Britanika School.
+
+The system should allow students and teachers to automatically generate modern presentations using AI.
+
+Features required:
+
+1. Presentation Creation
+
+* User enters:
+
+  * presentation topic
+  * language
+  * number of slides
+  * presentation style (modern, business, education, minimal)
+  * education level
+* AI automatically generates:
+
+  * presentation title
+  * slide structure
+  * slide titles
+  * bullet point content
+  * conclusion slide
+  * speaking notes for each slide
+
+2. AI Content Generation
+
+* Use OpenAI API or Groq API
+* Generate concise educational content
+* Make content readable and presentation-friendly
+* Avoid large paragraphs
+* Use bullet points and summaries
+
+3. Slide Editor
+
+* Allow editing:
+
+  * title
+  * text
+  * images
+  * colors
+  * layout
+* Add drag-and-drop slide reordering
+* Auto-save presentation changes
+
+4. Presentation Design
+
+* Use modern animated presentation UI similar to:
+
+  * Gamma
+  * Canva
+  * Prezi
+* Use Reveal.js for slide rendering
+* Add smooth transitions and animations
+
+5. Database Structure
+   Store presentations in database:
+
+* id
+* user_id
+* title
+* description
+* theme
+* language
+* slides (JSON)
+* created_at
+* updated_at
+
+Each slide should store:
+
+* title
+* content
+* image
+* notes
+* animation
+* order
+
+6. Export Features
+   Allow export to:
+
+* PDF
+* PowerPoint (.pptx)
+* Shareable presentation link
+
+Use:
+
+* PptxGenJS for PowerPoint export
+* jsPDF/html2pdf for PDF export
+
+7. AI Speaking Assistant
+   Generate:
+
+* presenter notes
+* short speech suggestions
+* “What to say” section for every slide
+
+8. User Dashboard
+   Users can:
+
+* create presentations
+* edit presentations
+* duplicate presentations
+* delete presentations
+* present in fullscreen mode
+* share presentations
+
+9. Multi-role Support
+
+* Student role
+* Teacher role
+* Admin role
+
+Teachers can:
+
+* review student presentations
+* leave comments
+* assign presentation topics
+
+10. UI/UX Requirements
+
+* Modern glassmorphism UI
+* Responsive design
+* Dark/light mode
+* Beautiful animated cards
+* Smooth loading states
+* Skeleton loaders
+* Disable buttons while submitting
+* Toast notifications for success/errors
+
+11. Recommended Stack
+    Frontend:
+
+* Vue 3 or React
+* Tailwind CSS
+* Reveal.js
+
+Backend:
+
+* Laravel API
+
+AI:
+
+* OpenAI API or Groq API
+
+Storage:
+
+* MySQL/PostgreSQL
+
+12. Additional Features
+
+* AI-generated quiz from presentation
+* AI-generated images per slide
+* Voice narration support
+* Real-time collaborative editing
+* Presentation analytics
+
+Generate:
+
+* complete architecture
+* frontend components
+* backend API structure
+* database schema
+* AI prompts
+* export system
+* best UX practices
+* scalable multi-tenant structure

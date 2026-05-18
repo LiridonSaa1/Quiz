@@ -10622,6 +10622,218 @@ Assistant:`;
     } catch (e: any) { res.status(500).json({ error: e.message }); }
   });
 
+  // ── PRESENTATIONS ──────────────────────────────────────────────────────────
+  // Auto-migrate presentations table
+  async function ensurePresentationsTable() {
+    try {
+      const { error } = await supabaseAdmin.from('presentations').select('id').limit(1);
+      if (error && (error.message.includes('does not exist') || error.code === '42P01')) {
+        // Table doesn't exist — create it via poolQuery
+        await poolQuery(`
+          CREATE TABLE IF NOT EXISTS presentations (
+            id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            user_id UUID NOT NULL,
+            title TEXT NOT NULL,
+            description TEXT,
+            theme TEXT NOT NULL DEFAULT 'modern',
+            language TEXT NOT NULL DEFAULT 'en',
+            education_level TEXT,
+            slides JSONB NOT NULL DEFAULT '[]',
+            is_public BOOLEAN NOT NULL DEFAULT false,
+            created_at TIMESTAMPTZ DEFAULT NOW(),
+            updated_at TIMESTAMPTZ DEFAULT NOW()
+          )
+        `).catch(() => null);
+        await poolQuery(`CREATE INDEX IF NOT EXISTS presentations_user_id_idx ON presentations(user_id)`).catch(() => null);
+        console.log('[presentations] Table created ✓');
+      }
+    } catch (e: any) {
+      console.warn('[presentations] Migration check:', e?.message);
+    }
+  }
+  void ensurePresentationsTable();
+
+  // GET /api/presentations — list presentations (admin: all, teacher/student: own)
+  app.get('/api/presentations', async (req: Request, res: Response) => {
+    try {
+      const { data: { user }, error: authErr } = await supabaseAdmin.auth.getUser(
+        req.headers.authorization?.replace('Bearer ', '') || ''
+      );
+      if (authErr || !user) return res.status(401).json({ error: 'Unauthorized' });
+
+      const { data: profile } = await supabaseAdmin
+        .from('profiles').select('role').eq('id', user.id).single();
+
+      let query = supabaseAdmin
+        .from('presentations')
+        .select('id, user_id, title, description, theme, language, education_level, is_public, slides, created_at, updated_at')
+        .order('created_at', { ascending: false });
+
+      if (profile?.role !== 'admin') {
+        query = query.eq('user_id', user.id);
+      }
+
+      const { data, error } = await query;
+      if (error) throw error;
+      res.json({ success: true, presentations: data || [] });
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  // GET /api/presentations/:id — get single presentation
+  app.get('/api/presentations/:id', async (req: Request, res: Response) => {
+    try {
+      const { data: { user }, error: authErr } = await supabaseAdmin.auth.getUser(
+        req.headers.authorization?.replace('Bearer ', '') || ''
+      );
+      if (authErr || !user) return res.status(401).json({ error: 'Unauthorized' });
+
+      const { data, error } = await supabaseAdmin
+        .from('presentations').select('*').eq('id', req.params.id).single();
+      if (error) throw error;
+
+      const { data: profile } = await supabaseAdmin
+        .from('profiles').select('role').eq('id', user.id).single();
+      if (profile?.role !== 'admin' && data.user_id !== user.id && !data.is_public) {
+        return res.status(403).json({ error: 'Forbidden' });
+      }
+      res.json({ success: true, presentation: data });
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  // POST /api/presentations — create presentation
+  app.post('/api/presentations', async (req: Request, res: Response) => {
+    try {
+      const { data: { user }, error: authErr } = await supabaseAdmin.auth.getUser(
+        req.headers.authorization?.replace('Bearer ', '') || ''
+      );
+      if (authErr || !user) return res.status(401).json({ error: 'Unauthorized' });
+
+      const { title, description, theme, language, education_level, slides, is_public } = req.body;
+      const { data, error } = await supabaseAdmin.from('presentations').insert({
+        user_id: user.id, title, description, theme: theme || 'modern',
+        language: language || 'en', education_level, slides: slides || [],
+        is_public: is_public || false,
+      }).select().single();
+      if (error) throw error;
+      res.json({ success: true, presentation: data });
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  // PUT /api/presentations/:id — update presentation
+  app.put('/api/presentations/:id', async (req: Request, res: Response) => {
+    try {
+      const { data: { user }, error: authErr } = await supabaseAdmin.auth.getUser(
+        req.headers.authorization?.replace('Bearer ', '') || ''
+      );
+      if (authErr || !user) return res.status(401).json({ error: 'Unauthorized' });
+
+      const { data: existing } = await supabaseAdmin
+        .from('presentations').select('user_id').eq('id', req.params.id).single();
+      const { data: profile } = await supabaseAdmin
+        .from('profiles').select('role').eq('id', user.id).single();
+      if (profile?.role !== 'admin' && existing?.user_id !== user.id) {
+        return res.status(403).json({ error: 'Forbidden' });
+      }
+
+      const { title, description, theme, language, education_level, slides, is_public } = req.body;
+      const { data, error } = await supabaseAdmin.from('presentations')
+        .update({ title, description, theme, language, education_level, slides, is_public, updated_at: new Date().toISOString() })
+        .eq('id', req.params.id).select().single();
+      if (error) throw error;
+      res.json({ success: true, presentation: data });
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  // DELETE /api/presentations/:id — delete presentation
+  app.delete('/api/presentations/:id', async (req: Request, res: Response) => {
+    try {
+      const { data: { user }, error: authErr } = await supabaseAdmin.auth.getUser(
+        req.headers.authorization?.replace('Bearer ', '') || ''
+      );
+      if (authErr || !user) return res.status(401).json({ error: 'Unauthorized' });
+
+      const { data: existing } = await supabaseAdmin
+        .from('presentations').select('user_id').eq('id', req.params.id).single();
+      const { data: profile } = await supabaseAdmin
+        .from('profiles').select('role').eq('id', user.id).single();
+      if (profile?.role !== 'admin' && existing?.user_id !== user.id) {
+        return res.status(403).json({ error: 'Forbidden' });
+      }
+
+      const { error } = await supabaseAdmin.from('presentations').delete().eq('id', req.params.id);
+      if (error) throw error;
+      res.json({ success: true });
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  // POST /api/presentations/generate — AI-generate slide content via Gemini
+  app.post('/api/presentations/generate', async (req: Request, res: Response) => {
+    try {
+      const { data: { user }, error: authErr } = await supabaseAdmin.auth.getUser(
+        req.headers.authorization?.replace('Bearer ', '') || ''
+      );
+      if (authErr || !user) return res.status(401).json({ error: 'Unauthorized' });
+
+      const { topic, language, slideCount, style, educationLevel } = req.body;
+      if (!topic) return res.status(400).json({ error: 'Topic is required' });
+
+      const count = Math.min(Math.max(Number(slideCount) || 8, 3), 20);
+      const apiKey = (process.env.AI_INTEGRATIONS_GEMINI_API_KEY || process.env.GEMINI_API_KEY || '').trim();
+      if (!apiKey) return res.status(503).json({ error: 'AI not configured. Add GEMINI_API_KEY to Secrets.' });
+
+      const { GoogleGenAI } = await import('@google/genai');
+      const geminiBaseUrl = (process.env.AI_INTEGRATIONS_GEMINI_BASE_URL || '').trim();
+      const ai = new GoogleGenAI(geminiBaseUrl
+        ? { apiKey, httpOptions: { apiVersion: '', baseUrl: geminiBaseUrl } }
+        : { apiKey }
+      );
+
+      const prompt = `You are an expert educational presentation creator. Generate a complete presentation about "${topic}".
+
+Requirements:
+- Language: ${language || 'English'}
+- Number of slides: ${count}
+- Style: ${style || 'modern'} (modern = clean & bold, business = formal & structured, education = colorful & engaging, minimal = simple & elegant)
+- Education level: ${educationLevel || 'general'}
+
+Return ONLY valid JSON with this exact structure (no markdown, no extra text):
+{
+  "title": "Presentation Title",
+  "slides": [
+    {
+      "order": 1,
+      "type": "title",
+      "title": "Slide Title",
+      "content": ["bullet point 1", "bullet point 2", "bullet point 3"],
+      "notes": "Speaker notes for this slide. What to say.",
+      "emoji": "🎯"
+    }
+  ]
+}
+
+Slide types: "title" (first slide), "content" (main slides), "quote", "stats", "summary" (last slide).
+Each content slide must have 3-5 bullet points. Keep content concise and educational.
+Make it engaging, modern, and appropriate for the education level.`;
+
+      const response = await ai.models.generateContent({
+        model: 'gemini-2.0-flash',
+        contents: prompt,
+      });
+
+      const rawText = response.text ?? '';
+      // Extract JSON from response
+      const jsonMatch = rawText.match(/\{[\s\S]*\}/);
+      if (!jsonMatch) return res.status(500).json({ error: 'AI did not return valid JSON' });
+
+      const parsed = JSON.parse(jsonMatch[0]);
+      res.json({ success: true, data: parsed });
+    } catch (e: any) {
+      console.error('[presentations/generate]', e?.message);
+      res.status(500).json({ error: e?.message || 'AI generation failed' });
+    }
+  });
+  // ── END PRESENTATIONS ────────────────────────────────────────────────────────
+
   app.use((err: any, req: Request, res: Response, next: any) => {
     if (!err) return next();
     const status = Number(err?.status || err?.statusCode || 500);

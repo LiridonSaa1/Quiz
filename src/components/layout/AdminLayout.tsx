@@ -12,7 +12,7 @@ import {
   LayoutDashboard, BookOpen, Layers, PlayCircle, FileText, Users, ShieldCheck,
   School, ClipboardList, CalendarCheck, Award, Video, MessageSquare, Megaphone,
   BarChart3, FileBarChart, DollarSign, Receipt, Settings, Palette, Lock,
-  User, Shield, LogOut, Menu, X, GraduationCap
+  User, Shield, LogOut, Menu, X, GraduationCap, Presentation
 } from 'lucide-react';
 
 export default function AdminLayout({ children }: { children: React.ReactNode }) {
@@ -46,9 +46,10 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
     {
       key: 'learning',
       items: [
-        { icon: ClipboardList, label: t('nav.assignments'), path: '/admin/assignments' },
-        { icon: CalendarCheck, label: t('nav.attendance'),  path: '/admin/attendance' },
-        { icon: Award,         label: t('nav.certificates'),path: '/admin/certificates' },
+        { icon: ClipboardList, label: t('nav.assignments'),   path: '/admin/assignments' },
+        { icon: Presentation,  label: t('nav.presentations'),path: '/admin/presentations' },
+        { icon: CalendarCheck, label: t('nav.attendance'),   path: '/admin/attendance' },
+        { icon: Award,         label: t('nav.certificates'), path: '/admin/certificates' },
       ]
     },
     {
