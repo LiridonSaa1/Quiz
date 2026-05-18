@@ -2,7 +2,7 @@ import React, { useEffect, useState, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 import { supabase } from '../../supabase';
 import TeacherLayout from '../../components/layout/TeacherLayout';
-import { Users, UserPlus, Search, UserCheck, UserX, BookOpen, X, Pencil, Trash2 } from 'lucide-react';
+import { Users, UserPlus, Search, UserCheck, UserX, BookOpen, X, Pencil, Trash2, AlertTriangle } from 'lucide-react';
 import GenderAvatar from '../../components/ui/GenderAvatar';
 import { toast } from 'sonner';
 import { UserProfile, UserRole } from '../../types';
@@ -11,7 +11,7 @@ import AddStudentModal from '../../components/AddStudentModal';
 import { resolveTeacherIdCandidates } from '../../lib/teacherScope';
 import { apiUrl, authFetch } from '../../lib/apiUrl';
 import { isMissingCoursesStudentIdsError } from '../../lib/schemaErrors';
-import { motion } from 'motion/react';
+import { motion, AnimatePresence } from 'motion/react';
 import {
   AdminListPageShell,
   AdminListFilterBar,
@@ -20,6 +20,63 @@ import {
   ADMIN_LIST_CARD_GRID,
   ADMIN_LIST_ITEM_CARD,
 } from '../../components/admin/AdminListPageShell';
+
+function DeleteConfirmModal({
+  name,
+  onConfirm,
+  onCancel,
+  loading,
+}: {
+  name: string;
+  onConfirm: () => void;
+  onCancel: () => void;
+  loading: boolean;
+}) {
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
+      <motion.div
+        initial={{ opacity: 0, scale: 0.95 }}
+        animate={{ opacity: 1, scale: 1 }}
+        exit={{ opacity: 0, scale: 0.95 }}
+        transition={{ duration: 0.15 }}
+        className="bg-white rounded-2xl shadow-2xl w-full max-w-sm p-6"
+      >
+        <div className="flex flex-col items-center text-center gap-3">
+          <div className="w-14 h-14 rounded-full bg-rose-100 flex items-center justify-center mb-1">
+            <AlertTriangle className="w-7 h-7 text-rose-500" />
+          </div>
+          <h3 className="text-lg font-bold text-slate-900">Delete Student</h3>
+          <p className="text-sm text-slate-500 leading-relaxed">
+            Are you sure you want to delete <span className="font-semibold text-slate-700">{name}</span>? This action cannot be undone.
+          </p>
+        </div>
+        <div className="flex gap-3 mt-6">
+          <button
+            type="button"
+            onClick={onCancel}
+            disabled={loading}
+            className="flex-1 py-2.5 rounded-xl border border-slate-200 text-slate-600 font-semibold text-sm hover:bg-slate-50 transition-colors disabled:opacity-50"
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            onClick={onConfirm}
+            disabled={loading}
+            className="flex-1 py-2.5 rounded-xl bg-rose-600 hover:bg-rose-700 text-white font-semibold text-sm transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
+          >
+            {loading ? (
+              <span className="w-4 h-4 border-2 border-white/40 border-t-white rounded-full animate-spin" />
+            ) : (
+              <Trash2 className="w-4 h-4" />
+            )}
+            Delete
+          </button>
+        </div>
+      </motion.div>
+    </div>
+  );
+}
 
 function EmptyIllustration() {
   return (
@@ -72,6 +129,8 @@ export default function StudentManagement() {
   const [courseFilter, setCourseFilter] = useState('all');
   const [classFilter, setClassFilter] = useState('all');
   const [showAddModal, setShowAddModal] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState<StudentWithCourses | null>(null);
+  const [deleteLoading, setDeleteLoading] = useState(false);
 
   const fetchData = async () => {
     setLoading(true);
@@ -286,16 +345,24 @@ export default function StudentManagement() {
     }
   };
 
-  const deleteStudent = async (student: StudentWithCourses) => {
-    if (!window.confirm(t('teacher.studentManagement.deleteStudent', { name: student.displayName || student.email }))) return;
+  const deleteStudent = (student: StudentWithCourses) => {
+    setDeleteTarget(student);
+  };
+
+  const confirmDelete = async () => {
+    if (!deleteTarget) return;
+    setDeleteLoading(true);
     try {
-      const res = await authFetch(`/api/teacher/students/${encodeURIComponent(student.uid)}`, { method: 'DELETE' });
+      const res = await authFetch(`/api/teacher/students/${encodeURIComponent(deleteTarget.uid)}`, { method: 'DELETE' });
       const json = await res.json().catch(() => ({}));
       if (!res.ok || !json?.success) throw new Error(json?.error || t('teacher.studentManagement.failedDeleteStudent'));
       toast.success(t('teacher.studentManagement.studentDeleted'));
+      setDeleteTarget(null);
       fetchData();
     } catch (e: any) {
       toast.error(e?.message || t('teacher.studentManagement.failedDeleteStudent'));
+    } finally {
+      setDeleteLoading(false);
     }
   };
 
@@ -326,6 +393,16 @@ export default function StudentManagement() {
 
   return (
     <TeacherLayout>
+      <AnimatePresence>
+        {deleteTarget && (
+          <DeleteConfirmModal
+            name={deleteTarget.displayName || deleteTarget.email || 'this student'}
+            onConfirm={confirmDelete}
+            onCancel={() => setDeleteTarget(null)}
+            loading={deleteLoading}
+          />
+        )}
+      </AnimatePresence>
       <AdminListPageShell
         breadcrumbPortalLabel={t('nav.teacherPortal')}
         breadcrumbLabel={t('teacher.studentManagement.title')}
