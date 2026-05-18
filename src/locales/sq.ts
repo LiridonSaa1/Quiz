@@ -1814,7 +1814,7 @@ const sq = {
     exploreCourses: 'Eksploro kurset e disponueshme',
     takeQuizzes: 'Zgjidh kuize dhe testo njohuritë',
     earnCertificates: 'Merr çertifikata dhe gjurmo progresin',
-    getStarted: 'Fillo tani →',
+    getStarted: 'Vazhdo →',
   },
   guidedTour: {
     stepOf: 'Hapi {{step}} nga {{total}}',

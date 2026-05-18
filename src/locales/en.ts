@@ -1904,7 +1904,7 @@ const en = {
     exploreCourses: 'Explore available courses',
     takeQuizzes: 'Take quizzes and test your knowledge',
     earnCertificates: 'Earn certificates and track your progress',
-    getStarted: 'Get started →',
+    getStarted: 'Continue →',
   },
   guidedTour: {
     stepOf: 'Step {{step}} of {{total}}',
