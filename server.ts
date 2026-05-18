@@ -10437,11 +10437,24 @@ Assistant:`;
       const { assignmentId } = req.params;
       const { content } = req.body;
 
-      const { data: assignment } = await supabaseAdmin
-        .from('assignments')
-        .select('id, due_date, allow_late_submission, status')
-        .eq('id', assignmentId)
-        .maybeSingle();
+      let assignment: any = null;
+      {
+        const { data: aFull } = await supabaseAdmin
+          .from('assignments')
+          .select('id, due_date, allow_late_submission, status')
+          .eq('id', assignmentId)
+          .maybeSingle();
+        if (aFull) {
+          assignment = aFull;
+        } else {
+          const { data: aBasic } = await supabaseAdmin
+            .from('assignments')
+            .select('id, due_date, status')
+            .eq('id', assignmentId)
+            .maybeSingle();
+          if (aBasic) assignment = { ...aBasic, allow_late_submission: false };
+        }
+      }
 
       if (!assignment || assignment.status !== 'published') {
         return res.status(400).json({ error: 'Assignment not available' });
@@ -10580,7 +10593,11 @@ Assistant:`;
           allow_late_submission: Boolean(b.allow_late_submission),
           publish_at: publishAt, created_at: now, updated_at: now,
         };
-        const { data, error } = await supabaseAdmin.from('assignments').insert(base).select('id').single();
+        let { data, error } = await supabaseAdmin.from('assignments').insert(base).select('id').single();
+        if (error && /allow_late_submission|schema cache/i.test(error.message)) {
+          const { allow_late_submission: _dropped, ...baseWithout } = base as any;
+          ({ data, error } = await supabaseAdmin.from('assignments').insert(baseWithout).select('id').single());
+        }
         if (error) return res.status(500).json({ error: error.message });
         return res.json({ success: true, assignment: { id: data?.id } });
       }
@@ -10630,7 +10647,11 @@ Assistant:`;
         if (b.allow_late_submission !== undefined) payload.allow_late_submission = Boolean(b.allow_late_submission);
         if (b.submission_config !== undefined) payload.submission_config = b.submission_config;
         if ('publish_at' in b) payload.publish_at = b.publish_at ? new Date(String(b.publish_at)).toISOString() : null;
-        const { error } = await supabaseAdmin.from('assignments').update(payload).eq('id', aId);
+        let { error } = await supabaseAdmin.from('assignments').update(payload).eq('id', aId);
+        if (error && /allow_late_submission|schema cache/i.test(error.message)) {
+          const { allow_late_submission: _dropped, ...payloadWithout } = payload as any;
+          ({ error } = await supabaseAdmin.from('assignments').update(payloadWithout).eq('id', aId));
+        }
         if (error) return res.status(500).json({ error: error.message });
         return res.json({ success: true });
       }
@@ -11044,11 +11065,24 @@ Make it engaging, modern, and appropriate for the education level.`;
       const { assignmentId } = req.params;
       const { content, file_urls, link_urls } = req.body;
 
-      const { data: assignment } = await supabaseAdmin
-        .from('assignments')
-        .select('id, due_date, allow_late_submission, status')
-        .eq('id', assignmentId)
-        .maybeSingle();
+      let assignment: any = null;
+      {
+        const { data: aFull } = await supabaseAdmin
+          .from('assignments')
+          .select('id, due_date, allow_late_submission, status')
+          .eq('id', assignmentId)
+          .maybeSingle();
+        if (aFull) {
+          assignment = aFull;
+        } else {
+          const { data: aBasic } = await supabaseAdmin
+            .from('assignments')
+            .select('id, due_date, status')
+            .eq('id', assignmentId)
+            .maybeSingle();
+          if (aBasic) assignment = { ...aBasic, allow_late_submission: false };
+        }
+      }
 
       if (!assignment || assignment.status !== 'published') {
         return res.status(400).json({ error: 'Assignment not available' });
