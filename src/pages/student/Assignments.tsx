@@ -3,7 +3,7 @@ import { useTranslation } from 'react-i18next';
 import StudentLayout from '../../components/layout/StudentLayout';
 import { authFetch } from '../../lib/apiUrl';
 import { motion, AnimatePresence } from 'motion/react';
-import { ClipboardList, Search, Calendar, BookOpen, AlertCircle, CheckCircle2, Archive, FileText, ArrowRight, Play } from 'lucide-react';
+import { ClipboardList, Search, Calendar, AlertCircle, CheckCircle2, Archive, FileText, ArrowRight, Play } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { format, isPast, isToday } from 'date-fns';
 import { Link } from 'react-router-dom';
@@ -214,13 +214,6 @@ export default function StudentAssignments() {
                         <Play className="w-3.5 h-3.5" />
                         {t('student.assignments.viewDetails')}
                         <ArrowRight className="w-3.5 h-3.5 ml-auto" />
-                      </Link>
-                      <Link
-                        to="/student/courses"
-                        className="mt-2 inline-flex items-center justify-center gap-2 w-full py-2.5 rounded-2xl text-xs font-bold transition-all bg-slate-100 text-slate-600 hover:bg-slate-200"
-                      >
-                        <BookOpen className="w-3.5 h-3.5" />
-                        {t('student.assignments.openCourse')}
                       </Link>
                     </div>
                   </motion.div>
