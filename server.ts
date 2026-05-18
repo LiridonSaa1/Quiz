@@ -11044,67 +11044,68 @@ Requirements:
 - Style: ${style || 'modern'} (modern = clean & bold, business = formal & structured, education = colorful & engaging, minimal = simple & elegant)
 - Education level: ${educationLevel || 'general'}
 
-Return ONLY valid JSON with this exact structure (no markdown, no extra text):
-{
-  "title": "Presentation Title",
-  "slides": [
-    {
-      "order": 1,
-      "type": "title",
-      "title": "Slide Title",
-      "content": ["bullet point 1", "bullet point 2", "bullet point 3"],
-      "notes": "Detailed speaker notes: explain the slide topic in depth, provide context, examples, and transitions to the next slide. Write 3-5 sentences minimum.",
-      "emoji": "🎯"
-    }
-  ]
-}
+CRITICAL JSON RULES — you must follow these exactly:
+- Output ONLY raw JSON. No markdown, no code fences, no explanation before or after.
+- Every string value must be on a single line — NO literal newlines inside strings.
+- Use \\n (backslash-n) if you need a line break inside a string value.
+- Do NOT use any control characters inside strings.
 
-Slide types: "title" (first slide), "content" (main slides), "quote", "stats", "summary" (last slide).
-Each content slide must have 3-5 bullet points. Keep content concise and educational.
-Speaker notes MUST be detailed and thorough — write 3 to 5 full sentences per slide. Include: what to say out loud, real-world examples or context, and a smooth transition sentence to the next slide.
-Make it engaging, modern, and appropriate for the education level.`;
+Output this exact structure:
+{"title":"Presentation Title","slides":[{"order":1,"type":"title","title":"Slide Title","content":["bullet 1","bullet 2","bullet 3"],"notes":"Speaker notes as a single line. Multiple sentences separated by spaces, not newlines.","emoji":"🎯"}]}
 
-      /** Robustly parse AI JSON that may have unescaped newlines / stray chars in string values */
+Slide types: "title" (first slide only), "content" (main slides), "stats", "quote", "summary" (last slide only).
+Each content/stats/quote slide must have 3-5 bullet points.
+Speaker notes: 2-3 sentences on a single line with no line breaks.`;
+
+      /** Robustly parse AI JSON — handles markdown fences, bare newlines inside strings, stray control chars */
       function safeParseJSON(raw: string): any {
+        if (!raw || !raw.trim()) return null;
         // 1. Strip markdown fences
-        let text = raw.replace(/^```(?:json)?\s*/im, '').replace(/```\s*$/im, '').trim();
-        // 2. Extract the outermost {...} block
-        const m = text.match(/\{[\s\S]*\}/);
-        if (!m) return null;
-        text = m[0];
-        // 3. Direct parse
+        let text = raw.replace(/^```(?:json)?\s*/im, '').replace(/\s*```\s*$/im, '').trim();
+        // 2. Extract the outermost { } block (greedy — takes largest match)
+        const start = text.indexOf('{');
+        const end = text.lastIndexOf('}');
+        if (start === -1 || end === -1 || end <= start) return null;
+        text = text.slice(start, end + 1);
+        // 3. Direct parse (best case — AI followed instructions)
         try { return JSON.parse(text); } catch { /* fall through */ }
-        // 4. Replace literal newlines/tabs/CRs inside JSON string values with escaped equivalents
-        //    Strategy: replace any bare \n \r \t that sit inside a quoted string context
-        const cleaned = text.replace(
-          /"((?:[^"\\]|\\.)*)"/g,
-          (_match: string, inner: string) =>
-            '"' + inner
-              .replace(/\n/g, '\\n')
-              .replace(/\r/g, '\\r')
-              .replace(/\t/g, '\\t')
-            + '"'
-        );
-        try { return JSON.parse(cleaned); } catch { /* fall through */ }
-        // 5. Aggressive: strip all ASCII control chars (0x00-0x1F except space) outside of keys/values
-        const stripped = cleaned.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '');
+        // 4. Escape bare newlines/tabs/CRs that appear inside string values
+        //    Walk char by char to track whether we're inside a JSON string
+        let result = '';
+        let inStr = false;
+        let escape = false;
+        for (let i = 0; i < text.length; i++) {
+          const ch = text[i];
+          if (escape) { result += ch; escape = false; continue; }
+          if (ch === '\\' && inStr) { result += ch; escape = true; continue; }
+          if (ch === '"') { inStr = !inStr; result += ch; continue; }
+          if (inStr) {
+            if (ch === '\n') { result += '\\n'; continue; }
+            if (ch === '\r') { result += '\\r'; continue; }
+            if (ch === '\t') { result += '\\t'; continue; }
+          }
+          result += ch;
+        }
+        try { return JSON.parse(result); } catch { /* fall through */ }
+        // 5. Aggressive fallback: strip all remaining control chars except structural whitespace
+        const stripped = result.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, ' ');
         try { return JSON.parse(stripped); } catch { return null; }
       }
 
       let rawText = '';
 
       if (apiKey) {
-        // Use Gemini when key is available
         const { GoogleGenAI } = await import('@google/genai');
         const geminiBaseUrl = (process.env.AI_INTEGRATIONS_GEMINI_BASE_URL || '').trim();
         const ai = new GoogleGenAI(geminiBaseUrl
           ? { apiKey, httpOptions: { apiVersion: '', baseUrl: geminiBaseUrl } }
           : { apiKey }
         );
+        // Use gemini-2.0-flash — reliable JSON output, not a thinking model (2.5-flash thinking model
+        // returns empty text when responseMimeType is set, and produces newlines in strings without it)
         const response = await ai.models.generateContent({
-          model: 'gemini-2.5-flash',
+          model: 'gemini-2.0-flash',
           contents: prompt,
-          config: { responseMimeType: 'application/json' },  // force valid JSON output
         });
         rawText = response.text ?? '';
       } else {
@@ -11125,8 +11126,12 @@ Make it engaging, modern, and appropriate for the education level.`;
         rawText = await pollinationsRes.text();
       }
 
+      console.log(`[presentations/generate] rawText length=${rawText.length}, preview=${rawText.slice(0, 120).replace(/\n/g, ' ')}`);
       const parsed = safeParseJSON(rawText);
-      if (!parsed) return res.status(500).json({ error: 'AI did not return valid JSON. Please try again.' });
+      if (!parsed) {
+        console.error('[presentations/generate] safeParseJSON returned null. rawText (first 500):', rawText.slice(0, 500));
+        return res.status(500).json({ error: 'AI did not return valid JSON. Please try again.' });
+      }
       res.json({ success: true, data: parsed });
     } catch (e: any) {
       console.error('[presentations/generate]', e?.message);
