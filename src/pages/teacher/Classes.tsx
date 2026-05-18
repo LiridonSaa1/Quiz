@@ -71,7 +71,6 @@ const formatDate = (d: string | null) =>
 const emptyForm = {
   name: '',
   description: '',
-  course_id: '',
   status: 'active' as ClassStatus,
   start_date: '',
   end_date: '',
@@ -202,7 +201,6 @@ export default function TeacherClasses() {
     setForm({
       name: cls.name,
       description: cls.description || '',
-      course_id: cls.course_id || '',
       status: cls.status,
       start_date: cls.start_date ? cls.start_date.slice(0, 10) : '',
       end_date: cls.end_date ? cls.end_date.slice(0, 10) : '',
@@ -221,7 +219,6 @@ export default function TeacherClasses() {
       const payload: any = {
         name: form.name.trim(),
         description: form.description.trim() || null,
-        course_id: form.course_id || null,
         status: form.status || 'upcoming',
         start_date: form.start_date || null,
         end_date: form.end_date || null,
@@ -566,18 +563,6 @@ export default function TeacherClasses() {
                     placeholder="Optional short description..."
                     className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/30 focus:border-indigo-400 transition-all resize-none"
                   />
-                </div>
-
-                <div>
-                  <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1.5">Course</label>
-                  <StyledSelect
-                    value={form.course_id}
-                    onChange={e => setForm({ ...form, course_id: e.target.value })}
-                    wrapperClassName="w-full"
-                  >
-                    <option value="">None</option>
-                    {courses.map(c => <option key={c.id} value={c.id}>{c.title}</option>)}
-                  </StyledSelect>
                 </div>
 
                 <div className="grid grid-cols-2 gap-3">
