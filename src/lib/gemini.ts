@@ -36,7 +36,7 @@ const getOptionalClient = () => {
 async function ask(prompt: string): Promise<string> {
   const ai = getClient();
   const res = await ai.models.generateContent({
-    model: 'gemini-2.0-flash',
+    model: 'gemini-2.5-flash',
     contents: prompt,
   });
   return res.text ?? '';
@@ -810,7 +810,7 @@ Content:
 """${clipped}"""`;
 
     const res = await aiClient.models.generateContent({
-      model: 'gemini-2.0-flash',
+      model: 'gemini-2.5-flash',
       contents: prompt,
     });
 

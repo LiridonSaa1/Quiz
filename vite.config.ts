@@ -17,6 +17,7 @@ export default defineConfig(({mode}) => {
   const hmrHost = env.VITE_HMR_HOST || undefined;
   const hmrPort = Number(env.VITE_HMR_PORT) || undefined;
   const hmrClientPort = Number(env.VITE_HMR_CLIENT_PORT) || undefined;
+  const isReplit = !!(process.env.REPL_ID || process.env.REPLIT_DEV_DOMAIN);
   return {
     plugins: [react(), tailwindcss()],
     resolve: {
@@ -30,6 +31,11 @@ export default defineConfig(({mode}) => {
       allowedHosts: true,
       hmr: disableHmr
         ? false
+        : isReplit
+        ? {
+            clientPort: 443,
+            protocol: 'wss',
+          }
         : hmrHost
         ? {
             host: hmrHost,

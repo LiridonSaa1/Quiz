@@ -1117,7 +1117,7 @@ ${historyText ? `Conversation so far:\n${historyText}\n\n` : ""}User: ${message}
 Assistant:`;
 
       const result = await ai.models.generateContent({
-        model: "gemini-2.0-flash",
+        model: "gemini-2.5-flash",
         contents: fullPrompt,
       });
 
@@ -10968,12 +10968,11 @@ Make it engaging, modern, and appropriate for the education level.`;
       const isReplit = !!(process.env.REPL_ID || process.env.REPLIT_DEV_DOMAIN);
       let hmrConfig: any;
       if (isReplit) {
-        const replitPort = Number(process.env.PORT) || 5000;
         hmrConfig = {
           ...(options.httpServer ? { server: options.httpServer } : {}),
           protocol: "wss",
           host: process.env.REPLIT_DEV_DOMAIN || undefined,
-          clientPort: replitPort,
+          clientPort: 443,
         };
       } else {
         hmrConfig = options.httpServer ? { server: options.httpServer } : true;
