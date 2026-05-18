@@ -352,7 +352,11 @@ export default function TeacherCourses() {
                       <td className="px-5 py-4">
                         {course.level ? <span className="text-xs bg-slate-100 text-slate-600 px-2.5 py-1 rounded-lg font-medium">{course.level}</span> : <span className="text-slate-300 text-xs">—</span>}
                       </td>
-                      <td className="px-5 py-4"><span className="flex items-center gap-1.5 text-sm text-slate-600"><Users className="w-3.5 h-3.5 text-slate-400" />{students}</span></td>
+                      <td className="px-5 py-4">
+                        {students > 0
+                          ? <span className="flex items-center gap-1.5 text-sm text-slate-600"><Users className="w-3.5 h-3.5 text-slate-400" />{students}</span>
+                          : <span className="text-slate-300 text-xs">—</span>}
+                      </td>
                       <td className="px-5 py-4">
                         <span className={`inline-flex items-center gap-1.5 text-xs font-semibold px-2.5 py-1 rounded-lg ${course.status === 'published' ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-700'}`}>
                           <span className={`w-1.5 h-1.5 rounded-full ${course.status === 'published' ? 'bg-emerald-500' : 'bg-amber-500'}`} />
@@ -539,21 +543,23 @@ function TeacherCourseCard({ course, gradient, index, onEdit, onDelete, onToggle
         <h3 className="font-bold text-slate-900 text-sm line-clamp-1 mb-1 group-hover:text-violet-700 transition-colors">{name}</h3>
         <p className="text-slate-400 text-xs line-clamp-2 leading-relaxed flex-1">{course.description || 'No description provided.'}</p>
 
-        {/* Progress bar */}
-        <div className="mt-4">
-          <div className="flex items-center justify-between mb-1.5">
-            <span className="text-[10px] font-semibold text-slate-400 uppercase tracking-wide">Enrollment</span>
-            <span className="text-[10px] font-bold text-slate-500">{students} students</span>
+        {/* Progress bar — only show when at least 1 student enrolled */}
+        {students > 0 && (
+          <div className="mt-4">
+            <div className="flex items-center justify-between mb-1.5">
+              <span className="text-[10px] font-semibold text-slate-400 uppercase tracking-wide">Enrollment</span>
+              <span className="text-[10px] font-bold text-slate-500">{students} students</span>
+            </div>
+            <div className="h-1.5 bg-slate-100 rounded-full overflow-hidden">
+              <motion.div
+                initial={{ width: 0 }}
+                animate={{ width: `${progress}%` }}
+                transition={{ delay: index * 0.06 + 0.3, duration: 0.6, ease: 'easeOut' }}
+                className="h-full rounded-full bg-gradient-to-r from-violet-500 to-indigo-500"
+              />
+            </div>
           </div>
-          <div className="h-1.5 bg-slate-100 rounded-full overflow-hidden">
-            <motion.div
-              initial={{ width: 0 }}
-              animate={{ width: `${progress}%` }}
-              transition={{ delay: index * 0.06 + 0.3, duration: 0.6, ease: 'easeOut' }}
-              className="h-full rounded-full bg-gradient-to-r from-violet-500 to-indigo-500"
-            />
-          </div>
-        </div>
+        )}
 
         {/* Footer */}
         <div className="flex items-center justify-between pt-4 mt-2 border-t border-slate-50">
