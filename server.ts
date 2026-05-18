@@ -2531,7 +2531,7 @@ When giving instructions, number each step clearly. Be precise and technical whe
 
   // Route to seed the initial admin account
   app.get("/api/admin/seed", async (req, res) => {
-    const adminEmail = "bitanicaschool@gmail.com";
+    const adminEmail = "britanicaschool@gmail.com";
     const adminPassword = "Admin123!";
     
     try {
