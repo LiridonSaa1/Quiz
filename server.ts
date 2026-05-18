@@ -11064,6 +11064,33 @@ Each content slide must have 3-5 bullet points. Keep content concise and educati
 Speaker notes MUST be detailed and thorough — write 3 to 5 full sentences per slide. Include: what to say out loud, real-world examples or context, and a smooth transition sentence to the next slide.
 Make it engaging, modern, and appropriate for the education level.`;
 
+      /** Robustly parse AI JSON that may have unescaped newlines / stray chars in string values */
+      function safeParseJSON(raw: string): any {
+        // 1. Strip markdown fences
+        let text = raw.replace(/^```(?:json)?\s*/im, '').replace(/```\s*$/im, '').trim();
+        // 2. Extract the outermost {...} block
+        const m = text.match(/\{[\s\S]*\}/);
+        if (!m) return null;
+        text = m[0];
+        // 3. Direct parse
+        try { return JSON.parse(text); } catch { /* fall through */ }
+        // 4. Replace literal newlines/tabs/CRs inside JSON string values with escaped equivalents
+        //    Strategy: replace any bare \n \r \t that sit inside a quoted string context
+        const cleaned = text.replace(
+          /"((?:[^"\\]|\\.)*)"/g,
+          (_match: string, inner: string) =>
+            '"' + inner
+              .replace(/\n/g, '\\n')
+              .replace(/\r/g, '\\r')
+              .replace(/\t/g, '\\t')
+            + '"'
+        );
+        try { return JSON.parse(cleaned); } catch { /* fall through */ }
+        // 5. Aggressive: strip all ASCII control chars (0x00-0x1F except space) outside of keys/values
+        const stripped = cleaned.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '');
+        try { return JSON.parse(stripped); } catch { return null; }
+      }
+
       let rawText = '';
 
       if (apiKey) {
@@ -11077,6 +11104,7 @@ Make it engaging, modern, and appropriate for the education level.`;
         const response = await ai.models.generateContent({
           model: 'gemini-2.5-flash',
           contents: prompt,
+          config: { responseMimeType: 'application/json' },  // force valid JSON output
         });
         rawText = response.text ?? '';
       } else {
@@ -11097,11 +11125,8 @@ Make it engaging, modern, and appropriate for the education level.`;
         rawText = await pollinationsRes.text();
       }
 
-      // Extract JSON from response
-      const jsonMatch = rawText.match(/\{[\s\S]*\}/);
-      if (!jsonMatch) return res.status(500).json({ error: 'AI did not return valid JSON' });
-
-      const parsed = JSON.parse(jsonMatch[0]);
+      const parsed = safeParseJSON(rawText);
+      if (!parsed) return res.status(500).json({ error: 'AI did not return valid JSON. Please try again.' });
       res.json({ success: true, data: parsed });
     } catch (e: any) {
       console.error('[presentations/generate]', e?.message);
