@@ -10938,12 +10938,18 @@ When giving instructions, number each step clearly. Be precise and technical whe
       if (authErr || !user) return res.status(401).json({ error: 'Unauthorized' });
 
       const { title, description, theme, language, education_level, slides, is_public, assignment_id } = req.body;
-      const { data, error } = await supabaseAdmin.from('presentations').insert({
+      const insertPayload: Record<string, any> = {
         user_id: user.id, title, description, theme: theme || 'modern',
         language: language || 'en', education_level, slides: slides || [],
         is_public: is_public || false,
         assignment_id: assignment_id || null,
-      }).select().single();
+      };
+      let { data, error } = await supabaseAdmin.from('presentations').insert(insertPayload).select().single();
+      if (error && error.message?.includes('assignment_id')) {
+        // Schema cache doesn't know about assignment_id yet — insert without it
+        const { assignment_id: _drop, ...payloadWithout } = insertPayload;
+        ({ data, error } = await supabaseAdmin.from('presentations').insert(payloadWithout).select().single());
+      }
       if (error) throw error;
       res.json({ success: true, presentation: data });
     } catch (e: any) { res.status(500).json({ error: e.message }); }
@@ -10966,9 +10972,18 @@ When giving instructions, number each step clearly. Be precise and technical whe
       }
 
       const { title, description, theme, language, education_level, slides, is_public, assignment_id } = req.body;
-      const { data, error } = await supabaseAdmin.from('presentations')
-        .update({ title, description, theme, language, education_level, slides, is_public, assignment_id: assignment_id ?? null, updated_at: new Date().toISOString() })
-        .eq('id', req.params.id).select().single();
+      const updatePayload: Record<string, any> = {
+        title, description, theme, language, education_level, slides, is_public,
+        assignment_id: assignment_id ?? null,
+        updated_at: new Date().toISOString(),
+      };
+      let { data, error } = await supabaseAdmin.from('presentations')
+        .update(updatePayload).eq('id', req.params.id).select().single();
+      if (error && error.message?.includes('assignment_id')) {
+        const { assignment_id: _drop, ...payloadWithout } = updatePayload;
+        ({ data, error } = await supabaseAdmin.from('presentations')
+          .update(payloadWithout).eq('id', req.params.id).select().single());
+      }
       if (error) throw error;
       res.json({ success: true, presentation: data });
     } catch (e: any) { res.status(500).json({ error: e.message }); }
