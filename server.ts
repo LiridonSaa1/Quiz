@@ -7104,6 +7104,66 @@ Assistant:`;
 
   // ── STUDENT LIVE SESSIONS ───────────────────────────────────
 
+  // Return all published courses belonging to the student's assigned teacher.
+  // This powers the "Available Courses" / discover section in /student/courses.
+  app.get('/api/student/courses/available', async (req, res) => {
+    try {
+      const caller = await assertAuthenticated(req, res);
+      if (!caller) return;
+      if (caller.role !== 'student' && caller.role !== 'admin') {
+        return res.status(403).json({ error: 'Forbidden: student role required' });
+      }
+
+      // Get the student's assigned teacher_id from their profile
+      const { data: profile, error: profileErr } = await supabaseAdmin
+        .from('profiles')
+        .select('teacher_id')
+        .eq('id', caller.userId)
+        .single();
+      if (profileErr) throw profileErr;
+
+      const linkedTeacherId = profile?.teacher_id ? String(profile.teacher_id) : '';
+      if (!linkedTeacherId) {
+        return res.json({ success: true, courses: [] });
+      }
+
+      // Resolve all candidate IDs for the teacher (handles teachers table row id vs auth uid)
+      const teacherIds = await getTeacherIdCandidates(linkedTeacherId);
+      const scopedIds = teacherIds.length > 0 ? teacherIds : [linkedTeacherId];
+
+      // Fetch all published courses from those teacher IDs
+      let coursesRes = await supabaseAdmin
+        .from('courses')
+        .select('id, title, description, level, language, status, teacher_id, student_ids, total_students, total_lessons, short_description, category, created_at')
+        .in('teacher_id', scopedIds)
+        .eq('status', 'published')
+        .order('created_at', { ascending: false });
+
+      if (coursesRes.error) {
+        // Fallback: maybe student_ids column missing — retry without it
+        if (isMissingCoursesStudentIdsError(coursesRes.error)) {
+          coursesRes = await supabaseAdmin
+            .from('courses')
+            .select('id, title, description, level, language, status, teacher_id, total_students, total_lessons, short_description, category, created_at')
+            .in('teacher_id', scopedIds)
+            .eq('status', 'published')
+            .order('created_at', { ascending: false });
+        }
+        if (coursesRes.error) throw coursesRes.error;
+      }
+
+      const courses = (coursesRes.data || []).map((c: any) => ({
+        ...c,
+        student_ids: Array.isArray(c.student_ids) ? c.student_ids : [],
+      }));
+
+      return res.json({ success: true, courses });
+    } catch (e: any) {
+      console.error('GET /api/student/courses/available', e);
+      return res.status(500).json({ error: e?.message || 'Failed to load available courses' });
+    }
+  });
+
   // Student enroll in a published course owned by their assigned teacher.
   app.post('/api/student/courses/:courseId/enroll', async (req, res) => {
     try {

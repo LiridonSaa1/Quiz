@@ -316,7 +316,7 @@ export default function StudentCourses() {
 
       if (profileSnap.data) setStudentName(profileSnap.data.display_name || '');
 
-      const [enrolledCoursesRes, enrolledClassesRes] = await Promise.all([
+      const [enrolledCoursesRes, enrolledClassesRes, availableRes] = await Promise.all([
         supabase
           .from('courses')
           .select('*')
@@ -325,6 +325,7 @@ export default function StudentCourses() {
           .from('classes')
           .select('course_id,student_ids')
           .contains('student_ids', [uid]),
+        authFetch('/api/student/courses/available').then(r => r.json()).catch(() => ({ courses: [] })),
       ]);
       if (enrolledCoursesRes.error) {
         setLoading(false);
@@ -351,6 +352,19 @@ export default function StudentCourses() {
           rawCourses = [...rawCourses, ...classLinkedCoursesRes.data];
         }
       }
+
+      // Merge in courses from the teacher's available courses list (courses not yet enrolled)
+      const availableCourses: any[] = Array.isArray(availableRes?.courses) ? availableRes.courses : [];
+      const enrolledIds = new Set(rawCourses.map((c: any) => String(c?.id || '')).filter(Boolean));
+      for (const ac of availableCourses) {
+        if (!ac?.id) continue;
+        const acId = String(ac.id);
+        if (!enrolledIds.has(acId)) {
+          rawCourses.push({ ...ac, student_ids: Array.isArray(ac.student_ids) ? ac.student_ids : [] });
+          enrolledIds.add(acId);
+        }
+      }
+
       rawCourses = rawCourses.filter((c: any) => String(c?.status || '').toLowerCase() === 'published');
       if (rawCourses.length === 0) { setCourses([]); setLoading(false); return; }
 
