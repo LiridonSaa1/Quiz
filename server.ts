@@ -9026,6 +9026,7 @@ When giving instructions, number each step clearly. Be precise and technical whe
         rqCompletedSessions.set(s.id, buildRQReport(s));
         const board = rqLeaderboard(s);
         await rqBroadcast(sessionId, 'session_ended', { leaderboard: board });
+        rqDeleteSessionFromDB(sessionId).catch(() => {});
       } else {
         s.currentQuestionIndex = nextIndex;
         s.questionStartedAt = Date.now();
@@ -9038,10 +9039,95 @@ When giving instructions, number each step clearly. Be precise and technical whe
           timerSeconds: nq.timerSeconds,
           startedAt: s.questionStartedAt,
         });
+        rqPersistSession(s).catch(() => {});
         rqScheduleAutoNext(sessionId);
       }
     }, q.timerSeconds * 1000 + 500);
   };
+
+  // ─── LIVE QUIZ SESSION PERSISTENCE (survive server restarts) ─────────────────
+  const rqSerializeSession = (s: RQSession) => ({
+    id: s.id, quizId: s.quizId, quizTitle: s.quizTitle, hostId: s.hostId,
+    pin: s.pin, status: s.status, currentQuestionIndex: s.currentQuestionIndex,
+    questionStartedAt: s.questionStartedAt, questions: s.questions,
+    createdAt: s.createdAt, teamsEnabled: s.teamsEnabled, teamCount: s.teamCount,
+    teamNames: s.teamNames, participantTeams: s.participantTeams, teamScores: s.teamScores,
+    participants: Object.fromEntries(s.participants.entries()),
+  });
+
+  const rqPersistSession = async (s: RQSession) => {
+    try {
+      await supabaseAdmin.from('platform_config')
+        .upsert(
+          { section: `rq_session:${s.id}`, value: rqSerializeSession(s), updated_at: new Date().toISOString() },
+          { onConflict: 'section' }
+        );
+    } catch (e) { console.warn('[rq] persist failed:', e); }
+  };
+
+  const rqDeleteSessionFromDB = async (sessionId: string) => {
+    try {
+      await supabaseAdmin.from('platform_config').delete().eq('section', `rq_session:${sessionId}`);
+    } catch (e) { console.warn('[rq] delete from DB failed:', e); }
+  };
+
+  const rqRestoreSessionsFromDB = async () => {
+    try {
+      const { data, error } = await supabaseAdmin
+        .from('platform_config')
+        .select('section, value')
+        .like('section', 'rq_session:%');
+      if (error || !data) return;
+      let restored = 0;
+      for (const row of data) {
+        try {
+          const d = row.value as any;
+          if (!d?.id || !d?.status) continue;
+          if (d.status === 'ended') {
+            // Clean up ended sessions from DB
+            await supabaseAdmin.from('platform_config').delete().eq('section', row.section);
+            continue;
+          }
+          // Check if session expired (older than 3 hours)
+          const msLeft = (d.createdAt ?? 0) + 3 * 60 * 60 * 1000 - Date.now();
+          if (msLeft <= 0) {
+            await supabaseAdmin.from('platform_config').delete().eq('section', row.section);
+            continue;
+          }
+          // Reconstruct session
+          const session: RQSession = {
+            id: d.id, quizId: d.quizId, quizTitle: d.quizTitle, hostId: d.hostId,
+            pin: d.pin, status: d.status, currentQuestionIndex: d.currentQuestionIndex ?? 0,
+            questionStartedAt: d.questionStartedAt ?? null, questions: d.questions ?? [],
+            createdAt: d.createdAt ?? Date.now(),
+            teamsEnabled: Boolean(d.teamsEnabled), teamCount: d.teamCount ?? 2,
+            teamNames: Array.isArray(d.teamNames) ? d.teamNames : ['Red', 'Blue'],
+            participantTeams: d.participantTeams ?? {},
+            teamScores: d.teamScores ?? {},
+            participants: new Map(Object.entries(d.participants ?? {})),
+          };
+          rqSessions.set(session.id, session);
+          rqPins.set(session.pin, session.id);
+          // Reschedule auto-next if session is active
+          if (session.status === 'active') {
+            rqScheduleAutoNext(session.id);
+          }
+          // Auto-clean when remaining lifetime expires
+          setTimeout(() => {
+            const s = rqSessions.get(session.id);
+            if (s) { rqPins.delete(s.pin); rqSessions.delete(session.id); }
+            rqDeleteSessionFromDB(session.id).catch(() => {});
+          }, msLeft);
+          restored++;
+        } catch (e) { console.warn('[rq] restore session failed:', e); }
+      }
+      if (restored > 0) console.log(`[rq] Restored ${restored} live quiz session(s) from DB`);
+    } catch (e) { console.warn('[rq] restoreSessionsFromDB failed:', e); }
+  };
+
+  // Restore sessions immediately (fire-and-forget — server is already serving)
+  rqRestoreSessionsFromDB().catch(() => {});
+  // ─── END LIVE QUIZ SESSION PERSISTENCE ───────────────────────────────────────
 
   // Teacher: start a live quiz session
   app.post('/api/teacher/realtime-quiz/start', async (req: Request, res: Response) => {
@@ -9125,10 +9211,14 @@ When giving instructions, number each step clearly. Be precise and technical whe
       rqSessions.set(sessionId, session);
       rqPins.set(pin, sessionId);
 
+      // Persist session so it survives server restarts
+      await rqPersistSession(session);
+
       // Auto-clean sessions after 3 hours
       setTimeout(() => {
         const s = rqSessions.get(sessionId);
         if (s) { rqPins.delete(s.pin); rqSessions.delete(sessionId); }
+        rqDeleteSessionFromDB(sessionId).catch(() => {});
       }, 3 * 60 * 60 * 1000);
 
       res.json({ success: true, sessionId, pin, quizTitle: session.quizTitle, totalQuestions: rqQuestions.length });
@@ -9244,6 +9334,7 @@ When giving instructions, number each step clearly. Be precise and technical whe
           index: q.index, body: q.body, options: q.options, points: q.points,
           timerSeconds: q.timerSeconds, startedAt: session.questionStartedAt,
         });
+        rqPersistSession(session).catch(() => {});
         rqScheduleAutoNext(session.id);
         return res.json({ success: true, status: 'active', questionIndex: 0 });
       }
@@ -9257,6 +9348,7 @@ When giving instructions, number each step clearly. Be precise and technical whe
           rqCompletedSessions.set(session.id, buildRQReport(session));
           const board = rqLeaderboard(session);
           await rqBroadcast(session.id, 'session_ended', { leaderboard: board });
+          rqDeleteSessionFromDB(session.id).catch(() => {});
           return res.json({ success: true, status: 'ended', leaderboard: board });
         }
         session.currentQuestionIndex = nextIndex;
@@ -9266,6 +9358,7 @@ When giving instructions, number each step clearly. Be precise and technical whe
           index: nq.index, body: nq.body, options: nq.options, points: nq.points,
           timerSeconds: nq.timerSeconds, startedAt: session.questionStartedAt,
         });
+        rqPersistSession(session).catch(() => {});
         rqScheduleAutoNext(session.id);
         return res.json({ success: true, status: 'active', questionIndex: nextIndex });
       }
@@ -9292,6 +9385,7 @@ When giving instructions, number each step clearly. Be precise and technical whe
       rqCompletedSessions.set(session.id, buildRQReport(session));
       const board = rqLeaderboard(session);
       await rqBroadcast(session.id, 'session_ended', { leaderboard: board });
+      rqDeleteSessionFromDB(session.id).catch(() => {});
       res.json({ success: true, leaderboard: board });
     } catch (err) {
       res.status(500).json({ error: 'Failed to end session.' });
@@ -9319,6 +9413,7 @@ When giving instructions, number each step clearly. Be precise and technical whe
         await rqBroadcast(sessionId, 'participant_joined', {
           displayName: name, participantCount: session.participants.size,
         });
+        rqPersistSession(session).catch(() => {});
       } else {
         participant.status = 'connected';
         participant.displayName = name;
@@ -9448,6 +9543,8 @@ When giving instructions, number each step clearly. Be precise and technical whe
         teamLeaderboard,
         teamScores: session.teamScores,
       });
+
+      rqPersistSession(session).catch(() => {});
 
       res.json({
         success: true, isCorrect, pointsEarned, correctAnswer: q.correctAnswer, score: participant.score,
