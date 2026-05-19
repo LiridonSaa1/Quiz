@@ -1997,6 +1997,50 @@ When giving instructions, number each step clearly. Be precise and technical whe
   setTimeout(() => { void runWeeklyReportIfDue(); }, 30_000);
   setInterval(() => { void runWeeklyReportIfDue(); }, 6 * 60 * 60 * 1000);
 
+  // ── Server-side Live Session Auto-End ────────────────────────────────────────
+  // Runs every 5 minutes. Finds any session with status='live' whose
+  // started_at + duration_minutes has elapsed, and marks it as 'ended'.
+  // This handles the case where the teacher's browser closed before the timer fired.
+  const autoEndExpiredLiveSessions = async () => {
+    try {
+      const { data: liveSessions, error } = await supabaseAdmin
+        .from('live_sessions')
+        .select('id, started_at, duration_minutes')
+        .eq('status', 'live')
+        .not('started_at', 'is', null);
+      if (error || !liveSessions || liveSessions.length === 0) return;
+
+      const now = Date.now();
+      const expiredIds: string[] = [];
+      for (const s of liveSessions as Array<{ id: string; started_at: string; duration_minutes: number }>) {
+        const startMs = new Date(s.started_at).getTime();
+        const endMs = startMs + (s.duration_minutes || 60) * 60 * 1000;
+        // Add 2-minute grace period so client timer fires first
+        if (now > endMs + 2 * 60 * 1000) {
+          expiredIds.push(s.id);
+        }
+      }
+
+      if (expiredIds.length === 0) return;
+
+      const { error: updateErr } = await supabaseAdmin
+        .from('live_sessions')
+        .update({ status: 'ended', updated_at: new Date().toISOString() })
+        .in('id', expiredIds);
+      if (updateErr) {
+        console.warn('[live-sessions] auto-end update error:', updateErr.message);
+      } else {
+        console.log(`[live-sessions] Auto-ended ${expiredIds.length} expired session(s): ${expiredIds.join(', ')}`);
+      }
+    } catch (e) {
+      console.warn('[live-sessions] autoEndExpiredLiveSessions error:', e);
+    }
+  };
+  // Run once 1 minute after boot (sessions may exist from before restart), then every 5 minutes
+  setTimeout(() => { void autoEndExpiredLiveSessions(); }, 60_000);
+  setInterval(() => { void autoEndExpiredLiveSessions(); }, 5 * 60 * 1000);
+  // ── End Live Session Auto-End ─────────────────────────────────────────────────
+
   const extractPublicFeatureFlags = (settingsValue: any) => {
     const features = settingsValue?.features || {};
     return {
@@ -6505,6 +6549,12 @@ When giving instructions, number each step clearly. Be precise and technical whe
         return res.status(400).json({ error: 'No updatable fields provided' });
       }
 
+      // When transitioning to 'live', always record started_at in DB
+      // (client may not send it, e.g. when using the list page "Start" button)
+      if (req.body.status === 'live' && !update.started_at) {
+        update.started_at = new Date().toISOString();
+      }
+
       const { data, error } = await supabaseAdmin
         .from('live_sessions')
         .update(update)
@@ -6512,7 +6562,6 @@ When giving instructions, number each step clearly. Be precise and technical whe
       if (error) throw error;
 
       if (req.body.status === 'live') {
-        update.started_at = new Date().toISOString();
         const { data: parts, error: partsErr } = await supabaseAdmin
           .from('session_participants').select('user_id').eq('session_id', req.params.id);
         if (partsErr && !isSessionParticipantsTableMissing(partsErr)) throw partsErr;

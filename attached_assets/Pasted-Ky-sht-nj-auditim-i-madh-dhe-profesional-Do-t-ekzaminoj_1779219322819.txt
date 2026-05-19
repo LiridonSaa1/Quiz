@@ -1,0 +1,305 @@
+Ky është një auditim i madh dhe profesional. Do të ekzaminoj të gjithë kodin dhe sistemin në paralel, pastaj gjenero raportin e plotë.
+
+
+9 actions
+Po pres që të gjithë agjentët e analizës të përfundojnë...
+
+
+2 actions
+Të gjitha analizat u përfunduan. Ja raporti i plotë dhe profesional:
+
+RAPORT AUDITIMI — QuizMaster LMS Platform
+Auditim i plotë: Security · Performance · Scalability · UX · API
+🔴 KRITIKE — Duhen rregulluar menjëherë
+C-1 · Backend API Routes pa Auth Check
+Risk: KRITIK | Kategoria: Security/Authorization
+
+Disa route /api/admin/* nuk kanë assertAuthenticated ose isAdmin check:
+
+POST /api/admin/create-course     → nuk ka isAdmin check
+PATCH /api/admin/update-course/:id → nuk ka isAdmin check
+POST /api/admin/create-teacher    → potencialisht i pambrojtur
+
+Çdo person me knowledge të endpoint-it mund të krijojë/modifikojë kurse.
+
+Si reprodukohet: curl -X POST /api/admin/create-course -d '{...}' pa Authorization header.
+Si rregullohet: Shto if (!caller || caller.role !== 'admin') return res.status(403) në fillim të çdo route /api/admin/.
+
+C-2 · fetchAllAttemptRows() — Query katastrofike
+Risk: KRITIK | Kategoria: Performance/Scalability
+
+// server.ts ~line 1588
+const fetchAllAttemptRows = async () => {
+  const modern = await supabaseAdmin.from("quiz_attempts").select("*"); // TË GJITHA
+  ...
+}
+
+Ky funksion thirret nga GET /api/teacher/progress, GET /api/teacher/results, dhe disa route admin. Me 10,000+ student, kjo:
+
+Shkarkон MB të dhëna mbi network
+Bllokon Node.js event loop
+Risk i lartë për memory exhaustion dhe timeout
+Si rregullohet: Zëvendëso me query të scoped-it:
+
+supabaseAdmin.from("quiz_attempts").select("*").in("quiz_id", teacherQuizIds)
+
+C-3 · XSS nëpërmjet dangerouslySetInnerHTML pa sanitizim
+Risk: KRITIK | Kategoria: Security/XSS
+
+// src/pages/student/LessonDetail.tsx ~line 300
+<div dangerouslySetInnerHTML={{ __html: item.text_content }} />
+
+Nuk ka asnjë sanitizim (DOMPurify, sanitize-html) në server apo frontend. Nëse content i leksionit vjen nga user-generated input, ekzekutimi i JS është i mundur.
+
+Si rregullohet: Instalo dompurify dhe vendos sanitizim:
+
+import DOMPurify from 'dompurify';
+<div dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(item.text_content) }} />
+
+C-4 · Pa Code Splitting — Bundle 3.48 MB
+Risk: KRITIK | Kategoria: Performance
+
+dist/assets/index-CuZ7MUAN.js  3,484.84 kB │ gzip: 889.96 kB
+
+src/App.tsx importon 70+ faqe me import statik. Koha deri në interaktivitet (TTI) është shumë e lartë, veçanërisht në mobile me 3G/4G.
+
+Si rregullohet:
+
+// Para:
+import AdminDashboard from './pages/admin/Dashboard';
+// Pas:
+const AdminDashboard = React.lazy(() => import('./pages/admin/Dashboard'));
+// + <Suspense fallback={<LayoutPageSkeleton />}> rreth <Routes>
+
+🟠 SERIOZ — Rregullohen brenda javës
+S-1 · Mungesë Pagination në të gjithë listat
+Risk: SERIOZ | Kategoria: Scalability
+
+Endpoint-et e mëposhtme kthejnë të gjithë records pa limit:
+
+GET /api/admin/students → select('*') pa limit
+GET /api/admin/teachers → pa limit
+GET /api/admin/courses → pa limit
+GET /api/teacher/quizzes → pa limit
+GET /api/admin/users → pa limit
+Me 1,000+ users, këto query do të degrade ndjeshëm.
+
+Si rregullohet: Shto ?page=1&limit=20 query params:
+
+const page = parseInt(req.query.page as string) || 1;
+const limit = parseInt(req.query.limit as string) || 20;
+const from = (page - 1) * limit;
+supabaseAdmin.from('profiles').select('*').range(from, from + limit - 1)
+
+S-2 · Pa Rate Limiting — Vulnerable ndaj Brute Force dhe DoS
+Risk: SERIOZ | Kategoria: Security
+
+server.ts nuk ka asnjë express-rate-limit middleware. Çdo endpoint është i ekspozuar ndaj:
+
+Brute force attack në login
+DoS attack nëpërmjet flood-it të API calls
+Abuse i POST /api/auth/2fa/challenge
+Si rregullohet:
+
+import rateLimit from 'express-rate-limit';
+const apiLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 100 });
+const loginLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 10 });
+app.use('/api/', apiLimiter);
+app.use('/api/auth/', loginLimiter);
+
+S-3 · Internal Error Details Exposed ndaj Client
+Risk: SERIOZ | Kategoria: Security
+
+Shumë catch blocks kthejnë e.message direkt:
+
+// server.ts ~lines 11010, 11071, 11092+
+catch (e: any) { res.status(500).json({ error: e.message }); }
+
+Kjo ekspozon emrat e tabelave, kolonave, ose stack traces ndaj user-ave.
+
+Si rregullohet: Standardizo error responses:
+
+catch (e: any) {
+  console.error('[route-name] error:', e);
+  res.status(500).json({ error: 'Internal server error.' });
+}
+
+S-4 · /api/admin/seed dhe /api/test-telegram — Route-t e Rrezikshme
+Risk: SERIOZ | Kategoria: Security
+
+/api/admin/seed varet nga process.env.NODE_ENV !== 'production'. Nëse konfigurohet gabim ose depolohet pa env të saktë, mund të krijohet admin account.
+/api/test-telegram dhe /api/telegram/diagnostics janë publicly accessible dhe kthejnë informacion rreth konfigurimit intern.
+
+Si rregullohet: Kufizo me isAdmin check ose fshi komplet në production.
+
+S-5 · Race Condition në Live Quiz — 100+ Studento Njëkohësisht
+Risk: SERIOZ | Kategoria: Real-Time/Scalability
+
+Endpoint POST /api/student/realtime-quiz/:sessionId/answer:
+
+if (participant.answers[questionIndex] !== undefined) { // ← check
+  return res.status(400)...
+}
+participant.answers[questionIndex] = { ... }; // ← write (PA LOCK)
+participant.score += pointsEarned;
+
+Dy requests që arrijnë pothuajse njëkohësisht mund të kalojnë check-un para se njëri të bëjë write (Node.js eshte single-threaded por await rqPersistSession krijon interrupt point). Me 100+ studento, mundësia e double-submission rritet.
+
+Si rregullohet: Shto Set me "in-progress" tracking:
+
+const processingAnswers = new Set<string>(); // sessionId:userId:qIndex
+const key = `${sessionId}:${userId}:${questionIndex}`;
+if (processingAnswers.has(key)) return res.status(429).json({error: 'Processing...'});
+processingAnswers.add(key);
+try { /* logic */ } finally { processingAnswers.delete(key); }
+
+S-6 · File Upload — Pa Validim Tipi dhe Madhësie
+Risk: SERIOZ | Kategoria: Security
+
+Endpoint-et e upload-URL (/api/teacher/lessons/:id/contents/upload-url, etj.) nuk validojnë mimetype ose fileSize përpara se të gjenerojnë signed URL për Supabase Storage. Dikush mund të uploadojë skedarë .exe, .php, etj.
+
+Si rregullohet:
+
+const ALLOWED_TYPES = ['image/jpeg', 'image/png', 'application/pdf', 'video/mp4'];
+const MAX_SIZE_BYTES = 100 * 1024 * 1024; // 100MB
+if (!ALLOWED_TYPES.includes(req.body.contentType)) 
+  return res.status(400).json({ error: 'File type not allowed.' });
+if (req.body.fileSize > MAX_SIZE_BYTES)
+  return res.status(400).json({ error: 'File too large.' });
+
+🟡 MEDIUM — Rregullohen brenda muajit
+M-1 · Polling i Tepërt — Ngarkesë Serveri pa Nevojë
+Risk: MEDIUM | Kategoria: Performance
+
+Vendndodhja	Interval	Problem
+App.tsx line 301	çdo 10s	Maintenance mode check global
+RealtimeQuizHost.tsx line 113	çdo 2s	Edhe kur Realtime është aktiv
+StudentLayout.tsx	çdo 30s + 60s	Live sessions + announcements
+Me 100 user aktiv, RealtimeQuizHost gjeneron 3,000 request/minutë vetëm nga mësuesi host. Supabase ka rate-limit në free tier.
+
+Si rregullohet: Varo polling vetëm si fallback — ndalo kur Supabase Realtime channel është i lidhur me sukses:
+
+// Ndaloje polling kur Realtime është aktiv
+useEffect(() => {
+  const ch = supabase.channel(...).subscribe((status) => {
+    if (status === 'SUBSCRIBED') {
+      clearInterval(pollRef.current); // ndalo polling
+    }
+  });
+}, []);
+
+M-2 · Filtrimi In-Memory i të Dhënave të Mëdha
+Risk: MEDIUM | Kategoria: Performance
+
+Disa route kryejnë filtrimin pas se kanë ngarkuar të gjithë të dhënat:
+
+// src/pages/student/Dashboard.tsx ~line 346
+courses.slice(0, 4) // ← ngarkon TË GJITHË kurset, merr 4
+
+// discussions endpoint
+results.filter(d => d.body.includes(searchQuery)) // ← filtrim JS, jo SQL
+
+Si rregullohet: Zhvendos filtrimet në SQL:
+
+.from('courses').select('*').limit(4).order('created_at', {ascending: false})
+
+M-3 · Cache-Control: no-store për Assets Statike
+Risk: MEDIUM | Kategoria: Performance
+
+// server.ts ~lines 802, 823, 867
+res.setHeader('Cache-Control', 'no-store, no-cache');
+
+Kjo parandalon browser caching të JavaScript, CSS, dhe SVG files. Çdo page reload shkarkon gjithçka nga e para.
+
+Si rregullohet: Skedarë statik me hash duhet të kenë cache të gjatë:
+
+// Vite gjeneron hash në filename, kështu 1 vit cache është i sigurt
+res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+
+M-4 · Dark Mode — Implementim i Paplotë
+Risk: MEDIUM | Kategoria: UX
+
+Admin Branding lejon toggle-in e darkMode, por shumica e komponentëve produktion kanë hardcoded bg-white, text-slate-900 pa Tailwind dark: variants. Dark mode nuk funksionon plotësisht.
+
+M-5 · Mungesë CORS Konfigurimi Eksplicit
+Risk: MEDIUM | Kategoria: Security
+
+server.ts nuk ka app.use(cors({...})). Në production, kjo mund të lejojë ose bllokojë request-e gabimisht.
+
+Si rregullohet:
+
+import cors from 'cors';
+app.use(cors({
+  origin: process.env.ALLOWED_ORIGINS?.split(',') || ['https://yourdomain.replit.app'],
+  credentials: true,
+}));
+
+M-6 · N+1 Queries në Admin Students dhe Teacher Progress
+Risk: MEDIUM | Kategoria: Scalability
+
+GET /api/admin/students: Ngarkon të gjitha classes dhe courses tabelat në memorie dhe llogarit enrollment count me JavaScript loops.
+
+GET /api/teacher/progress: Ngarkon të gjithë quiz_attempts tabelën, pastaj filtron për teacher-in specifik.
+
+M-7 · Dashboard Pages — Over-fetching Paralel
+Risk: MEDIUM | Kategoria: Performance
+
+src/pages/student/Dashboard.tsx ekzekuton Promise.all me 5-6 query të mëdha njëkohësisht (courses, classes, attempts, sessions, etj.). Me 1,000+ records secila, kjo krijon load spike të madh në backend.
+
+🟢 MINOR — Optimizime UX/DX
+MI-1 · 2FA — Kodi i Paqëndrueshëm
+Komentarja në server.ts thotë "2FA has been removed" por routes ende ekzistojnë dhe generojnë kode që vetëm shfaqen në console (nuk dërgohen). Kjo krijon konfuzion.
+
+MI-2 · Translations — Strings të Hardcoded-uara Anglisht
+Error messages në server.ts dhe disa AI-related strings nuk janë të tradhuara, çon në UI inconsistent për gjuhë të tjera.
+
+MI-3 · Delete Confirmations — window.confirm() Native
+Disa faqe (LiveSessions, Classes) përdorin browser native confirm() dialog që duket primitive. Preferohen AlertDialog komponentë konsistentë.
+
+MI-4 · Tabela komplekse mobile — Overflow horizontal
+Tabela administrative (admin/Courses, admin/Students) nuk adaptohen mirë në ekrane shumë të vogla (<375px). Nevojitet overflow-x-auto wrapper ose dizajn alternativ.
+
+MI-5 · Accessibility — Butona Icon-only pa aria-label
+Shumë butona me vetëm ikon nuk kanë aria-label, duke e bërë platformën të paaccessible për screen readers.
+
+MI-6 · In-memory studentBadges, twoFaVerifiedUsers — Humbasin pas Restart
+Njësoj si sesionet e quiz (tashmë rregulluar), badge-t dhe 2FA verification state humbasin kur serveri riniset.
+
+TABELË PRIORITETESH
+ID	Problemi	Risk	Effort	Impakt Production
+C-1	Backend routes pa auth	🔴 Kritik	E ulët	Akses i paautorizuar
+C-2	fetchAllAttemptRows()	🔴 Kritik	E mesme	Crash serveri me 1K+ users
+C-3	XSS dangerouslySetInnerHTML	🔴 Kritik	E ulët	Token theft, account takeover
+C-4	Bundle 3.48MB pa code splitting	🔴 Kritik	E mesme	TTI shumë e lartë në mobile
+S-1	Pa pagination	🟠 Serioz	E mesme	Timeout me 1K+ records
+S-2	Pa rate limiting	🟠 Serioz	E ulët	DoS, brute force
+S-3	Error messages eksplicit	🟠 Serioz	E ulët	Info leakage
+S-4	Seed/test routes publike	🟠 Serioz	E ulët	Privilege escalation
+S-5	Race condition quiz answers	🟠 Serioz	E mesme	Double scoring
+S-6	Pa validim file upload	🟠 Serioz	E ulët	Malicious file upload
+M-1	Polling i tepërt	🟡 Medium	E ulët	Rate limit Supabase
+M-2	Filtrimi in-memory	🟡 Medium	E mesme	Slowdown me data të madhe
+M-3	Cache-Control: no-store	🟡 Medium	E ulët	Reload i ngadaltë
+M-5	Pa CORS konfigurim	🟡 Medium	E ulët	Cross-origin risk
+REKOMANDIME STRATEGJIKE
+1. Siguria (bëj tani):
+
+Audit çdo app.post/patch/delete route — verifiko se ka assertAuthenticated + role check
+Instalo dompurify + express-rate-limit — max 2 orë punë
+Kufizo ose fshi /api/admin/seed dhe /api/test-telegram në production
+2. Scalability (bëj para lansimit):
+
+Zëvendëso fetchAllAttemptRows() — kjo është bottleneck i vetëm i madh
+Shto pagination në të gjitha listat admin/teacher
+Shto indekse në Supabase: profiles(role), quiz_attempts(quiz_id, student_id), courses(teacher_id)
+3. Performance (optimizim gradual):
+
+Implemento React.lazy() — ndikon direkt në First Load dhe Lighthouse score
+Fshi Cache-Control: no-store nga assets me hash
+Reduzo polling me Realtime-first + polling fallback
+4. UX Polishing:
+
+Zëvendëso window.confirm() me AlertDialog komponent
+Shto aria-label në butona icon-only
+Plotëso dark mode me dark: Tailwind variants
+Platforma është solide si MVP — auth sistemi punon, RBAC ekziston, forms kanë loading states, Real-time quiz ka fallback polling, dhe persistimi i sesioneve u rregullua. Problemet kryesore janë scalability (fetchAllAttemptRows), security (routes pa auth check + XSS), dhe performance (bundle i madh). Duke adresuar C-1, C-2, C-3 dhe S-2, platforma është shumë më e gatshme për production me 1,000+ users.

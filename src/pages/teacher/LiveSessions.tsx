@@ -226,7 +226,7 @@ export default function TeacherLiveSessions() {
     try {
       const res = await authFetch(`/api/teacher/live-sessions/${id}`, {
         method: 'PATCH',
-        body: JSON.stringify({ status: 'live' }),
+        body: JSON.stringify({ status: 'live', started_at: new Date().toISOString() }),
       });
       const json = await res.json();
       if (!json.success) throw new Error(json.error);
