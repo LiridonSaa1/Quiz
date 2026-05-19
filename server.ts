@@ -1244,7 +1244,7 @@ When giving instructions, number each step clearly. Be precise and technical whe
     res.setHeader("X-Request-Id", requestId);
     res.on("finish", () => {
       const durationMs = Date.now() - startedAt;
-      res.setHeader("X-Response-Time", `${durationMs}ms`);
+      if (!res.headersSent) res.setHeader("X-Response-Time", `${durationMs}ms`);
 
       // Log slow API requests (>500ms) so bottlenecks are visible in console
       if (req.path.startsWith("/api") && durationMs > 500) {
