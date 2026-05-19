@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
+import DOMPurify from 'dompurify';
 import { useTranslation } from 'react-i18next';
 import { Link, useParams } from 'react-router-dom';
 import StudentLayout from '../../components/layout/StudentLayout';
@@ -297,7 +298,7 @@ export default function StudentLessonDetail() {
                       {item.type === 'text' && (
                         <div
                           className="prose prose-slate max-w-none"
-                          dangerouslySetInnerHTML={{ __html: item.text_content || `<p>${t('student.lessons.noTextContent')}</p>` }}
+                          dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(item.text_content || `<p>${t('student.lessons.noTextContent')}</p>`) }}
                         />
                       )}
                     </div>

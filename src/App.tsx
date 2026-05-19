@@ -1,88 +1,88 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { Suspense, lazy, useEffect, useRef, useState } from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import { Toaster, toast } from 'sonner';
 import { supabase } from './supabase';
 import { UserProfile } from './types';
 import { AppBootSkeleton } from './components/ui/Skeleton';
 
-// Pages
-import Login from './pages/Login';
-import AdminDashboard from './pages/AdminDashboard';
-import AdminStudents from './pages/admin/Students';
-import AdminTeachers from './pages/admin/Teachers';
-import AdminCourses from './pages/admin/Courses';
-import AdminCourseForm from './pages/admin/CourseForm';
-import TeacherDashboard from './pages/teacher/Dashboard';
-import TeacherClasses from './pages/teacher/Classes';
-import TeacherCourses from './pages/teacher/Courses';
-import TeacherCourseForm from './pages/teacher/CourseForm';
-import StudentManagement from './pages/teacher/StudentManagement';
-import QuizManagement from './pages/teacher/QuizManagement';
-import QuizBuilder from './pages/teacher/QuizBuilder';
-import RealtimeQuizHost from './pages/teacher/RealtimeQuizHost';
-import RealtimeQuizReports from './pages/teacher/RealtimeQuizReports';
-import RealtimeQuizPlay from './pages/student/RealtimeQuizPlay';
-import QuizTaking from './pages/student/QuizTaking';
-import QuizResults from './pages/student/QuizResults';
-import StudentProfile from './pages/student/Profile';
-import TeacherResults from './pages/teacher/Results';
-import TeacherModules from './pages/teacher/Modules';
-import TeacherLessons from './pages/teacher/Lessons';
-import TeacherLessonContentManager from './pages/teacher/LessonContentManager';
-import TeacherAssignments from './pages/teacher/Assignments';
-import TeacherAttendance from './pages/teacher/Attendance';
-import TeacherCertificates from './pages/teacher/Certificates';
-import TeacherLiveSessions from './pages/teacher/LiveSessions';
-import TeacherLiveSessionRoom from './pages/teacher/LiveSessionRoom';
-import TeacherCommunity from './pages/teacher/Community';
-import TeacherAnnouncements from './pages/teacher/Announcements';
-import TeacherProgress from './pages/teacher/Progress';
-import TeacherExams from './pages/teacher/Exams';
-import TeacherProfilePage from './pages/teacher/Profile';
-import AdminModules from './pages/admin/Modules';
-import AdminLessons from './pages/admin/Lessons';
-import AdminQuizzes from './pages/admin/Quizzes';
-import AdminClasses from './pages/admin/Classes';
-import AdminAssignments from './pages/admin/Assignments';
-import AdminAttendance from './pages/admin/Attendance';
-import AdminCertificates from './pages/admin/Certificates';
-import AdminLiveSessions from './pages/admin/LiveSessions';
-import AdminLiveSessionRoom from './pages/admin/LiveSessionRoom';
-import AdminCommunity from './pages/admin/Community';
-import AdminAnnouncements from './pages/admin/Announcements';
-import AdminAnalytics from './pages/admin/Analytics';
-import AdminReports from './pages/admin/Reports';
-import AdminPayments from './pages/admin/Payments';
-import AdminInvoices from './pages/admin/Invoices';
-import AdminSettings from './pages/admin/Settings';
-import AdminBranding from './pages/admin/Branding';
-import AdminDomain from './pages/admin/Domain';
-import AdminRoles from './pages/admin/Roles';
-import AdminProfile from './pages/admin/Profile';
-import AdminSecurityPage from './pages/admin/Security';
-import AdminPresentations from './pages/admin/Presentations';
-import TeacherPresentations from './pages/teacher/Presentations';
-import StudentPresentations from './pages/student/Presentations';
-import JoinClass from './pages/student/JoinClass';
-import Badges from './pages/student/Badges';
-import StudentDashboard from './pages/student/Dashboard';
-import StudentCourses from './pages/student/Courses';
-import StudentCourseDetail from './pages/student/CourseDetail';
-import ContinueLearning from './pages/student/ContinueLearning';
-import StudentLessons from './pages/student/Lessons';
-import StudentLessonDetail from './pages/student/LessonDetail';
-import StudentQuizzes from './pages/student/Quizzes';
-import StudentAssignments from './pages/student/Assignments';
-import StudentAssignmentDetail from './pages/student/AssignmentDetail';
-import StudentProgress from './pages/student/Progress';
-import StudentResults from './pages/student/Results';
-import StudentCertificates from './pages/student/Certificates';
-import StudentCommunity from './pages/student/Community';
-import StudentLiveClasses from './pages/student/LiveClasses';
-import StudentLiveSessionJoin from './pages/student/LiveSessionJoin';
-import StudentExams from './pages/student/Exams';
-import StudentAnnouncements from './pages/student/Announcements';
-import NotFound from './pages/NotFound';
+// Pages — loaded lazily to enable code splitting (reduces initial bundle from 3.5MB to ~200KB)
+const Login = lazy(() => import('./pages/Login'));
+const AdminDashboard = lazy(() => import('./pages/AdminDashboard'));
+const AdminStudents = lazy(() => import('./pages/admin/Students'));
+const AdminTeachers = lazy(() => import('./pages/admin/Teachers'));
+const AdminCourses = lazy(() => import('./pages/admin/Courses'));
+const AdminCourseForm = lazy(() => import('./pages/admin/CourseForm'));
+const TeacherDashboard = lazy(() => import('./pages/teacher/Dashboard'));
+const TeacherClasses = lazy(() => import('./pages/teacher/Classes'));
+const TeacherCourses = lazy(() => import('./pages/teacher/Courses'));
+const TeacherCourseForm = lazy(() => import('./pages/teacher/CourseForm'));
+const StudentManagement = lazy(() => import('./pages/teacher/StudentManagement'));
+const QuizManagement = lazy(() => import('./pages/teacher/QuizManagement'));
+const QuizBuilder = lazy(() => import('./pages/teacher/QuizBuilder'));
+const RealtimeQuizHost = lazy(() => import('./pages/teacher/RealtimeQuizHost'));
+const RealtimeQuizReports = lazy(() => import('./pages/teacher/RealtimeQuizReports'));
+const RealtimeQuizPlay = lazy(() => import('./pages/student/RealtimeQuizPlay'));
+const QuizTaking = lazy(() => import('./pages/student/QuizTaking'));
+const QuizResults = lazy(() => import('./pages/student/QuizResults'));
+const StudentProfile = lazy(() => import('./pages/student/Profile'));
+const TeacherResults = lazy(() => import('./pages/teacher/Results'));
+const TeacherModules = lazy(() => import('./pages/teacher/Modules'));
+const TeacherLessons = lazy(() => import('./pages/teacher/Lessons'));
+const TeacherLessonContentManager = lazy(() => import('./pages/teacher/LessonContentManager'));
+const TeacherAssignments = lazy(() => import('./pages/teacher/Assignments'));
+const TeacherAttendance = lazy(() => import('./pages/teacher/Attendance'));
+const TeacherCertificates = lazy(() => import('./pages/teacher/Certificates'));
+const TeacherLiveSessions = lazy(() => import('./pages/teacher/LiveSessions'));
+const TeacherLiveSessionRoom = lazy(() => import('./pages/teacher/LiveSessionRoom'));
+const TeacherCommunity = lazy(() => import('./pages/teacher/Community'));
+const TeacherAnnouncements = lazy(() => import('./pages/teacher/Announcements'));
+const TeacherProgress = lazy(() => import('./pages/teacher/Progress'));
+const TeacherExams = lazy(() => import('./pages/teacher/Exams'));
+const TeacherProfilePage = lazy(() => import('./pages/teacher/Profile'));
+const AdminModules = lazy(() => import('./pages/admin/Modules'));
+const AdminLessons = lazy(() => import('./pages/admin/Lessons'));
+const AdminQuizzes = lazy(() => import('./pages/admin/Quizzes'));
+const AdminClasses = lazy(() => import('./pages/admin/Classes'));
+const AdminAssignments = lazy(() => import('./pages/admin/Assignments'));
+const AdminAttendance = lazy(() => import('./pages/admin/Attendance'));
+const AdminCertificates = lazy(() => import('./pages/admin/Certificates'));
+const AdminLiveSessions = lazy(() => import('./pages/admin/LiveSessions'));
+const AdminLiveSessionRoom = lazy(() => import('./pages/admin/LiveSessionRoom'));
+const AdminCommunity = lazy(() => import('./pages/admin/Community'));
+const AdminAnnouncements = lazy(() => import('./pages/admin/Announcements'));
+const AdminAnalytics = lazy(() => import('./pages/admin/Analytics'));
+const AdminReports = lazy(() => import('./pages/admin/Reports'));
+const AdminPayments = lazy(() => import('./pages/admin/Payments'));
+const AdminInvoices = lazy(() => import('./pages/admin/Invoices'));
+const AdminSettings = lazy(() => import('./pages/admin/Settings'));
+const AdminBranding = lazy(() => import('./pages/admin/Branding'));
+const AdminDomain = lazy(() => import('./pages/admin/Domain'));
+const AdminRoles = lazy(() => import('./pages/admin/Roles'));
+const AdminProfile = lazy(() => import('./pages/admin/Profile'));
+const AdminSecurityPage = lazy(() => import('./pages/admin/Security'));
+const AdminPresentations = lazy(() => import('./pages/admin/Presentations'));
+const TeacherPresentations = lazy(() => import('./pages/teacher/Presentations'));
+const StudentPresentations = lazy(() => import('./pages/student/Presentations'));
+const JoinClass = lazy(() => import('./pages/student/JoinClass'));
+const Badges = lazy(() => import('./pages/student/Badges'));
+const StudentDashboard = lazy(() => import('./pages/student/Dashboard'));
+const StudentCourses = lazy(() => import('./pages/student/Courses'));
+const StudentCourseDetail = lazy(() => import('./pages/student/CourseDetail'));
+const ContinueLearning = lazy(() => import('./pages/student/ContinueLearning'));
+const StudentLessons = lazy(() => import('./pages/student/Lessons'));
+const StudentLessonDetail = lazy(() => import('./pages/student/LessonDetail'));
+const StudentQuizzes = lazy(() => import('./pages/student/Quizzes'));
+const StudentAssignments = lazy(() => import('./pages/student/Assignments'));
+const StudentAssignmentDetail = lazy(() => import('./pages/student/AssignmentDetail'));
+const StudentProgress = lazy(() => import('./pages/student/Progress'));
+const StudentResults = lazy(() => import('./pages/student/Results'));
+const StudentCertificates = lazy(() => import('./pages/student/Certificates'));
+const StudentCommunity = lazy(() => import('./pages/student/Community'));
+const StudentLiveClasses = lazy(() => import('./pages/student/LiveClasses'));
+const StudentLiveSessionJoin = lazy(() => import('./pages/student/LiveSessionJoin'));
+const StudentExams = lazy(() => import('./pages/student/Exams'));
+const StudentAnnouncements = lazy(() => import('./pages/student/Announcements'));
+const NotFound = lazy(() => import('./pages/NotFound'));
 import { apiUrl, authFetch } from './lib/apiUrl';
 import { isProfileAccessAllowed } from './lib/profileAccess';
 import { normalizeUserRole } from './lib/userRole';
@@ -329,6 +329,7 @@ export default function App() {
   return (
     <Router>
       <Toaster position="top-right" richColors />
+      <Suspense fallback={<AppBootSkeleton />}>
       <Routes>
         <Route path="/login" element={!user ? <Login /> : <Navigate to="/" />} />
         <Route path="/not-found" element={<NotFound />} />
@@ -344,6 +345,7 @@ export default function App() {
         <Route path="/student/*" element={user?.role === 'student' ? <StudentRoutes features={features} /> : <Navigate to="/login" />} />
         <Route path="*" element={<Navigate to="/not-found" replace />} />
       </Routes>
+      </Suspense>
     </Router>
   );
 }

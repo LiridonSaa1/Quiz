@@ -5,6 +5,7 @@ import { generateFixSuggestion } from "./src/lib/ai/generateFixSuggestion.js";
 import { isEmailConfigured, sendEmail, renderVerificationEmail } from "./src/lib/email.js";
 import { notifyEvent, type NotifyContext, type NotifyEventKey } from "./src/lib/notifyEvents.js";
 import express, { Request, Response } from "express";
+import rateLimit from "express-rate-limit";
 import { appendFile, mkdir, readFile as readFileFs, writeFile } from "fs/promises";
 import http from "http";
 import { createRequire } from "module";
@@ -797,6 +798,40 @@ export async function createApp(options: CreateAppOptions = {}) {
   app.use(express.json({ limit: "15mb" }));
   app.use(express.urlencoded({ extended: true, limit: "15mb" }));
 
+  // Trust the Replit reverse-proxy so that express-rate-limit can read the
+  // real client IP from X-Forwarded-For instead of seeing the proxy's IP.
+  app.set('trust proxy', 1);
+
+  // ── Rate Limiting ────────────────────────────────────────────────────────────
+  const apiLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000,
+    max: 200,
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: { error: 'Too many requests, please try again later.' },
+    skip: (req) => req.path === '/api/health',
+  });
+  const authLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000,
+    max: 20,
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: { error: 'Too many auth attempts, please try again in 15 minutes.' },
+  });
+  app.use('/api/', apiLimiter);
+  app.use('/api/auth/', authLimiter);
+
+  // ── Admin Auth Middleware ─────────────────────────────────────────────────────
+  // Protects ALL /api/admin/* routes. Exception: /api/admin/seed has its own
+  // first-run logic that allows unauthenticated access when DB is empty.
+  app.use('/api/admin', async (req: Request, res: Response, next) => {
+    if (req.path === '/seed' && req.method === 'GET') return next();
+    const caller = await assertAuthenticated(req, res);
+    if (!caller) return;
+    if (caller.role !== 'admin') return res.status(403).json({ error: 'Forbidden: admin role required' });
+    next();
+  });
+
   // PWA: serve sw.js with no-cache so browsers always check for updates
   app.get("/sw.js", (_req, res, next) => {
     res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate");
@@ -910,6 +945,9 @@ export async function createApp(options: CreateAppOptions = {}) {
 
   app.get("/api/test-telegram", async (req: Request, res: Response) => {
     try {
+      const caller = await assertAuthenticated(req, res);
+      if (!caller) return;
+      if (caller.role !== 'admin') return res.status(403).json({ error: 'Forbidden: admin role required' });
       const message =
         typeof req.query.message === "string" && req.query.message.trim()
           ? req.query.message.trim()
@@ -927,11 +965,16 @@ export async function createApp(options: CreateAppOptions = {}) {
       );
       return res.json({ success: true, message: "Test alert sent to Telegram (if configured)." });
     } catch (error: any) {
-      return res.status(500).json({ error: error?.message || "Failed to send test Telegram alert" });
+      return res.status(500).json({ error: 'Internal server error.' });
     }
   });
 
-  app.get("/api/telegram/diagnostics", async (_req: Request, res: Response) => {
+  app.get("/api/telegram/diagnostics", async (req: Request, res: Response) => {
+    try {
+      const caller = await assertAuthenticated(req, res);
+      if (!caller) return;
+      if (caller.role !== 'admin') return res.status(403).json({ error: 'Forbidden: admin role required' });
+    } catch { return res.status(401).json({ error: 'Unauthorized' }); }
     if (!ERROR_ALERTS_ENABLED) {
       return res.json({
         ok: false,
@@ -5057,6 +5100,25 @@ When giving instructions, number each step clearly. Be precise and technical whe
       if (!lesson) return res.status(404).json({ error: 'Lesson not found' });
       const gate = await assertTeacherOwnsCourse(userId, String((lesson as any).course_id || ''));
       if (!gate.ok) return res.status(403).json({ error: 'Forbidden: no access to this lesson' });
+
+      // Validate content type and file size before issuing a signed URL
+      const ALLOWED_CONTENT_TYPES = [
+        'image/jpeg', 'image/png', 'image/gif', 'image/webp', 'image/svg+xml',
+        'video/mp4', 'video/webm', 'video/ogg',
+        'audio/mpeg', 'audio/ogg', 'audio/wav', 'audio/webm',
+        'application/pdf',
+        'text/plain', 'text/html',
+        'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+        'application/vnd.ms-powerpoint',
+      ];
+      const MAX_FILE_SIZE = 500 * 1024 * 1024; // 500 MB
+      if (!ALLOWED_CONTENT_TYPES.includes(contentType)) {
+        return res.status(400).json({ error: `File type not allowed: ${contentType}` });
+      }
+      const fileSize = typeof req.body?.fileSize === 'number' ? req.body.fileSize : null;
+      if (fileSize !== null && fileSize > MAX_FILE_SIZE) {
+        return res.status(400).json({ error: 'File exceeds maximum allowed size of 500 MB.' });
+      }
 
       const cleanName = fileName.replace(/[^\w.\-]/g, '_');
       const storagePath = `lesson/${lessonId}/${Date.now()}_${cleanName}`;
@@ -9539,7 +9601,12 @@ When giving instructions, number each step clearly. Be precise and technical whe
   });
 
   // Student: submit answer
+  // In-memory set to prevent race-condition double-submissions on the answer endpoint.
+  // Key: `${sessionId}:${userId}:${questionIndex}`
+  const rqAnswerProcessing = new Set<string>();
+
   app.post('/api/student/realtime-quiz/:sessionId/answer', async (req: Request, res: Response) => {
+    let _rqKey = '';
     try {
       const caller = await assertAuthenticated(req, res);
       if (!caller) return;
@@ -9558,6 +9625,15 @@ When giving instructions, number each step clearly. Be precise and technical whe
       if (participant.answers[questionIndex] !== undefined) {
         return res.status(400).json({ error: 'Already answered this question.' });
       }
+
+      // Race-condition guard: prevent two simultaneous requests from both passing
+      // the "already answered" check above before either has written the answer.
+      _rqKey = `${req.params.sessionId}:${caller.userId}:${questionIndex}`;
+      if (rqAnswerProcessing.has(_rqKey)) {
+        return res.status(429).json({ error: 'Answer is being processed, please wait.' });
+      }
+      rqAnswerProcessing.add(_rqKey);
+      // Key is removed in the finally block below
 
       const q = session.questions[questionIndex];
       if (!q) return res.status(400).json({ error: 'Invalid question.' });
@@ -9613,6 +9689,8 @@ When giving instructions, number each step clearly. Be precise and technical whe
       });
     } catch (err) {
       res.status(500).json({ error: 'Failed to submit answer.' });
+    } finally {
+      if (_rqKey) rqAnswerProcessing.delete(_rqKey);
     }
   });
 
@@ -11438,8 +11516,15 @@ Speaker notes: 2-3 sentences on a single line with no line breaks.`;
       app.use(vite.middlewares);
     } else {
       const distPath = path.join(process.cwd(), "dist");
-      app.use(express.static(distPath));
+      // Vite hashed assets (e.g. index-AbCdEf.js) can be cached for 1 year — immutable.
+      // index.html and other entry files must NOT be cached so clients always get the latest.
+      app.use('/assets', express.static(path.join(distPath, 'assets'), {
+        maxAge: '1y',
+        immutable: true,
+      }));
+      app.use(express.static(distPath, { maxAge: 0 }));
       app.get("*", (_req, res) => {
+        res.setHeader('Cache-Control', 'no-store');
         res.sendFile(path.join(distPath, "index.html"));
       });
     }
