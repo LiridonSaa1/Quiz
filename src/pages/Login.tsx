@@ -182,7 +182,7 @@ export default function Login() {
   };
 
   return (
-    <div className="min-h-screen flex font-sans antialiased" style={{ background: '#080a12' }}>
+    <div className="min-h-[100dvh] flex font-sans antialiased" style={{ background: '#080a12' }}>
 
       {/* ═══════════════════ LEFT ═══════════════════ */}
       <div
@@ -286,7 +286,16 @@ export default function Login() {
       </div>
 
       {/* ═══════════════════ RIGHT ══════════════════ */}
-      <div className="flex-1 flex items-center justify-center px-6 relative" style={{ background: '#080a12' }}>
+      <div
+        className="flex-1 flex items-center justify-center px-6 relative overflow-y-auto"
+        style={{
+          background: '#080a12',
+          paddingTop: 'max(1.5rem, env(safe-area-inset-top))',
+          paddingBottom: 'max(1.5rem, env(safe-area-inset-bottom))',
+          paddingLeft: 'max(1.5rem, env(safe-area-inset-left))',
+          paddingRight: 'max(1.5rem, env(safe-area-inset-right))',
+        }}
+      >
         <Noise />
         <div className="absolute inset-0 pointer-events-none" style={{ background: 'radial-gradient(ellipse 60% 50% at 50% 50%,rgba(109,40,217,0.07),transparent)' }} />
 

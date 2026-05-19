@@ -3,10 +3,147 @@
 @source not "../.local";
 @source not "../artifacts";
 
+/* ─── Scrollbar utilities ─── */
 .scrollbar-none {
   scrollbar-width: none;
   -ms-overflow-style: none;
 }
 .scrollbar-none::-webkit-scrollbar {
   display: none;
+}
+
+/* ─── Base resets ─── */
+*, *::before, *::after {
+  box-sizing: border-box;
+}
+
+html {
+  overflow-x: hidden;
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+
+body {
+  overflow-x: hidden;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  /* Prevent pull-to-refresh overscroll bounce on iOS PWA */
+  overscroll-behavior-y: none;
+}
+
+/* ─── Safe area CSS variables (iOS notch / Dynamic Island / Android cutout) ─── */
+:root {
+  --safe-top:    env(safe-area-inset-top, 0px);
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+  --safe-left:   env(safe-area-inset-left, 0px);
+  --safe-right:  env(safe-area-inset-right, 0px);
+
+  /* Header height = 56px + safe-area top */
+  --header-h: calc(3.5rem + var(--safe-top));
+}
+
+/* ─── Mobile header safe area ─── */
+.mobile-header {
+  padding-top: var(--safe-top);
+  height: var(--header-h);
+}
+
+/* ─── Main content safe area offset ─── */
+.main-content-mobile {
+  padding-top: var(--header-h);
+  padding-bottom: var(--safe-bottom);
+}
+
+/* ─── Sidebar slide animation ─── */
+.sidebar-overlay {
+  animation: fadeIn 0.2s ease forwards;
+}
+.sidebar-panel {
+  animation: slideInLeft 0.25s cubic-bezier(0.25, 0.46, 0.45, 0.94) forwards;
+}
+.sidebar-panel-exit {
+  animation: slideOutLeft 0.2s cubic-bezier(0.55, 0, 1, 0.45) forwards;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+@keyframes slideInLeft {
+  from { transform: translateX(-100%); }
+  to   { transform: translateX(0); }
+}
+@keyframes slideOutLeft {
+  from { transform: translateX(0); }
+  to   { transform: translateX(-100%); }
+}
+
+/* ─── Minimum touch target (44×44 px) ─── */
+.touch-target {
+  min-height: 44px;
+  min-width:  44px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* ─── Prevent text overflow everywhere ─── */
+p, span, h1, h2, h3, h4, h5, h6, a, button, label, td, th, li {
+  overflow-wrap: break-word;
+  word-break: break-word;
+}
+
+/* ─── Responsive tables: scroll container ─── */
+.table-responsive {
+  width: 100%;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+/* ─── Modals: scrollable on small screens ─── */
+.modal-scroll {
+  max-height: calc(100dvh - var(--header-h) - 2rem - var(--safe-bottom));
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+/* ─── Prevent layout shifts ─── */
+img, video, iframe {
+  max-width: 100%;
+  height: auto;
+}
+
+/* ─── Bottom safe area for fixed bottom bars (PWA) ─── */
+.bottom-safe {
+  padding-bottom: var(--safe-bottom);
+}
+
+/* ─── Fast tap (remove 300ms delay on older mobile browsers) ─── */
+a, button, [role="button"], input, select, textarea, label {
+  touch-action: manipulation;
+}
+
+/* ─── Prevent horizontal overflow on all containers ─── */
+.container, .max-w-8xl, .max-w-7xl, .max-w-6xl, .max-w-5xl, .max-w-4xl, .max-w-3xl, .max-w-2xl, .max-w-xl {
+  width: 100%;
+  max-width: 100%;
+}
+
+/* ─── Card / panel full-width on mobile ─── */
+@media (max-width: 640px) {
+  .card-mobile-full {
+    border-radius: 0 !important;
+    margin-left: -1rem;
+    margin-right: -1rem;
+    width: calc(100% + 2rem);
+  }
+}
+
+/* ─── Reduce motion for accessibility ─── */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
 }

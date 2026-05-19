@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { supabase } from '../../supabase';
@@ -6,7 +6,8 @@ import {
   LayoutDashboard, BookOpen, Users, FileText, BarChart3, LogOut,
   Menu, X, Layers, PlayCircle, School, ClipboardList, CalendarCheck,
   Award, Video, MessageSquare, Megaphone, FileBarChart, User,
-  GraduationCap, ScrollText, ChevronRight, PanelLeftClose, PanelLeftOpen, Zap, FileBarChart2, Presentation
+  GraduationCap, ScrollText, ChevronRight, PanelLeftClose, PanelLeftOpen,
+  Zap, FileBarChart2, Presentation
 } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import NotificationCenter from '../NotificationCenter';
@@ -30,11 +31,11 @@ function NavItem({
       onClick={onClick}
       title={collapsed ? item.label : undefined}
       className={cn(
-        'group relative flex items-center rounded-xl transition-all duration-200 text-sm',
+        'group relative flex items-center rounded-xl transition-all duration-200 text-sm min-h-[44px]',
         collapsed ? 'justify-center p-2.5' : 'gap-3 px-3 py-2.5',
         active
           ? 'text-white font-semibold'
-          : 'text-slate-400 hover:text-white hover:bg-white/[0.06] font-medium'
+          : 'text-slate-400 hover:text-white hover:bg-white/[0.06] active:bg-white/[0.1] font-medium'
       )}
       style={active ? {
         background: 'linear-gradient(135deg, rgba(139,92,246,0.22) 0%, rgba(99,102,241,0.18) 100%)',
@@ -53,10 +54,11 @@ function NavItem({
       )} />
       {!collapsed && (
         <>
-          <span className="truncate">{item.label}</span>
-          {active && <ChevronRight className="w-3.5 h-3.5 ml-auto text-violet-400/70" />}
+          <span className="truncate flex-1">{item.label}</span>
+          {active && <ChevronRight className="w-3.5 h-3.5 ml-auto text-violet-400/70 shrink-0" />}
         </>
       )}
+      {/* Tooltip for collapsed state */}
       {collapsed && (
         <div className="absolute left-full ml-3 px-2.5 py-1.5 bg-slate-900 border border-white/10 text-white text-xs font-semibold rounded-lg opacity-0 group-hover:opacity-100 transition-all pointer-events-none whitespace-nowrap z-[999] shadow-xl"
           style={{ boxShadow: '0 4px 20px rgba(0,0,0,0.4)' }}
@@ -112,8 +114,8 @@ function SidebarContent({
           <div className="absolute -inset-0.5 rounded-xl bg-gradient-to-br from-violet-500 to-indigo-600 opacity-25 blur-md -z-10" />
         </div>
         {!collapsed && (
-          <div className="overflow-hidden">
-            <div className="text-sm font-bold text-white tracking-tight">{branding.schoolName}</div>
+          <div className="overflow-hidden min-w-0">
+            <div className="text-sm font-bold text-white tracking-tight truncate">{branding.schoolName}</div>
             <div className="text-[9px] text-violet-400/70 font-semibold tracking-[0.18em] uppercase">{t('nav.teacherPortal')}</div>
           </div>
         )}
@@ -131,7 +133,13 @@ function SidebarContent({
               <div className="h-px bg-white/[0.06] mx-2 mb-2 mt-1" />
             )}
             {section.items.map((item) => (
-              <NavItem key={item.path} item={item} active={activePath === item.path} collapsed={collapsed} onClick={onLinkClick} />
+              <NavItem
+                key={item.path}
+                item={item}
+                active={activePath === item.path}
+                collapsed={collapsed}
+                onClick={onLinkClick}
+              />
             ))}
           </div>
         ))}
@@ -141,16 +149,16 @@ function SidebarContent({
       <div className="px-2 py-3 border-t border-white/[0.06] space-y-1 shrink-0">
         {collapsed ? (
           <div className="flex justify-center py-1">
-            <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-violet-500 to-indigo-600 flex items-center justify-center text-white text-xs font-bold shadow-md shadow-violet-900/40">
+            <div className="w-9 h-9 rounded-lg bg-gradient-to-br from-violet-500 to-indigo-600 flex items-center justify-center text-white text-xs font-bold shadow-md shadow-violet-900/40">
               {initials || 'T'}
             </div>
           </div>
         ) : (
-          <div className="flex items-center gap-3 px-3 py-2.5 rounded-xl">
+          <div className="flex items-center gap-3 px-3 py-2.5 rounded-xl min-w-0">
             <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-violet-500 to-indigo-600 flex items-center justify-center text-white text-xs font-bold shrink-0 shadow-md shadow-violet-900/40">
               {initials || 'T'}
             </div>
-            <div className="min-w-0 flex-1">
+            <div className="min-w-0 flex-1 overflow-hidden">
               <div className="text-xs font-semibold text-white truncate">{displayName}</div>
               <div className="text-[10px] text-slate-500 truncate">{userEmail}</div>
             </div>
@@ -161,7 +169,7 @@ function SidebarContent({
           onClick={onLogout}
           title={collapsed ? t('nav.signOut') : undefined}
           className={cn(
-            'w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-slate-500 hover:text-red-400 hover:bg-red-500/[0.08] transition-all text-sm font-medium',
+            'w-full flex items-center gap-3 px-3 rounded-xl text-slate-500 hover:text-red-400 hover:bg-red-500/[0.08] active:bg-red-500/[0.14] transition-all text-sm font-medium min-h-[44px]',
             collapsed && 'justify-center px-2'
           )}
         >
@@ -171,13 +179,14 @@ function SidebarContent({
 
         <button
           onClick={onCollapse}
-          title={collapsed ? t('nav.collapse') : t('nav.collapse')}
           className={cn(
-            'w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-slate-600 hover:text-slate-300 hover:bg-white/[0.06] transition-all text-sm font-medium',
+            'w-full flex items-center gap-3 px-3 rounded-xl text-slate-600 hover:text-slate-300 hover:bg-white/[0.06] active:bg-white/[0.1] transition-all text-sm font-medium min-h-[44px]',
             collapsed && 'justify-center px-2'
           )}
         >
-          {collapsed ? <PanelLeftOpen className="w-4 h-4 shrink-0" /> : <PanelLeftClose className="w-4 h-4 shrink-0" />}
+          {collapsed
+            ? <PanelLeftOpen className="w-4 h-4 shrink-0" />
+            : <PanelLeftClose className="w-4 h-4 shrink-0" />}
           {!collapsed && <span>{t('nav.collapse')}</span>}
         </button>
       </div>
@@ -194,6 +203,7 @@ export default function TeacherLayout({ children }: { children: React.ReactNode 
   const { can } = useTeacherPermissions();
   const location = useLocation();
   const navigate = useNavigate();
+  const overlayRef = useRef<HTMLDivElement>(null);
 
   const NAV_SECTIONS = [
     {
@@ -220,29 +230,29 @@ export default function TeacherLayout({ children }: { children: React.ReactNode 
       key: 'learning',
       title: t('nav.sections.learning'),
       items: [
-        { icon: ClipboardList, label: t('nav.assignments'),   path: '/teacher/assignments' },
-        { icon: Presentation,  label: t('nav.presentations'),path: '/teacher/presentations' },
-        { icon: CalendarCheck, label: t('nav.attendance'),   path: '/teacher/attendance' },
-        { icon: Award,         label: t('nav.certificates'), path: '/teacher/certificates' },
+        { icon: ClipboardList, label: t('nav.assignments'),    path: '/teacher/assignments' },
+        { icon: Presentation,  label: t('nav.presentations'), path: '/teacher/presentations' },
+        { icon: CalendarCheck, label: t('nav.attendance'),    path: '/teacher/attendance' },
+        { icon: Award,         label: t('nav.certificates'),  path: '/teacher/certificates' },
       ],
     },
     {
       key: 'interaction',
       title: t('nav.sections.interaction'),
       items: [
-        { icon: Zap,          label: t('nav.liveQuiz'),      path: '/teacher/live-quiz' },
-        { icon: FileBarChart2,label: t('nav.quizReports'),   path: '/teacher/live-quiz/reports' },
-        { icon: Video,        label: t('nav.liveSessions'),  path: '/teacher/live-sessions' },
-        { icon: MessageSquare,label: t('nav.community'),     path: '/teacher/community' },
-        { icon: Megaphone,    label: t('nav.announcements'), path: '/teacher/announcements' },
+        { icon: Zap,           label: t('nav.liveQuiz'),      path: '/teacher/live-quiz' },
+        { icon: FileBarChart2, label: t('nav.quizReports'),   path: '/teacher/live-quiz/reports' },
+        { icon: Video,         label: t('nav.liveSessions'),  path: '/teacher/live-sessions' },
+        { icon: MessageSquare, label: t('nav.community'),     path: '/teacher/community' },
+        { icon: Megaphone,     label: t('nav.announcements'), path: '/teacher/announcements' },
       ],
     },
     {
       key: 'analytics',
       title: t('nav.sections.analytics'),
       items: [
-        { icon: BarChart3,   label: t('nav.studentProgress'), path: '/teacher/progress' },
-        { icon: FileBarChart,label: t('nav.quizResults'),     path: '/teacher/results' },
+        { icon: BarChart3,    label: t('nav.studentProgress'), path: '/teacher/progress' },
+        { icon: FileBarChart, label: t('nav.quizResults'),     path: '/teacher/results' },
       ],
     },
     {
@@ -253,6 +263,28 @@ export default function TeacherLayout({ children }: { children: React.ReactNode 
       ],
     },
   ];
+
+  // Close sidebar on route change
+  useEffect(() => {
+    setSidebarOpen(false);
+  }, [location.pathname]);
+
+  // Close on ESC key
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setSidebarOpen(false); };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, []);
+
+  // Lock body scroll when mobile sidebar is open
+  useEffect(() => {
+    if (sidebarOpen) {
+      document.body.style.overflow = 'hidden';
+    } else {
+      document.body.style.overflow = '';
+    }
+    return () => { document.body.style.overflow = ''; };
+  }, [sidebarOpen]);
 
   useEffect(() => {
     let mounted = true;
@@ -301,9 +333,13 @@ export default function TeacherLayout({ children }: { children: React.ReactNode 
   const headerL = collapsed ? 'lg:left-16' : 'lg:left-60';
 
   return (
-    <div className="min-h-screen bg-slate-50 flex">
-      {/* Desktop Sidebar */}
-      <aside className={cn('hidden lg:flex flex-col fixed h-full z-30 overflow-hidden border-r border-white/[0.04] transition-all duration-300 ease-in-out', sidebarW)}>
+    <div className="min-h-screen bg-slate-50 flex overflow-x-hidden">
+
+      {/* ── Desktop Sidebar ── */}
+      <aside className={cn(
+        'hidden lg:flex flex-col fixed h-full z-30 overflow-hidden border-r border-white/[0.04] transition-all duration-300 ease-in-out',
+        sidebarW
+      )}>
         <SidebarContent
           activePath={location.pathname}
           collapsed={collapsed}
@@ -313,48 +349,71 @@ export default function TeacherLayout({ children }: { children: React.ReactNode 
         />
       </aside>
 
-      {/* Desktop Topbar */}
-      <header className={cn('hidden lg:flex fixed top-0 right-0 h-14 bg-white/95 backdrop-blur-md border-b border-slate-100/80 items-center justify-between px-6 z-20 transition-all duration-300 ease-in-out shadow-sm shadow-slate-100/50', headerL)}>
-        <div className="flex items-center gap-2 text-sm">
-          <span className="text-slate-400 text-xs font-medium">{t('nav.teacherPortal')}</span>
-          <ChevronRight className="w-3.5 h-3.5 text-slate-300" />
-          <span className="text-slate-800 font-semibold text-sm">{currentLabel}</span>
+      {/* ── Desktop Topbar ── */}
+      <header className={cn(
+        'hidden lg:flex fixed top-0 right-0 h-14 bg-white/95 backdrop-blur-md border-b border-slate-100/80 items-center justify-between px-6 z-20 transition-all duration-300 ease-in-out shadow-sm shadow-slate-100/50',
+        headerL
+      )}>
+        <div className="flex items-center gap-2 text-sm min-w-0">
+          <span className="text-slate-400 text-xs font-medium shrink-0">{t('nav.teacherPortal')}</span>
+          <ChevronRight className="w-3.5 h-3.5 text-slate-300 shrink-0" />
+          <span className="text-slate-800 font-semibold text-sm truncate">{currentLabel}</span>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 shrink-0">
           <LanguageDropdown variant="light" />
           <NotificationCenter />
         </div>
       </header>
 
-      {/* Mobile Topbar */}
+      {/* ── Mobile Topbar (safe-area aware) ── */}
       <div
-        className="lg:hidden fixed top-0 left-0 right-0 h-14 z-50 flex items-center justify-between px-4 border-b border-white/[0.06]"
-        style={{ background: '#0c0e16' }}
+        className="lg:hidden fixed top-0 left-0 right-0 z-50 flex flex-col justify-end mobile-header border-b border-white/[0.06]"
+        style={{
+          background: '#0c0e16',
+          paddingLeft: 'env(safe-area-inset-left)',
+          paddingRight: 'env(safe-area-inset-right)',
+        }}
       >
-        <div className="flex items-center gap-2.5">
-          <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-violet-500 to-indigo-600 flex items-center justify-center overflow-hidden">
-            {branding.logoUrl ? (
-              <img src={branding.logoUrl} alt="Brand logo" className="w-full h-full object-contain rounded-xl" />
-            ) : (
-              <GraduationCap className="w-4 h-4 text-white" />
-            )}
+        <div className="flex items-center justify-between px-4 h-14">
+          <div className="flex items-center gap-2.5 min-w-0">
+            <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-violet-500 to-indigo-600 flex items-center justify-center overflow-hidden shrink-0">
+              {branding.logoUrl ? (
+                <img src={branding.logoUrl} alt="Brand logo" className="w-full h-full object-contain rounded-xl" />
+              ) : (
+                <GraduationCap className="w-4 h-4 text-white" />
+              )}
+            </div>
+            <span className="text-sm font-bold text-white truncate">{branding.schoolName}</span>
           </div>
-          <span className="text-sm font-bold text-white">{branding.schoolName}</span>
-        </div>
-        <div className="flex items-center gap-2">
-          <LanguageDropdown variant="dark" />
-          <NotificationCenter />
-          <button onClick={() => setSidebarOpen(!sidebarOpen)} className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-white/10 transition-all">
-            {sidebarOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
-          </button>
+          <div className="flex items-center gap-1 shrink-0">
+            <LanguageDropdown variant="dark" />
+            <NotificationCenter />
+            <button
+              onClick={() => setSidebarOpen(!sidebarOpen)}
+              className="touch-target rounded-lg text-slate-400 hover:text-white hover:bg-white/10 active:bg-white/20 transition-all"
+              aria-label={sidebarOpen ? 'Close menu' : 'Open menu'}
+              aria-expanded={sidebarOpen}
+            >
+              {sidebarOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
+            </button>
+          </div>
         </div>
       </div>
 
-      {/* Mobile Sidebar */}
+      {/* ── Mobile Sidebar with slide animation ── */}
       {sidebarOpen && (
-        <div className="lg:hidden fixed inset-0 z-40 flex">
-          <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setSidebarOpen(false)} />
-          <aside className="relative w-64 h-full z-50">
+        <div
+          ref={overlayRef}
+          className="lg:hidden fixed inset-0 z-40 flex sidebar-overlay"
+          style={{ background: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(4px)', WebkitBackdropFilter: 'blur(4px)' }}
+          onClick={() => setSidebarOpen(false)}
+          aria-label="Close sidebar"
+        >
+          <aside
+            className="relative w-72 max-w-[85vw] h-full z-50 sidebar-panel"
+            onClick={e => e.stopPropagation()}
+            aria-label="Navigation sidebar"
+          >
             <SidebarContent
               activePath={location.pathname}
               collapsed={false}
@@ -367,14 +426,24 @@ export default function TeacherLayout({ children }: { children: React.ReactNode 
         </div>
       )}
 
-      {/* Main */}
-      <main className={cn('flex-1 pt-14 min-h-screen transition-all duration-300 ease-in-out', mainML)}>
-        <div className="px-4 sm:px-6 lg:px-8 py-7">
+      {/* ── Main Content ── */}
+      <main
+        className={cn('flex-1 min-h-screen transition-all duration-300 ease-in-out overflow-x-hidden', mainML)}
+        style={{
+          paddingTop: 'var(--header-h)',
+          paddingLeft: 'env(safe-area-inset-left)',
+          paddingRight: 'env(safe-area-inset-right)',
+          paddingBottom: 'env(safe-area-inset-bottom)',
+        }}
+      >
+        {/* Desktop top offset */}
+        <div className="hidden lg:block" style={{ height: '3.5rem' }} />
+        <div className="px-4 sm:px-6 lg:px-8 py-6">
           {canAccessCurrentPage ? (
             children
           ) : (
             <div className="min-h-[60vh] flex items-center justify-center">
-              <div className="max-w-md text-center space-y-3">
+              <div className="max-w-md text-center space-y-3 px-4">
                 <h2 className="text-2xl font-bold text-slate-900">{t('errors.noAccess')}</h2>
                 <p className="text-slate-500 text-sm">{t('errors.noPermission')}</p>
               </div>

@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { supabase } from '../../supabase';
@@ -8,7 +8,7 @@ import LanguageDropdown from '../LanguageDropdown';
 import { authFetch } from '../../lib/apiUrl';
 import { defaultFeatureFlags, extractFeatureFlags, FeatureFlags } from '../../lib/platformFeatures';
 import { useBranding } from '../../lib/useBranding';
-import { 
+import {
   LayoutDashboard, BookOpen, Layers, PlayCircle, FileText, Users, ShieldCheck,
   School, ClipboardList, CalendarCheck, Award, Video, MessageSquare, Megaphone,
   BarChart3, FileBarChart, DollarSign, Receipt, Settings, Palette, Lock,
@@ -23,48 +23,49 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
   const brandLogoUrl = branding.logoUrl;
   const location = useLocation();
   const navigate = useNavigate();
+  const overlayRef = useRef<HTMLDivElement>(null);
 
   const adminNavSections = [
     {
       key: 'main',
       items: [
-        { icon: LayoutDashboard, label: t('nav.dashboard'), path: '/admin' },
-        { icon: BookOpen,        label: t('nav.courses'),   path: '/admin/courses' },
-        { icon: Layers,          label: t('nav.modules'),   path: '/admin/modules' },
-        { icon: PlayCircle,      label: t('nav.lessons'),   path: '/admin/lessons' },
-        { icon: FileText,        label: t('nav.quizzes'),   path: '/admin/quizzes' },
+        { icon: LayoutDashboard, label: t('nav.dashboard'),       path: '/admin' },
+        { icon: BookOpen,        label: t('nav.courses'),         path: '/admin/courses' },
+        { icon: Layers,          label: t('nav.modules'),         path: '/admin/modules' },
+        { icon: PlayCircle,      label: t('nav.lessons'),         path: '/admin/lessons' },
+        { icon: FileText,        label: t('nav.quizzes'),         path: '/admin/quizzes' },
       ]
     },
     {
       key: 'users',
       items: [
-        { icon: Users,      label: t('nav.students'),  path: '/admin/students' },
-        { icon: ShieldCheck,label: t('nav.teachers'),  path: '/admin/teachers' },
-        { icon: School,     label: t('nav.classes'),   path: '/admin/classes' },
+        { icon: Users,       label: t('nav.students'),  path: '/admin/students' },
+        { icon: ShieldCheck, label: t('nav.teachers'),  path: '/admin/teachers' },
+        { icon: School,      label: t('nav.classes'),   path: '/admin/classes' },
       ]
     },
     {
       key: 'learning',
       items: [
-        { icon: ClipboardList, label: t('nav.assignments'),   path: '/admin/assignments' },
-        { icon: Presentation,  label: t('nav.presentations'),path: '/admin/presentations' },
-        { icon: CalendarCheck, label: t('nav.attendance'),   path: '/admin/attendance' },
-        { icon: Award,         label: t('nav.certificates'), path: '/admin/certificates' },
+        { icon: ClipboardList, label: t('nav.assignments'),    path: '/admin/assignments' },
+        { icon: Presentation,  label: t('nav.presentations'),  path: '/admin/presentations' },
+        { icon: CalendarCheck, label: t('nav.attendance'),     path: '/admin/attendance' },
+        { icon: Award,         label: t('nav.certificates'),   path: '/admin/certificates' },
       ]
     },
     {
       key: 'interaction',
       items: [
-        { icon: Video,        label: t('nav.liveSessions'),   path: '/admin/live-sessions' },
-        { icon: MessageSquare,label: t('nav.community'),      path: '/admin/community' },
-        { icon: Megaphone,    label: t('nav.announcements'),  path: '/admin/announcements' },
+        { icon: Video,         label: t('nav.liveSessions'),   path: '/admin/live-sessions' },
+        { icon: MessageSquare, label: t('nav.community'),      path: '/admin/community' },
+        { icon: Megaphone,     label: t('nav.announcements'),  path: '/admin/announcements' },
       ]
     },
     {
       key: 'analytics',
       items: [
-        { icon: BarChart3,   label: t('nav.analytics'), path: '/admin/analytics' },
-        { icon: FileBarChart,label: t('nav.reports'),   path: '/admin/reports' },
+        { icon: BarChart3,    label: t('nav.analytics'), path: '/admin/analytics' },
+        { icon: FileBarChart, label: t('nav.reports'),   path: '/admin/reports' },
       ]
     },
     {
@@ -77,9 +78,9 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
     {
       key: 'system',
       items: [
-        { icon: Settings, label: t('nav.settings'),          path: '/admin/settings' },
-        { icon: Palette,  label: t('nav.branding'),          path: '/admin/branding' },
-        { icon: Lock,     label: t('nav.rolesPermissions'),  path: '/admin/roles' },
+        { icon: Settings, label: t('nav.settings'),         path: '/admin/settings' },
+        { icon: Palette,  label: t('nav.branding'),         path: '/admin/branding' },
+        { icon: Lock,     label: t('nav.rolesPermissions'), path: '/admin/roles' },
       ]
     },
     {
@@ -90,6 +91,28 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
       ]
     }
   ];
+
+  // Close sidebar on route change (mobile)
+  useEffect(() => {
+    setIsSidebarOpen(false);
+  }, [location.pathname]);
+
+  // Close sidebar on ESC key
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setIsSidebarOpen(false); };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, []);
+
+  // Lock body scroll when sidebar is open on mobile
+  useEffect(() => {
+    if (isSidebarOpen) {
+      document.body.style.overflow = 'hidden';
+    } else {
+      document.body.style.overflow = '';
+    }
+    return () => { document.body.style.overflow = ''; };
+  }, [isSidebarOpen]);
 
   useEffect(() => {
     let mounted = true;
@@ -135,14 +158,15 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
       to={item.path}
       onClick={onClick}
       className={cn(
-        "flex items-center gap-3 px-3 py-2 rounded-lg transition-all text-sm font-medium",
+        'flex items-center gap-3 px-3 rounded-lg transition-all text-sm font-medium',
+        'min-h-[44px] py-2',
         location.pathname === item.path
-          ? "bg-indigo-600 text-white shadow-lg shadow-indigo-900/30"
-          : "text-slate-400 hover:bg-slate-700/60 hover:text-white"
+          ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-900/30'
+          : 'text-slate-400 hover:bg-slate-700/60 hover:text-white active:bg-slate-700'
       )}
     >
       <item.icon className="w-4 h-4 shrink-0" />
-      <span>{item.label}</span>
+      <span className="truncate">{item.label}</span>
     </Link>
   );
 
@@ -150,15 +174,15 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
     <div className="flex flex-col h-full min-h-0">
       <div className="p-5 border-b border-slate-700/50 shrink-0">
         <div className="flex items-center gap-3">
-          <div className="w-9 h-9 bg-indigo-600 rounded-xl flex items-center justify-center shadow-lg shadow-indigo-900/40">
+          <div className="w-9 h-9 bg-indigo-600 rounded-xl flex items-center justify-center shadow-lg shadow-indigo-900/40 shrink-0 overflow-hidden">
             {brandLogoUrl ? (
               <img src={brandLogoUrl} alt="Brand logo" className="w-full h-full object-contain rounded-xl" />
             ) : (
               <GraduationCap className="w-5 h-5 text-white" />
             )}
           </div>
-          <div>
-            <h1 className="text-base font-bold text-white leading-tight">{branding.schoolName}</h1>
+          <div className="min-w-0">
+            <h1 className="text-base font-bold text-white leading-tight truncate">{branding.schoolName}</h1>
             <p className="text-[10px] text-slate-400 font-medium uppercase tracking-widest">{t('nav.adminPanel')}</p>
           </div>
         </div>
@@ -178,9 +202,9 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
       <div className="px-3 py-3 border-t border-slate-700/50 shrink-0">
         <button
           onClick={handleLogout}
-          className="flex items-center gap-3 px-3 py-2 w-full text-slate-400 hover:bg-red-500/10 hover:text-red-400 rounded-lg transition-all text-sm font-medium"
+          className="flex items-center gap-3 px-3 py-2 min-h-[44px] w-full text-slate-400 hover:bg-red-500/10 hover:text-red-400 active:bg-red-500/20 rounded-lg transition-all text-sm font-medium"
         >
-          <LogOut className="w-4 h-4" />
+          <LogOut className="w-4 h-4 shrink-0" />
           <span>{t('nav.signOut')}</span>
         </button>
       </div>
@@ -190,56 +214,86 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
   const currentLabel = visibleSections.flatMap(s => s.items).find(i => i.path === location.pathname)?.label || t('nav.dashboard');
 
   return (
-    <div className="min-h-screen bg-slate-50 flex">
-      {/* Sidebar Desktop */}
+    <div className="min-h-screen bg-slate-50 flex overflow-x-hidden">
+
+      {/* ── Desktop Sidebar ── */}
       <aside className="hidden lg:flex flex-col w-60 bg-slate-800 fixed h-full z-30 overflow-hidden">
         <SidebarContent />
       </aside>
 
-      {/* Top Bar Desktop */}
+      {/* ── Desktop Top Bar ── */}
       <header className="hidden lg:flex fixed top-0 right-0 left-60 h-14 bg-white border-b border-slate-200 items-center justify-between px-6 z-20">
-        <div className="flex items-center gap-2">
-          <span className="text-sm font-semibold text-slate-500">{currentLabel}</span>
-        </div>
+        <span className="text-sm font-semibold text-slate-500">{currentLabel}</span>
         <div className="flex items-center gap-2">
           <LanguageDropdown variant="light" />
           <NotificationCenter />
         </div>
       </header>
 
-      {/* Mobile Header */}
-      <div className="lg:hidden fixed top-0 left-0 right-0 h-14 bg-slate-800 flex items-center justify-between px-4 z-50">
-        <div className="flex items-center gap-2.5">
-          <div className="w-8 h-8 bg-indigo-600 rounded-lg flex items-center justify-center">
-            {brandLogoUrl ? (
-              <img src={brandLogoUrl} alt="Brand logo" className="w-full h-full object-contain rounded-lg" />
-            ) : (
-              <GraduationCap className="w-4 h-4 text-white" />
-            )}
+      {/* ── Mobile Header (safe-area aware) ── */}
+      <div
+        className="lg:hidden fixed top-0 left-0 right-0 z-50 bg-slate-800 flex flex-col justify-end mobile-header"
+        style={{ paddingLeft: 'env(safe-area-inset-left)', paddingRight: 'env(safe-area-inset-right)' }}
+      >
+        <div className="flex items-center justify-between px-4 h-14">
+          <div className="flex items-center gap-2.5 min-w-0">
+            <div className="w-8 h-8 bg-indigo-600 rounded-lg flex items-center justify-center shrink-0 overflow-hidden">
+              {brandLogoUrl ? (
+                <img src={brandLogoUrl} alt="Brand logo" className="w-full h-full object-contain rounded-lg" />
+              ) : (
+                <GraduationCap className="w-4 h-4 text-white" />
+              )}
+            </div>
+            <h1 className="text-base font-bold text-white truncate">{branding.schoolName}</h1>
           </div>
-          <h1 className="text-base font-bold text-white">{branding.schoolName}</h1>
-        </div>
-        <div className="flex items-center gap-2">
-          <LanguageDropdown variant="dark" />
-          <NotificationCenter />
-          <button onClick={() => setIsSidebarOpen(!isSidebarOpen)} className="p-1.5 hover:bg-slate-700 rounded-lg">
-            {isSidebarOpen ? <X className="w-5 h-5 text-slate-300" /> : <Menu className="w-5 h-5 text-slate-300" />}
-          </button>
+          <div className="flex items-center gap-1 shrink-0">
+            <LanguageDropdown variant="dark" />
+            <NotificationCenter />
+            <button
+              onClick={() => setIsSidebarOpen(!isSidebarOpen)}
+              className="touch-target rounded-lg hover:bg-slate-700 active:bg-slate-600 transition-colors"
+              aria-label={isSidebarOpen ? 'Close menu' : 'Open menu'}
+              aria-expanded={isSidebarOpen}
+            >
+              {isSidebarOpen
+                ? <X className="w-5 h-5 text-slate-300" />
+                : <Menu className="w-5 h-5 text-slate-300" />}
+            </button>
+          </div>
         </div>
       </div>
 
-      {/* Mobile Sidebar */}
+      {/* ── Mobile Sidebar with slide animation ── */}
       {isSidebarOpen && (
-        <div className="lg:hidden fixed inset-0 bg-black/60 z-40 backdrop-blur-sm" onClick={() => setIsSidebarOpen(false)}>
-          <aside className="w-64 bg-slate-800 h-full flex flex-col overflow-hidden" onClick={e => e.stopPropagation()}>
+        <div
+          ref={overlayRef}
+          className="lg:hidden fixed inset-0 z-40 sidebar-overlay"
+          style={{ background: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(4px)', WebkitBackdropFilter: 'blur(4px)' }}
+          onClick={() => setIsSidebarOpen(false)}
+          aria-label="Close sidebar"
+        >
+          <aside
+            className="w-72 max-w-[85vw] bg-slate-800 h-full flex flex-col overflow-hidden sidebar-panel"
+            onClick={e => e.stopPropagation()}
+            aria-label="Navigation sidebar"
+          >
             <SidebarContent onLinkClick={() => setIsSidebarOpen(false)} />
           </aside>
         </div>
       )}
 
-      {/* Main Content */}
-      <main className="flex-1 lg:ml-60 px-3 sm:px-4 md:px-6 lg:px-8 py-4 pt-18 lg:pt-18" style={{paddingTop: '3.5rem'}}>
-        <div className="max-w-8xl mx-auto pt-6">
+      {/* ── Main Content ── */}
+      <main
+        className="flex-1 lg:ml-60 min-h-screen overflow-x-hidden"
+        style={{
+          paddingTop: 'var(--header-h)',
+          paddingLeft: 'env(safe-area-inset-left)',
+          paddingRight: 'env(safe-area-inset-right)',
+        }}
+      >
+        {/* Desktop top offset */}
+        <div className="hidden lg:block" style={{ height: '3.5rem' }} />
+        <div className="px-3 sm:px-4 md:px-6 lg:px-8 py-6">
           {children}
         </div>
       </main>

@@ -1,0 +1,109 @@
+Perform a complete responsive and PWA audit across the entire platform for all roles:
+- Admin
+- Teacher
+- Student
+
+Carefully test and fix every page, component, modal, table, form, card, sidebar, navbar, dropdown, calendar, chart, quiz page, assignment page, settings page, authentication page, and dashboard.
+
+Requirements:
+
+1. RESPONSIVE DESIGN
+- Ensure full responsiveness on:
+  - Mobile
+  - Tablet
+  - Laptop
+  - Large desktop
+- Test common breakpoints:
+  - 320px
+  - 375px
+  - 425px
+  - 768px
+  - 1024px
+  - 1440px
+
+2. MOBILE UI FIXES
+- Prevent horizontal scrolling.
+- Ensure cards and tables fit properly on small screens.
+- Convert large tables into responsive scroll containers.
+- Ensure text never overflows containers.
+- Buttons must resize correctly.
+- Forms and modals must fit within viewport height.
+- Fix spacing, padding, margins, and alignment issues.
+- Ensure dropdowns and datepickers are usable on mobile.
+- Ensure all modals are scrollable internally on small screens.
+
+3. SIDEBAR & NAVIGATION
+- Fix mobile sidebar behavior.
+- Sidebar toggle button must always stay visible.
+- Add proper z-index handling.
+- Prevent sidebar from covering important content incorrectly.
+- Ensure sidebar closes correctly after navigation on mobile.
+- Add smooth animations/transitions.
+
+4. PWA FIXES
+- In PWA/mobile mode, the sidebar open icon/button is positioned too high near the device clock/status bar and becomes hard to click.
+- Fix safe area issues for:
+  - iPhone Safari
+  - Android Chrome
+  - Installed PWA mode
+
+Requirements:
+- Respect safe-area insets.
+- Add proper top spacing/padding.
+- Ensure navbar/header does not overlap with:
+  - clock
+  - battery
+  - notch
+  - dynamic island
+  - status bar
+
+Implement:
+- env(safe-area-inset-top)
+- proper sticky header handling
+- correct z-index layering
+
+Example:
+padding-top: env(safe-area-inset-top);
+
+5. TOUCH & MOBILE EXPERIENCE
+- Ensure all buttons/icons are easy to tap.
+- Minimum touch target size:
+  - 44x44px
+- Fix click/touch delays.
+- Ensure no elements are hidden behind fixed headers or bottom navigation.
+
+6. PERFORMANCE
+- Optimize mobile rendering.
+- Prevent layout shifts.
+- Lazy load heavy components when possible.
+- Reduce unnecessary re-renders.
+
+7. TEST EVERYTHING
+Check all pages and flows:
+- Login/Register/Forgot Password
+- Dashboard
+- Courses
+- Lessons
+- Quizzes
+- Assignments
+- Certificates
+- Attendance
+- Messages/Chat
+- Notifications
+- Payments
+- Settings
+- Profile pages
+- Admin management pages
+- Teacher panels
+- Student panels
+
+8. FINAL RESULT
+After fixes:
+- Platform must behave like a modern native mobile app.
+- PWA must work correctly on Android and iPhone.
+- No overlapping UI.
+- No broken responsive layouts.
+- No inaccessible buttons.
+- No clipped modals.
+- No sidebar/navigation issues.
+- Clean professional responsive experience across all roles.

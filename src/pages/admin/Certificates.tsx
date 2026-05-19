@@ -506,7 +506,7 @@ export default function AdminCertificates() {
       {/* Certificate Preview Modal */}
       {previewCert && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-xl overflow-hidden">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-xl max-h-[90vh] overflow-y-auto">
             <div className="flex items-center justify-between p-4 border-b border-slate-100">
               <span className="text-sm font-semibold text-slate-600">Certificate Preview</span>
               <button onClick={() => setPreviewCert(null)} className="p-2 hover:bg-slate-100 rounded-lg"><X className="w-4 h-4" /></button>

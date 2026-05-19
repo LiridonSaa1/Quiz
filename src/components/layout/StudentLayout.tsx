@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { supabase } from '../../supabase';
@@ -8,7 +8,7 @@ import NotificationCenter from '../NotificationCenter';
 import LanguageDropdown from '../LanguageDropdown';
 import { defaultFeatureFlags, extractFeatureFlags, FeatureFlags } from '../../lib/platformFeatures';
 import { useBranding } from '../../lib/useBranding';
-import { 
+import {
   LayoutDashboard, BookOpen, PlayCircle, HelpCircle, ClipboardList, BarChart3,
   FileBarChart, Award, MessageSquare, Video, Radio, User, LogOut, Menu, X,
   GraduationCap, ScrollText, Zap, Trophy, Megaphone, Presentation,
@@ -25,6 +25,7 @@ export default function StudentLayout({ children }: { children: React.ReactNode 
   const branding = useBranding();
   const location = useLocation();
   const navigate = useNavigate();
+  const overlayRef = useRef<HTMLDivElement>(null);
 
   const studentNavSections = [
     {
@@ -38,25 +39,25 @@ export default function StudentLayout({ children }: { children: React.ReactNode 
     {
       key: 'learning',
       items: [
-        { icon: BookOpen,      label: t('nav.lessons'),     path: '/student/lessons' },
-        { icon: HelpCircle,    label: t('nav.quizzes'),     path: '/student/quizzes' },
-        { icon: ScrollText,    label: t('nav.exams'),       path: '/student/exams' },
-        { icon: ClipboardList, label: t('nav.assignments'),   path: '/student/assignments' },
+        { icon: BookOpen,      label: t('nav.lessons'),      path: '/student/lessons' },
+        { icon: HelpCircle,    label: t('nav.quizzes'),      path: '/student/quizzes' },
+        { icon: ScrollText,    label: t('nav.exams'),        path: '/student/exams' },
+        { icon: ClipboardList, label: t('nav.assignments'),  path: '/student/assignments' },
         { icon: Presentation,  label: t('nav.presentations'),path: '/student/presentations' },
       ]
     },
     {
       key: 'progress',
       items: [
-        { icon: BarChart3,   label: t('nav.myProgress'), path: '/student/progress' },
-        { icon: FileBarChart,label: t('nav.results'),    path: '/student/results' },
+        { icon: BarChart3,    label: t('nav.myProgress'), path: '/student/progress' },
+        { icon: FileBarChart, label: t('nav.results'),    path: '/student/results' },
       ]
     },
     {
       key: 'extra',
       items: [
-        { icon: Award,    label: t('nav.certificates'),  path: '/student/certificates'  },
-        { icon: Megaphone,label: t('nav.announcements'), path: '/student/announcements' },
+        { icon: Award,     label: t('nav.certificates'),  path: '/student/certificates'  },
+        { icon: Megaphone, label: t('nav.announcements'), path: '/student/announcements' },
       ]
     },
     {
@@ -81,6 +82,28 @@ export default function StudentLayout({ children }: { children: React.ReactNode 
       ]
     }
   ];
+
+  // Close sidebar on route change
+  useEffect(() => {
+    setIsSidebarOpen(false);
+  }, [location.pathname]);
+
+  // Close on ESC key
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setIsSidebarOpen(false); };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, []);
+
+  // Lock body scroll when mobile sidebar is open
+  useEffect(() => {
+    if (isSidebarOpen) {
+      document.body.style.overflow = 'hidden';
+    } else {
+      document.body.style.overflow = '';
+    }
+    return () => { document.body.style.overflow = ''; };
+  }, [isSidebarOpen]);
 
   useEffect(() => {
     let mounted = true;
@@ -165,16 +188,19 @@ export default function StudentLayout({ children }: { children: React.ReactNode 
         to={item.path}
         onClick={onClick}
         className={cn(
-          "flex items-center gap-3 px-3 py-2 rounded-lg transition-all text-sm font-medium",
+          'flex items-center gap-3 px-3 rounded-lg transition-all text-sm font-medium min-h-[44px] py-2',
           location.pathname === item.path
-            ? "bg-emerald-600 text-white shadow-lg shadow-emerald-900/30"
-            : "text-slate-400 hover:bg-slate-700/60 hover:text-white"
+            ? 'bg-emerald-600 text-white shadow-lg shadow-emerald-900/30'
+            : 'text-slate-400 hover:bg-slate-700/60 hover:text-white active:bg-slate-700'
         )}
       >
         <item.icon className="w-4 h-4 shrink-0" />
-        <span className="flex-1">{item.label}</span>
+        <span className="flex-1 truncate">{item.label}</span>
         {badge > 0 && (
-          <span className={cn('inline-flex items-center justify-center min-w-[18px] h-[18px] px-1 text-white text-[10px] font-bold rounded-full animate-pulse', badgeColor)}>
+          <span className={cn(
+            'inline-flex items-center justify-center min-w-[20px] h-5 px-1.5 text-white text-[10px] font-bold rounded-full animate-pulse shrink-0',
+            badgeColor
+          )}>
             {badge}
           </span>
         )}
@@ -183,18 +209,18 @@ export default function StudentLayout({ children }: { children: React.ReactNode 
   };
 
   const SidebarContent = ({ onLinkClick }: { onLinkClick?: () => void }) => (
-    <>
-      <div className="p-5 border-b border-slate-700/50">
+    <div className="flex flex-col h-full bg-slate-800">
+      <div className="p-5 border-b border-slate-700/50 shrink-0">
         <div className="flex items-center gap-3">
-          <div className="w-9 h-9 bg-emerald-600 rounded-xl flex items-center justify-center shadow-lg shadow-emerald-900/40 overflow-hidden">
+          <div className="w-9 h-9 bg-emerald-600 rounded-xl flex items-center justify-center shadow-lg shadow-emerald-900/40 overflow-hidden shrink-0">
             {branding.logoUrl ? (
               <img src={branding.logoUrl} alt="Brand logo" className="w-full h-full object-contain rounded-xl" />
             ) : (
               <GraduationCap className="w-5 h-5 text-white" />
             )}
           </div>
-          <div>
-            <h1 className="text-base font-bold text-white leading-tight">{branding.schoolName}</h1>
+          <div className="min-w-0">
+            <h1 className="text-base font-bold text-white leading-tight truncate">{branding.schoolName}</h1>
             <p className="text-[10px] text-slate-400 font-medium uppercase tracking-widest">{t('nav.studentPortal')}</p>
           </div>
         </div>
@@ -213,69 +239,103 @@ export default function StudentLayout({ children }: { children: React.ReactNode 
         <div className="pt-3 border-t border-slate-700/50">
           <button
             onClick={handleLogout}
-            className="flex items-center gap-3 px-3 py-2 w-full text-slate-400 hover:bg-red-500/10 hover:text-red-400 rounded-lg transition-all text-sm font-medium"
+            className="flex items-center gap-3 px-3 py-2 min-h-[44px] w-full text-slate-400 hover:bg-red-500/10 hover:text-red-400 active:bg-red-500/20 rounded-lg transition-all text-sm font-medium"
           >
-            <LogOut className="w-4 h-4" />
+            <LogOut className="w-4 h-4 shrink-0" />
             <span>{t('nav.signOut')}</span>
           </button>
         </div>
       </nav>
-    </>
+    </div>
   );
 
   const currentLabel = visibleSections.flatMap(s => s.items).find(i => i.path === location.pathname)?.label || t('nav.dashboard');
 
   return (
-    <div className="min-h-screen bg-slate-50 flex">
-      {/* Sidebar Desktop */}
+    <div className="min-h-screen bg-slate-50 flex overflow-x-hidden">
+
+      {/* ── Desktop Sidebar ── */}
       <aside className="hidden lg:flex flex-col w-60 bg-slate-800 fixed h-full z-30 overflow-hidden">
         <SidebarContent />
       </aside>
 
-      {/* Top Bar Desktop */}
+      {/* ── Desktop Top Bar ── */}
       <header className="hidden lg:flex fixed top-0 right-0 left-60 h-14 bg-white border-b border-slate-200 items-center justify-between px-6 z-20">
-        <div className="flex items-center gap-2">
-          <span className="text-sm font-semibold text-slate-500">{currentLabel}</span>
-        </div>
-        <div className="flex items-center gap-2">
+        <span className="text-sm font-semibold text-slate-500 truncate">{currentLabel}</span>
+        <div className="flex items-center gap-2 shrink-0">
           <LanguageDropdown variant="light" />
           <NotificationCenter />
         </div>
       </header>
 
-      {/* Mobile Header */}
-      <div className="lg:hidden fixed top-0 left-0 right-0 h-14 bg-slate-800 flex items-center justify-between px-4 z-50">
-        <div className="flex items-center gap-2.5">
-          <div className="w-8 h-8 bg-emerald-600 rounded-lg flex items-center justify-center overflow-hidden">
-            {branding.logoUrl ? (
-              <img src={branding.logoUrl} alt="Brand logo" className="w-full h-full object-contain rounded-lg" />
-            ) : (
-              <GraduationCap className="w-4 h-4 text-white" />
-            )}
+      {/* ── Mobile Header (safe-area aware) ── */}
+      <div
+        className="lg:hidden fixed top-0 left-0 right-0 z-50 bg-slate-800 flex flex-col justify-end mobile-header"
+        style={{
+          paddingLeft: 'env(safe-area-inset-left)',
+          paddingRight: 'env(safe-area-inset-right)',
+        }}
+      >
+        <div className="flex items-center justify-between px-4 h-14">
+          <div className="flex items-center gap-2.5 min-w-0">
+            <div className="w-8 h-8 bg-emerald-600 rounded-lg flex items-center justify-center overflow-hidden shrink-0">
+              {branding.logoUrl ? (
+                <img src={branding.logoUrl} alt="Brand logo" className="w-full h-full object-contain rounded-lg" />
+              ) : (
+                <GraduationCap className="w-4 h-4 text-white" />
+              )}
+            </div>
+            <h1 className="text-base font-bold text-white truncate">{branding.schoolName}</h1>
           </div>
-          <h1 className="text-base font-bold text-white">{branding.schoolName}</h1>
-        </div>
-        <div className="flex items-center gap-3">
-          <LanguageDropdown variant="dark" />
-          <NotificationCenter />
-          <button onClick={() => setIsSidebarOpen(!isSidebarOpen)} className="p-1.5 hover:bg-slate-700 rounded-lg">
-            {isSidebarOpen ? <X className="w-5 h-5 text-slate-300" /> : <Menu className="w-5 h-5 text-slate-300" />}
-          </button>
+          <div className="flex items-center gap-1 shrink-0">
+            <LanguageDropdown variant="dark" />
+            <NotificationCenter />
+            <button
+              onClick={() => setIsSidebarOpen(!isSidebarOpen)}
+              className="touch-target rounded-lg hover:bg-slate-700 active:bg-slate-600 transition-colors"
+              aria-label={isSidebarOpen ? 'Close menu' : 'Open menu'}
+              aria-expanded={isSidebarOpen}
+            >
+              {isSidebarOpen
+                ? <X className="w-5 h-5 text-slate-300" />
+                : <Menu className="w-5 h-5 text-slate-300" />}
+            </button>
+          </div>
         </div>
       </div>
 
-      {/* Mobile Sidebar */}
+      {/* ── Mobile Sidebar with slide animation ── */}
       {isSidebarOpen && (
-        <div className="lg:hidden fixed inset-0 bg-black/60 z-40 backdrop-blur-sm" onClick={() => setIsSidebarOpen(false)}>
-          <aside className="w-64 bg-slate-800 h-full flex flex-col overflow-hidden" onClick={e => e.stopPropagation()}>
+        <div
+          ref={overlayRef}
+          className="lg:hidden fixed inset-0 z-40 sidebar-overlay"
+          style={{ background: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(4px)', WebkitBackdropFilter: 'blur(4px)' }}
+          onClick={() => setIsSidebarOpen(false)}
+          aria-label="Close sidebar"
+        >
+          <aside
+            className="w-72 max-w-[85vw] bg-slate-800 h-full flex flex-col overflow-hidden sidebar-panel"
+            onClick={e => e.stopPropagation()}
+            aria-label="Navigation sidebar"
+          >
             <SidebarContent onLinkClick={() => setIsSidebarOpen(false)} />
           </aside>
         </div>
       )}
 
-      {/* Main Content */}
-      <main className="flex-1 lg:ml-60 px-3 sm:px-4 md:px-6 lg:px-8 py-4" style={{paddingTop: '3.5rem'}}>
-        <div className="max-w-8xl mx-auto pt-6">
+      {/* ── Main Content ── */}
+      <main
+        className="flex-1 lg:ml-60 min-h-screen overflow-x-hidden"
+        style={{
+          paddingTop: 'var(--header-h)',
+          paddingLeft: 'env(safe-area-inset-left)',
+          paddingRight: 'env(safe-area-inset-right)',
+          paddingBottom: 'env(safe-area-inset-bottom)',
+        }}
+      >
+        {/* Desktop top offset */}
+        <div className="hidden lg:block" style={{ height: '3.5rem' }} />
+        <div className="px-3 sm:px-4 md:px-6 lg:px-8 py-6">
           {children}
         </div>
       </main>

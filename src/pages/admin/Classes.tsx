@@ -634,7 +634,7 @@ export default function AdminClasses() {
       {/* View Detail Modal */}
       {viewClass && (
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-2xl w-full max-w-md shadow-2xl border border-slate-100 overflow-hidden">
+          <div className="bg-white rounded-2xl w-full max-w-md shadow-2xl border border-slate-100 overflow-hidden max-h-[90vh] overflow-y-auto">
             <div className={`bg-gradient-to-br ${getAvatar(viewClass.name)} p-6 relative`}>
               <button
                 onClick={() => setViewClass(null)}

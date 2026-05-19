@@ -135,8 +135,8 @@ export default function AddStudentModal({ onClose, onSuccess, accentColor = 'vio
   const labelCls = 'block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5';
 
   return (
-    <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[60] flex items-center justify-center p-4">
-      <div className="bg-white w-full max-w-lg rounded-2xl shadow-2xl overflow-hidden">
+    <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[60] flex items-center justify-center p-4" style={{ paddingTop: 'max(1rem, env(safe-area-inset-top))', paddingBottom: 'max(1rem, env(safe-area-inset-bottom))' }}>
+      <div className="bg-white w-full max-w-lg rounded-2xl shadow-2xl overflow-hidden flex flex-col" style={{ maxHeight: 'min(90dvh, 700px)' }}>
 
         {/* Header */}
         <div className={`px-6 pt-6 pb-5 bg-gradient-to-r ${accent.header} border-b border-slate-100`}>
@@ -177,7 +177,7 @@ export default function AddStudentModal({ onClose, onSuccess, accentColor = 'vio
         </div>
 
         {/* Body */}
-        <div className="p-6 space-y-4 min-h-[280px]">
+        <div className="p-6 space-y-4 min-h-[220px] overflow-y-auto flex-1">
 
           {/* Step 0 — Account */}
           {step === 0 && (
@@ -350,7 +350,7 @@ export default function AddStudentModal({ onClose, onSuccess, accentColor = 'vio
         </div>
 
         {/* Footer */}
-        <div className="px-6 pb-6 flex gap-3">
+        <div className="px-6 pb-6 flex gap-3 shrink-0 border-t border-slate-100 pt-4">
           {step > 0 && (
             <button
               type="button"
