@@ -22,6 +22,7 @@ interface LiveSession {
   scheduled_at: string;
   duration_minutes: number;
   recording_url: string | null;
+  recording_urls: string[];
   started_at: string | null;
   host_id: string | null;
   course: { id: string; title: string } | null;
@@ -290,7 +291,11 @@ export default function TeacherLiveSessionRoom() {
       const json = await res.json();
       if (json.success) {
         setSession(json.session);
-        if (json.session.recording_url) setSavedRecordings([json.session.recording_url]);
+        // Prefer recording_urls array; fall back to single recording_url for legacy rows
+        const urls: string[] = Array.isArray(json.session.recording_urls) && json.session.recording_urls.length > 0
+          ? json.session.recording_urls
+          : json.session.recording_url ? [json.session.recording_url] : [];
+        if (urls.length > 0) setSavedRecordings(urls);
         if (json.session.status === 'live') setMeetingActive(true);
       } else {
         toast.error(t('liveSessions.sessionNotFound'));

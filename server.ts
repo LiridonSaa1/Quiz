@@ -6555,6 +6555,17 @@ When giving instructions, number each step clearly. Be precise and technical whe
         update.started_at = new Date().toISOString();
       }
 
+      // When a new recording_url is being set, also append it to recording_urls array
+      if (update.recording_url) {
+        const { data: existing } = await supabaseAdmin
+          .from('live_sessions').select('recording_urls').eq('id', req.params.id).single();
+        const existingUrls: string[] = Array.isArray(existing?.recording_urls) ? existing.recording_urls : [];
+        const newUrl = String(update.recording_url);
+        if (!existingUrls.includes(newUrl)) {
+          update.recording_urls = [...existingUrls, newUrl];
+        }
+      }
+
       const { data, error } = await supabaseAdmin
         .from('live_sessions')
         .update(update)
@@ -12059,6 +12070,25 @@ async function runNotificationsColumnsMigration(): Promise<void> {
   }
 }
 
+async function runLiveSessionsRecordingUrlsMigration(): Promise<void> {
+  const ddl = `ALTER TABLE public.live_sessions ADD COLUMN IF NOT EXISTS recording_urls JSONB NOT NULL DEFAULT '[]'::jsonb`;
+  try {
+    await poolQuery(ddl);
+    console.log('[migration] live_sessions.recording_urls column ensured ✓');
+    return;
+  } catch { /* fall through */ }
+  try {
+    const probe = await supabaseAdmin.from('live_sessions').select('recording_urls').limit(1);
+    if (!probe.error) { console.log('[migration] live_sessions.recording_urls column already exists ✓'); return; }
+    const rpc = await (supabaseAdmin as any).rpc('exec_sql', { sql: ddl });
+    if (rpc.error) throw rpc.error;
+    console.log('[migration] live_sessions.recording_urls added via RPC ✓');
+  } catch (err: any) {
+    console.warn('[migration] live_sessions.recording_urls could not be auto-created:', err?.message?.split('\n')[0]);
+    console.warn('[migration] Run manually:', ddl);
+  }
+}
+
 async function ensureAssignmentFilesBucket(): Promise<void> {
   try {
     const { error } = await supabaseAdmin.storage.createBucket('assignment-files', {
@@ -12091,6 +12121,7 @@ async function startServer() {
   void runQuizzesPublishAtMigration();
   void runAssignmentsPublishAtMigration();
   void runNotificationsColumnsMigration();
+  void runLiveSessionsRecordingUrlsMigration();
   void ensureAssignmentFilesBucket();
 
   const httpServer = http.createServer();

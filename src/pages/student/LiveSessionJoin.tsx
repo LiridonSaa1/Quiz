@@ -22,6 +22,7 @@ interface LiveSession {
   scheduled_at: string;
   duration_minutes: number;
   recording_url: string | null;
+  recording_urls: string[];
   started_at: string | null;
   host_id: string | null;
   host: { id: string; display_name: string } | null;
@@ -336,14 +337,32 @@ export default function StudentLiveSessionJoin() {
         )}
 
         {/* Ended - Show Recording */}
-        {isEnded && session.recording_url && (
-          <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-5">
-            <h3 className="text-sm font-bold text-slate-900 mb-3 flex items-center gap-2">
-              <CheckCircle2 className="w-4 h-4 text-emerald-500" /> {t('liveSessionStudent.sessionRecording')}
-            </h3>
-            <video src={session.recording_url} controls className="w-full rounded-xl" style={{ maxHeight: 400 }} />
-          </div>
-        )}
+        {isEnded && (() => {
+          const allUrls: string[] = Array.isArray(session.recording_urls) && session.recording_urls.length > 0
+            ? session.recording_urls
+            : session.recording_url ? [session.recording_url] : [];
+          if (allUrls.length === 0) return null;
+          return (
+            <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-5">
+              <h3 className="text-sm font-bold text-slate-900 mb-3 flex items-center gap-2">
+                <CheckCircle2 className="w-4 h-4 text-emerald-500" /> {t('liveSessionStudent.sessionRecording')}
+                {allUrls.length > 1 && (
+                  <span className="ml-1 text-xs font-normal text-slate-500">({allUrls.length} {t('liveSessions.recordings', { count: allUrls.length })})</span>
+                )}
+              </h3>
+              <div className="flex flex-col gap-4">
+                {allUrls.map((url, i) => (
+                  <div key={url}>
+                    {allUrls.length > 1 && (
+                      <p className="text-xs text-slate-500 mb-1 font-medium">Part {i + 1}</p>
+                    )}
+                    <video src={url} controls className="w-full rounded-xl" style={{ maxHeight: 400 }} />
+                  </div>
+                ))}
+              </div>
+            </div>
+          );
+        })()}
 
         {/* Video Room (when joined or live) */}
         {isLive && (
