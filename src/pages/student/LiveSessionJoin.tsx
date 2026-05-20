@@ -34,6 +34,7 @@ interface LiveSession {
   recording_urls: string[];
   started_at: string | null;
   host_id: string | null;
+  jitsi_room_name: string | null;
   host: { id: string; display_name: string } | null;
   course: { id: string; title: string } | null;
 }
@@ -96,11 +97,21 @@ export default function StudentLiveSessionJoin() {
     return `${m}:${sec}`;
   };
 
-  const jitsiRoomName = `quizmaster-session-${id?.slice(0, 8)}`;
-  const jitsiMeetUrl = `https://meet.jit.si/${jitsiRoomName}`;
+  const defaultJitsiRoomName = `quizmaster-session-${id?.slice(0, 8)}`;
+  const [activeRoomName, setActiveRoomName] = useState(defaultJitsiRoomName);
   const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(
     typeof navigator !== 'undefined' ? navigator.userAgent : ''
   );
+  const jitsiMeetUrl = `https://meet.jit.si/${activeRoomName}`;
+
+  // Sync activeRoomName when teacher reconnects (jitsi_room_name changes via Realtime)
+  useEffect(() => {
+    if (session?.jitsi_room_name && session.jitsi_room_name !== activeRoomName) {
+      setActiveRoomName(session.jitsi_room_name);
+      // Force reinit by clearing existing API instance
+      if (jitsiApiRef.current) { jitsiApiRef.current.dispose(); jitsiApiRef.current = null; }
+    }
+  }, [session?.jitsi_room_name]);
 
   // Initialize Jitsi External API when student joins (desktop only — mobile opens in new tab)
   useEffect(() => {
@@ -111,7 +122,7 @@ export default function StudentLiveSessionJoin() {
       const JitsiAPI = window.JitsiMeetExternalAPI;
       if (!JitsiAPI) { console.error('JitsiMeetExternalAPI not available'); return; }
       const api = new JitsiAPI('meet.jit.si', {
-        roomName: jitsiRoomName,
+        roomName: activeRoomName,
         parentNode: container,
         width: '100%',
         height: '100%',
@@ -166,7 +177,7 @@ export default function StudentLiveSessionJoin() {
     return () => {
       if (jitsiApiRef.current) { jitsiApiRef.current.dispose(); jitsiApiRef.current = null; }
     };
-  }, [joined, userDisplayName]);
+  }, [joined, userDisplayName, activeRoomName]);
 
   useEffect(() => {
     const init = async () => {

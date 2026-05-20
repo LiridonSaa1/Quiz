@@ -189,9 +189,11 @@ export default function TeacherLiveSessionRoom() {
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const chatEndRef = useRef<HTMLDivElement | null>(null);
 
-  const jitsiRoomName = `quizmaster-session-${id?.slice(0, 8)}`;
+  const defaultJitsiRoomName = `quizmaster-session-${id?.slice(0, 8)}`;
+  const jitsiRoomNameRef = useRef(defaultJitsiRoomName);
   const jitsiApiRef = useRef<JitsiMeetExternalAPIInstance | null>(null);
   const jitsiContainerRef = useRef<HTMLDivElement | null>(null);
+  const timeRemainingRef = useRef<number | null>(null);
 
   // Track mobile breakpoint
   useEffect(() => {
@@ -364,10 +366,20 @@ export default function TeacherLiveSessionRoom() {
     toast.success('Meeting started!');
   };
 
-  const initJitsi = () => {
+  const reconnectJitsi = async () => {
+    const newRoomName = `quizmaster-session-${id?.slice(0, 8)}-${Date.now().toString(36)}`;
+    jitsiRoomNameRef.current = newRoomName;
+    await patchSession({ jitsi_room_name: newRoomName });
+    if (jitsiApiRef.current) { jitsiApiRef.current.dispose(); jitsiApiRef.current = null; }
+    toast.info('🔄 Reconnecting to new room — students will follow automatically…');
+    setTimeout(() => initJitsi(newRoomName), 800);
+  };
+
+  const initJitsi = (roomName?: string) => {
     if (!jitsiContainerRef.current || jitsiApiRef.current) return;
+    const name = roomName ?? jitsiRoomNameRef.current;
     loadJitsiExternalAPI(
-      jitsiRoomName,
+      name,
       jitsiContainerRef.current,
       userDisplayName,
       !micOn,
@@ -381,6 +393,16 @@ export default function TeacherLiveSessionRoom() {
         api.addListener('videoMuteStatusChanged', (e: unknown) => {
           const event = e as { muted: boolean };
           setCameraOn(!event.muted);
+        });
+        // When Jitsi closes the room (e.g. meet.jit.si 5-min free limit),
+        // auto-reconnect if our session still has time remaining.
+        api.addListener('readyToClose', () => {
+          const rem = timeRemainingRef.current;
+          if (rem !== null && rem > 0) {
+            void reconnectJitsi();
+          } else {
+            void endMeeting(true);
+          }
         });
       }
     );
@@ -542,6 +564,7 @@ export default function TeacherLiveSessionRoom() {
       const now = Date.now();
       const remaining = Math.max(0, Math.floor((end - now) / 1000));
       setTimeRemaining(remaining);
+      timeRemainingRef.current = remaining;
       // Only auto-end if duration is valid (>0) to prevent instant-end bug when duration_minutes=0
       if (remaining <= 0 && session.status === 'live' && (session.duration_minutes || 0) > 0) endMeeting(true);
     }, 1000);
