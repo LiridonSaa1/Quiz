@@ -1933,6 +1933,9 @@ const en = {
     chat: 'Chat',
     sessionScheduled: 'Session scheduled',
     startsIn: 'Starts {{time}}',
+    openMeeting: 'Open Meeting',
+    openMeetingDesc: 'Tap the button below to join the live meeting in your browser or Jitsi app.',
+    openMeetingHint: 'The meeting will open in a new tab.',
   },
   realtimeQuizStudent: {
     enterPinError: 'Enter a PIN.',

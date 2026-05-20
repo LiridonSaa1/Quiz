@@ -97,10 +97,14 @@ export default function StudentLiveSessionJoin() {
   };
 
   const jitsiRoomName = `quizmaster-session-${id?.slice(0, 8)}`;
+  const jitsiMeetUrl = `https://meet.jit.si/${jitsiRoomName}`;
+  const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(
+    typeof navigator !== 'undefined' ? navigator.userAgent : ''
+  );
 
-  // Initialize Jitsi External API when student joins
+  // Initialize Jitsi External API when student joins (desktop only — mobile opens in new tab)
   useEffect(() => {
-    if (!joined || !jitsiContainerRef.current || jitsiApiRef.current) return;
+    if (!joined || isMobile || !jitsiContainerRef.current || jitsiApiRef.current) return;
     const container = jitsiContainerRef.current;
 
     const init = () => {
@@ -446,8 +450,31 @@ export default function StudentLiveSessionJoin() {
             {joined ? (
               <div className="flex h-full">
                 <div className="flex-1 relative h-full">
-                  {/* Jitsi External API container — fills full height so join button is always visible */}
-                  <div ref={jitsiContainerRef} className="w-full h-full" />
+                  {/* Mobile: open in new tab instead of embedding Jitsi */}
+                  {isMobile ? (
+                    <div className="w-full h-full flex flex-col items-center justify-center gap-6 p-6 bg-slate-900">
+                      <div className="w-20 h-20 rounded-full bg-emerald-600/20 border-2 border-emerald-500 flex items-center justify-center">
+                        <Video className="w-10 h-10 text-emerald-400" />
+                      </div>
+                      <div className="text-center">
+                        <p className="text-xl font-bold text-white mb-2">{t('liveSessionStudent.sessionIsLiveNow')}</p>
+                        <p className="text-white/50 text-sm">{t('liveSessionStudent.openMeetingDesc')}</p>
+                      </div>
+                      <a
+                        href={jitsiMeetUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="flex items-center gap-2.5 px-8 py-4 bg-emerald-500 hover:bg-emerald-600 text-white rounded-2xl font-bold text-base transition-all shadow-xl shadow-emerald-900/40"
+                      >
+                        <Video className="w-5 h-5" />
+                        {t('liveSessionStudent.openMeeting')}
+                      </a>
+                      <p className="text-white/30 text-xs text-center">{t('liveSessionStudent.openMeetingHint')}</p>
+                    </div>
+                  ) : (
+                    /* Desktop: embed Jitsi External API */
+                    <div ref={jitsiContainerRef} className="w-full h-full" />
+                  )}
                   {/* Floating Reactions */}
                   <div className="absolute bottom-20 right-4 pointer-events-none z-10">
                     <AnimatePresence>

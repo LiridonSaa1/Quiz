@@ -1843,6 +1843,9 @@ const sq = {
     chat: 'Bisedë',
     sessionScheduled: 'Sesioni është planifikuar',
     startsIn: 'Fillon {{time}}',
+    openMeeting: 'Hap Takimin',
+    openMeetingDesc: 'Kliko butonin më poshtë për t\'u bashkuar me takimin live në shfletuesin tuaj ose aplikacionin Jitsi.',
+    openMeetingHint: 'Takimi do të hapet në skedë të re.',
   },
   realtimeQuizStudent: {
     enterPinError: 'Shkruani një PIN.',
