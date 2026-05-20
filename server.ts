@@ -3804,6 +3804,9 @@ When giving instructions, number each step clearly. Be precise and technical whe
       if (caller.role !== "admin" && caller.userId !== requestedUserId) {
         return res.status(403).json({ error: "Forbidden" });
       }
+      const teacherDashboardCacheKey = `teacher-dashboard:${requestedUserId}`;
+      const cachedTeacherDashboard = getCachedApiResponse<any>(teacherDashboardCacheKey);
+      if (cachedTeacherDashboard) return res.json(cachedTeacherDashboard);
 
       const teacherIds = await getTeacherIdCandidates(requestedUserId);
       const scopedIds = teacherIds.length > 0 ? teacherIds : [requestedUserId];
@@ -9276,6 +9279,11 @@ When giving instructions, number each step clearly. Be precise and technical whe
   };
 
   // ─── LIVE QUIZ SESSION PERSISTENCE (survive server restarts) ─────────────────
+  const RQ_SESSION_SECTION_PREFIX = 'teacher/live-quiz:';
+  const RQ_SESSION_SECTION_PREFIX_LEGACY = 'rq_session:';
+  const rqSectionForSession = (sessionId: string) => `${RQ_SESSION_SECTION_PREFIX}${sessionId}`;
+  const rqLegacySectionForSession = (sessionId: string) => `${RQ_SESSION_SECTION_PREFIX_LEGACY}${sessionId}`;
+
   const rqSerializeSession = (s: RQSession) => ({
     id: s.id, quizId: s.quizId, quizTitle: s.quizTitle, hostId: s.hostId,
     pin: s.pin, status: s.status, currentQuestionIndex: s.currentQuestionIndex,
@@ -9289,16 +9297,55 @@ When giving instructions, number each step clearly. Be precise and technical whe
     try {
       await supabaseAdmin.from('platform_config')
         .upsert(
-          { section: `rq_session:${s.id}`, value: rqSerializeSession(s), updated_at: new Date().toISOString() },
+          { section: rqSectionForSession(s.id), value: rqSerializeSession(s), updated_at: new Date().toISOString() },
           { onConflict: 'section' }
         );
+      // Clean up legacy key once new key is saved.
+      await supabaseAdmin.from('platform_config').delete().eq('section', rqLegacySectionForSession(s.id));
     } catch (e) { console.warn('[rq] persist failed:', e); }
   };
 
   const rqDeleteSessionFromDB = async (sessionId: string) => {
     try {
-      await supabaseAdmin.from('platform_config').delete().eq('section', `rq_session:${sessionId}`);
+      await supabaseAdmin
+        .from('platform_config')
+        .delete()
+        .in('section', [rqSectionForSession(sessionId), rqLegacySectionForSession(sessionId)]);
     } catch (e) { console.warn('[rq] delete from DB failed:', e); }
+  };
+
+  const rqRestoreSingleSessionFromDB = async (sessionId: string): Promise<RQSession | null> => {
+    try {
+      const { data, error } = await supabaseAdmin
+        .from('platform_config')
+        .select('section, value')
+        .in('section', [rqSectionForSession(sessionId), rqLegacySectionForSession(sessionId)])
+        .maybeSingle();
+      if (error || !data?.value) return null;
+      const d = data.value as any;
+      if (!d?.id || d.id !== sessionId || !d?.status) return null;
+      if (d.status === 'ended') {
+        await supabaseAdmin.from('platform_config').delete().eq('section', data.section);
+        return null;
+      }
+      const session: RQSession = {
+        id: d.id, quizId: d.quizId, quizTitle: d.quizTitle, hostId: d.hostId,
+        pin: d.pin, status: d.status, currentQuestionIndex: d.currentQuestionIndex ?? 0,
+        questionStartedAt: d.questionStartedAt ?? null, questions: d.questions ?? [],
+        createdAt: d.createdAt ?? Date.now(),
+        teamsEnabled: Boolean(d.teamsEnabled), teamCount: d.teamCount ?? 2,
+        teamNames: Array.isArray(d.teamNames) ? d.teamNames : ['Red', 'Blue'],
+        participantTeams: d.participantTeams ?? {},
+        teamScores: d.teamScores ?? {},
+        participants: new Map(Object.entries(d.participants ?? {})),
+      };
+      rqSessions.set(session.id, session);
+      rqPins.set(session.pin, session.id);
+      if (session.status === 'active') rqScheduleAutoNext(session.id);
+      return session;
+    } catch {
+      return null;
+    }
   };
 
   const rqRestoreSessionsFromDB = async () => {
@@ -9306,7 +9353,7 @@ When giving instructions, number each step clearly. Be precise and technical whe
       const { data, error } = await supabaseAdmin
         .from('platform_config')
         .select('section, value')
-        .like('section', 'rq_session:%');
+        .or(`section.like.${RQ_SESSION_SECTION_PREFIX}%,section.like.${RQ_SESSION_SECTION_PREFIX_LEGACY}%`);
       if (error || !data) return;
       let restored = 0;
       for (const row of data) {
@@ -9463,7 +9510,9 @@ When giving instructions, number each step clearly. Be precise and technical whe
     try {
       const caller = await assertAuthenticated(req, res);
       if (!caller) return;
-      const session = rqSessions.get(req.params.sessionId);
+      const session =
+        rqSessions.get(req.params.sessionId) ??
+        (await rqRestoreSingleSessionFromDB(req.params.sessionId));
       if (!session) return res.status(404).json({ error: 'Session not found.' });
       if (session.hostId !== caller.userId && caller.role !== 'admin') {
         return res.status(403).json({ error: 'Access denied.' });
@@ -9549,7 +9598,9 @@ When giving instructions, number each step clearly. Be precise and technical whe
     try {
       const caller = await assertAuthenticated(req, res);
       if (!caller) return;
-      const session = rqSessions.get(req.params.sessionId);
+      const session =
+        rqSessions.get(req.params.sessionId) ??
+        (await rqRestoreSingleSessionFromDB(req.params.sessionId));
       if (!session) return res.status(404).json({ error: 'Session not found.' });
       if (session.hostId !== caller.userId && caller.role !== 'admin') {
         return res.status(403).json({ error: 'Access denied.' });
@@ -9604,7 +9655,9 @@ When giving instructions, number each step clearly. Be precise and technical whe
     try {
       const caller = await assertAuthenticated(req, res);
       if (!caller) return;
-      const session = rqSessions.get(req.params.sessionId);
+      const session =
+        rqSessions.get(req.params.sessionId) ??
+        (await rqRestoreSingleSessionFromDB(req.params.sessionId));
       if (!session) return res.status(404).json({ error: 'Session not found.' });
       if (session.hostId !== caller.userId && caller.role !== 'admin') {
         return res.status(403).json({ error: 'Access denied.' });
