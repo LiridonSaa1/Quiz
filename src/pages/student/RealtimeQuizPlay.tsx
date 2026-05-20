@@ -203,7 +203,7 @@ export default function RealtimeQuizPlay() {
 
       // Always start a poll so we stay in sync regardless of session state
       if (pollRef.current) clearInterval(pollRef.current);
-      pollRef.current = setInterval(() => pollState(json.sessionId), 3000);
+      pollRef.current = setInterval(() => pollState(json.sessionId), 20000);
 
       if (json.status === 'waiting') {
         setView('lobby');
@@ -250,7 +250,7 @@ export default function RealtimeQuizPlay() {
         if (timerRef.current) clearInterval(timerRef.current);
         // Ensure poll is running so we detect session_ended even if Realtime is missed
         if (!pollRef.current) {
-          pollRef.current = setInterval(() => pollState(sessionId), 3000);
+          pollRef.current = setInterval(() => pollState(sessionId), 20000);
         }
       } else {
         toast.error(json.error || t('realtimeQuizStudent.failedToJoin'));

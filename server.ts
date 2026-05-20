@@ -1378,9 +1378,9 @@ When giving instructions, number each step clearly. Be precise and technical whe
   // (1) auth.getUser(token) and (2) profiles.select("role").
   // Caching by token hash saves ~100-300ms per request for active users.
   const AUTH_CACHE_TTL_MS = 30_000;
-  const authUserCache = new Map<string, { userId: string; role: string; expiresAt: number }>();
+  const authUserCache = new Map<string, { userId: string; role: string; displayName?: string; expiresAt: number }>();
 
-  const getAuthUser = async (req: Request): Promise<{ userId: string; role: string } | null> => {
+  const getAuthUser = async (req: Request): Promise<{ userId: string; role: string; displayName?: string } | null> => {
     const auth = req.headers["authorization"] || "";
     const token = auth.startsWith("Bearer ") ? auth.slice(7).trim() : "";
     if (!token) return null;
@@ -1389,7 +1389,7 @@ When giving instructions, number each step clearly. Be precise and technical whe
     const cacheKey = stableHash(token);
     const cached = authUserCache.get(cacheKey);
     if (cached && Date.now() < cached.expiresAt) {
-      return { userId: cached.userId, role: cached.role };
+      return { userId: cached.userId, role: cached.role, displayName: cached.displayName };
     }
 
     const {
@@ -1404,10 +1404,10 @@ When giving instructions, number each step clearly. Be precise and technical whe
     }
     const { data: profile } = await supabaseAdmin
       .from("profiles")
-      .select("role")
+      .select("role, display_name")
       .eq("id", user.id)
       .maybeSingle();
-    const result = { userId: user.id, role: normalizeRole(profile?.role) };
+    const result = { userId: user.id, role: normalizeRole(profile?.role), displayName: profile?.display_name ?? undefined };
     authUserCache.set(cacheKey, { ...result, expiresAt: Date.now() + AUTH_CACHE_TTL_MS });
     // Evict old entries to avoid unbounded growth
     if (authUserCache.size > 500) {
@@ -2696,8 +2696,13 @@ When giving instructions, number each step clearly. Be precise and technical whe
       if (!caller) return res.status(401).json({ error: "Unauthorized" });
       if (caller.role !== "admin") return res.status(403).json({ error: "Forbidden: admin role required" });
 
+      const page  = Math.max(0, parseInt(String(req.query.page  ?? '0')) || 0);
+      const limit = Math.min(200, Math.max(10, parseInt(String(req.query.limit ?? '100')) || 100));
+      const rangeStart = page * limit;
+      const rangeEnd   = rangeStart + limit - 1;
+
       const [profilesRes, teachersRes, coursesRes] = await Promise.all([
-        supabaseAdmin.from('profiles').select('*').eq('role', 'student'),
+        supabaseAdmin.from('profiles').select('*', { count: 'exact' }).eq('role', 'student').range(rangeStart, rangeEnd),
         supabaseAdmin.from('teachers').select('user_id, first_name, last_name'),
         supabaseAdmin.from('courses').select('id, student_ids, teacher_id'),
       ]);
@@ -2753,7 +2758,7 @@ When giving instructions, number each step clearly. Be precise and technical whe
         enrolledCourseCount: enrolledCountMap[p.id] || 0,
       }));
 
-      res.json({ success: true, students, teacherOptions });
+      res.json({ success: true, students, teacherOptions, total: profilesRes.count ?? students.length, page, limit });
     } catch (error: any) {
       console.error('Error fetching students:', error);
       res.status(500).json({ error: error.message });
@@ -2767,8 +2772,13 @@ When giving instructions, number each step clearly. Be precise and technical whe
       if (!caller) return;
       if (!isAdmin(caller)) return res.status(403).json({ error: "Forbidden: admin role required" });
 
+      const tPage  = Math.max(0, parseInt(String(req.query.page  ?? '0')) || 0);
+      const tLimit = Math.min(200, Math.max(10, parseInt(String(req.query.limit ?? '100')) || 100));
+      const tRangeStart = tPage * tLimit;
+      const tRangeEnd   = tRangeStart + tLimit - 1;
+
       const [profilesRes, teachersRes] = await Promise.all([
-        supabaseAdmin.from("profiles").select("*").eq("role", "teacher"),
+        supabaseAdmin.from("profiles").select("*", { count: 'exact' }).eq("role", "teacher").range(tRangeStart, tRangeEnd),
         supabaseAdmin.from("teachers").select("id, user_id"),
       ]);
 
@@ -2791,7 +2801,7 @@ When giving instructions, number each step clearly. Be precise and technical whe
         status: p.status || 'active',
         createdAt: p.created_at,
       }));
-      res.json({ success: true, teachers });
+      res.json({ success: true, teachers, total: profilesRes.count ?? teachers.length, page: tPage, limit: tLimit });
     } catch (error: any) {
       console.error('Error fetching teachers:', error);
       res.status(500).json({ error: error.message });
@@ -5475,7 +5485,7 @@ When giving instructions, number each step clearly. Be precise and technical whe
         courseByLevel,
         scoreDistribution,
       };
-      setCachedApiResponse(adminAnalyticsCacheKey, payload, 20_000);
+      setCachedApiResponse(adminAnalyticsCacheKey, payload, 300_000);
       const durationMs = Date.now() - analyticsStartedAt;
       if (durationMs > PERF_SLOW_THRESHOLD_MS) {
         console.warn(
@@ -5489,6 +5499,10 @@ When giving instructions, number each step clearly. Be precise and technical whe
   // ── REPORTS ─────────────────────────────────────────────────
   app.get('/api/admin/reports/students', async (req, res) => {
     try {
+      const rptStudentsCacheKey = 'admin-reports:students';
+      const rptStudentsCached = getCachedApiResponse<any>(rptStudentsCacheKey);
+      if (rptStudentsCached) return res.json(rptStudentsCached);
+
       const [studentsRes, enrollmentsResWithIds, certs] = await Promise.all([
         supabaseAdmin.from('profiles').select('id, display_name, email, status, created_at').eq('role', 'student'),
         supabaseAdmin.from('courses').select('id, student_ids'),
@@ -5534,7 +5548,9 @@ When giving instructions, number each step clearly. Be precise and technical whe
         };
       });
 
-      res.json({ success: true, report });
+      const rptStudentsPayload = { success: true, report };
+      setCachedApiResponse(rptStudentsCacheKey, rptStudentsPayload, 180_000);
+      res.json(rptStudentsPayload);
     } catch (e: any) { res.status(500).json({ error: e.message }); }
   });
 
@@ -5688,6 +5704,10 @@ When giving instructions, number each step clearly. Be precise and technical whe
 
   app.get('/api/admin/reports/roles', async (req, res) => {
     try {
+      const rptRolesCacheKey = 'admin-reports:roles';
+      const rptRolesCached = getCachedApiResponse<any>(rptRolesCacheKey);
+      if (rptRolesCached) return res.json(rptRolesCached);
+
       const [profilesRes, coursesRes, quizzesRes, certs] = await Promise.all([
         supabaseAdmin.from('profiles').select('id, role, status, created_at'),
         supabaseAdmin.from('courses').select('teacher_id'),
@@ -5758,7 +5778,9 @@ When giving instructions, number each step clearly. Be precise and technical whe
       });
 
       const report = [roleStats.admin, roleStats.teacher, roleStats.student];
-      res.json({ success: true, report });
+      const rptRolesPayload = { success: true, report };
+      setCachedApiResponse(rptRolesCacheKey, rptRolesPayload, 180_000);
+      res.json(rptRolesPayload);
     } catch (e: any) { res.status(500).json({ error: e.message }); }
   });
 
@@ -7207,7 +7229,7 @@ When giving instructions, number each step clearly. Be precise and technical whe
       }
       const { data, error } = await supabaseAdmin
         .from('session_chat_messages')
-        .insert({ session_id: req.params.id, sender_id, message: text, created_at: new Date().toISOString() })
+        .insert({ session_id: req.params.id, sender_id, message: text, created_at: new Date().toISOString(), sender_display_name: caller.displayName as string | undefined ?? null })
         .select('*, sender:profiles!sender_id(id,display_name,avatar_url)').single();
       if (error && !isSessionChatTableMissing(error)) throw error;
       // If table missing, return a local echo of the message so UI doesn't crash
@@ -9271,6 +9293,44 @@ When giving instructions, number each step clearly. Be precise and technical whe
   const studentQuizCount   = new Map<string, number>();
   const studentPassStreak  = new Map<string, number>();
 
+  // ── Badge DB persistence (survive server restarts) ──────────────────────────
+  const BADGE_SECTION_PREFIX = 'rq_badge:';
+
+  const rqPersistBadgeState = async (userId: string): Promise<void> => {
+    try {
+      const badges = [...(studentBadges.get(userId) ?? [])];
+      const quizCount  = studentQuizCount.get(userId)  ?? 0;
+      const passStreak = studentPassStreak.get(userId) ?? 0;
+      await supabaseAdmin.from('platform_config').upsert(
+        { section: `${BADGE_SECTION_PREFIX}${userId}`, value: { badges, quizCount, passStreak }, updated_at: new Date().toISOString() },
+        { onConflict: 'section' }
+      );
+    } catch { /* non-critical */ }
+  };
+
+  const rqRestoreBadgeStateFromDB = async (): Promise<void> => {
+    try {
+      const { data } = await supabaseAdmin
+        .from('platform_config')
+        .select('section, value')
+        .like('section', `${BADGE_SECTION_PREFIX}%`);
+      if (!data) return;
+      let restored = 0;
+      for (const row of data) {
+        const userId = (row.section as string).slice(BADGE_SECTION_PREFIX.length);
+        const d = row.value as any;
+        if (!userId || !d) continue;
+        if (Array.isArray(d.badges))           studentBadges.set(userId, new Set<string>(d.badges));
+        if (typeof d.quizCount  === 'number')  studentQuizCount.set(userId, d.quizCount);
+        if (typeof d.passStreak === 'number')  studentPassStreak.set(userId, d.passStreak);
+        restored++;
+      }
+      if (restored > 0) console.log(`[badges] Restored badge state for ${restored} user(s)`);
+    } catch { /* non-critical */ }
+  };
+  rqRestoreBadgeStateFromDB().catch(() => {});
+  // ────────────────────────────────────────────────────────────────────────────
+
   const awardBadge = (userId: string, badgeId: string) => {
     if (!studentBadges.has(userId)) studentBadges.set(userId, new Set());
     studentBadges.get(userId)!.add(badgeId);
@@ -9296,6 +9356,7 @@ When giving instructions, number each step clearly. Be precise and technical whe
     const newStreak = pct >= 50 ? prevStreak + 1 : 0;
     studentPassStreak.set(userId, newStreak);
     if (newStreak >= 3) awardBadge(userId, 'consistent');
+    rqPersistBadgeState(userId).catch(() => {});
   };
   // ─── END ACHIEVEMENT BADGE SYSTEM ────────────────────────────────────────────
 

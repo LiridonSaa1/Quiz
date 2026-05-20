@@ -83,6 +83,17 @@ Set these in Replit Secrets:
 - `session_reactions` — Emoji reactions per session
 - `live_sessions.class_id` — Added column linking sessions to classes
 
+## Performance & Scalability Fixes (May 2026)
+- **Live quiz badge state** persisted to Supabase `platform_config` (section `rq_badge:{userId}`), restored on server start
+- **Frontend polling** reduced from 2–3s → 20s fallback; primary delivery via Supabase Realtime broadcast
+- **Realtime subscription** in `RealtimeQuizHost` now covers lobby view as well as active quiz
+- **Admin student/teacher routes** paginated — query params `page` (0-indexed) + `limit` (10–200, default 100); response includes `total`, `page`, `limit`
+- **Admin analytics cache** TTL increased from 20s → 5 min (300s)
+- **Admin reports/students + reports/roles** now have 3-minute route-level cache
+- **Chat messages** denormalized: `sender_display_name` stored in the row; `getAuthUser` now returns `displayName` from profile cache
+- **`migrations/010_chat_sender_denorm.sql`** — adds `sender_display_name`, `sender_avatar_url` to `session_chat_messages`
+- **`migrations/011_extra_indexes.sql`** — adds indexes on `quiz_attempts(student_id,status)`, `notifications(user_id,read)`, `profiles(status)`, `profiles(role,status)`, `profiles(created_at)`, `courses(status)`, `classes(status)`
+
 ## Notes
 - Port 5000 is used for both frontend and backend (Express serves Vite middleware)
 - Vite is configured with `allowedHosts: true` for Replit proxy compatibility

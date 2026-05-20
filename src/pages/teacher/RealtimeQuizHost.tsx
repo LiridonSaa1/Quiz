@@ -110,12 +110,12 @@ export default function RealtimeQuizHost() {
   useEffect(() => {
     if (!sessionId) return;
     pollSession();
-    pollRef.current = setInterval(pollSession, 2000);
+    pollRef.current = setInterval(pollSession, 20000);
     return () => { if (pollRef.current) clearInterval(pollRef.current); };
   }, [sessionId, pollSession]);
 
   useEffect(() => {
-    if (!sessionId || view !== 'active') return;
+    if (!sessionId || view === 'setup' || view === 'ended') return;
     if (realtimeRef.current) { realtimeRef.current.unsubscribe(); }
     const ch = supabase.channel(`quiz:${sessionId}`)
       .on('broadcast', { event: 'participant_joined' }, () => { pollSession(); })
