@@ -3779,7 +3779,7 @@ When giving instructions, number each step clearly. Be precise and technical whe
         quizRows = quizzesRes.data || [];
       }
       const quizzesCount = quizRows.length;
-      const quizIds = new Set(quizRows.map((q: any) => String(q.id || "")).filter(Boolean));
+      const quizIds = new Set<string>(quizRows.map((q: any) => String(q.id || "")).filter(Boolean));
       const passingScoreByQuiz = quizRows.reduce((acc: Record<string, number>, q: any) => {
         const raw =
           q?.settings?.passingScore ??
@@ -3882,7 +3882,7 @@ When giving instructions, number each step clearly. Be precise and technical whe
         if (quizzesRes.error) throw quizzesRes.error;
         quizRows = quizzesRes.data || [];
       }
-      const quizIds = new Set(quizRows.map((q: any) => String(q.id || "")).filter(Boolean));
+      const quizIds = new Set<string>(quizRows.map((q: any) => String(q.id || "")).filter(Boolean));
       const quizzes: Record<string, string> = {};
       const passingScoreByQuiz = quizRows.reduce((acc: Record<string, number>, q: any) => {
         const qid = String(q.id || "");
@@ -3904,7 +3904,7 @@ When giving instructions, number each step clearly. Be precise and technical whe
         .eq("role", "student");
       if (studentsRes.error) throw studentsRes.error;
       const studentRows = studentsRes.data || [];
-      const allowedStudentIds = new Set(studentRows.map((s: any) => String(s.id || "")).filter(Boolean));
+      const allowedStudentIds = new Set<string>(studentRows.map((s: any) => String(s.id || "")).filter(Boolean));
       const students: Record<string, { name: string; email: string }> = {};
       studentRows.forEach((s: any) => {
         const sid = String(s.id || "");
@@ -3978,7 +3978,7 @@ When giving instructions, number each step clearly. Be precise and technical whe
         .in("teacher_id", scopedIds)
         .eq("role", "student");
       if (studentsRes.error) throw studentsRes.error;
-      const studentIds = new Set((studentsRes.data || []).map((s: any) => String(s.id || "")).filter(Boolean));
+      const studentIds = new Set<string>((studentsRes.data || []).map((s: any) => String(s.id || "")).filter(Boolean));
 
       let quizRows: any[] = [];
       if (courseIds.length > 0) {
@@ -3986,7 +3986,7 @@ When giving instructions, number each step clearly. Be precise and technical whe
         if (quizzesRes.error) throw quizzesRes.error;
         quizRows = quizzesRes.data || [];
       }
-      const quizIds = new Set(quizRows.map((q: any) => String(q.id || "")).filter(Boolean));
+      const quizIds = new Set<string>(quizRows.map((q: any) => String(q.id || "")).filter(Boolean));
       const passingScoreByQuiz = quizRows.reduce((acc: Record<string, number>, q: any) => {
         const raw =
           q?.settings?.passingScore ??
@@ -4106,7 +4106,7 @@ When giving instructions, number each step clearly. Be precise and technical whe
 
       const profileRow = (profileRes.data || {}) as Record<string, unknown>;
       const courseIds = (coursesRes.data || []).map((c: any) => String(c.id || "")).filter(Boolean);
-      const studentIds = new Set((studentsRes.data || []).map((s: any) => String(s.id || "")).filter(Boolean));
+      const studentIds = new Set<string>((studentsRes.data || []).map((s: any) => String(s.id || "")).filter(Boolean));
 
       let quizRows: any[] = [];
       if (courseIds.length > 0) {
@@ -4115,7 +4115,7 @@ When giving instructions, number each step clearly. Be precise and technical whe
         quizRows = quizzesRes.data || [];
       }
 
-      const quizIds = new Set(quizRows.map((q: any) => String(q.id || "")).filter(Boolean));
+      const quizIds = new Set<string>(quizRows.map((q: any) => String(q.id || "")).filter(Boolean));
       const passingScoreByQuiz = quizRows.reduce((acc: Record<string, number>, q: any) => {
         const raw =
           q?.settings?.passingScore ??
