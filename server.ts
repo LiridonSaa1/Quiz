@@ -6660,10 +6660,13 @@ When giving instructions, number each step clearly. Be precise and technical whe
 
   // List sessions for logged-in teacher (teacher or admin only)
   const isLiveSessionsStartedAtColumnMissing = (error: any) => {
-    const hay = `${error?.message || ''} ${error?.details || ''} ${error?.hint || ''}`.toLowerCase();
+    const hay = `${error?.message || ''} ${error?.details || ''} ${error?.hint || ''} ${error?.code || ''}`.toLowerCase();
     if (!hay.includes('started_at')) return false;
-    if (!hay.includes('live_sessions')) return false;
-    return /schema cache|could not find|does not exist|42703|undefined column|column/i.test(hay);
+    // "column does not exist" (schema cache miss or truly absent)
+    if (/schema cache|could not find|does not exist|42703|undefined column/.test(hay)) return true;
+    // "can only be updated to DEFAULT" — column is GENERATED ALWAYS in Postgres
+    if (hay.includes('can only be updated to default')) return true;
+    return false;
   };
 
   app.get('/api/teacher/live-sessions', async (req, res) => {
