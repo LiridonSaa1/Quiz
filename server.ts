@@ -6574,6 +6574,13 @@ When giving instructions, number each step clearly. Be precise and technical whe
   });
 
   // List sessions for logged-in teacher (teacher or admin only)
+  const isLiveSessionsStartedAtColumnMissing = (error: any) => {
+    const hay = `${error?.message || ''} ${error?.details || ''} ${error?.hint || ''}`.toLowerCase();
+    if (!hay.includes('started_at')) return false;
+    if (!hay.includes('live_sessions')) return false;
+    return /schema cache|could not find|does not exist|42703|undefined column|column/i.test(hay);
+  };
+
   app.get('/api/teacher/live-sessions', async (req, res) => {
     try {
       const caller = await assertAuthenticated(req, res);
@@ -6734,10 +6741,18 @@ When giving instructions, number each step clearly. Be precise and technical whe
         }
       }
 
-      const { data, error } = await supabaseAdmin
+      let updateResult = await supabaseAdmin
         .from('live_sessions')
         .update(update)
         .eq('id', req.params.id).select().single();
+      if (updateResult.error && isLiveSessionsStartedAtColumnMissing(updateResult.error) && 'started_at' in update) {
+        const { started_at: _startedAt, ...fallbackUpdate } = update;
+        updateResult = await supabaseAdmin
+          .from('live_sessions')
+          .update(fallbackUpdate)
+          .eq('id', req.params.id).select().single();
+      }
+      const { data, error } = updateResult;
       if (error) throw error;
 
       if (req.body.status === 'live') {
@@ -8877,8 +8892,15 @@ When giving instructions, number each step clearly. Be precise and technical whe
 
   app.patch('/api/admin/live-sessions/:id', async (req, res) => {
     try {
-      const { data, error } = await supabaseAdmin
-        .from('live_sessions').update({ ...req.body, updated_at: new Date().toISOString() }).eq('id', req.params.id).select().single();
+      const adminUpdatePayload: Record<string, unknown> = { ...req.body, updated_at: new Date().toISOString() };
+      let updateResult = await supabaseAdmin
+        .from('live_sessions').update(adminUpdatePayload).eq('id', req.params.id).select().single();
+      if (updateResult.error && isLiveSessionsStartedAtColumnMissing(updateResult.error) && 'started_at' in adminUpdatePayload) {
+        const { started_at: _startedAt, ...fallbackUpdate } = adminUpdatePayload;
+        updateResult = await supabaseAdmin
+          .from('live_sessions').update(fallbackUpdate).eq('id', req.params.id).select().single();
+      }
+      const { data, error } = updateResult;
       if (error) throw error;
       res.json({ success: true, session: data });
     } catch (e: any) { res.status(500).json({ error: e.message }); }
