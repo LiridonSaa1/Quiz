@@ -83,10 +83,17 @@ const StudentLiveSessionJoin = lazy(() => import('./pages/student/LiveSessionJoi
 const StudentExams = lazy(() => import('./pages/student/Exams'));
 const StudentAnnouncements = lazy(() => import('./pages/student/Announcements'));
 const NotFound = lazy(() => import('./pages/NotFound'));
-import { apiUrl, authFetch } from './lib/apiUrl';
+import { apiUrl } from './lib/apiUrl';
 import { isProfileAccessAllowed } from './lib/profileAccess';
 import { normalizeUserRole } from './lib/userRole';
 import { defaultFeatureFlags, extractFeatureFlags, FeatureFlags } from './lib/platformFeatures';
+
+const PLATFORM_CONFIG_CACHE_TTL_MS = 20_000;
+let platformConfigCache: { runtime: any; branding: any; expiresAt: number } = {
+  runtime: null,
+  branding: null,
+  expiresAt: 0,
+};
 
 export default function App() {
   const [user, setUser] = useState<UserProfile | null>(null);
@@ -160,20 +167,34 @@ export default function App() {
 
   const loadPlatformRuntimeConfig = async () => {
     try {
-      const [runtimeRes, brandingRes] = await Promise.all([
-        fetch(`${apiUrl('/api/platform/runtime')}?t=${Date.now()}`, { cache: 'no-store' }),
-        fetch(`${apiUrl('/api/platform/branding')}?t=${Date.now()}`, { cache: 'no-store' }),
-      ]);
-      const runtimeJson = await runtimeRes.json().catch(() => ({}));
-      if (runtimeRes.ok && runtimeJson?.success) {
+      const now = Date.now();
+      let runtimeJson: any = platformConfigCache.runtime;
+      let brandingJson: any = platformConfigCache.branding;
+
+      if (now >= platformConfigCache.expiresAt || !runtimeJson || !brandingJson) {
+        const [runtimeRes, brandingRes] = await Promise.all([
+          fetch(apiUrl('/api/platform/runtime')),
+          fetch(apiUrl('/api/platform/branding')),
+        ]);
+        runtimeJson = await runtimeRes.json().catch(() => ({}));
+        brandingJson = await brandingRes.json().catch(() => ({}));
+        if (runtimeRes.ok || brandingRes.ok) {
+          platformConfigCache = {
+            runtime: runtimeJson,
+            branding: brandingJson,
+            expiresAt: Date.now() + PLATFORM_CONFIG_CACHE_TTL_MS,
+          };
+        }
+      }
+
+      if (runtimeJson?.success) {
         const nextFeatures = extractFeatureFlags({ features: runtimeJson.features });
         setFeatures(nextFeatures);
         setMaintenanceMode(Boolean(runtimeJson.maintenanceMode));
         const schoolName = String(runtimeJson.schoolName || 'QuizMaster').trim();
         if (schoolName) document.title = schoolName;
       }
-      const brandingJson = await brandingRes.json().catch(() => ({}));
-      if (brandingRes.ok && brandingJson?.success) {
+      if (brandingJson?.success) {
         const faviconUrl = brandingJson?.faviconUrl;
         if (typeof faviconUrl === 'string' && faviconUrl.trim()) {
           let link = document.querySelector("link[rel~='icon']") as HTMLLinkElement | null;

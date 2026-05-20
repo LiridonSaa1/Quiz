@@ -20,7 +20,7 @@ import { TableRowsSkeleton } from '../components/ui/Skeleton';
 import LoadingButton from '../components/ui/LoadingButton';
 import { motion, AnimatePresence } from 'motion/react';
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, ResponsiveContainer, BarChart, Bar, Cell } from 'recharts';
-import { apiUrl, authFetch } from '../lib/apiUrl';
+import { authFetch, authFetchJsonCached } from '../lib/apiUrl';
 
 const CustomTooltip = ({ active, payload, label }: any) => {
   if (!active || !payload?.length) return null;
@@ -51,13 +51,14 @@ export default function AdminDashboard() {
   const fetchData = async () => {
     try {
       setLoading(true);
-      const [usersHttpRes, analyticsHttpRes] = await Promise.all([
+      const t0 = performance.now();
+      const [usersHttpRes, analyticsJson] = await Promise.all([
         authFetch('/api/admin/users'),
-        fetch(apiUrl('/api/admin/analytics')),
+        authFetchJsonCached<any>('/api/admin/analytics', { ttlMs: 20000 }),
       ]);
 
       const usersJson = await usersHttpRes.json().catch(() => ({}));
-      const analyticsRes = await analyticsHttpRes.json().catch(() => ({}));
+      const analyticsRes = analyticsJson || {};
 
       let usersSource: any[] = [];
       if (usersHttpRes.ok && usersJson?.success && Array.isArray(usersJson.users)) {
@@ -104,6 +105,10 @@ export default function AdminDashboard() {
 
       if (analyticsRes.success) {
         setAnalytics(analyticsRes);
+      }
+      const durationMs = Math.round(performance.now() - t0);
+      if (durationMs > 300) {
+        console.warn(`[perf] Admin dashboard fetchData took ${durationMs}ms`);
       }
     } catch (error) {
       toast.error(t('errors.loadFailed'));

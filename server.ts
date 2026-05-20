@@ -168,6 +168,36 @@ function stableHash(input: string): string {
   return (hash >>> 0).toString(16);
 }
 
+type ApiCacheEntry<T> = {
+  value: T;
+  expiresAt: number;
+};
+
+const apiResponseCache = new Map<string, ApiCacheEntry<unknown>>();
+const API_CACHE_MAX_ENTRIES = 500;
+const PERF_SLOW_THRESHOLD_MS = 300;
+
+function getCachedApiResponse<T>(key: string): T | null {
+  const cached = apiResponseCache.get(key);
+  if (!cached) return null;
+  if (Date.now() > cached.expiresAt) {
+    apiResponseCache.delete(key);
+    return null;
+  }
+  return cached.value as T;
+}
+
+function setCachedApiResponse<T>(key: string, value: T, ttlMs: number): void {
+  apiResponseCache.set(key, { value, expiresAt: Date.now() + ttlMs });
+  if (apiResponseCache.size > API_CACHE_MAX_ENTRIES) {
+    const now = Date.now();
+    for (const [cacheKey, entry] of apiResponseCache) {
+      if (entry.expiresAt <= now) apiResponseCache.delete(cacheKey);
+      if (apiResponseCache.size <= API_CACHE_MAX_ENTRIES - 100) break;
+    }
+  }
+}
+
 function serializeUnknownError(error: unknown): string {
   if (error instanceof Error) {
     return `${error.name}: ${error.message}\n${error.stack || ""}`.trim();
@@ -1289,8 +1319,8 @@ When giving instructions, number each step clearly. Be precise and technical whe
       const durationMs = Date.now() - startedAt;
       if (!res.headersSent) res.setHeader("X-Response-Time", `${durationMs}ms`);
 
-      // Log slow API requests (>500ms) so bottlenecks are visible in console
-      if (req.path.startsWith("/api") && durationMs > 500) {
+      // Log slow API requests (>300ms) so bottlenecks are visible in console
+      if (req.path.startsWith("/api") && durationMs > PERF_SLOW_THRESHOLD_MS) {
         console.warn(
           `[perf] ⚠️  SLOW REQUEST  ${req.method} ${req.path} → ${res.statusCode}  ${durationMs}ms`,
         );
@@ -1628,16 +1658,59 @@ When giving instructions, number each step clearly. Be precise and technical whe
     );
   };
 
-  const fetchAllAttemptRows = async () => {
-    const modern = await supabaseAdmin.from("quiz_attempts").select("*");
-    if (!modern.error) return modern.data || [];
-    if (!isAttemptsTableMissing(modern.error) && !isAnyTableMissingError(modern.error)) throw modern.error;
+  const ATTEMPTS_CACHE_TTL_MS = 15_000;
+  let attemptsCache: { rows: any[]; expiresAt: number } = { rows: [], expiresAt: 0 };
+  let attemptsInFlight: Promise<any[]> | null = null;
 
-    const legacy = await supabaseAdmin.from("attempts").select("*");
-    if (!legacy.error) return legacy.data || [];
-    // Both quiz_attempts and attempts tables are absent — return empty gracefully
-    if (isAnyTableMissingError(legacy.error)) return [];
-    throw legacy.error;
+  const fetchAllAttemptRows = async () => {
+    const now = Date.now();
+    if (now < attemptsCache.expiresAt) return attemptsCache.rows;
+    if (attemptsInFlight) return attemptsInFlight;
+
+    attemptsInFlight = (async () => {
+      const startedAt = Date.now();
+      const modernStartedAt = Date.now();
+      const modern = await supabaseAdmin.from("quiz_attempts").select("*");
+      const modernDurationMs = Date.now() - modernStartedAt;
+      if (modernDurationMs > PERF_SLOW_THRESHOLD_MS) {
+        console.warn(`[perf] slow query quiz_attempts.select(*) ${modernDurationMs}ms`);
+      }
+      if (!modern.error) {
+        const rows = modern.data || [];
+        attemptsCache = { rows, expiresAt: Date.now() + ATTEMPTS_CACHE_TTL_MS };
+        const durationMs = Date.now() - startedAt;
+        if (durationMs > PERF_SLOW_THRESHOLD_MS) {
+          console.warn(`[perf] fetchAllAttemptRows resolved in ${durationMs}ms (source=quiz_attempts, rows=${rows.length})`);
+        }
+        return rows;
+      }
+      if (!isAttemptsTableMissing(modern.error) && !isAnyTableMissingError(modern.error)) throw modern.error;
+
+      const legacyStartedAt = Date.now();
+      const legacy = await supabaseAdmin.from("attempts").select("*");
+      const legacyDurationMs = Date.now() - legacyStartedAt;
+      if (legacyDurationMs > PERF_SLOW_THRESHOLD_MS) {
+        console.warn(`[perf] slow query attempts.select(*) ${legacyDurationMs}ms`);
+      }
+      if (!legacy.error) {
+        const rows = legacy.data || [];
+        attemptsCache = { rows, expiresAt: Date.now() + ATTEMPTS_CACHE_TTL_MS };
+        const durationMs = Date.now() - startedAt;
+        if (durationMs > PERF_SLOW_THRESHOLD_MS) {
+          console.warn(`[perf] fetchAllAttemptRows resolved in ${durationMs}ms (source=attempts, rows=${rows.length})`);
+        }
+        return rows;
+      }
+      // Both quiz_attempts and attempts tables are absent — return empty gracefully
+      if (isAnyTableMissingError(legacy.error)) return [];
+      throw legacy.error;
+    })();
+
+    try {
+      return await attemptsInFlight;
+    } finally {
+      attemptsInFlight = null;
+    }
   };
 
   /** Missing-column errors from Postgres/PostgREST; retry with a narrower select. */
@@ -3574,6 +3647,9 @@ When giving instructions, number each step clearly. Be precise and technical whe
       if (caller.role !== "admin" && caller.userId !== requestedUserId) {
         return res.status(403).json({ error: "Forbidden" });
       }
+      const teacherDashboardCacheKey = `teacher-dashboard:${requestedUserId}`;
+      const cachedTeacherDashboard = getCachedApiResponse<any>(teacherDashboardCacheKey);
+      if (cachedTeacherDashboard) return res.json(cachedTeacherDashboard);
 
       const teacherIds = await getTeacherIdCandidates(requestedUserId);
       const scopedIds = teacherIds.length > 0 ? teacherIds : [requestedUserId];
@@ -3803,6 +3879,7 @@ When giving instructions, number each step clearly. Be precise and technical whe
   // Teacher dashboard summary — scoped strictly to authenticated teacher ownership.
   app.get("/api/teacher/dashboard", async (req: Request, res: Response) => {
     try {
+      const dashboardStartedAt = Date.now();
       const caller = await assertAuthenticated(req, res);
       if (!caller) return;
       if (caller.role !== "teacher" && caller.role !== "admin") {
@@ -3899,7 +3976,7 @@ When giving instructions, number each step clearly. Be precise and technical whe
         };
       });
 
-      res.json({
+      const payload = {
         success: true,
         stats: {
           courses: courseIds.length,
@@ -3911,7 +3988,15 @@ When giving instructions, number each step clearly. Be precise and technical whe
           certificates: certificatesCount,
         },
         trend,
-      });
+      };
+      setCachedApiResponse(teacherDashboardCacheKey, payload, 30_000);
+      const durationMs = Date.now() - dashboardStartedAt;
+      if (durationMs > PERF_SLOW_THRESHOLD_MS) {
+        console.warn(
+          `[perf] slow teacher dashboard requestedUserId=${requestedUserId} duration=${durationMs}ms courseIds=${courseIds.length} quizIds=${quizIds.size} attempts=${attempts.length}`,
+        );
+      }
+      res.json(payload);
     } catch (e: any) {
       res.status(500).json({ error: e?.message || "Failed to load teacher dashboard" });
     }
@@ -5140,6 +5225,11 @@ When giving instructions, number each step clearly. Be precise and technical whe
 
   app.get('/api/admin/analytics', async (req, res) => {
     try {
+      const analyticsStartedAt = Date.now();
+      const adminAnalyticsCacheKey = "admin-analytics:global";
+      const cachedAdminAnalytics = getCachedApiResponse<any>(adminAnalyticsCacheKey);
+      if (cachedAdminAnalytics) return res.json(cachedAdminAnalytics);
+
       const certsPromise = (async () => {
         const certRows = await fetchCertificatesSelectWithFallback([
           "id, status, created_at",
@@ -5288,7 +5378,7 @@ When giving instructions, number each step clearly. Be precise and technical whe
       const presentCount = attendance.filter(a => a.status === 'present').length;
       const attendanceRate = attendance.length > 0 ? Math.round((presentCount / attendance.length) * 100) : 0;
 
-      res.json({
+      const payload = {
         success: true,
         overview: {
           totalStudents: profiles.filter(p => p.role === 'student').length,
@@ -5318,7 +5408,15 @@ When giving instructions, number each step clearly. Be precise and technical whe
         courseByCategory,
         courseByLevel,
         scoreDistribution,
-      });
+      };
+      setCachedApiResponse(adminAnalyticsCacheKey, payload, 20_000);
+      const durationMs = Date.now() - analyticsStartedAt;
+      if (durationMs > PERF_SLOW_THRESHOLD_MS) {
+        console.warn(
+          `[perf] slow admin analytics duration=${durationMs}ms profiles=${profiles.length} courses=${courses.length} classes=${classes.length} attempts=${attempts.length}`,
+        );
+      }
+      res.json(payload);
     } catch (e: any) { res.status(500).json({ error: e.message }); }
   });
 
@@ -6280,6 +6378,9 @@ When giving instructions, number each step clearly. Be precise and technical whe
       const caller = await assertAuthenticated(req, res);
       if (!caller) return;
       if (caller.role !== 'admin') return res.status(403).json({ error: 'Forbidden: admin role required' });
+      const adminUsersCacheKey = "admin-users:teachers";
+      const cachedAdminUsers = getCachedApiResponse<any>(adminUsersCacheKey);
+      if (cachedAdminUsers) return res.json(cachedAdminUsers);
 
       const { data, error } = await supabaseAdmin
         .from('profiles')
@@ -6288,7 +6389,9 @@ When giving instructions, number each step clearly. Be precise and technical whe
         .order('created_at', { ascending: false });
 
       if (error) throw error;
-      res.json({ success: true, users: data || [] });
+      const payload = { success: true, users: data || [] };
+      setCachedApiResponse(adminUsersCacheKey, payload, 15_000);
+      res.json(payload);
     } catch (e: unknown) {
       res.status(500).json({ error: (e as Error).message || 'Failed to load users' });
     }
@@ -8637,6 +8740,9 @@ When giving instructions, number each step clearly. Be precise and technical whe
         return res.status(403).json({ error: 'Forbidden: student or admin role required' });
       }
       const { status } = req.query;
+      const studentLiveSessionsCacheKey = `student-live-sessions:${caller.userId}:${String(status || "all")}`;
+      const cachedLiveSessions = getCachedApiResponse<any>(studentLiveSessionsCacheKey);
+      if (cachedLiveSessions) return res.json(cachedLiveSessions);
 
       // Find session_ids where this user is a non-removed participant
       const { data: participantRows, error: pErr } = await supabaseAdmin
@@ -8708,7 +8814,9 @@ When giving instructions, number each step clearly. Be precise and technical whe
           host: row.host_id ? hostMap[String(row.host_id)] || null : null,
         }));
       }
-      res.json({ success: true, sessions: data || [] });
+      const payload = { success: true, sessions: data || [] };
+      setCachedApiResponse(studentLiveSessionsCacheKey, payload, 15_000);
+      res.json(payload);
     } catch (e: unknown) {
       console.error('GET /api/student/live-sessions', e);
       res.status(500).json({ error: (e as Error).message });

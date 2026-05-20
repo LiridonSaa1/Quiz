@@ -1,6 +1,13 @@
 import { supabase } from '../supabase';
 import { monitoredFetch } from './httpClient';
 
+type JsonCacheEntry = {
+  expiresAt: number;
+  payload: unknown;
+};
+const authJsonCache = new Map<string, JsonCacheEntry>();
+const authJsonInflight = new Map<string, Promise<unknown>>();
+
 /**
  * Prefix for `/api/...` requests.
  * Leave unset when the UI and API share one origin (recommended: `npm run dev` → open the URL printed in the terminal).
@@ -97,4 +104,50 @@ export async function authFetch(path: string, init: RequestInit = {}): Promise<R
   }
 
   return res;
+}
+
+type AuthFetchJsonCachedOptions = {
+  ttlMs?: number;
+  forceRefresh?: boolean;
+};
+
+/**
+ * Cached authenticated GET JSON helper for hot dashboard/profile endpoints.
+ * De-duplicates concurrent requests and reuses response briefly to avoid bursts.
+ */
+export async function authFetchJsonCached<T = any>(
+  path: string,
+  options: AuthFetchJsonCachedOptions = {},
+): Promise<T> {
+  const ttlMs = Math.max(1000, Number(options.ttlMs || 15000));
+  const cacheKey = path.trim();
+
+  if (!options.forceRefresh) {
+    const cached = authJsonCache.get(cacheKey);
+    if (cached && Date.now() < cached.expiresAt) {
+      return cached.payload as T;
+    }
+    const inFlight = authJsonInflight.get(cacheKey);
+    if (inFlight) return (await inFlight) as T;
+  }
+
+  const loadPromise = (async () => {
+    const res = await authFetch(path, { method: 'GET' });
+    const json = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      const message = typeof (json as any)?.error === 'string'
+        ? (json as any).error
+        : `Request failed (${res.status})`;
+      throw new Error(message);
+    }
+    authJsonCache.set(cacheKey, { payload: json, expiresAt: Date.now() + ttlMs });
+    return json as T;
+  })();
+
+  authJsonInflight.set(cacheKey, loadPromise);
+  try {
+    return (await loadPromise) as T;
+  } finally {
+    authJsonInflight.delete(cacheKey);
+  }
 }

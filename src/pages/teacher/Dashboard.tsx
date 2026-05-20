@@ -13,7 +13,7 @@ import {
   Tooltip, ResponsiveContainer
 } from 'recharts';
 import { motion } from 'motion/react';
-import { authFetch } from '../../lib/apiUrl';
+import { authFetchJsonCached } from '../../lib/apiUrl';
 
 const CHART_DATA = [
   { day: 'Mon', attempts: 0 },
@@ -113,16 +113,19 @@ export default function TeacherDashboard() {
   const [chartData, setChartData] = useState(CHART_DATA);
 
   useEffect(() => {
+    let active = true;
     const fetch = async () => {
       const { data: { session } } = await supabase.auth.getSession();
       if (!session) return;
       const uid = session.user.id;
-      setDisplayName(session.user.user_metadata?.displayName || session.user.email?.split('@')[0] || 'Teacher');
+      if (active) {
+        setDisplayName(session.user.user_metadata?.displayName || session.user.email?.split('@')[0] || 'Teacher');
+      }
       try {
-        const res = await authFetch(`/api/teacher/dashboard?userId=${encodeURIComponent(uid)}`);
-        const json = await res.json().catch(() => ({}));
-        if (!res.ok || !json?.success) throw new Error(json?.error || 'Failed to load dashboard');
+        const json = await authFetchJsonCached<any>(`/api/teacher/dashboard?userId=${encodeURIComponent(uid)}`, { ttlMs: 30000 });
+        if (!json?.success) throw new Error(json?.error || 'Failed to load dashboard');
 
+        if (!active) return;
         setStats({
           courses: Number(json?.stats?.courses || 0),
           students: Number(json?.stats?.students || 0),
@@ -136,10 +139,13 @@ export default function TeacherDashboard() {
       } catch (e) {
         console.error('Dashboard fetch error:', e);
       } finally {
-        setLoading(false);
+        if (active) setLoading(false);
       }
     };
     fetch();
+    return () => {
+      active = false;
+    };
   }, []);
 
   const STAT_CARDS = [

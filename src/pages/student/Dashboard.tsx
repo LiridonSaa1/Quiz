@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { supabase } from '../../supabase';
-import { authFetch } from '../../lib/apiUrl';
+import { authFetch, authFetchJsonCached } from '../../lib/apiUrl';
 import StudentLayout from '../../components/layout/StudentLayout';
 import { BookOpen, Clock, CheckCircle2, Trophy, ArrowRight, Flame, Radio } from 'lucide-react';
 import { Link } from 'react-router-dom';
@@ -36,6 +36,7 @@ export default function StudentDashboard() {
   const [celebrationName, setCelebrationName] = useState<string>(() => pendingCelebration?.name ?? '');
 
   useEffect(() => {
+    let active = true;
     const fetchData = async () => {
       const { data: { session } } = await supabase.auth.getSession();
       if (!session) return;
@@ -78,9 +79,10 @@ export default function StudentDashboard() {
             .select('course_id,student_ids')
             .contains('student_ids', [studentId]),
           fetchAttemptRowsByStudentId(supabase, studentId),
-          authFetch('/api/student/live-sessions?status=live')
-            .then((r) => r.json())
-            .catch(() => ({ success: false })),
+          authFetchJsonCached<{ success?: boolean; sessions?: LiveSessionBanner[] }>(
+            '/api/student/live-sessions?status=live',
+            { ttlMs: 15000 },
+          ).catch(() => ({ success: false, sessions: [] })),
         ]);
         if (performance.now() - t0 > 500) {
           console.warn(`[perf] Student dashboard initial batch took ${Math.round(performance.now() - t0)}ms`);
@@ -107,6 +109,7 @@ export default function StudentDashboard() {
         }
 
         const enrolledCourses = courses.filter((c: any) => String(c?.status || '').toLowerCase() === 'published');
+        if (!active) return;
         setEnrolledCourses(enrolledCourses);
 
         // Attempts are already resolved — set them immediately
@@ -140,10 +143,13 @@ export default function StudentDashboard() {
       } catch (error) {
         console.error('Error fetching student data:', error);
       } finally {
-        setLoading(false);
+        if (active) setLoading(false);
       }
     };
     fetchData();
+    return () => {
+      active = false;
+    };
   }, []);
 
   const stats = {
