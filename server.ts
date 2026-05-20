@@ -848,6 +848,18 @@ export async function createApp(options: CreateAppOptions = {}) {
     legacyHeaders: false,
     message: { error: 'Too many auth attempts, please try again in 15 minutes.' },
   });
+  // Realtime routes are polled frequently (every 3s per student) so they get their own
+  // generous limiter — 2000 req / 15 min per IP — well above the normal 200 cap.
+  const realtimeLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000,
+    max: 2000,
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: { error: 'Too many realtime requests, please slow down.' },
+  });
+  app.use('/api/student/realtime-quiz/', realtimeLimiter);
+  app.use('/api/teacher/realtime-quiz/', realtimeLimiter);
+  app.use('/api/realtime-quiz/', realtimeLimiter);
   app.use('/api/', apiLimiter);
   app.use('/api/auth/', authLimiter);
 
@@ -1711,6 +1723,48 @@ When giving instructions, number each step clearly. Be precise and technical whe
     } finally {
       attemptsInFlight = null;
     }
+  };
+
+  /**
+   * Filtered attempt fetch — queries only rows matching the given quiz IDs and/or student IDs.
+   * Falls back gracefully if the table is missing or filters exceed Supabase's IN-list limit.
+   * Uses the all-attempts cache when no filters are provided.
+   */
+  const fetchFilteredAttemptRows = async (opts: {
+    quizIds?: Set<string> | string[];
+    studentIds?: Set<string> | string[];
+  } = {}): Promise<any[]> => {
+    const quizArr = opts.quizIds ? [...opts.quizIds].filter(Boolean) : [];
+    const studentArr = opts.studentIds ? [...opts.studentIds].filter(Boolean) : [];
+
+    // Fall back to global cache when no useful filters are given
+    if (quizArr.length === 0 && studentArr.length === 0) {
+      return fetchAllAttemptRows();
+    }
+
+    const startedAt = Date.now();
+
+    const buildQuery = (table: string) => {
+      let q = supabaseAdmin.from(table).select(
+        "id,quiz_id,student_id,score,score_percent,total_points,correct_answers,total_questions,status,passed,started_at,completed_at,answers"
+      );
+      if (quizArr.length > 0) q = q.in("quiz_id", quizArr);
+      if (studentArr.length > 0) q = q.in("student_id", studentArr);
+      return q;
+    };
+
+    const modern = await buildQuery("quiz_attempts");
+    const durationMs = Date.now() - startedAt;
+    if (durationMs > PERF_SLOW_THRESHOLD_MS) {
+      console.warn(`[perf] slow fetchFilteredAttemptRows quiz_attempts ${durationMs}ms quizIds=${quizArr.length} studentIds=${studentArr.length}`);
+    }
+    if (!modern.error) return modern.data || [];
+    if (!isAttemptsTableMissing(modern.error) && !isAnyTableMissingError(modern.error)) throw modern.error;
+
+    const legacy = await buildQuery("attempts");
+    if (!legacy.error) return legacy.data || [];
+    if (isAnyTableMissingError(legacy.error)) return [];
+    throw legacy.error;
   };
 
   /** Missing-column errors from Postgres/PostgREST; retry with a narrower select. */
@@ -3647,9 +3701,6 @@ When giving instructions, number each step clearly. Be precise and technical whe
       if (caller.role !== "admin" && caller.userId !== requestedUserId) {
         return res.status(403).json({ error: "Forbidden" });
       }
-      const teacherDashboardCacheKey = `teacher-dashboard:${requestedUserId}`;
-      const cachedTeacherDashboard = getCachedApiResponse<any>(teacherDashboardCacheKey);
-      if (cachedTeacherDashboard) return res.json(cachedTeacherDashboard);
 
       const teacherIds = await getTeacherIdCandidates(requestedUserId);
       const scopedIds = teacherIds.length > 0 ? teacherIds : [requestedUserId];
@@ -3730,7 +3781,10 @@ When giving instructions, number each step clearly. Be precise and technical whe
         return acc;
       }, {});
 
-      const attemptsRows = normalizeAttempts(await fetchAllAttemptRows(), passingScoreByQuiz).filter((a: any) => {
+      const attemptsRows = normalizeAttempts(
+        await fetchFilteredAttemptRows({ quizIds, studentIds: allowedStudentIds }),
+        passingScoreByQuiz
+      ).filter((a: any) => {
         if (!quizIds.has(String(a.quiz_id || ""))) return false;
         return allowedStudentIds.has(String(a.student_id || ""));
       });
@@ -3804,9 +3858,6 @@ When giving instructions, number each step clearly. Be precise and technical whe
       if (caller.role !== "admin" && caller.userId !== requestedUserId) {
         return res.status(403).json({ error: "Forbidden" });
       }
-      const teacherDashboardCacheKey = `teacher-dashboard:${requestedUserId}`;
-      const cachedTeacherDashboard = getCachedApiResponse<any>(teacherDashboardCacheKey);
-      if (cachedTeacherDashboard) return res.json(cachedTeacherDashboard);
 
       const teacherIds = await getTeacherIdCandidates(requestedUserId);
       const scopedIds = teacherIds.length > 0 ? teacherIds : [requestedUserId];
@@ -3854,8 +3905,10 @@ When giving instructions, number each step clearly. Be precise and technical whe
         };
       });
 
-      const attempts = normalizeAttempts(await fetchAllAttemptRows(), passingScoreByQuiz)
-        .filter((a: any) => quizIds.has(String(a.quiz_id || "")) && allowedStudentIds.has(String(a.student_id || "")))
+      const attempts = normalizeAttempts(
+        await fetchFilteredAttemptRows({ quizIds, studentIds: allowedStudentIds }),
+        passingScoreByQuiz
+      ).filter((a: any) => quizIds.has(String(a.quiz_id || "")) && allowedStudentIds.has(String(a.student_id || "")))
         .map((a: any) => ({
           id: String(a.id || ""),
           quizId: String(a.quiz_id || ""),
@@ -3898,6 +3951,10 @@ When giving instructions, number each step clearly. Be precise and technical whe
         return res.status(403).json({ error: "Forbidden" });
       }
 
+      const teacherDashboardCacheKey = `teacher-dashboard:${requestedUserId}`;
+      const cachedTeacherDashboard = getCachedApiResponse<any>(teacherDashboardCacheKey);
+      if (cachedTeacherDashboard) return res.json(cachedTeacherDashboard);
+
       const teacherIds = await getTeacherIdCandidates(requestedUserId);
       const scopedIds = teacherIds.length > 0 ? teacherIds : [requestedUserId];
 
@@ -3931,7 +3988,10 @@ When giving instructions, number each step clearly. Be precise and technical whe
         return acc;
       }, {});
 
-      const attempts = normalizeAttempts(await fetchAllAttemptRows(), passingScoreByQuiz).filter((a: any) => {
+      const attempts = normalizeAttempts(
+        await fetchFilteredAttemptRows({ quizIds, studentIds }),
+        passingScoreByQuiz
+      ).filter((a: any) => {
         return quizIds.has(String(a.quiz_id || "")) && studentIds.has(String(a.student_id || ""));
       });
       const completedAttempts = attempts.filter((a: any) => String(a.status || "").toLowerCase() === "completed");
@@ -4057,7 +4117,10 @@ When giving instructions, number each step clearly. Be precise and technical whe
         return acc;
       }, {});
 
-      const attempts = normalizeAttempts(await fetchAllAttemptRows(), passingScoreByQuiz).filter((a: any) => {
+      const attempts = normalizeAttempts(
+        await fetchFilteredAttemptRows({ quizIds, studentIds }),
+        passingScoreByQuiz
+      ).filter((a: any) => {
         return quizIds.has(String(a.quiz_id || "")) && studentIds.has(String(a.student_id || ""));
       });
       const completedAttempts = attempts.filter((a: any) => String(a.status || "").toLowerCase() === "completed");
