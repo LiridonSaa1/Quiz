@@ -718,7 +718,7 @@ function NewSessionModal({
           title: form.title.trim(),
           description: form.description || null,
           scheduled_at: new Date(form.scheduled_at).toISOString(),
-          duration_minutes: Number(form.duration_minutes),
+          duration_minutes: Math.max(15, parseInt(String(form.duration_minutes), 10) || 60),
           status: 'scheduled',
           max_participants: Number(form.max_participants) || 100,
           meeting_url: form.meeting_url || null,
@@ -821,7 +821,7 @@ function NewSessionModal({
                 min={15}
                 max={480}
                 value={form.duration_minutes}
-                onChange={e => setForm(p => ({ ...p, duration_minutes: Number(e.target.value) }))}
+                onChange={e => setForm(p => ({ ...p, duration_minutes: parseInt(e.target.value, 10) || 60 }))}
                 className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
               />
             </div>

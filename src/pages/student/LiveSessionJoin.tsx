@@ -11,8 +11,17 @@ import {
   CalendarDays
 } from 'lucide-react';
 import { cn } from '../../lib/utils';
-import { format, formatDistanceToNow } from 'date-fns';
+import { format } from 'date-fns';
 import StudentLayout from '../../components/layout/StudentLayout';
+
+declare global {
+  interface Window {
+    JitsiMeetExternalAPI: new (domain: string, options: object) => {
+      dispose: () => void;
+      executeCommand: (cmd: string, ...args: unknown[]) => void;
+    };
+  }
+}
 
 interface LiveSession {
   id: string;
@@ -61,6 +70,8 @@ export default function StudentLiveSessionJoin() {
   const [chatRealtimeConnected, setChatRealtimeConnected] = useState(false);
   const [timeRemaining, setTimeRemaining] = useState<number | null>(null);
   const chatEndRef = useRef<HTMLDivElement | null>(null);
+  const jitsiContainerRef = useRef<HTMLDivElement | null>(null);
+  const jitsiApiRef = useRef<ReturnType<typeof window.JitsiMeetExternalAPI> | null>(null);
 
   useEffect(() => {
     if (!session || session.status !== 'live' || !session.started_at) {
@@ -86,7 +97,72 @@ export default function StudentLiveSessionJoin() {
   };
 
   const jitsiRoomName = `quizmaster-session-${id?.slice(0, 8)}`;
-  const jitsiUrl = `https://meet.jit.si/${jitsiRoomName}#config.prejoinPageEnabled=false&config.startWithAudioMuted=false&config.startWithVideoMuted=false&interfaceConfig.SHOW_JITSI_WATERMARK=false`;
+
+  // Initialize Jitsi External API when student joins
+  useEffect(() => {
+    if (!joined || !jitsiContainerRef.current || jitsiApiRef.current) return;
+    const container = jitsiContainerRef.current;
+
+    const init = () => {
+      const JitsiAPI = window.JitsiMeetExternalAPI;
+      if (!JitsiAPI) { console.error('JitsiMeetExternalAPI not available'); return; }
+      const api = new JitsiAPI('meet.jit.si', {
+        roomName: jitsiRoomName,
+        parentNode: container,
+        width: '100%',
+        height: '100%',
+        userInfo: { displayName: userDisplayName },
+        configOverwrite: {
+          prejoinPageEnabled: false,
+          startWithAudioMuted: false,
+          startWithVideoMuted: false,
+          disableDeepLinking: true,
+          disableThirdPartyRequests: true,
+          p2p: { enabled: false },
+          analytics: { disabled: true },
+          notifications: [],
+          enableNoisyMicDetection: false,
+          enableNoAudioDetection: false,
+        },
+        interfaceConfigOverwrite: {
+          SHOW_JITSI_WATERMARK: false,
+          SHOW_WATERMARK_FOR_GUESTS: false,
+          TOOLBAR_BUTTONS: [],
+          DISABLE_JOIN_LEAVE_NOTIFICATIONS: true,
+          HIDE_INVITE_MORE_HEADER: true,
+          SHOW_PROMOTIONAL_CLOSE_PAGE: false,
+          SHOW_CHROME_EXTENSION_BANNER: false,
+          MOBILE_APP_PROMO: false,
+          ENABLE_FEEDBACK_ANIMATION: false,
+          DEFAULT_LOGO_URL: '',
+          JITSI_WATERMARK_LINK: '',
+        },
+      });
+      setTimeout(() => {
+        const iframe = container.querySelector('iframe');
+        if (iframe) {
+          iframe.setAttribute('allow', 'camera *; microphone *; fullscreen *; display-capture *; autoplay *; clipboard-write *');
+        }
+      }, 1500);
+      jitsiApiRef.current = api;
+    };
+
+    const scriptId = 'jitsi-external-api';
+    if (document.getElementById(scriptId)) {
+      init();
+    } else {
+      const script = document.createElement('script');
+      script.id = scriptId;
+      script.src = 'https://meet.jit.si/external_api.js';
+      script.async = true;
+      script.onload = init;
+      document.head.appendChild(script);
+    }
+
+    return () => {
+      if (jitsiApiRef.current) { jitsiApiRef.current.dispose(); jitsiApiRef.current = null; }
+    };
+  }, [joined, userDisplayName]);
 
   useEffect(() => {
     const init = async () => {
@@ -364,20 +440,16 @@ export default function StudentLiveSessionJoin() {
           );
         })()}
 
-        {/* Video Room (when joined or live) */}
+        {/* Video Room (when live) */}
         {isLive && (
-          <div className="bg-slate-900 rounded-2xl overflow-hidden shadow-2xl relative" style={{ minHeight: 520 }}>
+          <div className="bg-slate-900 rounded-2xl overflow-hidden shadow-2xl relative" style={{ height: 'calc(100vh - 260px)', minHeight: 560 }}>
             {joined ? (
-              <div className="flex" style={{ height: 520 }}>
-                <div className="flex-1 relative">
-                  <iframe
-                    src={jitsiUrl}
-                    allow="camera *; microphone *; fullscreen *; display-capture *; autoplay *; clipboard-write *"
-                    className="w-full h-full border-0"
-                    title="Live Session"
-                  />
+              <div className="flex h-full">
+                <div className="flex-1 relative h-full">
+                  {/* Jitsi External API container — fills full height so join button is always visible */}
+                  <div ref={jitsiContainerRef} className="w-full h-full" />
                   {/* Floating Reactions */}
-                  <div className="absolute bottom-20 right-4 pointer-events-none">
+                  <div className="absolute bottom-20 right-4 pointer-events-none z-10">
                     <AnimatePresence>
                       {floatingReactions.map(r => (
                         <motion.div
@@ -402,7 +474,7 @@ export default function StudentLiveSessionJoin() {
                       initial={{ width: 0 }}
                       animate={{ width: 280 }}
                       exit={{ width: 0 }}
-                      className="bg-slate-800 flex flex-col overflow-hidden border-l border-slate-700"
+                      className="bg-slate-800 flex flex-col overflow-hidden border-l border-slate-700 h-full shrink-0"
                     >
                       <div className="p-3 border-b border-slate-700 flex items-center justify-between shrink-0">
                         <span className="text-white text-sm font-semibold flex items-center gap-2">
@@ -454,7 +526,7 @@ export default function StudentLiveSessionJoin() {
                 </AnimatePresence>
               </div>
             ) : (
-              <div className="h-[520px] flex flex-col items-center justify-center gap-5 text-white/70">
+              <div className="h-full flex flex-col items-center justify-center gap-5 text-white/70">
                 <div className="w-20 h-20 rounded-full bg-white/5 flex items-center justify-center">
                   <Video className="w-10 h-10 text-white/30" />
                 </div>

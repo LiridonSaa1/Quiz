@@ -542,7 +542,8 @@ export default function TeacherLiveSessionRoom() {
       const now = Date.now();
       const remaining = Math.max(0, Math.floor((end - now) / 1000));
       setTimeRemaining(remaining);
-      if (remaining <= 0 && session.status === 'live') endMeeting(true);
+      // Only auto-end if duration is valid (>0) to prevent instant-end bug when duration_minutes=0
+      if (remaining <= 0 && session.status === 'live' && (session.duration_minutes || 0) > 0) endMeeting(true);
     }, 1000);
     return () => clearInterval(interval);
   }, [session, meetingActive]);
