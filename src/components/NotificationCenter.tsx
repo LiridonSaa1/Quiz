@@ -10,6 +10,7 @@ import {
 import { cn } from '../lib/utils';
 import { formatDistanceToNow } from 'date-fns';
 import { useNavigate } from 'react-router-dom';
+import { isMissingNotificationsColumnError } from '../lib/notificationSchema';
 
 const TYPE_CFG = {
   info:    { icon: Info,          bg: 'bg-blue-50',    text: 'text-blue-600',   ring: 'ring-blue-200',   dot: 'bg-blue-500',    pill: 'bg-blue-50 text-blue-700 border-blue-200'    },
@@ -21,6 +22,7 @@ const TYPE_CFG = {
 type NotifType = keyof typeof TYPE_CFG;
 
 const getTypeCfg = (type: string) => TYPE_CFG[type as NotifType] ?? TYPE_CFG.info;
+const getLegacyReadState = (row: any) => (typeof row?.read === 'boolean' ? row.read : Boolean(row?.read_at));
 
 function BellIcon({ unread, shaking }: { unread: number; shaking: boolean }) {
   return (
@@ -130,6 +132,16 @@ export default function NotificationCenter() {
   const panelRef = useRef<HTMLDivElement>(null);
 
   const unreadCount = notifications.filter(n => !n.read).length;
+  const getFallbackTitle = useCallback((row: any) => {
+    const explicit = String(row?.title || '').trim();
+    if (explicit) return explicit;
+
+    const type = String(row?.type || '').toLowerCase();
+    if (type === 'success') return t('notificationCenter.filterSuccess');
+    if (type === 'warning') return t('notificationCenter.filterWarning');
+    if (type === 'error') return t('notificationCenter.filterError');
+    return t('notificationCenter.filterInfo');
+  }, [t]);
 
   const isNotificationRelevantForRole = useCallback((n: Notification, role: string) => {
     if (!role) return true;
@@ -148,49 +160,58 @@ export default function NotificationCenter() {
       .eq('user_id', userId)
       .order('created_at', { ascending: false })
       .limit(30);
-    if (error) return;
-    const mapped = data.map((d: any) => ({
+    if (error) {
+      console.error('Failed to fetch notifications:', error);
+      return;
+    }
+    const rows = Array.isArray(data) ? data : [];
+    const mapped = rows.map((d: any) => ({
       id: d.id,
       userId: d.user_id,
-      title: d.title,
-      message: d.message,
-      type: d.type,
-      read: d.read,
+      title: getFallbackTitle(d),
+      message: String(d.message || ''),
+      type: String(d.type || 'info'),
+      read: getLegacyReadState(d),
+      readAt: d.read_at || undefined,
       actionUrl: d.action_url || '',
-      createdAt: d.created_at,
+      createdAt: d.created_at || d.read_at || new Date().toISOString(),
     } as Notification));
     const currentRole = userRole || '';
     setNotifications(mapped.filter((n) => isNotificationRelevantForRole(n, currentRole)));
-  }, [isNotificationRelevantForRole, userRole]);
+  }, [getFallbackTitle, isNotificationRelevantForRole, userRole]);
 
   useEffect(() => {
     let active = true;
     const setup = async () => {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (!session || !active) return;
-      const uid = session.user.id;
-      const profile = await supabase
-        .from('profiles')
-        .select('role')
-        .eq('id', uid)
-        .maybeSingle();
-      const role = String(profile.data?.role || '').toLowerCase();
-      if (role) setUserRole(role);
-      await fetchNotifications(uid);
-      if (!active) return;
-
       try {
-        const existing = (supabase.getChannels() as any[]).find(c => c.topic === `realtime:notifications:${uid}`);
-        if (existing) await supabase.removeChannel(existing);
-      } catch {}
+        const { data: { session } } = await supabase.auth.getSession();
+        if (!session || !active) return;
+        const uid = session.user.id;
+        const profile = await supabase
+          .from('profiles')
+          .select('role')
+          .eq('id', uid)
+          .maybeSingle();
+        const role = String(profile.data?.role || '').toLowerCase();
+        if (role) setUserRole(role);
+        await fetchNotifications(uid);
+        if (!active) return;
 
-      const ch = supabase
-        .channel(`notifications:${uid}`)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'notifications', filter: `user_id=eq.${uid}` }, () => {
-          if (active) fetchNotifications(uid);
-        })
-        .subscribe();
-      if (active) channelRef.current = ch; else supabase.removeChannel(ch);
+        try {
+          const existing = (supabase.getChannels() as any[]).find(c => c.topic === `realtime:notifications:${uid}`);
+          if (existing) await supabase.removeChannel(existing);
+        } catch {}
+
+        const ch = supabase
+          .channel(`notifications:${uid}`)
+          .on('postgres_changes', { event: '*', schema: 'public', table: 'notifications', filter: `user_id=eq.${uid}` }, () => {
+            if (active) fetchNotifications(uid);
+          })
+          .subscribe();
+        if (active) channelRef.current = ch; else supabase.removeChannel(ch);
+      } catch (error) {
+        console.error('Notification channel setup failed:', error);
+      }
     };
     setup();
     return () => { active = false; if (channelRef.current) { supabase.removeChannel(channelRef.current); channelRef.current = null; } };
@@ -236,7 +257,13 @@ export default function NotificationCenter() {
   }, [isOpen]);
 
   const markAsRead = async (id: string) => {
-    await supabase.from('notifications').update({ read: true }).eq('id', id);
+    let { error } = await supabase.from('notifications').update({ read: true }).eq('id', id);
+    if (error && isMissingNotificationsColumnError(error, 'read')) {
+      ({ error } = await supabase.from('notifications').update({ read_at: new Date().toISOString() }).eq('id', id));
+    }
+    if (error) {
+      console.error('Failed to mark notification as read:', error);
+    }
     const target = notifications.find((n) => n.id === id);
     setNotifications(prev => prev.map(n => n.id === id ? { ...n, read: true } : n));
     if (target?.actionUrl) navigate(target.actionUrl);
@@ -245,7 +272,21 @@ export default function NotificationCenter() {
   const markAllAsRead = async () => {
     const { data: { session } } = await supabase.auth.getSession();
     if (!session) return;
-    await supabase.from('notifications').update({ read: true }).eq('user_id', session.user.id).eq('read', false);
+    let { error } = await supabase
+      .from('notifications')
+      .update({ read: true })
+      .eq('user_id', session.user.id)
+      .eq('read', false);
+    if (error && isMissingNotificationsColumnError(error, 'read')) {
+      ({ error } = await supabase
+        .from('notifications')
+        .update({ read_at: new Date().toISOString() })
+        .eq('user_id', session.user.id)
+        .is('read_at', null));
+    }
+    if (error) {
+      console.error('Failed to mark all notifications as read:', error);
+    }
     setNotifications(prev => prev.map(n => ({ ...n, read: true })));
   };
 

@@ -2,6 +2,32 @@ import { createClient, SupabaseClient } from '@supabase/supabase-js';
 
 let supabaseInstance: SupabaseClient | null = null;
 
+const isNetworkError = (error: any) =>
+  error?.message === 'Failed to fetch' || error?.message?.includes('NetworkError');
+
+const normalizeNetworkError = (error: any) => {
+  if (isNetworkError(error)) {
+    throw new Error('Network error: Failed to fetch from Supabase. Please check if your VITE_SUPABASE_URL is correct and reachable.');
+  }
+  throw error;
+};
+
+const isRealtimeChannelLike = (value: unknown) => {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const candidate = value as { on?: unknown; subscribe?: unknown };
+  return typeof candidate.on === 'function' && typeof candidate.subscribe === 'function';
+};
+
+const shouldWrapObject = (value: unknown, prop?: string | symbol) =>
+  Boolean(
+    value &&
+      typeof value === 'object' &&
+      !Array.isArray(value) &&
+      prop !== 'supabaseUrl' &&
+      prop !== 'supabaseKey' &&
+      !isRealtimeChannelLike(value),
+  );
+
 const wrapWithNetworkErrorHandler = (obj: any): any => {
   return new Proxy(obj, {
     get: (target, prop, receiver) => {
@@ -15,30 +41,24 @@ const wrapWithNetworkErrorHandler = (obj: any): any => {
             // If it's a promise, catch network errors
             if (result instanceof Promise) {
               return result.catch((error: any) => {
-                if (error.message === 'Failed to fetch' || error.message?.includes('NetworkError')) {
-                  throw new Error('Network error: Failed to fetch from Supabase. Please check if your VITE_SUPABASE_URL is correct and reachable.');
-                }
-                throw error;
+                return normalizeNetworkError(error);
               });
             }
             
             // If it's an object (like .from().select()), wrap it too
-            if (result && typeof result === 'object' && !Array.isArray(result)) {
+            if (shouldWrapObject(result)) {
               return wrapWithNetworkErrorHandler(result);
             }
             
             return result;
           } catch (error: any) {
-            if (error.message === 'Failed to fetch' || error.message?.includes('NetworkError')) {
-              throw new Error('Network error: Failed to fetch from Supabase. Please check if your VITE_SUPABASE_URL is correct and reachable.');
-            }
-            throw error;
+            return normalizeNetworkError(error);
           }
         };
       }
       
       // Recursively wrap objects (like .auth)
-      if (value && typeof value === 'object' && !Array.isArray(value) && prop !== 'supabaseUrl' && prop !== 'supabaseKey') {
+      if (shouldWrapObject(value, prop)) {
         return wrapWithNetworkErrorHandler(value);
       }
       
@@ -76,26 +96,20 @@ export const supabase = new Proxy({} as SupabaseClient, {
           const result = bound(...args);
           if (result instanceof Promise) {
             return result.catch((error: any) => {
-              if (error.message === 'Failed to fetch' || error.message?.includes('NetworkError')) {
-                throw new Error('Network error: Failed to fetch from Supabase. Please check if your VITE_SUPABASE_URL is correct and reachable.');
-              }
-              throw error;
+              return normalizeNetworkError(error);
             });
           }
-          if (result && typeof result === 'object' && !Array.isArray(result)) {
+          if (shouldWrapObject(result)) {
             return wrapWithNetworkErrorHandler(result);
           }
           return result;
         } catch (error: any) {
-          if (error.message === 'Failed to fetch' || error.message?.includes('NetworkError')) {
-            throw new Error('Network error: Failed to fetch from Supabase. Please check if your VITE_SUPABASE_URL is correct and reachable.');
-          }
-          throw error;
+          return normalizeNetworkError(error);
         }
       };
     }
     
-    if (value && typeof value === 'object' && !Array.isArray(value)) {
+    if (shouldWrapObject(value, prop)) {
       return wrapWithNetworkErrorHandler(value);
     }
     
