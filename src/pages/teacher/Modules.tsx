@@ -104,6 +104,14 @@ export default function TeacherModules() {
   const [headwayLevel, setHeadwayLevel] = useState('Beginner');
   const [headwayCourseId, setHeadwayCourseId] = useState('');
   const [headwayImporting, setHeadwayImporting] = useState(false);
+  const [headwayOptions, setHeadwayOptions] = useState({
+    grammar: true,
+    vocabulary: true,
+    everydayEnglish: true,
+    audioDownload: true,
+    videoDownload: true,
+    testBuilder: true,
+  });
   const [headwayDone, setHeadwayDone] = useState<{ modules: number; lessons: number } | null>(null);
   const { can } = useTeacherPermissions();
 
@@ -342,6 +350,7 @@ export default function TeacherModules() {
     setHeadwayDone(null);
     setHeadwayCourseId(courses.length === 1 ? courses[0].id : '');
     setHeadwayLevel('Beginner');
+    setHeadwayOptions({ grammar: true, vocabulary: true, everydayEnglish: true, audioDownload: true, videoDownload: true, testBuilder: true });
     setShowHeadwayModal(true);
   };
 
@@ -353,7 +362,7 @@ export default function TeacherModules() {
     try {
       const res = await authFetch(`/api/teacher/courses/${encodeURIComponent(headwayCourseId)}/headway-populate`, {
         method: 'POST',
-        body: JSON.stringify({ userId: session.user.id, level: headwayLevel }),
+        body: JSON.stringify({ userId: session.user.id, level: headwayLevel, options: headwayOptions }),
       });
       const json = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(json?.error || 'Import failed');
@@ -1098,13 +1107,43 @@ export default function TeacherModules() {
                       </div>
                     </div>
 
+                    {/* Content options */}
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-600 mb-2">Include in import</label>
+                      <div className="rounded-xl border border-slate-200 bg-slate-50 divide-y divide-slate-100 overflow-hidden">
+                        {[
+                          { key: 'grammar',        label: 'Grammar exercises',       icon: '📘', desc: 'Interactive grammar practice on Oxford site' },
+                          { key: 'vocabulary',     label: 'Vocabulary exercises',    icon: '🌿', desc: 'Vocabulary drills linked to Oxford site' },
+                          { key: 'everydayEnglish',label: 'Everyday English',        icon: '🎤', desc: 'Dialogue videos and listening activities' },
+                          { key: 'audioDownload',  label: 'Audio Downloads',         icon: '🎧', desc: 'Student\'s Book MP3 audio ZIP files' },
+                          { key: 'videoDownload',  label: 'Video Downloads',         icon: '🎬', desc: 'Unit video clip ZIP files' },
+                          { key: 'testBuilder',    label: 'Test Builder (quizzes)',  icon: '📝', desc: 'Draft quizzes linked to Oxford Test Builder' },
+                        ].map(({ key, label, icon, desc }) => (
+                          <label
+                            key={key}
+                            className={`flex items-center gap-3 px-4 py-2.5 cursor-pointer transition-colors ${headwayImporting ? 'opacity-50 pointer-events-none' : 'hover:bg-blue-50'}`}
+                          >
+                            <input
+                              type="checkbox"
+                              checked={headwayOptions[key as keyof typeof headwayOptions]}
+                              onChange={e => setHeadwayOptions(prev => ({ ...prev, [key]: e.target.checked }))}
+                              className="w-4 h-4 rounded accent-blue-600 shrink-0"
+                            />
+                            <span className="text-base shrink-0">{icon}</span>
+                            <span className="flex-1 min-w-0">
+                              <span className="block text-xs font-semibold text-slate-800">{label}</span>
+                              <span className="block text-xs text-slate-500">{desc}</span>
+                            </span>
+                          </label>
+                        ))}
+                      </div>
+                    </div>
+
                     {/* Unit count info */}
                     <div className="rounded-xl bg-blue-50 border border-blue-100 px-4 py-3 text-xs text-blue-800 flex items-start gap-2">
                       <BookOpen className="w-4 h-4 text-blue-500 shrink-0 mt-0.5" />
                       <span>
-                        {headwayLevel === 'Beginner' ? '14 units' : '12 units'} will be created as modules.
-                        Each unit gets Grammar, Vocabulary, Everyday English, and Audio/Video download lessons — all linked to the official Oxford exercise pages.
-                        {headwayLevel === 'Beginner' && ' Audio &amp; video ZIP downloads are included for every unit.'}
+                        {headwayLevel === 'Beginner' ? '14 units' : '12 units'} modules will be created with the selected lesson types above.
                       </span>
                     </div>
 

@@ -4723,6 +4723,14 @@ When giving instructions, number each step clearly. Be precise and technical whe
       const gate = await assertTeacherOwnsCourse(userId, courseId);
       if (!gate.ok) return res.status(403).json({ error: "You do not have access to this course." });
 
+      const rawOpts = req.body?.options ?? {};
+      const includeGrammar       = rawOpts.grammar        !== false;
+      const includeVocabulary    = rawOpts.vocabulary      !== false;
+      const includeEverydayEnglish = rawOpts.everydayEnglish !== false;
+      const includeAudioDownload = rawOpts.audioDownload   !== false;
+      const includeVideoDownload = rawOpts.videoDownload   !== false;
+      const includeTestBuilder   = rawOpts.testBuilder     !== false;
+
       const OUP = "https://elt.oup.com";
       const CC  = "?cc=global&selLanguage=en";
       type HUnit = { num: number; title: string; description: string; grammar: { topic: string; path: string }[]; vocabulary: { topic: string; path: string }[]; eeSlug: string; audioZip?: string; videoZip?: string; };
@@ -5023,24 +5031,30 @@ When giving instructions, number each step clearly. Be precise and technical whe
         const lessonUrls: string[] = [];
         let ord = 0;
 
-        for (const gr of unit.grammar) {
-          const url = `${OUP}${gr.path}${CC}`;
-          lessonRows.push({ course_id: courseId, module_id: mod.id, title: `Grammar: ${gr.topic}`, slug: slugify(`u${unit.num}-gr-${gr.topic}`), type: "text", short_description: `Oxford Headway exercise — ${gr.topic}\n${url}`, order: ++ord, status: "published", duration_minutes: 20, is_free_preview: ord === 1 });
-          lessonUrls.push(url);
+        if (includeGrammar) {
+          for (const gr of unit.grammar) {
+            const url = `${OUP}${gr.path}${CC}`;
+            lessonRows.push({ course_id: courseId, module_id: mod.id, title: `Grammar: ${gr.topic}`, slug: slugify(`u${unit.num}-gr-${gr.topic}`), type: "text", short_description: `Oxford Headway exercise — ${gr.topic}\n${url}`, order: ++ord, status: "published", duration_minutes: 20, is_free_preview: ord === 1 });
+            lessonUrls.push(url);
+          }
         }
-        for (const vc of unit.vocabulary) {
-          const url = `${OUP}${vc.path}${CC}`;
-          lessonRows.push({ course_id: courseId, module_id: mod.id, title: `Vocabulary: ${vc.topic}`, slug: slugify(`u${unit.num}-vc-${vc.topic}`), type: "text", short_description: `Oxford Headway vocabulary — ${vc.topic}\n${url}`, order: ++ord, status: "published", duration_minutes: 15, is_free_preview: false });
-          lessonUrls.push(url);
+        if (includeVocabulary) {
+          for (const vc of unit.vocabulary) {
+            const url = `${OUP}${vc.path}${CC}`;
+            lessonRows.push({ course_id: courseId, module_id: mod.id, title: `Vocabulary: ${vc.topic}`, slug: slugify(`u${unit.num}-vc-${vc.topic}`), type: "text", short_description: `Oxford Headway vocabulary — ${vc.topic}\n${url}`, order: ++ord, status: "published", duration_minutes: 15, is_free_preview: false });
+            lessonUrls.push(url);
+          }
         }
-        const eeUrl = `${OUP}/student/headway/${levelData.slug}/everydayenglish/${unit.eeSlug}/${CC}`;
-        lessonRows.push({ course_id: courseId, module_id: mod.id, title: "Everyday English", slug: slugify(`u${unit.num}-everyday-english`), type: "video", short_description: `Listen and practise dialogues from Unit ${unit.num}.\n${eeUrl}`, order: ++ord, status: "published", duration_minutes: 20, is_free_preview: false });
-        lessonUrls.push(eeUrl);
-        if ((unit as any).audioZip) {
+        if (includeEverydayEnglish) {
+          const eeUrl = `${OUP}/student/headway/${levelData.slug}/everydayenglish/${unit.eeSlug}/${CC}`;
+          lessonRows.push({ course_id: courseId, module_id: mod.id, title: "Everyday English", slug: slugify(`u${unit.num}-everyday-english`), type: "video", short_description: `Listen and practise dialogues from Unit ${unit.num}.\n${eeUrl}`, order: ++ord, status: "published", duration_minutes: 20, is_free_preview: false });
+          lessonUrls.push(eeUrl);
+        }
+        if (includeAudioDownload && (unit as any).audioZip) {
           lessonRows.push({ course_id: courseId, module_id: mod.id, title: "Student's Book Audio — Download", slug: slugify(`u${unit.num}-audio`), type: "text", short_description: `Download Student's Book audio for Unit ${unit.num}.\n${(unit as any).audioZip}`, order: ++ord, status: "published", duration_minutes: 0, is_free_preview: false });
           lessonUrls.push((unit as any).audioZip);
         }
-        if ((unit as any).videoZip) {
+        if (includeVideoDownload && (unit as any).videoZip) {
           lessonRows.push({ course_id: courseId, module_id: mod.id, title: "Video — Download", slug: slugify(`u${unit.num}-video`), type: "video", short_description: `Download video for Unit ${unit.num}.\n${(unit as any).videoZip}`, order: ++ord, status: "published", duration_minutes: 0, is_free_preview: false });
           lessonUrls.push((unit as any).videoZip);
         }
@@ -5142,17 +5156,19 @@ When giving instructions, number each step clearly. Be precise and technical whe
         emit({ type: "progress", unit: i + 1, total, title: unit.title, phase: "done" });
       }
 
-      // ── Quizzes: one draft per unit ────────────────────────────────────────────
-      emit({ type: "status", message: "Krijimi i kuizeve..." });
-      const quizRows = levelData.units.map((u) => ({
-        course_id: courseId,
-        title: `${u.title.replace(/^Unit \d+ — /, "")} — Test Builder`,
-        description: `Test yourself on the grammar topics from ${u.title}. Opens Oxford Headway Test Builder: ${OUP}/student/headway/${levelData.slug}/test_builder${CC}`,
-        time_limit: 30,
-        published: false,
-        status: "draft",
-      }));
-      try { await supabaseAdmin.from("quizzes").insert(quizRows); } catch { /* best-effort */ }
+      // ── Quizzes: one draft per unit (only if testBuilder option enabled) ────────
+      if (includeTestBuilder) {
+        emit({ type: "status", message: "Krijimi i kuizeve..." });
+        const quizRows = levelData.units.map((u) => ({
+          course_id: courseId,
+          title: `${u.title.replace(/^Unit \d+ — /, "")} — Test Builder`,
+          description: `Test yourself on the grammar topics from ${u.title}. Opens Oxford Headway Test Builder: ${OUP}/student/headway/${levelData.slug}/test_builder${CC}`,
+          time_limit: 30,
+          published: false,
+          status: "draft",
+        }));
+        try { await supabaseAdmin.from("quizzes").insert(quizRows); } catch { /* best-effort */ }
+      }
 
       // ── Persist sync timestamp to platform_config ─────────────────────────────
       const syncedAt = new Date().toISOString();
