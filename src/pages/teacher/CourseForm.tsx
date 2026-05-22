@@ -75,6 +75,7 @@ export default function TeacherCourseForm() {
   const [headwayDone, setHeadwayDone] = useState<{ modules: number; lessons: number } | null>(null);
   const [headwayProgress, setHeadwayProgress] = useState<{ unit: number; total: number; title: string; phase: string } | null>(null);
   const [contentStats, setContentStats] = useState<{ modules: number; lessons: number; quizzes: number; syncedAt: string | null; syncLevel: string | null; loading: boolean } | null>(null);
+  const [quickResyncing, setQuickResyncing] = useState(false);
 
   const set = (key: string, value: any) => setForm(prev => ({ ...prev, [key]: value }));
 
@@ -316,6 +317,54 @@ export default function TeacherCourseForm() {
     const currentLevel = HEADWAY_LEVELS.has(form.level) ? form.level : 'Beginner';
     setHeadwayLevel(currentLevel);
     setShowHeadwayModal(true);
+  };
+
+  const handleQuickResync = async () => {
+    if (!id || !contentStats?.syncLevel || quickResyncing) return;
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session) { toast.error('Not signed in'); return; }
+    setQuickResyncing(true);
+    try {
+      const res = await authFetch(`/api/teacher/courses/${encodeURIComponent(id)}/headway-populate`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId: session.user.id, level: contentStats.syncLevel, stream: true }),
+      });
+      if (!res.ok) {
+        const json = await res.json().catch(() => ({}));
+        throw new Error(json?.error || 'Re-sync failed');
+      }
+      // Drain SSE stream silently — we only care about the done event
+      const reader = res.body?.getReader();
+      const decoder = new TextDecoder();
+      let buf = '';
+      if (reader) {
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          buf += decoder.decode(value, { stream: true });
+          const lines = buf.split('\n');
+          buf = lines.pop() ?? '';
+          for (const line of lines) {
+            const trimmed = line.replace(/^data:\s*/, '').trim();
+            if (!trimmed) continue;
+            try {
+              const evt = JSON.parse(trimmed);
+              if (evt.type === 'done') {
+                toast.success(`Headway ${contentStats.syncLevel} u ri-sinkronizua — ${evt.modules} module, ${evt.lessons} mësime`);
+                await fetchContentStats();
+              } else if (evt.type === 'error') {
+                throw new Error(evt.message || 'Re-sync failed');
+              }
+            } catch { /* skip malformed lines */ }
+          }
+        }
+      }
+    } catch (e: any) {
+      toast.error(e?.message || 'Re-sync failed');
+    } finally {
+      setQuickResyncing(false);
+    }
   };
 
   const handleHeadwayImport = async () => {
@@ -745,21 +794,38 @@ export default function TeacherCourseForm() {
                       {/* Last sync badge */}
                       {contentStats.syncedAt && !contentStats.loading && (
                         <div className="rounded-xl border border-blue-100 bg-blue-50 px-3 py-2.5 flex items-start gap-2">
-                          <Globe className="w-3.5 h-3.5 text-blue-500 shrink-0 mt-0.5" />
-                          <div className="min-w-0">
-                            <p className="text-[10px] font-bold text-blue-700 uppercase tracking-wide leading-none mb-0.5">
-                              Oxford Headway {contentStats.syncLevel ? `· ${contentStats.syncLevel}` : ''}
-                            </p>
+                          <Globe className={`w-3.5 h-3.5 shrink-0 mt-0.5 ${quickResyncing ? 'text-blue-400 animate-spin' : 'text-blue-500'}`} />
+                          <div className="min-w-0 flex-1">
+                            <div className="flex items-center justify-between gap-1 mb-0.5">
+                              <p className="text-[10px] font-bold text-blue-700 uppercase tracking-wide leading-none">
+                                Oxford Headway {contentStats.syncLevel ? `· ${contentStats.syncLevel}` : ''}
+                              </p>
+                              <button
+                                onClick={() => void handleQuickResync()}
+                                disabled={quickResyncing || headwayImporting}
+                                title="Ri-sinkronizo Headway"
+                                className="flex items-center gap-1 px-1.5 py-0.5 rounded-md text-[10px] font-semibold text-blue-600 hover:bg-blue-100 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                              >
+                                <RefreshCw className={`w-2.5 h-2.5 ${quickResyncing ? 'animate-spin' : ''}`} />
+                                {quickResyncing ? 'Duke sinkronizuar…' : 'Ri-sync'}
+                              </button>
+                            </div>
                             <p className="text-[11px] text-blue-600">
-                              Sinkronizuar:{' '}
-                              <span className="font-semibold">
-                                {new Date(contentStats.syncedAt).toLocaleDateString('sq-AL', {
-                                  day: '2-digit', month: 'short', year: 'numeric',
-                                })}{' '}
-                                në {new Date(contentStats.syncedAt).toLocaleTimeString('sq-AL', {
-                                  hour: '2-digit', minute: '2-digit',
-                                })}
-                              </span>
+                              {quickResyncing ? (
+                                <span className="italic text-blue-400">Importimi në vazhdim…</span>
+                              ) : (
+                                <>
+                                  Sinkronizuar:{' '}
+                                  <span className="font-semibold">
+                                    {new Date(contentStats.syncedAt).toLocaleDateString('sq-AL', {
+                                      day: '2-digit', month: 'short', year: 'numeric',
+                                    })}{' '}
+                                    në {new Date(contentStats.syncedAt).toLocaleTimeString('sq-AL', {
+                                      hour: '2-digit', minute: '2-digit',
+                                    })}
+                                  </span>
+                                </>
+                              )}
                             </p>
                           </div>
                         </div>
