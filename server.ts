@@ -5033,6 +5033,7 @@ When giving instructions, number each step clearly. Be precise and technical whe
 
       let totalLessons = 0;
       let totalModules = 0;
+      const unitModuleIds: string[] = [];
 
       // ── Process each unit individually so we can stream progress ─────────────
       for (let i = 0; i < levelData.units.length; i++) {
@@ -5061,6 +5062,7 @@ When giving instructions, number each step clearly. Be precise and technical whe
           return;
         }
         const mod = modRows[0];
+        unitModuleIds[i] = String(mod.id);
         totalModules++;
 
         emit({ type: "progress", unit: i + 1, total, title: unit.title, phase: "lessons" });
@@ -5198,15 +5200,18 @@ When giving instructions, number each step clearly. Be precise and technical whe
       // ── Quizzes: one draft per unit (only if testBuilder option enabled) ────────
       if (includeTestBuilder) {
         emit({ type: "status", message: "Krijimi i kuizeve..." });
-        const quizRows = levelData.units.map((u) => ({
+        const quizRows = levelData.units.map((u, qi) => ({
           course_id: courseId,
+          teacher_id: userId,
+          module_id: unitModuleIds[qi] || null,
           title: `${u.title.replace(/^Unit \d+ — /, "")} — Test Builder`,
           description: `Test yourself on the grammar topics from ${u.title}. Opens Oxford Headway Test Builder: ${OUP}/student/headway/${levelData.slug}/test_builder${CC}`,
           time_limit: 30,
           published: false,
           status: "draft",
         }));
-        try { await supabaseAdmin.from("quizzes").insert(quizRows); } catch { /* best-effort */ }
+        const { error: qErr } = await supabaseAdmin.from("quizzes").insert(quizRows);
+        if (qErr) console.error("[headway-populate] quiz insert failed:", qErr.message, qErr.details, qErr.hint);
       }
 
       // ── Persist sync timestamp to platform_config ─────────────────────────────
