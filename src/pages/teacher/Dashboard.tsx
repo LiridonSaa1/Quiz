@@ -5,8 +5,8 @@ import TeacherLayout from '../../components/layout/TeacherLayout';
 import { Link } from 'react-router-dom';
 import {
   BookOpen, Users, FileText, TrendingUp,
-  ArrowUpRight, Plus, ChevronRight, Zap,
-  Target, Clock, Award, BarChart3, Sparkles, Layers
+  ArrowUpRight, Plus, ChevronRight,
+  Target, Clock, Award, BarChart3, Sparkles, Layers, Trophy, Medal
 } from 'lucide-react';
 import {
   AreaChart, Area, XAxis, YAxis, CartesianGrid,
@@ -37,6 +37,15 @@ interface ModuleCompletion {
   published: number;
   total: number;
   pct: number;
+}
+
+interface TopStudent {
+  id: string;
+  name: string;
+  avatar: string | null;
+  avgScore: number;
+  quizzes: number;
+  passed: number;
 }
 
 interface Stats {
@@ -137,6 +146,7 @@ export default function TeacherDashboard() {
   const [displayName, setDisplayName]     = useState('');
   const [chartData, setChartData]         = useState(CHART_DATA);
   const [moduleData, setModuleData]       = useState<ModuleCompletion[]>([]);
+  const [topStudents, setTopStudents]     = useState<TopStudent[]>([]);
 
   useEffect(() => {
     let active = true;
@@ -163,6 +173,7 @@ export default function TeacherDashboard() {
         });
         setChartData(Array.isArray(json?.trend) && json.trend.length ? json.trend : CHART_DATA);
         setModuleData(Array.isArray(json?.moduleCompletion) ? json.moduleCompletion : []);
+        setTopStudents(Array.isArray(json?.topStudents) ? json.topStudents : []);
       } catch (e) {
         console.error('Dashboard fetch error:', e);
       } finally {
@@ -343,6 +354,105 @@ export default function TeacherDashboard() {
             </motion.div>
           </div>
         </div>
+
+        {/* Student Leaderboard */}
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.48, duration: 0.45, ease: [0.22, 1, 0.36, 1] }}
+          className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden hover:shadow-md transition-shadow duration-300"
+        >
+          <div className="h-0.5 bg-gradient-to-r from-amber-400 via-orange-500 to-rose-500" />
+          <div className="p-6">
+            <div className="flex items-center justify-between mb-6">
+              <div className="flex items-center gap-3">
+                <div className="p-2.5 bg-amber-50 ring-4 ring-amber-100 rounded-xl">
+                  <Trophy className="w-5 h-5 text-amber-500" />
+                </div>
+                <div>
+                  <h2 className="text-base font-bold text-slate-900">Top Students</h2>
+                  <p className="text-xs text-slate-400 mt-0.5">Ranked by average quiz score</p>
+                </div>
+              </div>
+              <Link
+                to="/teacher/students"
+                className="flex items-center gap-1.5 text-xs font-semibold text-amber-600 hover:text-amber-700 bg-amber-50 hover:bg-amber-100 px-3 py-1.5 rounded-xl transition-all duration-200"
+              >
+                All Students <ChevronRight className="w-3.5 h-3.5" />
+              </Link>
+            </div>
+
+            {loading ? (
+              <div className="space-y-3">
+                {[1,2,3,4,5].map(i => (
+                  <div key={i} className="h-12 bg-slate-100 rounded-xl animate-pulse" />
+                ))}
+              </div>
+            ) : topStudents.length === 0 ? (
+              <div className="flex flex-col items-center justify-center py-10 text-center">
+                <div className="w-12 h-12 rounded-2xl bg-slate-50 ring-4 ring-slate-100 flex items-center justify-center mb-3">
+                  <Trophy className="w-5 h-5 text-slate-300" />
+                </div>
+                <p className="text-sm font-semibold text-slate-400">No quiz results yet</p>
+                <p className="text-xs text-slate-300 mt-0.5">Students will appear here once they complete quizzes</p>
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+                {topStudents.map((student, i) => {
+                  const rank = i + 1;
+                  const isGold   = rank === 1;
+                  const isSilver = rank === 2;
+                  const isBronze = rank === 3;
+                  const medalColor = isGold ? 'text-amber-400' : isSilver ? 'text-slate-400' : isBronze ? 'text-orange-400' : null;
+                  const ringColor  = isGold ? 'ring-amber-200 bg-amber-50' : isSilver ? 'ring-slate-200 bg-slate-50' : isBronze ? 'ring-orange-200 bg-orange-50' : 'ring-slate-100 bg-slate-50';
+                  const passRate   = student.quizzes > 0 ? Math.round((student.passed / student.quizzes) * 100) : 0;
+                  const initials   = student.name.split(' ').map(p => p[0]).join('').slice(0, 2).toUpperCase();
+
+                  return (
+                    <motion.div
+                      key={student.id}
+                      initial={{ opacity: 0, y: 12 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      transition={{ delay: 0.52 + i * 0.04, duration: 0.35 }}
+                      className="flex items-center gap-3 p-3.5 rounded-xl border border-slate-100 hover:border-violet-200 hover:bg-violet-50/30 transition-all duration-200 group"
+                    >
+                      {/* Rank */}
+                      <div className={`w-7 h-7 rounded-lg ring-2 ${ringColor} flex items-center justify-center shrink-0`}>
+                        {medalColor
+                          ? <Medal className={`w-3.5 h-3.5 ${medalColor}`} />
+                          : <span className="text-[10px] font-bold text-slate-400">#{rank}</span>
+                        }
+                      </div>
+
+                      {/* Avatar */}
+                      <div className="w-8 h-8 rounded-full bg-gradient-to-br from-violet-400 to-indigo-500 flex items-center justify-center text-white text-[10px] font-bold shrink-0 overflow-hidden">
+                        {student.avatar
+                          ? <img src={student.avatar} alt={student.name} className="w-full h-full object-cover" />
+                          : initials
+                        }
+                      </div>
+
+                      {/* Info */}
+                      <div className="flex-1 min-w-0">
+                        <p className="text-xs font-semibold text-slate-800 truncate group-hover:text-violet-700 transition-colors">{student.name}</p>
+                        <p className="text-[10px] text-slate-400 mt-0.5">{student.quizzes} quiz{student.quizzes !== 1 ? 'zes' : ''} · {passRate}% pass rate</p>
+                      </div>
+
+                      {/* Score badge */}
+                      <div className={`shrink-0 text-xs font-bold tabular-nums px-2 py-1 rounded-lg ${
+                        student.avgScore >= 80 ? 'bg-emerald-50 text-emerald-600 border border-emerald-100' :
+                        student.avgScore >= 60 ? 'bg-indigo-50 text-indigo-600 border border-indigo-100' :
+                        'bg-slate-50 text-slate-500 border border-slate-100'
+                      }`}>
+                        {student.avgScore}%
+                      </div>
+                    </motion.div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        </motion.div>
 
         {/* Module Completion Chart */}
         <motion.div

@@ -4172,6 +4172,47 @@ When giving instructions, number each step clearly. Be precise and technical whe
         }
       }
 
+      // Top students leaderboard (ranked by avg score, min 1 completed attempt)
+      let topStudents: { id: string; name: string; avatar: string | null; avgScore: number; quizzes: number; passed: number }[] = [];
+      if (completedAttempts.length > 0) {
+        const byStudent: Record<string, { scores: number[]; passed: number }> = {};
+        for (const a of completedAttempts) {
+          const sid = String(a.student_id || "");
+          if (!sid || !studentIds.has(sid)) continue;
+          if (!byStudent[sid]) byStudent[sid] = { scores: [], passed: 0 };
+          byStudent[sid].scores.push(toFiniteNumber(a.score_percent, 0));
+          if (a.passed) byStudent[sid].passed++;
+        }
+        const ranked = Object.entries(byStudent)
+          .map(([id, { scores, passed }]) => ({
+            id,
+            avgScore: Math.round(scores.reduce((s, v) => s + v, 0) / scores.length),
+            quizzes: scores.length,
+            passed,
+          }))
+          .sort((a, b) => b.avgScore - a.avgScore || b.quizzes - a.quizzes)
+          .slice(0, 10);
+
+        if (ranked.length > 0) {
+          const profilesRes = await supabaseAdmin
+            .from("profiles")
+            .select("id, display_name, email, avatar_url")
+            .in("id", ranked.map(r => r.id));
+          const profileMap: Record<string, { name: string; avatar: string | null }> = {};
+          for (const p of (profilesRes.data || [])) {
+            profileMap[String(p.id)] = {
+              name: String(p.display_name || p.email || "Student"),
+              avatar: p.avatar_url || null,
+            };
+          }
+          topStudents = ranked.map(r => ({
+            ...r,
+            name: profileMap[r.id]?.name ?? "Student",
+            avatar: profileMap[r.id]?.avatar ?? null,
+          }));
+        }
+      }
+
       const payload = {
         success: true,
         stats: {
@@ -4185,6 +4226,7 @@ When giving instructions, number each step clearly. Be precise and technical whe
         },
         trend,
         moduleCompletion,
+        topStudents,
       };
       setCachedApiResponse(teacherDashboardCacheKey, payload, 30_000);
       const durationMs = Date.now() - dashboardStartedAt;
