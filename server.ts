@@ -4708,6 +4708,45 @@ When giving instructions, number each step clearly. Be precise and technical whe
     }
   });
 
+  // Bulk-delete all modules (and their lessons/quizzes) for a course
+  app.post("/api/teacher/courses/:courseId/clear-modules", async (req: Request, res: Response) => {
+    try {
+      const caller = await assertAuthenticated(req, res);
+      if (!caller) return;
+      const { courseId } = req.params;
+      const userId = typeof req.body?.userId === "string" ? req.body.userId.trim() : "";
+      if (!userId) return res.status(400).json({ error: "userId is required" });
+
+      const gate = await assertTeacherOwnsCourse(userId, courseId);
+      if (!gate.ok) return res.status(403).json({ error: "Access denied" });
+
+      // Fetch all module IDs for this course
+      const { data: mods, error: mErr } = await supabaseAdmin
+        .from("modules")
+        .select("id")
+        .eq("course_id", courseId);
+      if (mErr) throw mErr;
+      if (!mods || mods.length === 0) return res.json({ deleted: 0 });
+
+      const moduleIds = mods.map((m: any) => m.id);
+
+      // Delete lessons first (avoids FK issues if no cascade)
+      await supabaseAdmin.from("lessons").delete().in("module_id", moduleIds);
+
+      // Delete quizzes tied to those modules (if quiz table has module_id)
+      await supabaseAdmin.from("quizzes").delete().in("module_id", moduleIds).throwOnError().catch(() => {});
+
+      // Delete the modules
+      const { error: dErr } = await supabaseAdmin.from("modules").delete().in("id", moduleIds);
+      if (dErr) throw dErr;
+
+      res.json({ success: true, deleted: moduleIds.length });
+    } catch (e: any) {
+      console.error("POST /api/teacher/courses/:courseId/clear-modules", e);
+      res.status(500).json({ error: e.message || "Server error" });
+    }
+  });
+
   // Headway auto-populate: creates modules + per-unit lessons with real Oxford exercise links
   app.post("/api/teacher/courses/:courseId/headway-populate", async (req: Request, res: Response) => {
     try {

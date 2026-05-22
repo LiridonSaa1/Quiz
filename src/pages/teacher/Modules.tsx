@@ -114,6 +114,8 @@ export default function TeacherModules() {
   });
   const [headwayDone, setHeadwayDone] = useState<{ modules: number; lessons: number } | null>(null);
   const [headwayProgress, setHeadwayProgress] = useState<{ unit: number; total: number; title: string; phase: string } | null>(null);
+  const [headwayClearing, setHeadwayClearing] = useState(false);
+  const [headwayClearConfirm, setHeadwayClearConfirm] = useState(false);
   const { can } = useTeacherPermissions();
 
   const fetchData = async () => {
@@ -350,10 +352,34 @@ export default function TeacherModules() {
   const openHeadwayModal = () => {
     setHeadwayDone(null);
     setHeadwayProgress(null);
+    setHeadwayClearing(false);
+    setHeadwayClearConfirm(false);
     setHeadwayCourseId(courses.length === 1 ? courses[0].id : '');
     setHeadwayLevel('Beginner');
     setHeadwayOptions({ grammar: true, vocabulary: true, everydayEnglish: true, audioDownload: true, videoDownload: true, testBuilder: true });
     setShowHeadwayModal(true);
+  };
+
+  const handleClearModules = async () => {
+    if (!headwayCourseId) return;
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session) { toast.error('Not signed in'); return; }
+    setHeadwayClearing(true);
+    setHeadwayClearConfirm(false);
+    try {
+      const res = await authFetch(`/api/teacher/courses/${encodeURIComponent(headwayCourseId)}/clear-modules`, {
+        method: 'POST',
+        body: JSON.stringify({ userId: session.user.id }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(json?.error || 'Clear failed');
+      toast.success(`Cleared ${json.deleted ?? 0} module(s) from this course`);
+      fetchData();
+    } catch (e: any) {
+      toast.error(e?.message || 'Failed to clear modules');
+    } finally {
+      setHeadwayClearing(false);
+    }
   };
 
   const handleHeadwayImport = async () => {
@@ -1120,6 +1146,44 @@ export default function TeacherModules() {
                         <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 pointer-events-none" />
                       </div>
                     </div>
+
+                    {/* Clear modules action */}
+                    {headwayCourseId && !headwayImporting && (
+                      <div className="flex items-center gap-2">
+                        {headwayClearConfirm ? (
+                          <>
+                            <span className="text-xs text-red-600 font-medium flex-1">Delete all modules in this course?</span>
+                            <button
+                              type="button"
+                              disabled={headwayClearing}
+                              onClick={() => setHeadwayClearConfirm(false)}
+                              className="px-3 py-1.5 rounded-lg text-xs font-semibold text-slate-600 bg-slate-100 hover:bg-slate-200 transition-all"
+                            >
+                              Cancel
+                            </button>
+                            <button
+                              type="button"
+                              disabled={headwayClearing}
+                              onClick={() => void handleClearModules()}
+                              className="px-3 py-1.5 rounded-lg text-xs font-semibold text-white bg-red-500 hover:bg-red-600 transition-all flex items-center gap-1.5 disabled:opacity-60"
+                            >
+                              {headwayClearing
+                                ? <><span className="w-3 h-3 rounded-full border-2 border-white border-t-transparent animate-spin" />Clearing…</>
+                                : 'Yes, delete all'}
+                            </button>
+                          </>
+                        ) : (
+                          <button
+                            type="button"
+                            disabled={headwayClearing}
+                            onClick={() => setHeadwayClearConfirm(true)}
+                            className="text-xs text-red-500 hover:text-red-700 font-medium underline underline-offset-2 transition-colors disabled:opacity-50"
+                          >
+                            Clear existing modules first
+                          </button>
+                        )}
+                      </div>
+                    )}
 
                     {/* Level selector */}
                     <div>
