@@ -5066,7 +5066,7 @@ When giving instructions, number each step clearly. Be precise and technical whe
             const html = `<div style="margin:0 auto;max-width:480px;padding:24px;border:1px solid #e2e8f0;border-radius:12px;background:#f8fafc;text-align:center"><p style="margin:0 0 8px;color:#334155;font-size:15px;font-weight:600">${lsn?.title || ""}</p><p style="margin:0 0 16px;color:#64748b;font-size:13px">${lsn?.short_description?.split("\n")[0] || ""}</p><a href="${url}" target="_blank" rel="noopener noreferrer" style="display:inline-block;background:#6366f1;color:#fff;padding:11px 28px;border-radius:8px;text-decoration:none;font-weight:700;font-size:14px">${btnLabel}</a></div>`;
             return { lesson_id: l.id, type: "text", content_type: "text", text_content: html, content: html, position: 1 };
           });
-          await supabaseAdmin.from("lesson_contents").insert(contentRows).catch(() => {});
+          try { await supabaseAdmin.from("lesson_contents").insert(contentRows); } catch { /* best-effort */ }
         }
 
         emit({ type: "progress", unit: i + 1, total, title: unit.title, phase: "done" });
@@ -5082,7 +5082,7 @@ When giving instructions, number each step clearly. Be precise and technical whe
         published: false,
         status: "draft",
       }));
-      await supabaseAdmin.from("quizzes").insert(quizRows).catch(() => {});
+      try { await supabaseAdmin.from("quizzes").insert(quizRows); } catch { /* best-effort */ }
 
       emit({ type: "done", modules: totalModules, lessons: totalLessons, level, success: true });
 
