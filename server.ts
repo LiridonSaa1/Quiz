@@ -4799,7 +4799,7 @@ When giving instructions, number each step clearly. Be precise and technical whe
       if (!gate.ok) return res.status(403).json({ error: "Access denied" });
 
       const [modulesRes, lessonsRes, courseRes] = await Promise.all([
-        supabaseAdmin.from("modules").select("id, title, order_index").eq("course_id", courseId).order("order_index"),
+        supabaseAdmin.from("modules").select("id, title, order").eq("course_id", courseId).order("order"),
         supabaseAdmin.from("lessons").select("id, module_id, title, status").eq("course_id", courseId).eq("status", "published"),
         supabaseAdmin.from("courses").select("id, student_ids").eq("id", courseId).maybeSingle(),
       ]);
