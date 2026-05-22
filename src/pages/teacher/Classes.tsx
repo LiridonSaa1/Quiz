@@ -109,16 +109,19 @@ export default function TeacherClasses() {
     try {
       const scopedIds = await resolveTeacherIdCandidates(tid);
 
-      const classesHttp = await authFetch('/api/teacher/classes');
+      // Fetch classes + courses in parallel — eliminates sequential waterfall
+      const [classesHttp, coursesHttp] = await Promise.all([
+        authFetch('/api/teacher/classes'),
+        authFetch(`/api/teacher/courses?userId=${encodeURIComponent(tid)}`).catch(() => null),
+      ]);
       if (!classesHttp.ok) throw new Error(await readApiError(classesHttp));
       const classesJson = await classesHttp.json();
       const classesRows = Array.isArray(classesJson?.classes) ? classesJson.classes : [];
 
       let allCourses: Course[] = [];
       try {
-        const backendRes = await authFetch(`/api/teacher/courses?userId=${encodeURIComponent(tid)}`);
-        if (backendRes.ok) {
-          const backendJson = await backendRes.json();
+        if (coursesHttp && coursesHttp.ok) {
+          const backendJson = await coursesHttp.json();
           if (backendJson?.success && Array.isArray(backendJson.courses)) {
             allCourses = backendJson.courses.map((c: any) => ({
               id: c.id,

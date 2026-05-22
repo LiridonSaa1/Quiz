@@ -11406,27 +11406,32 @@ When giving instructions, number each step clearly. Be precise and technical whe
       if (!caller) return;
       const { assignmentId } = req.params;
 
+      // Single query with join — eliminates sequential round-trip for profiles
       const { data: submissions, error } = await supabaseAdmin
         .from('assignment_submissions')
-        .select('*')
+        .select(`
+          id, assignment_id, student_id, submitted_at, score, status,
+          content, file_url, feedback, grade, graded_at, updated_at,
+          student:profiles!student_id(id, display_name, email, avatar_url)
+        `)
         .eq('assignment_id', assignmentId)
         .order('submitted_at', { ascending: false });
 
-      if (error && !/does not exist|schema cache/i.test(error.message)) throw error;
-
-      const studentIds = [...new Set((submissions || []).map((s: any) => s.student_id))];
-      let profileMap: Record<string, any> = {};
-      if (studentIds.length > 0) {
-        const { data: profiles } = await supabaseAdmin
-          .from('profiles')
-          .select('id, display_name, email, avatar_url')
-          .in('id', studentIds);
-        (profiles || []).forEach((p: any) => { profileMap[p.id] = p; });
+      if (error) {
+        if (/does not exist|schema cache/i.test(error.message)) {
+          const { data: plain } = await supabaseAdmin
+            .from('assignment_submissions')
+            .select('id, assignment_id, student_id, submitted_at, score, status, content, file_url, feedback, grade, graded_at')
+            .eq('assignment_id', assignmentId)
+            .order('submitted_at', { ascending: false });
+          return res.json({ success: true, submissions: plain || [] });
+        }
+        throw error;
       }
 
       const enriched = (submissions || []).map((s: any) => ({
         ...s,
-        student: profileMap[s.student_id] || { display_name: 'Unknown', email: '' },
+        student: s.student || { display_name: 'Unknown', email: '' },
       }));
       res.json({ success: true, submissions: enriched });
     } catch (e: any) { res.status(500).json({ error: e.message }); }
@@ -11984,27 +11989,32 @@ Speaker notes: 2-3 sentences on a single line with no line breaks.`;
       if (!caller) return;
       const { assignmentId } = req.params;
 
+      // Single query with join — eliminates sequential round-trip for profiles
       const { data: submissions, error } = await supabaseAdmin
         .from('assignment_submissions')
-        .select('*')
+        .select(`
+          id, assignment_id, student_id, submitted_at, score, status,
+          content, file_url, feedback, grade, graded_at, updated_at,
+          student:profiles!student_id(id, display_name, email, avatar_url)
+        `)
         .eq('assignment_id', assignmentId)
         .order('submitted_at', { ascending: false });
 
-      if (error && !/does not exist|schema cache/i.test(error.message)) throw error;
-
-      const studentIds = [...new Set((submissions || []).map((s: any) => s.student_id))];
-      let profileMap: Record<string, any> = {};
-      if (studentIds.length > 0) {
-        const { data: profiles } = await supabaseAdmin
-          .from('profiles')
-          .select('id, display_name, email, avatar_url')
-          .in('id', studentIds);
-        (profiles || []).forEach((p: any) => { profileMap[p.id] = p; });
+      if (error) {
+        if (/does not exist|schema cache/i.test(error.message)) {
+          const { data: plain } = await supabaseAdmin
+            .from('assignment_submissions')
+            .select('id, assignment_id, student_id, submitted_at, score, status, content, file_url, feedback, grade, graded_at')
+            .eq('assignment_id', assignmentId)
+            .order('submitted_at', { ascending: false });
+          return res.json({ success: true, submissions: plain || [] });
+        }
+        throw error;
       }
 
       const enriched = (submissions || []).map((s: any) => ({
         ...s,
-        student: profileMap[s.student_id] || { display_name: 'Unknown', email: '' },
+        student: s.student || { display_name: 'Unknown', email: '' },
       }));
       res.json({ success: true, submissions: enriched });
     } catch (e: any) { res.status(500).json({ error: e.message }); }
@@ -12597,16 +12607,16 @@ async function runAutoPublishQuizzes() {
       .lte('publish_at', now)
       .neq('published', true);
     if (error || !data || data.length === 0) return;
-    for (const quiz of data) {
-      const { error: updErr } = await supabaseAdmin
-        .from('quizzes')
-        .update({ published: true, publish_at: null, updated_at: now })
-        .eq('id', quiz.id);
-      if (updErr) {
-        console.error(`[auto-publish] Failed to publish quiz "${quiz.title}":`, updErr.message);
-      } else {
-        console.log(`[auto-publish] Published quiz "${quiz.title}" (${quiz.id})`);
-      }
+    // Batch update — 1 query instead of N
+    const ids = data.map((q: any) => q.id);
+    const { error: batchErr } = await supabaseAdmin
+      .from('quizzes')
+      .update({ published: true, publish_at: null, updated_at: now })
+      .in('id', ids);
+    if (batchErr) {
+      console.error('[auto-publish] Failed to batch-publish quizzes:', batchErr.message);
+    } else {
+      console.log(`[auto-publish] Published ${ids.length} quiz(zes):`, data.map((q: any) => q.title).join(', '));
     }
   } catch (e: any) {
     console.error('[auto-publish] Quizzes scheduler error:', e?.message);
@@ -12622,16 +12632,16 @@ async function runAutoPublishLessons() {
       .lte('publish_at', now)
       .neq('status', 'published');
     if (error || !data || data.length === 0) return;
-    for (const lesson of data) {
-      const { error: updErr } = await supabaseAdmin
-        .from('lessons')
-        .update({ status: 'published', publish_at: null, updated_at: now })
-        .eq('id', lesson.id);
-      if (updErr) {
-        console.error(`[auto-publish] Failed to publish lesson "${lesson.title}":`, updErr.message);
-      } else {
-        console.log(`[auto-publish] Published lesson "${lesson.title}" (${lesson.id})`);
-      }
+    // Batch update — 1 query instead of N
+    const ids = data.map((l: any) => l.id);
+    const { error: batchErr } = await supabaseAdmin
+      .from('lessons')
+      .update({ status: 'published', publish_at: null, updated_at: now })
+      .in('id', ids);
+    if (batchErr) {
+      console.error('[auto-publish] Failed to batch-publish lessons:', batchErr.message);
+    } else {
+      console.log(`[auto-publish] Published ${ids.length} lesson(s):`, data.map((l: any) => l.title).join(', '));
     }
   } catch (e: any) {
     console.error('[auto-publish] Lessons scheduler error:', e?.message);
@@ -12704,16 +12714,16 @@ async function runAutoPublishModules() {
       .lte('publish_at', now)
       .neq('status', 'active');
     if (error || !data || data.length === 0) return;
-    for (const mod of data) {
-      const { error: updErr } = await supabaseAdmin
-        .from('modules')
-        .update({ status: 'active', publish_at: null, updated_at: now })
-        .eq('id', mod.id);
-      if (updErr) {
-        console.error(`[auto-publish] Failed to publish module "${mod.title}":`, updErr.message);
-      } else {
-        console.log(`[auto-publish] Published module "${mod.title}" (${mod.id})`);
-      }
+    // Batch update — 1 query instead of N
+    const ids = data.map((m: any) => m.id);
+    const { error: batchErr } = await supabaseAdmin
+      .from('modules')
+      .update({ status: 'active', publish_at: null, updated_at: now })
+      .in('id', ids);
+    if (batchErr) {
+      console.error('[auto-publish] Failed to batch-publish modules:', batchErr.message);
+    } else {
+      console.log(`[auto-publish] Published ${ids.length} module(s):`, data.map((m: any) => m.title).join(', '));
     }
   } catch (e: any) {
     console.error('[auto-publish] Scheduler error:', e?.message);

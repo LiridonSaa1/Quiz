@@ -138,10 +138,10 @@ export default function StudentManagement() {
       const { data: { session } } = await supabase.auth.getSession();
       if (!session?.user?.id) return;
 
-      const studentsRes = await authFetch(
-        `/api/teacher/students?userId=${encodeURIComponent(session.user.id)}`
-      );
-      const classesRes = await authFetch('/api/teacher/classes');
+      const [studentsRes, classesRes] = await Promise.all([
+        authFetch(`/api/teacher/students?userId=${encodeURIComponent(session.user.id)}`),
+        authFetch('/api/teacher/classes'),
+      ]);
       if (classesRes.ok) {
         const classesJson = await classesRes.json();
         if (classesJson?.success && Array.isArray(classesJson.classes)) {

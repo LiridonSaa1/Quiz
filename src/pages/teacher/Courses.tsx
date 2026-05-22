@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Link, useNavigate } from 'react-router-dom';
 import { supabase } from '../../supabase';
@@ -74,7 +74,7 @@ export default function TeacherCourses() {
 
       const { data, error } = await supabase
         .from('courses')
-        .select('*')
+        .select('id, title, name, description, status, teacher_id, created_at, updated_at, student_ids, total_students, thumbnail_url, category, level')
         .in('teacher_id', scopedIds)
         .order('created_at', { ascending: false });
 
@@ -119,7 +119,8 @@ export default function TeacherCourses() {
       if (res.ok) {
         toast.success('Course deleted');
         setCourseToDelete(null);
-        fetchCourses();
+        // Optimistic removal — no full refetch needed
+        setCourses(prev => prev.filter(c => c.id !== courseId));
         return;
       }
 
@@ -155,7 +156,8 @@ export default function TeacherCourses() {
       }
       toast.success('Course deleted');
       setCourseToDelete(null);
-      fetchCourses();
+      // Optimistic removal — no full refetch needed
+      setCourses(prev => prev.filter(c => c.id !== courseId));
     } catch (e: any) {
       fail(e?.message || 'Failed to delete');
     } finally {
@@ -165,6 +167,8 @@ export default function TeacherCourses() {
 
   const toggleStatus = async (course: any) => {
     const newStatus = course.status === 'published' ? 'draft' : 'published';
+    // Optimistic update — no refetch needed
+    setCourses(prev => prev.map(c => c.id === course.id ? { ...c, status: newStatus } : c));
     try {
       const res = await authFetch(`/api/teacher/courses/${encodeURIComponent(course.id)}/status`, {
         method: 'PATCH',
@@ -172,28 +176,29 @@ export default function TeacherCourses() {
       });
       const json = await res.json().catch(() => ({}));
       if (!res.ok || !json?.success) {
+        // Revert optimistic update on error
+        setCourses(prev => prev.map(c => c.id === course.id ? { ...c, status: course.status } : c));
         throw new Error(json?.error || 'Failed to update status');
       }
       toast.success(`Course ${newStatus === 'published' ? 'published' : 'set to draft'}`);
-      fetchCourses();
     } catch (e: any) {
       toast.error(e?.message || 'Failed to update status');
     }
   };
 
-  const filtered = courses.filter(c => {
+  const filtered = useMemo(() => courses.filter(c => {
     const q = search.toLowerCase();
     const matchSearch = (c.name || c.title || '').toLowerCase().includes(q) || (c.description || '').toLowerCase().includes(q);
     const matchStatus = statusFilter === 'All' || c.status === statusFilter;
     return matchSearch && matchStatus;
-  });
+  }), [courses, search, statusFilter]);
 
-  const stats = [
+  const stats = useMemo(() => [
     { label: t('courses.title'), value: courses.length, icon: BookOpen, iconBg: 'bg-violet-100 text-violet-600', grad: 'from-violet-500 to-purple-500', ring: 'ring-violet-100' },
     { label: t('common.published'), value: courses.filter(c => c.status === 'published').length, icon: CheckCircle2, iconBg: 'bg-emerald-100 text-emerald-600', grad: 'from-emerald-500 to-teal-500', ring: 'ring-emerald-100' },
     { label: t('common.draft'), value: courses.filter(c => c.status !== 'published').length, icon: FileText, iconBg: 'bg-amber-100 text-amber-600', grad: 'from-amber-500 to-orange-500', ring: 'ring-amber-100' },
     { label: t('courses.totalStudents'), value: courses.reduce((acc, c) => acc + (c.student_ids?.length || c.total_students || 0), 0), icon: GraduationCap, iconBg: 'bg-indigo-100 text-indigo-600', grad: 'from-indigo-500 to-blue-500', ring: 'ring-indigo-100' },
-  ];
+  ], [courses, t]);
 
   return (
     <TeacherLayout>

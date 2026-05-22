@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useRef } from 'react';
+import React, { useEffect, useState, useRef, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 import { supabase } from '../../supabase';
 import TeacherLayout from '../../components/layout/TeacherLayout';
@@ -148,12 +148,12 @@ export default function TeacherDashboard() {
     };
   }, []);
 
-  const STAT_CARDS = [
+  const STAT_CARDS = useMemo(() => [
     { label: t('dashboard.stats.totalCourses'),  value: stats.courses,  icon: BookOpen,    trend: '+12%', gradient: 'from-violet-500 to-indigo-600',  bg: 'bg-violet-50',  text: 'text-violet-600',  ring: 'ring-violet-100' },
     { label: t('dashboard.stats.myStudents'),    value: stats.students, icon: Users,        trend: '+5%',  gradient: 'from-indigo-500 to-blue-600',    bg: 'bg-indigo-50',  text: 'text-indigo-600',  ring: 'ring-indigo-100' },
     { label: t('dashboard.stats.totalQuizzes'),  value: stats.quizzes,  icon: FileText,     trend: '+8%',  gradient: 'from-amber-500 to-orange-600',   bg: 'bg-amber-50',   text: 'text-amber-600',   ring: 'ring-amber-100'  },
     { label: t('dashboard.stats.avgScore'),     value: `${stats.avgScore}%`, icon: TrendingUp, trend: 'N/A', gradient: 'from-emerald-500 to-teal-600', bg: 'bg-emerald-50', text: 'text-emerald-600', ring: 'ring-emerald-100' },
-  ];
+  ], [stats, t]);
 
   const hour = new Date().getHours();
   const greetingKey = hour < 12 ? 'dashboard.goodMorning' : hour < 18 ? 'dashboard.goodAfternoon' : 'dashboard.goodEvening';

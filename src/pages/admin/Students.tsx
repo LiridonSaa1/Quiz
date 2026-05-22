@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 import { supabase } from '../../supabase';
 import { UserProfile } from '../../types';
@@ -89,12 +89,17 @@ export default function AdminStudents() {
 
   const toggleStatus = async (student: StudentWithMeta) => {
     const newStatus = student.status === 'active' ? 'inactive' : 'active';
+    // Optimistic update — no refetch needed
+    setStudents(prev => prev.map(s => s.uid === student.uid ? { ...s, status: newStatus } : s));
     try {
       const { error } = await supabase.from('profiles').update({ status: newStatus }).eq('id', student.uid);
       if (error) throw error;
       toast.success(newStatus === 'active' ? t('students.studentEnabled') : t('students.studentDisabled'));
-      fetchData();
-    } catch { toast.error(t('errors.saveFailed')); }
+    } catch {
+      // Revert on error
+      setStudents(prev => prev.map(s => s.uid === student.uid ? { ...s, status: student.status } : s));
+      toast.error(t('errors.saveFailed'));
+    }
   };
 
   const editStudent = async (student: StudentWithMeta) => {
@@ -110,7 +115,8 @@ export default function AdminStudents() {
       const json = await res.json().catch(() => ({}));
       if (!res.ok || !json?.success) throw new Error(json?.error || t('errors.saveFailed'));
       toast.success(t('dashboard.studentUpdated'));
-      fetchData();
+      // Update local state — no full refetch needed
+      setStudents(prev => prev.map(s => s.uid === student.uid ? { ...s, displayName: displayName || s.displayName, email: email || s.email } : s));
     } catch (e: any) {
       toast.error(e?.message || t('errors.saveFailed'));
     }
@@ -152,28 +158,30 @@ export default function AdminStudents() {
       const json = await res.json().catch(() => ({}));
       if (!res.ok || !json?.success) throw new Error(json?.error || t('errors.deleteFailed'));
       toast.success(t('success.deleted'));
-      fetchData();
+      // Optimistic removal — no full refetch needed
+      setStudents(prev => prev.filter(s => s.uid !== student.uid));
     } catch (e: any) {
       toast.error(e?.message || t('errors.deleteFailed'));
     }
   };
 
-  const filtered = students.filter(s => {
+  const filtered = useMemo(() => students.filter(s => {
+    const q = search.toLowerCase();
     const matchSearch =
-      s.displayName.toLowerCase().includes(search.toLowerCase()) ||
-      s.email.toLowerCase().includes(search.toLowerCase()) ||
-      s.teacherName.toLowerCase().includes(search.toLowerCase());
+      s.displayName.toLowerCase().includes(q) ||
+      s.email.toLowerCase().includes(q) ||
+      s.teacherName.toLowerCase().includes(q);
     const matchStatus = statusFilter === 'all' || s.status === statusFilter;
     const matchTeacher = teacherFilter === 'all' || s.teacherId === teacherFilter;
     return matchSearch && matchStatus && matchTeacher;
-  });
+  }), [students, search, statusFilter, teacherFilter]);
 
-  const stats = [
+  const stats = useMemo(() => [
     { ...STAT_CONFIG[0], label: t(STAT_CONFIG[0].labelKey), value: students.length },
     { ...STAT_CONFIG[1], label: t(STAT_CONFIG[1].labelKey), value: students.filter(s => s.status === 'active').length },
     { ...STAT_CONFIG[2], label: t(STAT_CONFIG[2].labelKey), value: students.filter(s => s.status !== 'active').length },
     { ...STAT_CONFIG[3], label: t(STAT_CONFIG[3].labelKey), value: students.filter(s => s.enrolledCourseCount > 0).length },
-  ];
+  ], [students, t]);
 
   const hasActiveFilters = search || statusFilter !== 'all' || teacherFilter !== 'all';
 
