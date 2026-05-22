@@ -5084,7 +5084,16 @@ When giving instructions, number each step clearly. Be precise and technical whe
       }));
       try { await supabaseAdmin.from("quizzes").insert(quizRows); } catch { /* best-effort */ }
 
-      emit({ type: "done", modules: totalModules, lessons: totalLessons, level, success: true });
+      // ── Persist sync timestamp to platform_config ─────────────────────────────
+      const syncedAt = new Date().toISOString();
+      try {
+        await supabaseAdmin.from("platform_config").upsert(
+          { section: `headway_sync:${courseId}`, value: { syncedAt, level, modules: totalModules, lessons: totalLessons }, updated_at: syncedAt },
+          { onConflict: "section" }
+        );
+      } catch { /* non-critical */ }
+
+      emit({ type: "done", modules: totalModules, lessons: totalLessons, level, syncedAt, success: true });
 
       if (wantStream) {
         res.end();

@@ -74,20 +74,29 @@ export default function TeacherCourseForm() {
   const [headwayImporting, setHeadwayImporting] = useState(false);
   const [headwayDone, setHeadwayDone] = useState<{ modules: number; lessons: number } | null>(null);
   const [headwayProgress, setHeadwayProgress] = useState<{ unit: number; total: number; title: string; phase: string } | null>(null);
-  const [contentStats, setContentStats] = useState<{ modules: number; lessons: number; quizzes: number; loading: boolean } | null>(null);
+  const [contentStats, setContentStats] = useState<{ modules: number; lessons: number; quizzes: number; syncedAt: string | null; syncLevel: string | null; loading: boolean } | null>(null);
 
   const set = (key: string, value: any) => setForm(prev => ({ ...prev, [key]: value }));
 
   const fetchContentStats = async () => {
     if (!id) return;
-    setContentStats(prev => prev ? { ...prev, loading: true } : { modules: 0, lessons: 0, quizzes: 0, loading: true });
+    setContentStats(prev => prev ? { ...prev, loading: true } : { modules: 0, lessons: 0, quizzes: 0, syncedAt: null, syncLevel: null, loading: true });
     try {
-      const [modRes, lesRes, qzRes] = await Promise.all([
+      const [modRes, lesRes, qzRes, syncRes] = await Promise.all([
         supabase.from('modules').select('id', { count: 'exact', head: true }).eq('course_id', id),
         supabase.from('lessons').select('id', { count: 'exact', head: true }).eq('course_id', id),
         supabase.from('quizzes').select('id', { count: 'exact', head: true }).eq('course_id', id),
+        supabase.from('platform_config').select('value, updated_at').eq('section', `headway_sync:${id}`).maybeSingle(),
       ]);
-      setContentStats({ modules: modRes.count ?? 0, lessons: lesRes.count ?? 0, quizzes: qzRes.count ?? 0, loading: false });
+      const syncVal = syncRes.data?.value as { syncedAt?: string; level?: string } | null;
+      setContentStats({
+        modules: modRes.count ?? 0,
+        lessons: lesRes.count ?? 0,
+        quizzes: qzRes.count ?? 0,
+        syncedAt: syncVal?.syncedAt ?? syncRes.data?.updated_at ?? null,
+        syncLevel: syncVal?.level ?? null,
+        loading: false,
+      });
     } catch {
       setContentStats(prev => prev ? { ...prev, loading: false } : null);
     }
@@ -731,6 +740,29 @@ export default function TeacherCourseForm() {
                         <p className="text-[11px] text-slate-400 text-center pt-1">
                           Nuk ka ende përmbajtje. Kliko <strong>Import Headway</strong> për të ngarkuar kurrikulën Oxford.
                         </p>
+                      )}
+
+                      {/* Last sync badge */}
+                      {contentStats.syncedAt && !contentStats.loading && (
+                        <div className="rounded-xl border border-blue-100 bg-blue-50 px-3 py-2.5 flex items-start gap-2">
+                          <Globe className="w-3.5 h-3.5 text-blue-500 shrink-0 mt-0.5" />
+                          <div className="min-w-0">
+                            <p className="text-[10px] font-bold text-blue-700 uppercase tracking-wide leading-none mb-0.5">
+                              Oxford Headway {contentStats.syncLevel ? `· ${contentStats.syncLevel}` : ''}
+                            </p>
+                            <p className="text-[11px] text-blue-600">
+                              Sinkronizuar:{' '}
+                              <span className="font-semibold">
+                                {new Date(contentStats.syncedAt).toLocaleDateString('sq-AL', {
+                                  day: '2-digit', month: 'short', year: 'numeric',
+                                })}{' '}
+                                në {new Date(contentStats.syncedAt).toLocaleTimeString('sq-AL', {
+                                  hour: '2-digit', minute: '2-digit',
+                                })}
+                              </span>
+                            </p>
+                          </div>
+                        </div>
                       )}
 
                       <Link
