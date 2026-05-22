@@ -113,6 +113,7 @@ export default function TeacherModules() {
     testBuilder: true,
   });
   const [headwayDone, setHeadwayDone] = useState<{ modules: number; lessons: number } | null>(null);
+  const [headwayProgress, setHeadwayProgress] = useState<{ unit: number; total: number; title: string; phase: string } | null>(null);
   const { can } = useTeacherPermissions();
 
   const fetchData = async () => {
@@ -348,6 +349,7 @@ export default function TeacherModules() {
 
   const openHeadwayModal = () => {
     setHeadwayDone(null);
+    setHeadwayProgress(null);
     setHeadwayCourseId(courses.length === 1 ? courses[0].id : '');
     setHeadwayLevel('Beginner');
     setHeadwayOptions({ grammar: true, vocabulary: true, everydayEnglish: true, audioDownload: true, videoDownload: true, testBuilder: true });
@@ -359,17 +361,51 @@ export default function TeacherModules() {
     const { data: { session } } = await supabase.auth.getSession();
     if (!session) { toast.error('Not signed in'); return; }
     setHeadwayImporting(true);
+    setHeadwayProgress(null);
     try {
       const res = await authFetch(`/api/teacher/courses/${encodeURIComponent(headwayCourseId)}/headway-populate`, {
         method: 'POST',
-        body: JSON.stringify({ userId: session.user.id, level: headwayLevel, options: headwayOptions }),
+        body: JSON.stringify({ userId: session.user.id, level: headwayLevel, options: headwayOptions, stream: true }),
       });
-      const json = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(json?.error || 'Import failed');
-      setHeadwayDone({ modules: json.modules ?? 0, lessons: json.lessons ?? 0 });
-      toast.success(`Headway ${headwayLevel} imported — ${json.modules} modules, ${json.lessons} lessons`);
+      if (!res.ok) {
+        const json = await res.json().catch(() => ({}));
+        throw new Error(json?.error || 'Import failed');
+      }
+      const reader = res.body?.getReader();
+      const decoder = new TextDecoder();
+      let finalModules = 0;
+      let finalLessons = 0;
+      if (reader) {
+        let buffer = '';
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split('\n');
+          buffer = lines.pop() ?? '';
+          for (const line of lines) {
+            if (!line.startsWith('data: ')) continue;
+            let evt: any;
+            try { evt = JSON.parse(line.slice(6)); } catch { continue; }
+            if (evt.type === 'progress' && evt.phase === 'done') {
+              setHeadwayProgress({ unit: evt.unit, total: evt.total, title: evt.title, phase: evt.phase });
+            } else if (evt.type === 'progress') {
+              setHeadwayProgress({ unit: evt.unit, total: evt.total, title: evt.title, phase: evt.phase });
+            } else if (evt.type === 'done') {
+              finalModules = evt.modules ?? 0;
+              finalLessons = evt.lessons ?? 0;
+            } else if (evt.type === 'error') {
+              throw new Error(evt.message || 'Import failed');
+            }
+          }
+        }
+      }
+      setHeadwayProgress(null);
+      setHeadwayDone({ modules: finalModules, lessons: finalLessons });
+      toast.success(`Headway ${headwayLevel} imported — ${finalModules} modules, ${finalLessons} lessons`);
       fetchData();
     } catch (e: any) {
+      setHeadwayProgress(null);
       toast.error(e?.message || 'Import failed');
     } finally {
       setHeadwayImporting(false);
@@ -1146,6 +1182,46 @@ export default function TeacherModules() {
                         {headwayLevel === 'Beginner' ? '14 units' : '12 units'} modules will be created with the selected lesson types above.
                       </span>
                     </div>
+
+                    {/* Progress bar — shown while importing */}
+                    {headwayImporting && (
+                      <div className="rounded-xl border border-blue-100 bg-blue-50 px-4 py-3 space-y-2">
+                        <div className="flex items-center justify-between text-xs font-semibold text-blue-800">
+                          <span>
+                            {headwayProgress
+                              ? `Unit ${headwayProgress.unit} of ${headwayProgress.total}`
+                              : 'Starting import…'}
+                          </span>
+                          {headwayProgress && (
+                            <span className="text-blue-500">
+                              {Math.round((headwayProgress.unit / headwayProgress.total) * 100)}%
+                            </span>
+                          )}
+                        </div>
+                        {/* Track */}
+                        <div className="h-2 w-full rounded-full bg-blue-100 overflow-hidden">
+                          <div
+                            className="h-full rounded-full transition-all duration-500"
+                            style={{
+                              width: headwayProgress
+                                ? `${Math.round((headwayProgress.unit / headwayProgress.total) * 100)}%`
+                                : '4%',
+                              background: 'linear-gradient(90deg,#1565c0,#42a5f5)',
+                            }}
+                          />
+                        </div>
+                        {/* Current unit title */}
+                        {headwayProgress && (
+                          <p className="text-xs text-blue-600 truncate">
+                            {headwayProgress.phase === 'done'
+                              ? `✓ ${headwayProgress.title}`
+                              : headwayProgress.phase === 'lessons'
+                              ? `Adding lessons — ${headwayProgress.title}`
+                              : `Creating module — ${headwayProgress.title}`}
+                          </p>
+                        )}
+                      </div>
+                    )}
 
                     <div className="flex gap-3 pt-1">
                       <button
