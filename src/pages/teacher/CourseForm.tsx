@@ -6,9 +6,11 @@ import { supabase } from '../../supabase';
 import TeacherLayout from '../../components/layout/TeacherLayout';
 import {
   ChevronRight, BookOpen, Globe, Save, Send, Check,
-  X, Plus, Award, Settings2, Image, Type, BarChart2, Sparkles
+  X, Plus, Award, Settings2, Image, Type, BarChart2, Sparkles,
+  Download, CheckCircle2
 } from 'lucide-react';
 import { toast } from 'sonner';
+import { motion, AnimatePresence } from 'motion/react';
 import { FormPageSkeleton } from '../../components/ui/Skeleton';
 import StyledSelect from '../../components/ui/StyledSelect';
 import { resolveTeacherIdCandidates } from '../../lib/teacherScope';
@@ -67,6 +69,10 @@ export default function TeacherCourseForm() {
   const [aiOpen, setAiOpen] = useState(false);
   const [classes, setClasses] = useState<TeacherClassOption[]>([]);
   const [selectedClassId, setSelectedClassId] = useState('');
+  const [showHeadwayModal, setShowHeadwayModal] = useState(false);
+  const [headwayLevel, setHeadwayLevel] = useState('Beginner');
+  const [headwayImporting, setHeadwayImporting] = useState(false);
+  const [headwayDone, setHeadwayDone] = useState<{ modules: number; lessons: number } | null>(null);
 
   const set = (key: string, value: any) => setForm(prev => ({ ...prev, [key]: value }));
 
@@ -265,6 +271,35 @@ export default function TeacherCourseForm() {
   const addTag = () => {
     const tag = tagInput.trim();
     if (tag && !form.tags.includes(tag)) { set('tags', [...form.tags, tag]); setTagInput(''); }
+  };
+
+  const openHeadwayModal = () => {
+    setHeadwayDone(null);
+    const currentLevel = HEADWAY_LEVELS.has(form.level) ? form.level : 'Beginner';
+    setHeadwayLevel(currentLevel);
+    setShowHeadwayModal(true);
+  };
+
+  const handleHeadwayImport = async () => {
+    if (!id) return;
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session) { toast.error('Not signed in'); return; }
+    setHeadwayImporting(true);
+    try {
+      const res = await authFetch(`/api/teacher/courses/${encodeURIComponent(id)}/headway-populate`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId: session.user.id, level: headwayLevel }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(json?.error || 'Import failed');
+      setHeadwayDone({ modules: json.modules ?? 0, lessons: json.lessons ?? 0 });
+      toast.success(`Headway ${headwayLevel} u importua — ${json.modules} module, ${json.lessons} mësime`);
+    } catch (e: any) {
+      toast.error(e?.message || 'Import failed');
+    } finally {
+      setHeadwayImporting(false);
+    }
   };
 
   if (loading) {
@@ -510,6 +545,18 @@ export default function TeacherCourseForm() {
 
             <div className="flex flex-col sm:flex-row gap-3">
               <Link to="/teacher/courses" className="flex-1 px-5 py-3 bg-slate-100 text-slate-600 rounded-xl font-semibold text-sm hover:bg-slate-200 transition-all text-center">{t('common.cancel')}</Link>
+              {isEditing && (
+                <button
+                  type="button"
+                  onClick={openHeadwayModal}
+                  className="flex-1 flex items-center justify-center gap-2 px-5 py-3 rounded-xl font-semibold text-sm text-white transition-all active:scale-[0.98]"
+                  style={{ background: 'linear-gradient(135deg,#1e3a5f 0%,#1565c0 100%)', boxShadow: '0 4px 14px rgba(21,101,192,0.35)' }}
+                  title="Re-import Oxford Headway modules and lessons into this course"
+                >
+                  <Globe className="w-4 h-4" />
+                  Import Headway
+                </button>
+              )}
               <button type="button" disabled={saving} onClick={() => handleSave(false)}
                 className="flex-1 flex items-center justify-center gap-2 px-5 py-3 bg-white border border-slate-200 text-slate-700 rounded-xl font-semibold text-sm hover:bg-slate-50 transition-all disabled:opacity-50">
                 <Save className="w-4 h-4" />{t('courses.saveDraft')}
@@ -567,6 +614,146 @@ export default function TeacherCourseForm() {
           </div>
         </div>
       </div>
+
+      {/* Headway Import Modal */}
+      <AnimatePresence>
+        {showHeadwayModal && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[70] flex items-center justify-center p-4"
+            onClick={() => !headwayImporting && setShowHeadwayModal(false)}
+          >
+            <motion.div
+              initial={{ opacity: 0, scale: 0.9, y: 24 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.9, y: 24 }}
+              transition={{ type: 'spring', stiffness: 300, damping: 28 }}
+              className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden"
+              onClick={e => e.stopPropagation()}
+            >
+              <div className="h-1.5 w-full" style={{ background: 'linear-gradient(90deg,#1565c0,#42a5f5)' }} />
+              <div className="p-6">
+                {/* Header row */}
+                <div className="flex items-center gap-3 mb-5">
+                  <div className="w-12 h-12 rounded-xl flex items-center justify-center shrink-0"
+                    style={{ background: 'linear-gradient(135deg,#1e3a5f,#1565c0)' }}>
+                    <Globe className="w-6 h-6 text-white" />
+                  </div>
+                  <div>
+                    <h3 className="text-base font-bold text-slate-900">Import Oxford Headway</h3>
+                    <p className="text-xs text-slate-500">Krijon module, mësime &amp; kuize nga kurrikula Oxford</p>
+                  </div>
+                  <button
+                    type="button"
+                    disabled={headwayImporting}
+                    onClick={() => setShowHeadwayModal(false)}
+                    className="ml-auto p-2 rounded-xl hover:bg-slate-100 transition-colors disabled:opacity-40"
+                  >
+                    <X className="w-4 h-4 text-slate-500" />
+                  </button>
+                </div>
+
+                {headwayDone ? (
+                  <div className="text-center py-4">
+                    <div className="w-16 h-16 rounded-2xl flex items-center justify-center mx-auto mb-4"
+                      style={{ background: 'linear-gradient(135deg,#d1fae5,#a7f3d0)' }}>
+                      <CheckCircle2 className="w-8 h-8 text-emerald-600" />
+                    </div>
+                    <p className="text-lg font-bold text-slate-900 mb-1">Importi u krye!</p>
+                    <p className="text-sm text-slate-500 mb-1">
+                      <span className="font-semibold text-slate-700">{headwayDone.modules}</span> module dhe{' '}
+                      <span className="font-semibold text-slate-700">{headwayDone.lessons}</span> mësime u krijuan
+                    </p>
+                    <p className="text-xs text-slate-400 mb-6">Çdo mësim lidhet me faqen zyrtare të ushtrimeve Oxford</p>
+                    <button
+                      type="button"
+                      onClick={() => setShowHeadwayModal(false)}
+                      className="px-6 py-2.5 rounded-xl text-sm font-semibold text-white transition-all"
+                      style={{ background: 'linear-gradient(135deg,#1565c0,#42a5f5)' }}
+                    >
+                      Mbyll
+                    </button>
+                  </div>
+                ) : (
+                  <div className="space-y-4">
+                    {/* Course info banner */}
+                    <div className="rounded-xl bg-slate-50 border border-slate-200 px-4 py-3 flex items-center gap-3">
+                      <BookOpen className="w-4 h-4 text-slate-400 shrink-0" />
+                      <div className="min-w-0">
+                        <p className="text-xs text-slate-500">Kursi i zgjedhur</p>
+                        <p className="text-sm font-semibold text-slate-800 truncate">{form.name || 'Ky kurs'}</p>
+                      </div>
+                    </div>
+
+                    {/* Level selector */}
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-600 mb-1.5">Zgjidh nivelin Headway</label>
+                      <div className="grid grid-cols-2 gap-2">
+                        {(['Beginner','Elementary','Pre-Intermediate','Intermediate','Upper-Intermediate','Advanced'] as const).map(lvl => (
+                          <button
+                            key={lvl}
+                            type="button"
+                            disabled={headwayImporting}
+                            onClick={() => setHeadwayLevel(lvl)}
+                            className={`px-3 py-2 rounded-xl text-xs font-semibold transition-all border ${
+                              headwayLevel === lvl
+                                ? 'border-blue-600 bg-blue-600 text-white shadow'
+                                : 'border-slate-200 bg-slate-50 text-slate-600 hover:border-blue-400 hover:bg-blue-50'
+                            } disabled:opacity-50`}
+                          >
+                            {lvl}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* Info box */}
+                    <div className="rounded-xl bg-blue-50 border border-blue-100 px-4 py-3 text-xs text-blue-800 flex items-start gap-2">
+                      <BookOpen className="w-4 h-4 text-blue-500 shrink-0 mt-0.5" />
+                      <span>
+                        {headwayLevel === 'Beginner' ? '14 njësi' : '12 njësi'} do të krijohen si module.
+                        Çdo njësi merr mësime për Gramatikë, Fjalor, Anglisht të Përditshëm dhe Audio/Video — lidhur me faqet zyrtare Oxford.
+                      </span>
+                    </div>
+
+                    {/* Warning if course already has content */}
+                    <div className="rounded-xl bg-amber-50 border border-amber-100 px-4 py-3 text-xs text-amber-800 flex items-start gap-2">
+                      <span className="text-amber-500 shrink-0 mt-0.5">⚠️</span>
+                      <span>Ky veprim shton module dhe mësime të reja në kurs. Përmbajtja ekzistuese <strong>nuk fshihet</strong>.</span>
+                    </div>
+
+                    <div className="flex gap-3 pt-1">
+                      <button
+                        type="button"
+                        disabled={headwayImporting}
+                        onClick={() => setShowHeadwayModal(false)}
+                        className="flex-1 py-2.5 rounded-xl text-sm font-semibold text-slate-600 bg-slate-100 hover:bg-slate-200 transition-all disabled:opacity-50"
+                      >
+                        Anulo
+                      </button>
+                      <button
+                        type="button"
+                        disabled={headwayImporting}
+                        onClick={() => void handleHeadwayImport()}
+                        className="flex-1 py-2.5 rounded-xl text-sm font-semibold text-white transition-all disabled:opacity-60 flex items-center justify-center gap-2"
+                        style={{ background: 'linear-gradient(135deg,#1565c0,#42a5f5)' }}
+                      >
+                        {headwayImporting ? (
+                          <><span className="w-4 h-4 rounded-full border-2 border-white border-t-transparent animate-spin" />Duke importuar…</>
+                        ) : (
+                          <><Download className="w-4 h-4" />Importo</>
+                        )}
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </TeacherLayout>
   );
 }
