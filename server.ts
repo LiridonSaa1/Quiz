@@ -4141,6 +4141,37 @@ When giving instructions, number each step clearly. Be precise and technical whe
         };
       });
 
+      // Module completion per course
+      let moduleCompletion: { course: string; published: number; total: number; pct: number }[] = [];
+      if (courseIds.length > 0) {
+        const [modulesForCourses, courseTitles] = await Promise.all([
+          supabaseAdmin.from("modules").select("id, course_id, status").in("course_id", courseIds),
+          supabaseAdmin.from("courses").select("id, title").in("id", courseIds),
+        ]);
+        if (!modulesForCourses.error && !courseTitles.error) {
+          const titleMap: Record<string, string> = {};
+          for (const c of (courseTitles.data || [])) {
+            titleMap[String(c.id)] = String(c.title || "Untitled");
+          }
+          const groupedByCourse: Record<string, { total: number; published: number }> = {};
+          for (const m of (modulesForCourses.data || [])) {
+            const cid = String(m.course_id || "");
+            if (!groupedByCourse[cid]) groupedByCourse[cid] = { total: 0, published: 0 };
+            groupedByCourse[cid].total++;
+            if (String(m.status || "").toLowerCase() === "published") groupedByCourse[cid].published++;
+          }
+          moduleCompletion = Object.entries(groupedByCourse)
+            .map(([cid, { total, published }]) => ({
+              course: titleMap[cid] || "Untitled",
+              published,
+              total,
+              pct: total > 0 ? Math.round((published / total) * 100) : 0,
+            }))
+            .sort((a, b) => b.pct - a.pct)
+            .slice(0, 8);
+        }
+      }
+
       const payload = {
         success: true,
         stats: {
@@ -4153,6 +4184,7 @@ When giving instructions, number each step clearly. Be precise and technical whe
           certificates: certificatesCount,
         },
         trend,
+        moduleCompletion,
       };
       setCachedApiResponse(teacherDashboardCacheKey, payload, 30_000);
       const durationMs = Date.now() - dashboardStartedAt;

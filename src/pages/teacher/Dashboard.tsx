@@ -6,11 +6,11 @@ import { Link } from 'react-router-dom';
 import {
   BookOpen, Users, FileText, TrendingUp,
   ArrowUpRight, Plus, ChevronRight, Zap,
-  Target, Clock, Award, BarChart3, Sparkles
+  Target, Clock, Award, BarChart3, Sparkles, Layers
 } from 'lucide-react';
 import {
   AreaChart, Area, XAxis, YAxis, CartesianGrid,
-  Tooltip, ResponsiveContainer
+  Tooltip, ResponsiveContainer, BarChart, Bar, Cell
 } from 'recharts';
 import { motion } from 'motion/react';
 import { authFetchJsonCached } from '../../lib/apiUrl';
@@ -31,6 +31,13 @@ const QUICK_ACTIONS = [
   { icon: Users,     label: 'Add Student',  to: '/teacher/students',    color: 'from-emerald-500 to-teal-600',   shadow: 'shadow-emerald-200' },
   { icon: BarChart3, label: 'View Results', to: '/teacher/results',     color: 'from-amber-500 to-orange-600',   shadow: 'shadow-amber-200' },
 ];
+
+interface ModuleCompletion {
+  course: string;
+  published: number;
+  total: number;
+  pct: number;
+}
 
 interface Stats {
   courses: number;
@@ -105,12 +112,31 @@ function StatCard({
   );
 }
 
+function getBarColor(pct: number) {
+  if (pct >= 80) return '#7c3aed';
+  if (pct >= 50) return '#6366f1';
+  return '#a5b4fc';
+}
+
+const CustomModuleTooltip = ({ active, payload }: any) => {
+  if (!active || !payload?.length) return null;
+  const d = payload[0].payload as ModuleCompletion;
+  return (
+    <div className="bg-white border border-slate-200 rounded-xl shadow-lg px-3.5 py-2.5 text-xs">
+      <p className="font-semibold text-slate-800 mb-1 max-w-[180px] truncate">{d.course}</p>
+      <p className="text-slate-500">{d.published} of {d.total} modules published</p>
+      <p className="font-bold text-violet-600 mt-0.5">{d.pct}% complete</p>
+    </div>
+  );
+};
+
 export default function TeacherDashboard() {
   const { t } = useTranslation();
-  const [stats, setStats]     = useState<Stats>({ courses: 0, students: 0, quizzes: 0, avgScore: 0, passRate: 0, avgDuration: 0, certificates: 0 });
-  const [loading, setLoading] = useState(true);
-  const [displayName, setDisplayName] = useState('');
-  const [chartData, setChartData] = useState(CHART_DATA);
+  const [stats, setStats]                 = useState<Stats>({ courses: 0, students: 0, quizzes: 0, avgScore: 0, passRate: 0, avgDuration: 0, certificates: 0 });
+  const [loading, setLoading]             = useState(true);
+  const [displayName, setDisplayName]     = useState('');
+  const [chartData, setChartData]         = useState(CHART_DATA);
+  const [moduleData, setModuleData]       = useState<ModuleCompletion[]>([]);
 
   useEffect(() => {
     let active = true;
@@ -136,6 +162,7 @@ export default function TeacherDashboard() {
           certificates: Number(json?.stats?.certificates || 0),
         });
         setChartData(Array.isArray(json?.trend) && json.trend.length ? json.trend : CHART_DATA);
+        setModuleData(Array.isArray(json?.moduleCompletion) ? json.moduleCompletion : []);
       } catch (e) {
         console.error('Dashboard fetch error:', e);
       } finally {
@@ -158,6 +185,9 @@ export default function TeacherDashboard() {
   const hour = new Date().getHours();
   const greetingKey = hour < 12 ? 'dashboard.goodMorning' : hour < 18 ? 'dashboard.goodAfternoon' : 'dashboard.goodEvening';
   const greeting = t(greetingKey);
+
+  const hasModuleData = moduleData.length > 0;
+  const chartHeight = Math.max(160, moduleData.length * 44);
 
   return (
     <TeacherLayout>
@@ -201,7 +231,7 @@ export default function TeacherDashboard() {
         {/* Main Grid */}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
 
-          {/* Chart */}
+          {/* Quiz Activity Chart */}
           <motion.div
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
@@ -313,6 +343,143 @@ export default function TeacherDashboard() {
             </motion.div>
           </div>
         </div>
+
+        {/* Module Completion Chart */}
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.5, duration: 0.45, ease: [0.22, 1, 0.36, 1] }}
+          className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden hover:shadow-md transition-shadow duration-300"
+        >
+          <div className="h-0.5 bg-gradient-to-r from-violet-500 via-indigo-500 to-blue-500" />
+          <div className="p-6">
+            <div className="flex items-center justify-between mb-6">
+              <div className="flex items-center gap-3">
+                <div className="p-2.5 bg-violet-50 ring-4 ring-violet-100 rounded-xl">
+                  <Layers className="w-5 h-5 text-violet-600" />
+                </div>
+                <div>
+                  <h2 className="text-base font-bold text-slate-900">Module Completion</h2>
+                  <p className="text-xs text-slate-400 mt-0.5">Published modules per course</p>
+                </div>
+              </div>
+              <Link
+                to="/teacher/modules"
+                className="flex items-center gap-1.5 text-xs font-semibold text-violet-600 hover:text-violet-700 bg-violet-50 hover:bg-violet-100 px-3 py-1.5 rounded-xl transition-all duration-200"
+              >
+                Manage <ChevronRight className="w-3.5 h-3.5" />
+              </Link>
+            </div>
+
+            {loading ? (
+              <div className="space-y-3">
+                {[1, 2, 3].map(i => (
+                  <div key={i} className="h-8 bg-slate-100 rounded-lg animate-pulse" />
+                ))}
+              </div>
+            ) : !hasModuleData ? (
+              <div className="flex flex-col items-center justify-center py-10 text-center">
+                <div className="w-12 h-12 rounded-2xl bg-slate-50 ring-4 ring-slate-100 flex items-center justify-center mb-3">
+                  <Layers className="w-5 h-5 text-slate-300" />
+                </div>
+                <p className="text-sm font-semibold text-slate-400">No modules yet</p>
+                <p className="text-xs text-slate-300 mt-0.5">Create modules in your courses to see completion here</p>
+                <Link
+                  to="/teacher/modules"
+                  className="mt-4 text-xs font-semibold text-violet-600 hover:underline"
+                >
+                  Go to Modules →
+                </Link>
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 items-start">
+                {/* Horizontal bar chart */}
+                <div style={{ height: chartHeight }}>
+                  <ResponsiveContainer width="100%" height="100%">
+                    <BarChart
+                      data={moduleData}
+                      layout="vertical"
+                      margin={{ left: 0, right: 40, top: 4, bottom: 4 }}
+                      barCategoryGap="28%"
+                    >
+                      <CartesianGrid horizontal={false} stroke="#f1f5f9" />
+                      <XAxis
+                        type="number"
+                        domain={[0, 100]}
+                        axisLine={false}
+                        tickLine={false}
+                        tick={{ fill: '#94a3b8', fontSize: 10 }}
+                        tickFormatter={(v) => `${v}%`}
+                      />
+                      <YAxis
+                        type="category"
+                        dataKey="course"
+                        width={120}
+                        axisLine={false}
+                        tickLine={false}
+                        tick={{ fill: '#64748b', fontSize: 11 }}
+                        tickFormatter={(v: string) => v.length > 16 ? `${v.slice(0, 16)}…` : v}
+                      />
+                      <Tooltip content={<CustomModuleTooltip />} cursor={{ fill: '#f8fafc' }} />
+                      <Bar dataKey="pct" radius={[0, 6, 6, 0]} maxBarSize={20}>
+                        {moduleData.map((entry, index) => (
+                          <Cell key={`cell-${index}`} fill={getBarColor(entry.pct)} />
+                        ))}
+                      </Bar>
+                    </BarChart>
+                  </ResponsiveContainer>
+                </div>
+
+                {/* Course list with pill indicators */}
+                <div className="space-y-2.5">
+                  {moduleData.map((item, i) => (
+                    <motion.div
+                      key={item.course}
+                      initial={{ opacity: 0, x: 12 }}
+                      animate={{ opacity: 1, x: 0 }}
+                      transition={{ delay: 0.55 + i * 0.05, duration: 0.3 }}
+                      className="flex items-center gap-3 group"
+                    >
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center justify-between mb-1">
+                          <span className="text-xs font-semibold text-slate-700 truncate max-w-[160px]">{item.course}</span>
+                          <span className={`text-xs font-bold tabular-nums ml-2 ${item.pct >= 80 ? 'text-violet-600' : item.pct >= 50 ? 'text-indigo-500' : 'text-slate-400'}`}>
+                            {item.pct}%
+                          </span>
+                        </div>
+                        <div className="relative h-1.5 bg-slate-100 rounded-full overflow-hidden">
+                          <motion.div
+                            initial={{ width: 0 }}
+                            animate={{ width: `${item.pct}%` }}
+                            transition={{ delay: 0.6 + i * 0.05, duration: 0.6, ease: [0.22, 1, 0.36, 1] }}
+                            className="absolute inset-y-0 left-0 rounded-full"
+                            style={{ background: getBarColor(item.pct) }}
+                          />
+                        </div>
+                        <p className="text-[10px] text-slate-400 mt-0.5">{item.published}/{item.total} modules published</p>
+                      </div>
+                    </motion.div>
+                  ))}
+
+                  {/* Legend */}
+                  <div className="flex items-center gap-4 pt-3 border-t border-slate-50 mt-1">
+                    {[
+                      { color: '#7c3aed', label: '≥ 80%' },
+                      { color: '#6366f1', label: '50–79%' },
+                      { color: '#a5b4fc', label: '< 50%' },
+                    ].map(({ color, label }) => (
+                      <div key={label} className="flex items-center gap-1.5">
+                        <div className="w-2.5 h-2.5 rounded-sm" style={{ background: color }} />
+                        <span className="text-[10px] text-slate-400 font-medium">{label}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+        </motion.div>
+
       </div>
     </TeacherLayout>
   );
