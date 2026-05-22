@@ -73,6 +73,7 @@ export default function TeacherCourseForm() {
   const [headwayLevel, setHeadwayLevel] = useState('Beginner');
   const [headwayImporting, setHeadwayImporting] = useState(false);
   const [headwayDone, setHeadwayDone] = useState<{ modules: number; lessons: number } | null>(null);
+  const [headwayProgress, setHeadwayProgress] = useState<{ unit: number; total: number; title: string; phase: string } | null>(null);
 
   const set = (key: string, value: any) => setForm(prev => ({ ...prev, [key]: value }));
 
@@ -285,20 +286,53 @@ export default function TeacherCourseForm() {
     const { data: { session } } = await supabase.auth.getSession();
     if (!session) { toast.error('Not signed in'); return; }
     setHeadwayImporting(true);
+    setHeadwayProgress(null);
     try {
       const res = await authFetch(`/api/teacher/courses/${encodeURIComponent(id)}/headway-populate`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ userId: session.user.id, level: headwayLevel }),
+        body: JSON.stringify({ userId: session.user.id, level: headwayLevel, stream: true }),
       });
-      const json = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(json?.error || 'Import failed');
-      setHeadwayDone({ modules: json.modules ?? 0, lessons: json.lessons ?? 0 });
-      toast.success(`Headway ${headwayLevel} u importua — ${json.modules} module, ${json.lessons} mësime`);
+
+      if (!res.ok) {
+        const json = await res.json().catch(() => ({}));
+        throw new Error(json?.error || 'Import failed');
+      }
+
+      // Read SSE stream line-by-line
+      const reader = res.body?.getReader();
+      const decoder = new TextDecoder();
+      let buf = '';
+
+      if (reader) {
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          buf += decoder.decode(value, { stream: true });
+          const lines = buf.split('\n');
+          buf = lines.pop() ?? '';
+          for (const line of lines) {
+            const trimmed = line.replace(/^data:\s*/, '').trim();
+            if (!trimmed) continue;
+            try {
+              const evt = JSON.parse(trimmed);
+              if (evt.type === 'progress') {
+                setHeadwayProgress({ unit: evt.unit, total: evt.total, title: evt.title, phase: evt.phase ?? '' });
+              } else if (evt.type === 'done') {
+                setHeadwayDone({ modules: evt.modules ?? 0, lessons: evt.lessons ?? 0 });
+                toast.success(`Headway ${headwayLevel} u importua — ${evt.modules} module, ${evt.lessons} mësime`);
+              } else if (evt.type === 'error') {
+                throw new Error(evt.message || 'Import failed');
+              }
+            } catch { /* skip malformed lines */ }
+          }
+        }
+      }
     } catch (e: any) {
       toast.error(e?.message || 'Import failed');
     } finally {
       setHeadwayImporting(false);
+      setHeadwayProgress(null);
     }
   };
 
@@ -723,6 +757,37 @@ export default function TeacherCourseForm() {
                       <span className="text-amber-500 shrink-0 mt-0.5">⚠️</span>
                       <span>Ky veprim shton module dhe mësime të reja në kurs. Përmbajtja ekzistuese <strong>nuk fshihet</strong>.</span>
                     </div>
+
+                    {/* Live progress bar — visible only while importing */}
+                    {headwayImporting && headwayProgress && (
+                      <div className="rounded-xl bg-slate-50 border border-slate-200 p-4 space-y-2">
+                        <div className="flex items-center justify-between text-xs font-semibold text-slate-600 mb-1">
+                          <span className="truncate max-w-[220px]">{headwayProgress.title}</span>
+                          <span className="shrink-0 ml-2 text-blue-600">{headwayProgress.unit} / {headwayProgress.total}</span>
+                        </div>
+                        <div className="w-full h-2.5 bg-slate-200 rounded-full overflow-hidden">
+                          <motion.div
+                            className="h-full rounded-full"
+                            style={{ background: 'linear-gradient(90deg,#1565c0,#42a5f5)' }}
+                            initial={{ width: 0 }}
+                            animate={{ width: `${Math.round((headwayProgress.unit / headwayProgress.total) * 100)}%` }}
+                            transition={{ duration: 0.4, ease: 'easeOut' }}
+                          />
+                        </div>
+                        <p className="text-[10px] text-slate-400 text-center">
+                          {headwayProgress.phase === 'module' && 'Duke krijuar modulin…'}
+                          {headwayProgress.phase === 'lessons' && 'Duke shtuar mësimet dhe ushtrimet…'}
+                          {headwayProgress.phase === 'done' && '✓ Njësia u importua'}
+                        </p>
+                      </div>
+                    )}
+
+                    {headwayImporting && !headwayProgress && (
+                      <div className="flex items-center justify-center gap-2 py-3 text-sm text-slate-500">
+                        <span className="w-4 h-4 rounded-full border-2 border-blue-500 border-t-transparent animate-spin" />
+                        Duke lidhur me Oxford…
+                      </div>
+                    )}
 
                     <div className="flex gap-3 pt-1">
                       <button

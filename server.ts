@@ -4969,72 +4969,111 @@ When giving instructions, number each step clearly. Be precise and technical whe
 
       const slugify = (s: string) => s.toLowerCase().replace(/[^\w\s-]/g, "").replace(/\s+/g, "-").replace(/-+/g, "-").trim();
 
-      // ── Step 1: batch-insert all modules ─────────────────────────────────────
-      const moduleRows = levelData.units.map((u, i) => ({
-        course_id:   courseId,
-        title:       u.title,
-        slug:        slugify(u.title),
-        description: u.description,
-        order:       i + 1,
-        status:      "active",
-      }));
+      const wantStream = req.body?.stream === true;
+      const total = levelData.units.length;
 
-      const { data: createdModules, error: modErr } = await supabaseAdmin.from("modules").insert(moduleRows).select("id, order");
-      if (modErr) { const msg = [modErr.message, modErr.details, modErr.hint].filter(Boolean).join(" — "); return res.status(400).json({ error: msg || "Failed to create modules" }); }
-      if (!createdModules || createdModules.length === 0) return res.status(400).json({ error: "Modules were not created" });
+      // Helper: emit a Server-Sent Event line
+      const emit = (obj: Record<string, unknown>) => {
+        if (wantStream) res.write(`data: ${JSON.stringify(obj)}\n\n`);
+      };
 
-      // ── Step 2: build lesson rows with real Oxford URLs ───────────────────────
-      const lessonRows: Record<string, unknown>[] = [];
-      const lessonOxfordUrls: string[] = [];
+      if (wantStream) {
+        res.setHeader("Content-Type", "text/event-stream");
+        res.setHeader("Cache-Control", "no-cache");
+        res.setHeader("X-Accel-Buffering", "no");
+        res.flushHeaders();
+      }
 
-      for (const mod of createdModules) {
-        const unitIdx = (Number(mod.order) || 1) - 1;
-        const unit = levelData.units[unitIdx];
-        if (!unit) continue;
+      let totalLessons = 0;
+      let totalModules = 0;
+
+      // ── Process each unit individually so we can stream progress ─────────────
+      for (let i = 0; i < levelData.units.length; i++) {
+        const unit = levelData.units[i];
+
+        emit({ type: "progress", unit: i + 1, total, title: unit.title, phase: "module" });
+
+        // Insert module
+        const { data: modRows, error: modErr } = await supabaseAdmin
+          .from("modules")
+          .insert([{
+            course_id:   courseId,
+            title:       unit.title,
+            slug:        slugify(unit.title),
+            description: unit.description,
+            order:       i + 1,
+            status:      "active",
+          }])
+          .select("id, order");
+
+        if (modErr || !modRows?.length) {
+          const msg = modErr ? [modErr.message, modErr.details, modErr.hint].filter(Boolean).join(" — ") : "Module not created";
+          emit({ type: "error", message: msg });
+          if (!wantStream) return res.status(400).json({ error: msg });
+          res.end();
+          return;
+        }
+        const mod = modRows[0];
+        totalModules++;
+
+        emit({ type: "progress", unit: i + 1, total, title: unit.title, phase: "lessons" });
+
+        // Build lessons for this unit
+        const lessonRows: Record<string, unknown>[] = [];
+        const lessonUrls: string[] = [];
         let ord = 0;
 
         for (const gr of unit.grammar) {
           const url = `${OUP}${gr.path}${CC}`;
           lessonRows.push({ course_id: courseId, module_id: mod.id, title: `Grammar: ${gr.topic}`, slug: slugify(`u${unit.num}-gr-${gr.topic}`), type: "text", short_description: `Oxford Headway exercise — ${gr.topic}\n${url}`, order: ++ord, status: "published", duration_minutes: 20, is_free_preview: ord === 1 });
-          lessonOxfordUrls.push(url);
+          lessonUrls.push(url);
         }
         for (const vc of unit.vocabulary) {
           const url = `${OUP}${vc.path}${CC}`;
           lessonRows.push({ course_id: courseId, module_id: mod.id, title: `Vocabulary: ${vc.topic}`, slug: slugify(`u${unit.num}-vc-${vc.topic}`), type: "text", short_description: `Oxford Headway vocabulary — ${vc.topic}\n${url}`, order: ++ord, status: "published", duration_minutes: 15, is_free_preview: false });
-          lessonOxfordUrls.push(url);
+          lessonUrls.push(url);
         }
         const eeUrl = `${OUP}/student/headway/${levelData.slug}/everydayenglish/${unit.eeSlug}/${CC}`;
         lessonRows.push({ course_id: courseId, module_id: mod.id, title: "Everyday English", slug: slugify(`u${unit.num}-everyday-english`), type: "video", short_description: `Listen and practise dialogues from Unit ${unit.num}.\n${eeUrl}`, order: ++ord, status: "published", duration_minutes: 20, is_free_preview: false });
-        lessonOxfordUrls.push(eeUrl);
+        lessonUrls.push(eeUrl);
+        if ((unit as any).audioZip) {
+          lessonRows.push({ course_id: courseId, module_id: mod.id, title: "Student's Book Audio — Download", slug: slugify(`u${unit.num}-audio`), type: "text", short_description: `Download Student's Book audio for Unit ${unit.num}.\n${(unit as any).audioZip}`, order: ++ord, status: "published", duration_minutes: 0, is_free_preview: false });
+          lessonUrls.push((unit as any).audioZip);
+        }
+        if ((unit as any).videoZip) {
+          lessonRows.push({ course_id: courseId, module_id: mod.id, title: "Video — Download", slug: slugify(`u${unit.num}-video`), type: "video", short_description: `Download video for Unit ${unit.num}.\n${(unit as any).videoZip}`, order: ++ord, status: "published", duration_minutes: 0, is_free_preview: false });
+          lessonUrls.push((unit as any).videoZip);
+        }
 
-        if (unit.audioZip) {
-          lessonRows.push({ course_id: courseId, module_id: mod.id, title: "Student's Book Audio — Download", slug: slugify(`u${unit.num}-audio`), type: "text", short_description: `Download Student's Book audio for Unit ${unit.num}.\n${unit.audioZip}`, order: ++ord, status: "published", duration_minutes: 0, is_free_preview: false });
-          lessonOxfordUrls.push(unit.audioZip);
+        // Insert lessons for this unit
+        const { data: createdLessons, error: lessonErr } = await supabaseAdmin.from("lessons").insert(lessonRows).select("id");
+        if (lessonErr) {
+          const msg = [lessonErr.message, lessonErr.details, lessonErr.hint].filter(Boolean).join(" — ");
+          emit({ type: "error", message: msg || "Failed to create lessons" });
+          if (!wantStream) return res.status(400).json({ error: msg });
+          res.end();
+          return;
         }
-        if (unit.videoZip) {
-          lessonRows.push({ course_id: courseId, module_id: mod.id, title: "Video — Download", slug: slugify(`u${unit.num}-video`), type: "video", short_description: `Download video for Unit ${unit.num}.\n${unit.videoZip}`, order: ++ord, status: "published", duration_minutes: 0, is_free_preview: false });
-          lessonOxfordUrls.push(unit.videoZip);
+        totalLessons += lessonRows.length;
+
+        // Lesson contents (best-effort)
+        if (Array.isArray(createdLessons) && createdLessons.length > 0) {
+          const contentRows = createdLessons.map((l: any, li: number) => {
+            const url = lessonUrls[li] || "";
+            const lsn = lessonRows[li] as any;
+            const isDownload = url.endsWith(".zip");
+            const btnLabel = isDownload ? "Download ZIP" : "Open Oxford Exercise →";
+            const html = `<div style="margin:0 auto;max-width:480px;padding:24px;border:1px solid #e2e8f0;border-radius:12px;background:#f8fafc;text-align:center"><p style="margin:0 0 8px;color:#334155;font-size:15px;font-weight:600">${lsn?.title || ""}</p><p style="margin:0 0 16px;color:#64748b;font-size:13px">${lsn?.short_description?.split("\n")[0] || ""}</p><a href="${url}" target="_blank" rel="noopener noreferrer" style="display:inline-block;background:#6366f1;color:#fff;padding:11px 28px;border-radius:8px;text-decoration:none;font-weight:700;font-size:14px">${btnLabel}</a></div>`;
+            return { lesson_id: l.id, type: "text", content_type: "text", text_content: html, content: html, position: 1 };
+          });
+          await supabaseAdmin.from("lesson_contents").insert(contentRows).catch(() => {});
         }
+
+        emit({ type: "progress", unit: i + 1, total, title: unit.title, phase: "done" });
       }
 
-      // ── Step 3: insert lessons ─────────────────────────────────────────────────
-      const { data: createdLessons, error: lessonErr } = await supabaseAdmin.from("lessons").insert(lessonRows).select("id");
-      if (lessonErr) { const msg = [lessonErr.message, lessonErr.details, lessonErr.hint].filter(Boolean).join(" — "); return res.status(400).json({ error: msg || "Failed to create lessons" }); }
-
-      // ── Step 4: lesson_contents with HTML link cards (best-effort) ────────────
-      if (Array.isArray(createdLessons) && createdLessons.length > 0) {
-        const contentRows = createdLessons.map((l: any, i: number) => {
-          const url = lessonOxfordUrls[i] || "";
-          const lsn = lessonRows[i] as any;
-          const isDownload = url.endsWith(".zip");
-          const btnLabel = isDownload ? "Download ZIP" : "Open Oxford Exercise →";
-          const html = `<div style="margin:0 auto;max-width:480px;padding:24px;border:1px solid #e2e8f0;border-radius:12px;background:#f8fafc;text-align:center"><p style="margin:0 0 8px;color:#334155;font-size:15px;font-weight:600">${lsn?.title || ""}</p><p style="margin:0 0 16px;color:#64748b;font-size:13px">${lsn?.short_description?.split("\n")[0] || ""}</p><a href="${url}" target="_blank" rel="noopener noreferrer" style="display:inline-block;background:#6366f1;color:#fff;padding:11px 28px;border-radius:8px;text-decoration:none;font-weight:700;font-size:14px">${btnLabel}</a></div>`;
-          return { lesson_id: l.id, type: "text", content_type: "text", text_content: html, content: html, position: 1 };
-        });
-        await supabaseAdmin.from("lesson_contents").insert(contentRows).catch(() => {});
-      }
-
-      // ── Step 5: one draft quiz per unit (Test Builder style) ──────────────────
+      // ── Quizzes: one draft per unit ────────────────────────────────────────────
+      emit({ type: "status", message: "Krijimi i kuizeve..." });
       const quizRows = levelData.units.map((u) => ({
         course_id: courseId,
         title: `${u.title.replace(/^Unit \d+ — /, "")} — Test Builder`,
@@ -5045,10 +5084,17 @@ When giving instructions, number each step clearly. Be precise and technical whe
       }));
       await supabaseAdmin.from("quizzes").insert(quizRows).catch(() => {});
 
-      res.json({ success: true, modules: (createdModules || []).length, lessons: lessonRows.length, level });
+      emit({ type: "done", modules: totalModules, lessons: totalLessons, level, success: true });
+
+      if (wantStream) {
+        res.end();
+      } else {
+        res.json({ success: true, modules: totalModules, lessons: totalLessons, level });
+      }
     } catch (e: any) {
       console.error("POST /api/teacher/courses/:courseId/headway-populate", e);
-      res.status(500).json({ error: e?.message || "Server error" });
+      if (res.headersSent) { res.write(`data: ${JSON.stringify({ type: "error", message: e?.message || "Server error" })}\n\n`); res.end(); }
+      else res.status(500).json({ error: e?.message || "Server error" });
     }
   });
 
