@@ -46,9 +46,9 @@ The live Supabase DB has schema differences from what some pages expect. All aff
 - `Notification` type now includes `title: string` and `read: boolean` fields
 
 ## Running the App
-- **Production (default)**: `npm start` — serves built `dist/` via Express on port 5000. This is what the workflow runs.
-- **Build**: `npm run build` — builds frontend to `dist/` (required before starting in production mode)
-- **Dev mode note**: `npm run dev` (Vite middleware) is NOT used in Replit because Vite's HMR WebSocket server on port 24678 conflicts with Replit's proxy routing, causing 502/426 errors externally. After code changes, run `npm run build` then restart the workflow.
+- **Production (workflow)**: `npm start` — serves built `dist/` via Express on port 5000. **This is what the workflow runs.**
+- **Build**: `npm run build` — builds frontend to `dist/` (required before starting). After any frontend code change: run `npm run build`, then restart the workflow.
+- **Dev mode note**: `npm run dev` (Vite middleware with HMR) must NOT be used in Replit. Vite's HMR WebSocket on port 24678 cannot connect through Replit's proxy, causing the page to get stuck on reload whenever any file in the workspace changes. Always use `npm start` after a build.
 
 ## Required Environment Variables
 Set these in Replit Secrets:
