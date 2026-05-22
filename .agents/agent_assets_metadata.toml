@@ -17,3 +17,9 @@ id = "O8gAg-zv2r-WDrbQ-Keg0"
 uri = "file://sql/fresh_database.txt"
 type = "text"
 title = "QuizMaster — Fresh Database SQL"
+
+[[outputs]]
+id = "Z1K0oFLyZanHTPobeVd5f"
+uri = "file://sql/clear_data.txt"
+type = "text"
+title = "QuizMaster — Clear All Data SQL"
