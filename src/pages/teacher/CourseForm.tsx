@@ -28,7 +28,7 @@ const GRADIENTS = [
 ];
 
 const LANGUAGES = ['English', 'Albanian', 'Spanish', 'French', 'German', 'Italian', 'Portuguese', 'Arabic', 'Chinese'];
-const LEVELS = ['Beginner', 'Intermediate', 'Advanced', 'All Levels'];
+const LEVELS = ['Beginner', 'Elementary', 'Pre-Intermediate', 'Intermediate', 'Upper-Intermediate', 'Advanced'];
 const CATEGORIES = ['Mathematics', 'Science', 'Programming', 'Language Arts', 'History', 'Arts', 'Music', 'Physical Education', 'Other'];
 
 const TABS = [
