@@ -190,6 +190,8 @@ export default function TeacherCourseForm() {
     loadClasses();
   }, [isEditing]);
 
+  const HEADWAY_LEVELS = new Set(['Beginner', 'Elementary', 'Pre-Intermediate', 'Intermediate', 'Upper-Intermediate', 'Advanced']);
+
   const handleSave = async (publishNow = false) => {
     if (!form.name.trim()) { toast.error(t('courses.courseTitle') + ' ' + t('common.required')); setActiveTab('basic'); return; }
     setSaving(true);
@@ -209,7 +211,7 @@ export default function TeacherCourseForm() {
       };
 
       if (isEditing) {
-        const res = await fetch(apiUrl(`/api/admin/update-course/${id}`), {
+        const res = await authFetch(`/api/teacher/courses/${id}`, {
           method: 'PATCH',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(payload),
@@ -218,7 +220,7 @@ export default function TeacherCourseForm() {
         if (!res.ok) throw new Error(json.error || t('common.error'));
         toast.success(publishNow ? t('courses.publishCourse') : t('courses.saveCourse'));
       } else {
-        const res = await fetch(apiUrl('/api/admin/create-course'), {
+        const res = await authFetch('/api/teacher/courses', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -229,7 +231,28 @@ export default function TeacherCourseForm() {
         });
         const json = await res.json();
         if (!res.ok) throw new Error(json.error || t('common.error'));
-        toast.success(publishNow ? t('courses.publishCourse') : t('courses.saveAsDraft'));
+
+        // Auto-populate Headway content if the level matches an Oxford Headway level
+        if (json.course?.id && HEADWAY_LEVELS.has(form.level)) {
+          toast.info(`Duke ngarkuar përmbajtjen Headway ${form.level}...`);
+          try {
+            const popRes = await authFetch(`/api/teacher/courses/${json.course.id}/headway-populate`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ userId: session.user.id, level: form.level }),
+            });
+            const popJson = await popRes.json();
+            if (popRes.ok && popJson.success) {
+              toast.success(`Kursi u krijua me ${popJson.modules} module dhe ${popJson.lessons} mësime nga Oxford Headway!`);
+            } else {
+              toast.warning(`Kursi u krijua por ngarkimi i Headway dështoi: ${popJson.error || 'gabim i panjohur'}`);
+            }
+          } catch {
+            toast.warning('Kursi u krijua por ngarkimi automatik i Headway dështoi.');
+          }
+        } else {
+          toast.success(publishNow ? t('courses.publishCourse') : t('courses.saveAsDraft'));
+        }
       }
       navigate('/teacher/courses');
     } catch (err: any) {

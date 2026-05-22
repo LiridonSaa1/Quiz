@@ -3457,6 +3457,98 @@ When giving instructions, number each step clearly. Be precise and technical whe
     }
   });
 
+  // Teacher: create own course
+  app.post('/api/teacher/courses', async (req: Request, res: Response) => {
+    try {
+      const caller = await assertAuthenticated(req, res);
+      if (!caller) return;
+      if (caller.role !== 'teacher' && caller.role !== 'admin') {
+        return res.status(403).json({ error: 'Forbidden: teacher or admin role required' });
+      }
+
+      const teacherId = caller.userId;
+      const teacherIdCandidates = await getTeacherIdCandidates(teacherId);
+      if (teacherIdCandidates.length === 0) {
+        return res.status(400).json({ error: 'Teacher account not found.' });
+      }
+
+      const baseSlug = (req.body.title || 'course')
+        .toLowerCase().trim()
+        .replace(/[^a-z0-9]+/g, '-')
+        .replace(/^-|-$/g, '');
+      const slug = `${baseSlug}-${Date.now()}`;
+
+      const payloadBase = {
+        ...sanitizeCoursePayload(req.body),
+        slug,
+        created_at: new Date().toISOString(),
+      };
+
+      let createdCourse: any = null;
+      for (const tid of teacherIdCandidates) {
+        const { data, error } = await supabaseAdmin
+          .from('courses')
+          .insert({ ...payloadBase, teacher_id: tid })
+          .select()
+          .single();
+        if (!error) { createdCourse = data; break; }
+        if (!(error.code === '23503' && typeof error.message === 'string' && error.message.includes('courses_teacher_id_fkey'))) {
+          throw error;
+        }
+      }
+
+      if (!createdCourse) {
+        return res.status(400).json({ error: 'Could not create course. Please try again.' });
+      }
+
+      // Optionally link to a class
+      const selectedClassId = typeof req.body?.class_id === 'string' ? req.body.class_id.trim() : '';
+      if (selectedClassId) {
+        const { data: classRow } = await supabaseAdmin
+          .from('classes').select('id, student_ids').eq('id', selectedClassId).maybeSingle();
+        if (classRow) {
+          const studentIds = Array.isArray((classRow as any).student_ids)
+            ? (classRow as any).student_ids.map((s: unknown) => String(s)).filter(Boolean)
+            : [];
+          const unique = Array.from(new Set(studentIds));
+          const { data: updated } = await supabaseAdmin
+            .from('courses')
+            .update({ student_ids: unique, total_students: unique.length, updated_at: new Date().toISOString() })
+            .eq('id', createdCourse.id).select().single();
+          if (updated) createdCourse = updated;
+        }
+      }
+
+      res.json({ success: true, course: createdCourse });
+    } catch (e: any) {
+      console.error('POST /api/teacher/courses', e);
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  // Teacher: update own course
+  app.patch('/api/teacher/courses/:id', async (req: Request, res: Response) => {
+    try {
+      const caller = await assertAuthenticated(req, res);
+      if (!caller) return;
+      const { id: courseId } = req.params;
+      const gate = await assertTeacherOwnsCourse(caller.userId, courseId);
+      if (!gate.ok) return res.status(403).json({ error: 'You do not have access to this course.' });
+
+      const updates = {
+        ...sanitizeCoursePayload(req.body),
+        updated_at: new Date().toISOString(),
+      };
+      const { data, error } = await supabaseAdmin
+        .from('courses').update(updates).eq('id', courseId).select().single();
+      if (error) throw error;
+      res.json({ success: true, course: data });
+    } catch (e: any) {
+      console.error('PATCH /api/teacher/courses/:id', e);
+      res.status(500).json({ error: e.message });
+    }
+  });
+
   // Teacher students (service role) — scoped to the authenticated teacher only (not global admin list).
   app.get(["/api/teacher/students", "/api/teacher/students/"], async (req, res) => {
     try {
