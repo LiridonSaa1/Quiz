@@ -6,7 +6,7 @@ import { useTranslation } from 'react-i18next';
 import {
   Plus, Search, Layers, Trash2, Edit2,
   BookOpen, X, Save, PlayCircle, ChevronRight, HelpCircle, AlertTriangle, Calendar,
-  Download, Globe, CheckCircle2, ChevronDown
+  Download, Globe, CheckCircle2, ChevronDown, RefreshCw
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { Module, Course } from '../../types';
@@ -380,6 +380,29 @@ export default function TeacherModules() {
     } finally {
       setHeadwayClearing(false);
     }
+  };
+
+  const handleClearAndReimport = async () => {
+    if (!headwayCourseId) return;
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session) { toast.error('Not signed in'); return; }
+    setHeadwayDone(null);
+    setHeadwayClearing(true);
+    setHeadwayClearConfirm(false);
+    try {
+      const res = await authFetch(`/api/teacher/courses/${encodeURIComponent(headwayCourseId)}/clear-modules`, {
+        method: 'POST',
+        body: JSON.stringify({ userId: session.user.id }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(json?.error || 'Clear failed');
+    } catch (e: any) {
+      toast.error(e?.message || 'Failed to clear modules');
+      setHeadwayClearing(false);
+      return;
+    }
+    setHeadwayClearing(false);
+    await handleHeadwayImport();
   };
 
   const handleHeadwayImport = async () => {
@@ -1116,14 +1139,30 @@ export default function TeacherModules() {
                       <span className="font-semibold text-slate-700">{headwayDone.lessons}</span> lessons created
                     </p>
                     <p className="text-xs text-slate-400 mb-6">Each lesson links to the real Oxford exercise page</p>
-                    <button
-                      type="button"
-                      onClick={() => setShowHeadwayModal(false)}
-                      className="px-6 py-2.5 rounded-xl text-sm font-semibold text-white transition-all"
-                      style={{ background: 'linear-gradient(135deg,#1565c0,#42a5f5)' }}
-                    >
-                      Done
-                    </button>
+                    <div className="flex gap-3 justify-center">
+                      <button
+                        type="button"
+                        disabled={headwayClearing || headwayImporting}
+                        onClick={() => void handleClearAndReimport()}
+                        className="px-5 py-2.5 rounded-xl text-sm font-semibold border border-slate-200 text-slate-600 hover:bg-slate-50 transition-all flex items-center gap-2 disabled:opacity-50"
+                      >
+                        {headwayClearing ? (
+                          <><span className="w-3.5 h-3.5 rounded-full border-2 border-slate-400 border-t-transparent animate-spin" />Clearing…</>
+                        ) : headwayImporting ? (
+                          <><span className="w-3.5 h-3.5 rounded-full border-2 border-slate-400 border-t-transparent animate-spin" />Importing…</>
+                        ) : (
+                          <><RefreshCw className="w-3.5 h-3.5" />Clear &amp; Re-import</>
+                        )}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setShowHeadwayModal(false)}
+                        className="px-6 py-2.5 rounded-xl text-sm font-semibold text-white transition-all"
+                        style={{ background: 'linear-gradient(135deg,#1565c0,#42a5f5)' }}
+                      >
+                        Done
+                      </button>
+                    </div>
                   </div>
                 ) : (
                   /* Form state */
