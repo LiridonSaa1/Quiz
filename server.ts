@@ -5056,14 +5056,84 @@ When giving instructions, number each step clearly. Be precise and technical whe
         }
         totalLessons += lessonRows.length;
 
-        // Lesson contents (best-effort)
+        // Lesson contents (best-effort) — rich cards per lesson type
         if (Array.isArray(createdLessons) && createdLessons.length > 0) {
           const contentRows = createdLessons.map((l: any, li: number) => {
-            const url = lessonUrls[li] || "";
-            const lsn = lessonRows[li] as any;
-            const isDownload = url.endsWith(".zip");
-            const btnLabel = isDownload ? "Download ZIP" : "Open Oxford Exercise →";
-            const html = `<div style="margin:0 auto;max-width:480px;padding:24px;border:1px solid #e2e8f0;border-radius:12px;background:#f8fafc;text-align:center"><p style="margin:0 0 8px;color:#334155;font-size:15px;font-weight:600">${lsn?.title || ""}</p><p style="margin:0 0 16px;color:#64748b;font-size:13px">${lsn?.short_description?.split("\n")[0] || ""}</p><a href="${url}" target="_blank" rel="noopener noreferrer" style="display:inline-block;background:#6366f1;color:#fff;padding:11px 28px;border-radius:8px;text-decoration:none;font-weight:700;font-size:14px">${btnLabel}</a></div>`;
+            const url  = lessonUrls[li] || "";
+            const lsn  = lessonRows[li] as any;
+            const title = lsn?.title || "";
+            const desc  = lsn?.short_description?.split("\n")[0] || "";
+
+            // Determine card type from title / URL
+            const isAudioDL   = title.includes("Audio") && url.endsWith(".zip");
+            const isVideoDL   = title.includes("Video") && url.endsWith(".zip");
+            const isEE        = title === "Everyday English";
+            const isGrammar   = title.startsWith("Grammar:");
+            const isVocab     = title.startsWith("Vocabulary:");
+
+            let html = "";
+
+            if (isAudioDL) {
+              // ── 🎧 Audio Download ─────────────────────────────────────────────
+              html = `<div style="margin:0 auto;max-width:480px;padding:28px 24px;border:1.5px solid #99f6e4;border-radius:16px;background:linear-gradient(135deg,#f0fdfa 0%,#ccfbf1 100%);text-align:center;font-family:system-ui,sans-serif">
+  <div style="font-size:40px;margin-bottom:10px">🎧</div>
+  <p style="margin:0 0 4px;color:#0f766e;font-size:17px;font-weight:700">${title}</p>
+  <p style="margin:0 0 6px;color:#115e59;font-size:13px">${desc}</p>
+  <p style="margin:0 0 20px;color:#0d9488;font-size:12px;background:#ccfbf1;display:inline-block;padding:4px 12px;border-radius:99px;border:1px solid #5eead4">📦 ZIP · MP3 audio files</p>
+  <br/>
+  <a href="${url}" target="_blank" rel="noopener noreferrer" style="display:inline-flex;align-items:center;gap:8px;background:#0d9488;color:#fff;padding:12px 28px;border-radius:10px;text-decoration:none;font-weight:700;font-size:14px">⬇ Download Audio ZIP</a>
+  <p style="margin:14px 0 0;color:#5eead4;font-size:11px">Opens Oxford University Press · elt.oup.com</p>
+</div>`;
+            } else if (isVideoDL) {
+              // ── 🎬 Video Download ─────────────────────────────────────────────
+              html = `<div style="margin:0 auto;max-width:480px;padding:28px 24px;border:1.5px solid #bae6fd;border-radius:16px;background:linear-gradient(135deg,#f0f9ff 0%,#e0f2fe 100%);text-align:center;font-family:system-ui,sans-serif">
+  <div style="font-size:40px;margin-bottom:10px">🎬</div>
+  <p style="margin:0 0 4px;color:#0369a1;font-size:17px;font-weight:700">${title}</p>
+  <p style="margin:0 0 6px;color:#075985;font-size:13px">${desc}</p>
+  <p style="margin:0 0 20px;color:#0284c7;font-size:12px;background:#e0f2fe;display:inline-block;padding:4px 12px;border-radius:99px;border:1px solid #7dd3fc">📦 ZIP · MP4 video clips</p>
+  <br/>
+  <a href="${url}" target="_blank" rel="noopener noreferrer" style="display:inline-flex;align-items:center;gap:8px;background:#0284c7;color:#fff;padding:12px 28px;border-radius:10px;text-decoration:none;font-weight:700;font-size:14px">⬇ Download Video ZIP</a>
+  <p style="margin:14px 0 0;color:#7dd3fc;font-size:11px">Opens Oxford University Press · elt.oup.com</p>
+</div>`;
+            } else if (isEE) {
+              // ── 🎤 Everyday English ───────────────────────────────────────────
+              html = `<div style="margin:0 auto;max-width:480px;padding:28px 24px;border:1.5px solid #ddd6fe;border-radius:16px;background:linear-gradient(135deg,#faf5ff 0%,#ede9fe 100%);text-align:center;font-family:system-ui,sans-serif">
+  <div style="font-size:40px;margin-bottom:10px">🎤</div>
+  <p style="margin:0 0 4px;color:#6d28d9;font-size:17px;font-weight:700">Everyday English</p>
+  <p style="margin:0 0 20px;color:#7c3aed;font-size:13px">${desc}</p>
+  <a href="${url}" target="_blank" rel="noopener noreferrer" style="display:inline-flex;align-items:center;gap:8px;background:#7c3aed;color:#fff;padding:12px 28px;border-radius:10px;text-decoration:none;font-weight:700;font-size:14px">▶ Watch &amp; Listen</a>
+  <p style="margin:14px 0 0;color:#c4b5fd;font-size:11px">Interactive dialogue · Oxford Headway Online</p>
+</div>`;
+            } else if (isGrammar) {
+              // ── 📘 Grammar Exercise ───────────────────────────────────────────
+              const topic = title.replace("Grammar: ", "");
+              html = `<div style="margin:0 auto;max-width:480px;padding:28px 24px;border:1.5px solid #c7d2fe;border-radius:16px;background:linear-gradient(135deg,#eef2ff 0%,#e0e7ff 100%);text-align:center;font-family:system-ui,sans-serif">
+  <div style="font-size:40px;margin-bottom:10px">📘</div>
+  <p style="margin:0 0 4px;color:#3730a3;font-size:17px;font-weight:700">Grammar: ${topic}</p>
+  <p style="margin:0 0 20px;color:#4338ca;font-size:13px">${desc}</p>
+  <a href="${url}" target="_blank" rel="noopener noreferrer" style="display:inline-flex;align-items:center;gap:8px;background:#4f46e5;color:#fff;padding:12px 28px;border-radius:10px;text-decoration:none;font-weight:700;font-size:14px">Open Grammar Exercise →</a>
+  <p style="margin:14px 0 0;color:#a5b4fc;font-size:11px">Interactive practice · Oxford Headway Online</p>
+</div>`;
+            } else if (isVocab) {
+              // ── 🌿 Vocabulary Exercise ────────────────────────────────────────
+              const topic = title.replace("Vocabulary: ", "");
+              html = `<div style="margin:0 auto;max-width:480px;padding:28px 24px;border:1.5px solid #bbf7d0;border-radius:16px;background:linear-gradient(135deg,#f0fdf4 0%,#dcfce7 100%);text-align:center;font-family:system-ui,sans-serif">
+  <div style="font-size:40px;margin-bottom:10px">🌿</div>
+  <p style="margin:0 0 4px;color:#166534;font-size:17px;font-weight:700">Vocabulary: ${topic}</p>
+  <p style="margin:0 0 20px;color:#15803d;font-size:13px">${desc}</p>
+  <a href="${url}" target="_blank" rel="noopener noreferrer" style="display:inline-flex;align-items:center;gap:8px;background:#16a34a;color:#fff;padding:12px 28px;border-radius:10px;text-decoration:none;font-weight:700;font-size:14px">Open Vocabulary Exercise →</a>
+  <p style="margin:14px 0 0;color:#86efac;font-size:11px">Interactive practice · Oxford Headway Online</p>
+</div>`;
+            } else {
+              // ── Generic fallback ──────────────────────────────────────────────
+              const isZip = url.endsWith(".zip");
+              html = `<div style="margin:0 auto;max-width:480px;padding:24px;border:1px solid #e2e8f0;border-radius:12px;background:#f8fafc;text-align:center;font-family:system-ui,sans-serif">
+  <p style="margin:0 0 8px;color:#334155;font-size:15px;font-weight:600">${title}</p>
+  <p style="margin:0 0 16px;color:#64748b;font-size:13px">${desc}</p>
+  <a href="${url}" target="_blank" rel="noopener noreferrer" style="display:inline-block;background:#6366f1;color:#fff;padding:11px 28px;border-radius:8px;text-decoration:none;font-weight:700;font-size:14px">${isZip ? "⬇ Download ZIP" : "Open →"}</a>
+</div>`;
+            }
+
             return { lesson_id: l.id, type: "text", content_type: "text", text_content: html, content: html, position: 1 };
           });
           try { await supabaseAdmin.from("lesson_contents").insert(contentRows); } catch { /* best-effort */ }
