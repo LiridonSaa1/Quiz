@@ -76,6 +76,7 @@ export default function TeacherCourseForm() {
   const [headwayProgress, setHeadwayProgress] = useState<{ unit: number; total: number; title: string; phase: string } | null>(null);
   const [contentStats, setContentStats] = useState<{ modules: number; lessons: number; quizzes: number; syncedAt: string | null; syncLevel: string | null; loading: boolean } | null>(null);
   const [quickResyncing, setQuickResyncing] = useState(false);
+  const [confirmResync, setConfirmResync] = useState(false);
 
   const set = (key: string, value: any) => setForm(prev => ({ ...prev, [key]: value }));
 
@@ -364,6 +365,7 @@ export default function TeacherCourseForm() {
       toast.error(e?.message || 'Re-sync failed');
     } finally {
       setQuickResyncing(false);
+      setConfirmResync(false);
     }
   };
 
@@ -793,40 +795,74 @@ export default function TeacherCourseForm() {
 
                       {/* Last sync badge */}
                       {contentStats.syncedAt && !contentStats.loading && (
-                        <div className="rounded-xl border border-blue-100 bg-blue-50 px-3 py-2.5 flex items-start gap-2">
-                          <Globe className={`w-3.5 h-3.5 shrink-0 mt-0.5 ${quickResyncing ? 'text-blue-400 animate-spin' : 'text-blue-500'}`} />
+                        <div className={`rounded-xl border px-3 py-2.5 flex items-start gap-2 transition-colors ${confirmResync && !quickResyncing ? 'border-amber-200 bg-amber-50' : 'border-blue-100 bg-blue-50'}`}>
+                          <Globe className={`w-3.5 h-3.5 shrink-0 mt-0.5 ${quickResyncing ? 'text-blue-400 animate-spin' : confirmResync ? 'text-amber-500' : 'text-blue-500'}`} />
                           <div className="min-w-0 flex-1">
                             <div className="flex items-center justify-between gap-1 mb-0.5">
-                              <p className="text-[10px] font-bold text-blue-700 uppercase tracking-wide leading-none">
+                              <p className={`text-[10px] font-bold uppercase tracking-wide leading-none ${confirmResync && !quickResyncing ? 'text-amber-700' : 'text-blue-700'}`}>
                                 Oxford Headway {contentStats.syncLevel ? `· ${contentStats.syncLevel}` : ''}
                               </p>
-                              <button
-                                onClick={() => void handleQuickResync()}
-                                disabled={quickResyncing || headwayImporting}
-                                title="Ri-sinkronizo Headway"
-                                className="flex items-center gap-1 px-1.5 py-0.5 rounded-md text-[10px] font-semibold text-blue-600 hover:bg-blue-100 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
-                              >
-                                <RefreshCw className={`w-2.5 h-2.5 ${quickResyncing ? 'animate-spin' : ''}`} />
-                                {quickResyncing ? 'Duke sinkronizuar…' : 'Ri-sync'}
-                              </button>
-                            </div>
-                            <p className="text-[11px] text-blue-600">
-                              {quickResyncing ? (
-                                <span className="italic text-blue-400">Importimi në vazhdim…</span>
-                              ) : (
-                                <>
-                                  Sinkronizuar:{' '}
-                                  <span className="font-semibold">
-                                    {new Date(contentStats.syncedAt).toLocaleDateString('sq-AL', {
-                                      day: '2-digit', month: 'short', year: 'numeric',
-                                    })}{' '}
-                                    në {new Date(contentStats.syncedAt).toLocaleTimeString('sq-AL', {
-                                      hour: '2-digit', minute: '2-digit',
-                                    })}
-                                  </span>
-                                </>
+                              {!confirmResync && !quickResyncing && (
+                                <button
+                                  onClick={() => setConfirmResync(true)}
+                                  disabled={headwayImporting}
+                                  title="Ri-sinkronizo Headway"
+                                  className="flex items-center gap-1 px-1.5 py-0.5 rounded-md text-[10px] font-semibold text-blue-600 hover:bg-blue-100 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                                >
+                                  <RefreshCw className="w-2.5 h-2.5" />
+                                  Ri-sync
+                                </button>
                               )}
-                            </p>
+                              {quickResyncing && (
+                                <span className="flex items-center gap-1 text-[10px] text-blue-500 font-medium">
+                                  <RefreshCw className="w-2.5 h-2.5 animate-spin" />
+                                  Duke sinkronizuar…
+                                </span>
+                              )}
+                            </div>
+
+                            {/* Inline confirm row */}
+                            {confirmResync && !quickResyncing && (
+                              <div className="mt-1.5 mb-1">
+                                <p className="text-[11px] text-amber-700 font-medium mb-1.5">
+                                  ⚠ Kjo do të fshijë dhe ri-ngarkojë të gjitha modulet dhe mësimet. Jeni i sigurt?
+                                </p>
+                                <div className="flex gap-1.5">
+                                  <button
+                                    onClick={() => void handleQuickResync()}
+                                    className="flex-1 py-1 rounded-lg text-[11px] font-bold text-white bg-amber-500 hover:bg-amber-600 transition-colors"
+                                  >
+                                    Po, Ri-sync
+                                  </button>
+                                  <button
+                                    onClick={() => setConfirmResync(false)}
+                                    className="flex-1 py-1 rounded-lg text-[11px] font-semibold text-slate-600 bg-white hover:bg-slate-50 border border-slate-200 transition-colors"
+                                  >
+                                    Anulo
+                                  </button>
+                                </div>
+                              </div>
+                            )}
+
+                            {!confirmResync && (
+                              <p className="text-[11px] text-blue-600">
+                                {quickResyncing ? (
+                                  <span className="italic text-blue-400">Importimi në vazhdim…</span>
+                                ) : (
+                                  <>
+                                    Sinkronizuar:{' '}
+                                    <span className="font-semibold">
+                                      {new Date(contentStats.syncedAt).toLocaleDateString('sq-AL', {
+                                        day: '2-digit', month: 'short', year: 'numeric',
+                                      })}{' '}
+                                      në {new Date(contentStats.syncedAt).toLocaleTimeString('sq-AL', {
+                                        hour: '2-digit', minute: '2-digit',
+                                      })}
+                                    </span>
+                                  </>
+                                )}
+                              </p>
+                            )}
                           </div>
                         </div>
                       )}
