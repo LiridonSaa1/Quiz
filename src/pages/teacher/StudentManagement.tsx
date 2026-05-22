@@ -2,7 +2,7 @@ import React, { useEffect, useState, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 import { supabase } from '../../supabase';
 import TeacherLayout from '../../components/layout/TeacherLayout';
-import { Users, UserPlus, Search, UserCheck, UserX, BookOpen, X, Pencil, Trash2, AlertTriangle } from 'lucide-react';
+import { Users, UserPlus, Search, UserCheck, UserX, BookOpen, X, Pencil, Trash2, AlertTriangle, RotateCcw } from 'lucide-react';
 import GenderAvatar from '../../components/ui/GenderAvatar';
 import { toast } from 'sonner';
 import { UserProfile, UserRole } from '../../types';
@@ -131,6 +131,7 @@ export default function StudentManagement() {
   const [showAddModal, setShowAddModal] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<StudentWithCourses | null>(null);
   const [deleteLoading, setDeleteLoading] = useState(false);
+  const [resettingProgressId, setResettingProgressId] = useState<string | null>(null);
 
   const fetchData = async () => {
     setLoading(true);
@@ -345,6 +346,26 @@ export default function StudentManagement() {
     }
   };
 
+  const handleResetProgress = async (student: StudentWithCourses) => {
+    if (!window.confirm(`Reset all quiz attempts and lesson progress for ${student.displayName || student.email}? This cannot be undone.`)) return;
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session) { toast.error('Not signed in'); return; }
+    setResettingProgressId(student.uid);
+    try {
+      const res = await authFetch(`/api/teacher/students/${encodeURIComponent(student.uid)}/reset-progress`, {
+        method: 'POST',
+        body: JSON.stringify({ userId: session.user.id }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(json?.error || 'Reset failed');
+      toast.success(`Progress reset — ${json.deletedAttempts ?? 0} quiz attempt(s) and ${json.deletedProgress ?? 0} lesson progress record(s) cleared`);
+    } catch (e: any) {
+      toast.error(e?.message || 'Failed to reset progress');
+    } finally {
+      setResettingProgressId(null);
+    }
+  };
+
   const deleteStudent = (student: StudentWithCourses) => {
     setDeleteTarget(student);
   };
@@ -518,6 +539,17 @@ export default function StudentManagement() {
                           )}
                         >
                           {student.status === 'active' ? <UserX className="w-4 h-4" /> : <UserCheck className="w-4 h-4" />}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => void handleResetProgress(student)}
+                          disabled={resettingProgressId === student.uid}
+                          title="Reset progress"
+                          className="p-2 rounded-lg text-slate-400 hover:text-amber-600 hover:bg-amber-50 transition-all disabled:opacity-50"
+                        >
+                          {resettingProgressId === student.uid
+                            ? <span className="w-4 h-4 block rounded-full border-2 border-amber-400 border-t-transparent animate-spin" />
+                            : <RotateCcw className="w-4 h-4" />}
                         </button>
                         <button
                           type="button"

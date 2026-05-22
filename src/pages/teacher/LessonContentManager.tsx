@@ -4,7 +4,7 @@ import { useNavigate, useParams } from 'react-router-dom';
 import TeacherLayout from '../../components/layout/TeacherLayout';
 import { authFetch } from '../../lib/apiUrl';
 import { supabase } from '../../supabase';
-import { ArrowLeft, GripVertical, Plus, Save, Trash2, UploadCloud, ArrowDown, ArrowUp } from 'lucide-react';
+import { ArrowLeft, GripVertical, Plus, Save, Trash2, UploadCloud, ArrowDown, ArrowUp, RotateCcw } from 'lucide-react';
 import { toast } from 'sonner';
 import { cn } from '../../lib/utils';
 
@@ -47,6 +47,7 @@ export default function TeacherLessonContentManager() {
   const [savingId, setSavingId] = useState<string | null>(null);
   const [uploadingId, setUploadingId] = useState<string | null>(null);
   const [dragIndex, setDragIndex] = useState<number | null>(null);
+  const [regenerating, setRegenerating] = useState(false);
 
   const sorted = useMemo(
     () => [...items].sort((a, b) => (a.position || 0) - (b.position || 0)),
@@ -210,6 +211,25 @@ export default function TeacherLessonContentManager() {
     await saveOrder(re);
   };
 
+  const handleRegenerateContent = async () => {
+    if (!userId) return;
+    setRegenerating(true);
+    try {
+      const res = await authFetch(`/api/teacher/lessons/${encodeURIComponent(lessonId)}/regenerate-content`, {
+        method: 'POST',
+        body: JSON.stringify({ userId }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(json?.error || 'Regeneration failed');
+      toast.success('Content regenerated with download page link');
+      void load();
+    } catch (e: any) {
+      toast.error(e?.message || 'Failed to regenerate content');
+    } finally {
+      setRegenerating(false);
+    }
+  };
+
   return (
     <TeacherLayout>
       <div className="space-y-5">
@@ -221,18 +241,33 @@ export default function TeacherLessonContentManager() {
           {t('lessons.backToLessons')}
         </button>
 
-        <div className="bg-white rounded-2xl border border-slate-100 p-5 flex items-center justify-between">
+        <div className="bg-white rounded-2xl border border-slate-100 p-5 flex items-center justify-between gap-3">
           <div>
             <h1 className="text-xl font-bold text-slate-900">{t('lessons.manage')}</h1>
             <p className="text-sm text-slate-500 mt-1">{lessonTitle}</p>
           </div>
-          <button
-            onClick={() => void addItem()}
-            className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-indigo-600 text-white text-sm font-semibold hover:bg-indigo-700"
-          >
-            <Plus className="w-4 h-4" />
-            {t('lessons.addContentItem')}
-          </button>
+          <div className="flex items-center gap-2">
+            {(lessonTitle.includes('Audio') || lessonTitle.includes('Video')) && (
+              <button
+                onClick={() => void handleRegenerateContent()}
+                disabled={regenerating}
+                title="Regenerate download page content"
+                className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-teal-50 text-teal-700 border border-teal-200 text-sm font-semibold hover:bg-teal-100 disabled:opacity-50 transition-all"
+              >
+                {regenerating
+                  ? <span className="w-4 h-4 rounded-full border-2 border-teal-400 border-t-transparent animate-spin" />
+                  : <RotateCcw className="w-4 h-4" />}
+                Regenerate
+              </button>
+            )}
+            <button
+              onClick={() => void addItem()}
+              className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-indigo-600 text-white text-sm font-semibold hover:bg-indigo-700"
+            >
+              <Plus className="w-4 h-4" />
+              {t('lessons.addContentItem')}
+            </button>
+          </div>
         </div>
 
         {loading ? (

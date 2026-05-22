@@ -6,7 +6,8 @@ import { useTranslation } from 'react-i18next';
 import {
   Plus, Search, Layers, Trash2, Edit2,
   BookOpen, X, Save, PlayCircle, ChevronRight, HelpCircle, AlertTriangle, Calendar,
-  Download, Globe, CheckCircle2, ChevronDown, RefreshCw
+  Download, Globe, CheckCircle2, ChevronDown, RefreshCw, Copy, CheckSquare, Square,
+  Eye, EyeOff, RotateCcw, BarChart2,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { Module, Course } from '../../types';
@@ -116,6 +117,14 @@ export default function TeacherModules() {
   const [headwayProgress, setHeadwayProgress] = useState<{ unit: number; total: number; title: string; phase: string } | null>(null);
   const [headwayClearing, setHeadwayClearing] = useState(false);
   const [headwayClearConfirm, setHeadwayClearConfirm] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [duplicatingId, setDuplicatingId] = useState<string | null>(null);
+  const [bulkActioning, setBulkActioning] = useState(false);
+  const [importAllLevels, setImportAllLevels] = useState(false);
+  const [showCompletionDashboard, setShowCompletionDashboard] = useState(false);
+  const [completionCourseId, setCompletionCourseId] = useState('');
+  const [completionLoading, setCompletionLoading] = useState(false);
+  const [completionData, setCompletionData] = useState<any | null>(null);
   const { can } = useTeacherPermissions();
 
   const fetchData = async () => {
@@ -461,6 +470,103 @@ export default function TeacherModules() {
     }
   };
 
+  const toggleSelect = (id: string) => {
+    setSelectedIds(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  };
+
+  const handleBulkStatus = async (status: 'active' | 'inactive') => {
+    if (!selectedIds.size) return;
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session) { toast.error('Not signed in'); return; }
+    setBulkActioning(true);
+    try {
+      const res = await authFetch('/api/teacher/modules/bulk-status', {
+        method: 'POST',
+        body: JSON.stringify({ userId: session.user.id, moduleIds: [...selectedIds], status }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(json?.error || 'Bulk update failed');
+      toast.success(`${json.updated} module(s) ${status === 'active' ? 'published' : 'hidden'}`);
+      setSelectedIds(new Set());
+      fetchData();
+    } catch (e: any) {
+      toast.error(e?.message || 'Bulk update failed');
+    } finally {
+      setBulkActioning(false);
+    }
+  };
+
+  const handleDuplicate = async (mod: Module) => {
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session) { toast.error('Not signed in'); return; }
+    setDuplicatingId(mod.id);
+    try {
+      const res = await authFetch(`/api/teacher/modules/${encodeURIComponent(mod.id)}/duplicate`, {
+        method: 'POST',
+        body: JSON.stringify({ userId: session.user.id }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(json?.error || 'Duplicate failed');
+      toast.success(`"${mod.title} (Copy)" created`);
+      fetchData();
+    } catch (e: any) {
+      toast.error(e?.message || 'Failed to duplicate module');
+    } finally {
+      setDuplicatingId(null);
+    }
+  };
+
+  const handleImportAllLevels = async () => {
+    if (!headwayCourseId) { toast.error('Please select a course'); return; }
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session) { toast.error('Not signed in'); return; }
+    const levels = ['Beginner', 'Elementary', 'Pre-Intermediate', 'Intermediate', 'Upper-Intermediate', 'Advanced'];
+    setHeadwayImporting(true);
+    let totalMods = 0;
+    let totalLessons = 0;
+    for (const lvl of levels) {
+      setHeadwayProgress({ unit: 0, total: 1, title: `Importing ${lvl}...`, phase: 'module' });
+      try {
+        const res = await authFetch(`/api/teacher/courses/${encodeURIComponent(headwayCourseId)}/headway-populate`, {
+          method: 'POST',
+          body: JSON.stringify({ userId: session.user.id, level: lvl, options: headwayOptions }),
+        });
+        if (res.ok) {
+          const json = await res.json().catch(() => ({}));
+          totalMods += json.modules ?? 0;
+          totalLessons += json.lessons ?? 0;
+        }
+      } catch { /* continue to next level */ }
+    }
+    setHeadwayProgress(null);
+    setHeadwayImporting(false);
+    setHeadwayDone({ modules: totalMods, lessons: totalLessons });
+    toast.success(`All Headway levels imported — ${totalMods} modules, ${totalLessons} lessons`);
+    fetchData();
+  };
+
+  const handleOpenCompletionDashboard = async (courseId: string) => {
+    setCompletionCourseId(courseId);
+    setCompletionData(null);
+    setShowCompletionDashboard(true);
+    setCompletionLoading(true);
+    try {
+      const res = await authFetch(`/api/teacher/courses/${encodeURIComponent(courseId)}/module-completion`);
+      const json = await res.json();
+      if (!res.ok) throw new Error(json?.error || 'Failed to load');
+      setCompletionData(json);
+    } catch (e: any) {
+      toast.error(e?.message || 'Failed to load completion data');
+      setShowCompletionDashboard(false);
+    } finally {
+      setCompletionLoading(false);
+    }
+  };
+
   const handleDelete = (mod: Module) => {
     setDeleteTarget(mod);
   };
@@ -579,6 +685,22 @@ export default function TeacherModules() {
                 </div>
                 {can('actions.teacher.modules.manage') && (
                   <div className="flex flex-wrap gap-3 shrink-0">
+                    {courses.length > 0 && (
+                      <motion.button
+                        onClick={() => handleOpenCompletionDashboard(courseFilter !== 'all' ? courseFilter : courses[0].id)}
+                        whileHover={{ scale: 1.04, y: -2 }}
+                        whileTap={{ scale: 0.97 }}
+                        className="inline-flex items-center gap-2 px-5 py-3 rounded-2xl font-bold text-sm text-white transition-all"
+                        style={{
+                          background: 'linear-gradient(135deg, #064e3b 0%, #059669 100%)',
+                          boxShadow: '0 8px 32px rgba(5,150,105,0.35), 0 2px 8px rgba(0,0,0,0.15)',
+                        }}
+                        title="Per-unit completion dashboard"
+                      >
+                        <BarChart2 className="w-4 h-4" />
+                        Completion
+                      </motion.button>
+                    )}
                     <motion.button
                       onClick={openHeadwayModal}
                       disabled={courses.length === 0}
@@ -727,6 +849,46 @@ export default function TeacherModules() {
               )}
             </motion.div>
 
+            {/* Bulk Action Bar */}
+            <AnimatePresence>
+              {selectedIds.size > 0 && (
+                <motion.div
+                  initial={{ opacity: 0, y: -8 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -8 }}
+                  transition={{ duration: 0.2 }}
+                  className="flex items-center gap-3 px-4 py-3 rounded-2xl text-white shadow-lg"
+                  style={{ background: 'linear-gradient(135deg,#4f46e5,#7c3aed)' }}
+                >
+                  <CheckSquare className="w-4 h-4 shrink-0" />
+                  <span className="text-sm font-semibold">{selectedIds.size} module{selectedIds.size !== 1 ? 's' : ''} selected</span>
+                  <div className="ml-auto flex items-center gap-2">
+                    <button
+                      onClick={() => void handleBulkStatus('active')}
+                      disabled={bulkActioning}
+                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white/20 hover:bg-white/30 text-xs font-semibold transition-all disabled:opacity-50"
+                    >
+                      <Eye className="w-3.5 h-3.5" /> Publish All
+                    </button>
+                    <button
+                      onClick={() => void handleBulkStatus('inactive')}
+                      disabled={bulkActioning}
+                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white/20 hover:bg-white/30 text-xs font-semibold transition-all disabled:opacity-50"
+                    >
+                      <EyeOff className="w-3.5 h-3.5" /> Hide All
+                    </button>
+                    <button
+                      onClick={() => setSelectedIds(new Set())}
+                      className="p-1.5 rounded-lg hover:bg-white/20 transition-all"
+                      title="Clear selection"
+                    >
+                      <X className="w-4 h-4" />
+                    </button>
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
+
             {/* Module Grid / Empty State */}
             {loading ? (
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-5">
@@ -785,8 +947,25 @@ export default function TeacherModules() {
                         visible: { opacity: 1, y: 0, transition: { duration: 0.35, ease: 'easeOut' } },
                       }}
                       whileHover={{ y: -4, boxShadow: '0 20px 48px rgba(99,102,241,0.15)' }}
-                      className="group relative bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden flex flex-col transition-all duration-200"
+                      className={cn(
+                        "group relative bg-white rounded-2xl border shadow-sm overflow-hidden flex flex-col transition-all duration-200",
+                        selectedIds.has(mod.id) ? "border-indigo-400 ring-2 ring-indigo-200" : "border-slate-100"
+                      )}
                     >
+                      {/* Select checkbox (top-left corner) */}
+                      {can('actions.teacher.modules.manage') && (
+                        <button
+                          onClick={e => { e.stopPropagation(); toggleSelect(mod.id); }}
+                          className="absolute top-3 left-3 z-10 opacity-0 group-hover:opacity-100 transition-opacity focus:opacity-100"
+                          style={{ opacity: selectedIds.has(mod.id) ? 1 : undefined }}
+                          title={selectedIds.has(mod.id) ? 'Deselect' : 'Select'}
+                        >
+                          {selectedIds.has(mod.id)
+                            ? <CheckSquare className="w-4 h-4 text-indigo-600" />
+                            : <Square className="w-4 h-4 text-slate-400" />}
+                        </button>
+                      )}
+
                       {/* Card top accent */}
                       <div
                         className="h-1.5 w-full"
@@ -861,18 +1040,29 @@ export default function TeacherModules() {
                         </div>
 
                         {/* Actions — always visible on mobile touch, hover-revealed on desktop */}
-                        <div className="flex items-center gap-2 pt-3 sm:opacity-0 sm:group-hover:opacity-100 opacity-100 transition-all duration-200 sm:translate-y-1 sm:group-hover:translate-y-0">
+                        <div className="flex items-center gap-1.5 pt-3 sm:opacity-0 sm:group-hover:opacity-100 opacity-100 transition-all duration-200 sm:translate-y-1 sm:group-hover:translate-y-0">
                           {can('actions.teacher.modules.manage') && <button
                             onClick={() => openEdit(mod)}
-                            className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-xl text-xs font-semibold text-indigo-600 bg-indigo-50 hover:bg-indigo-100 transition-all"
+                            className="flex-1 flex items-center justify-center gap-1 py-2 rounded-xl text-xs font-semibold text-indigo-600 bg-indigo-50 hover:bg-indigo-100 transition-all"
                           >
                             <Edit2 className="w-3.5 h-3.5" /> {t('modules.editAction')}
                           </button>}
                           {can('actions.teacher.modules.manage') && <button
-                            onClick={() => handleDelete(mod)}
-                            className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-xl text-xs font-semibold text-red-500 bg-red-50 hover:bg-red-100 transition-all"
+                            onClick={() => void handleDuplicate(mod)}
+                            disabled={duplicatingId === mod.id}
+                            className="flex items-center justify-center gap-1 py-2 px-2.5 rounded-xl text-xs font-semibold text-violet-600 bg-violet-50 hover:bg-violet-100 transition-all disabled:opacity-50"
+                            title="Duplicate module"
                           >
-                            <Trash2 className="w-3.5 h-3.5" /> {t('modules.deleteAction')}
+                            {duplicatingId === mod.id
+                              ? <span className="w-3.5 h-3.5 rounded-full border-2 border-violet-400 border-t-transparent animate-spin" />
+                              : <Copy className="w-3.5 h-3.5" />}
+                          </button>}
+                          {can('actions.teacher.modules.manage') && <button
+                            onClick={() => handleDelete(mod)}
+                            className="flex items-center justify-center gap-1 py-2 px-2.5 rounded-xl text-xs font-semibold text-red-500 bg-red-50 hover:bg-red-100 transition-all"
+                            title="Delete module"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
                           </button>}
                         </div>
                       </div>
@@ -1224,8 +1414,23 @@ export default function TeacherModules() {
                       </div>
                     )}
 
+                    {/* Import All Levels toggle */}
+                    <label className="flex items-center gap-3 px-4 py-3 rounded-xl border border-slate-200 bg-slate-50 cursor-pointer hover:bg-blue-50 hover:border-blue-300 transition-all">
+                      <input
+                        type="checkbox"
+                        checked={importAllLevels}
+                        disabled={headwayImporting}
+                        onChange={e => setImportAllLevels(e.target.checked)}
+                        className="w-4 h-4 rounded accent-blue-600 shrink-0"
+                      />
+                      <div>
+                        <span className="block text-xs font-bold text-slate-800">Import all 6 levels at once</span>
+                        <span className="block text-xs text-slate-500">Beginner → Elementary → Pre-Intermediate → Intermediate → Upper-Intermediate → Advanced</span>
+                      </div>
+                    </label>
+
                     {/* Level selector */}
-                    <div>
+                    <div className={importAllLevels ? 'opacity-40 pointer-events-none' : ''}>
                       <label className="block text-xs font-semibold text-slate-600 mb-1.5">Level</label>
                       <div className="grid grid-cols-2 gap-2">
                         {['Beginner','Elementary','Pre-Intermediate','Intermediate','Upper-Intermediate','Advanced'].map(lvl => (
@@ -1338,12 +1543,14 @@ export default function TeacherModules() {
                       <button
                         type="button"
                         disabled={headwayImporting || !headwayCourseId}
-                        onClick={() => void handleHeadwayImport()}
+                        onClick={() => void (importAllLevels ? handleImportAllLevels() : handleHeadwayImport())}
                         className="flex-1 py-2.5 rounded-xl text-sm font-semibold text-white transition-all disabled:opacity-60 flex items-center justify-center gap-2"
                         style={{ background: 'linear-gradient(135deg,#1565c0,#42a5f5)' }}
                       >
                         {headwayImporting ? (
                           <><span className="w-4 h-4 rounded-full border-2 border-white border-t-transparent animate-spin" />Importing…</>
+                        ) : importAllLevels ? (
+                          <><Download className="w-4 h-4" />Import All 6 Levels</>
                         ) : (
                           <><Download className="w-4 h-4" />Import</>
                         )}
@@ -1416,6 +1623,104 @@ export default function TeacherModules() {
           </motion.div>
         )}
       </AnimatePresence>
+
+      {/* Completion Dashboard Modal */}
+      {showCompletionDashboard && (
+        <div className="fixed inset-0 bg-slate-900/70 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl w-full max-w-4xl max-h-[90vh] flex flex-col shadow-2xl border border-slate-100 overflow-hidden">
+            <div className="px-6 py-5 border-b border-slate-100 flex items-center justify-between shrink-0">
+              <div className="flex items-center gap-3">
+                <div className="w-9 h-9 bg-emerald-50 rounded-xl flex items-center justify-center">
+                  <BarChart2 className="w-[18px] h-[18px] text-emerald-600" />
+                </div>
+                <div>
+                  <h2 className="text-base font-bold text-slate-900">Completion Dashboard</h2>
+                  <p className="text-xs text-slate-400 mt-0.5">Per-unit student progress</p>
+                </div>
+              </div>
+              <div className="flex items-center gap-3">
+                {courses.length > 1 && (
+                  <select
+                    value={completionCourseId}
+                    onChange={e => handleOpenCompletionDashboard(e.target.value)}
+                    className="text-sm border border-slate-200 rounded-xl px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-emerald-400/30 bg-slate-50"
+                  >
+                    {courses.map(c => (
+                      <option key={c.id} value={c.id}>{c.name || c.title}</option>
+                    ))}
+                  </select>
+                )}
+                <button type="button" onClick={() => setShowCompletionDashboard(false)} className="p-2 hover:bg-slate-100 rounded-xl transition-colors">
+                  <X className="w-4 h-4 text-slate-400" />
+                </button>
+              </div>
+            </div>
+            <div className="overflow-auto flex-1 p-6">
+              {completionLoading ? (
+                <div className="flex items-center justify-center h-40">
+                  <span className="w-8 h-8 rounded-full border-2 border-emerald-400 border-t-transparent animate-spin" />
+                </div>
+              ) : !completionData || completionData.completion?.length === 0 ? (
+                <div className="flex flex-col items-center justify-center h-40 text-slate-400 text-sm">
+                  <BarChart2 className="w-8 h-8 mb-2 opacity-30" />
+                  {completionData?.studentCount === 0 ? 'No students enrolled in this course.' : 'No lesson progress recorded yet.'}
+                </div>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm border-collapse">
+                    <thead>
+                      <tr className="bg-slate-50">
+                        <th className="text-left px-4 py-3 text-xs font-bold text-slate-500 uppercase tracking-wider rounded-l-lg border-b border-slate-100 sticky left-0 bg-slate-50 min-w-[160px]">Student</th>
+                        {(completionData.modules || []).map((mod: any) => (
+                          <th key={mod.id} className="text-center px-3 py-3 text-xs font-bold text-slate-500 uppercase tracking-wider border-b border-slate-100 min-w-[90px]">
+                            <span className="line-clamp-2">{mod.title}</span>
+                          </th>
+                        ))}
+                        <th className="text-center px-4 py-3 text-xs font-bold text-slate-500 uppercase tracking-wider rounded-r-lg border-b border-slate-100 min-w-[80px]">Overall</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {(completionData.completion || []).map((row: any) => (
+                        <tr key={row.studentId} className="border-b border-slate-50 hover:bg-slate-50/60 transition-colors">
+                          <td className="px-4 py-3 sticky left-0 bg-white">
+                            <div className="font-semibold text-slate-800 truncate max-w-[150px]">{row.studentName}</div>
+                            <div className="text-xs text-slate-400 truncate max-w-[150px]">{row.studentEmail}</div>
+                          </td>
+                          {row.modules.map((mod: any) => (
+                            <td key={mod.moduleId} className="px-3 py-3 text-center">
+                              {mod.total === 0 ? (
+                                <span className="text-slate-300 text-xs">—</span>
+                              ) : (
+                                <div className="flex flex-col items-center gap-1">
+                                  <div className="w-12 h-1.5 bg-slate-100 rounded-full overflow-hidden">
+                                    <div
+                                      className={cn('h-full rounded-full', mod.percent === 100 ? 'bg-emerald-400' : mod.percent > 50 ? 'bg-indigo-400' : mod.percent > 0 ? 'bg-amber-400' : 'bg-slate-200')}
+                                      style={{ width: `${mod.percent}%` }}
+                                    />
+                                  </div>
+                                  <span className={cn('text-xs font-semibold', mod.percent === 100 ? 'text-emerald-600' : 'text-slate-500')}>{mod.percent}%</span>
+                                </div>
+                              )}
+                            </td>
+                          ))}
+                          <td className="px-4 py-3 text-center">
+                            <span className={cn(
+                              'inline-flex items-center justify-center w-10 h-10 rounded-xl text-sm font-bold',
+                              row.overallPercent === 100 ? 'bg-emerald-50 text-emerald-700' : row.overallPercent > 50 ? 'bg-indigo-50 text-indigo-700' : row.overallPercent > 0 ? 'bg-amber-50 text-amber-700' : 'bg-slate-100 text-slate-400',
+                            )}>
+                              {row.overallPercent}%
+                            </span>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </TeacherLayout>
   );
 }

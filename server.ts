@@ -4632,6 +4632,251 @@ When giving instructions, number each step clearly. Be precise and technical whe
   app.delete("/api/teacher/modules/:id", teacherModuleDeleteHandler);
   app.post("/api/teacher/modules/:id/delete", teacherModuleDeleteHandler);
 
+  // ── Bulk-update status for multiple modules ───────────────────────────────
+  app.post("/api/teacher/modules/bulk-status", async (req: Request, res: Response) => {
+    try {
+      const caller = await assertAuthenticated(req, res);
+      if (!caller) return;
+      const userId = typeof req.body?.userId === "string" ? req.body.userId.trim() : "";
+      const moduleIds: string[] = Array.isArray(req.body?.moduleIds)
+        ? req.body.moduleIds.filter((id: any) => typeof id === "string" && id)
+        : [];
+      const status = req.body?.status === "active" || req.body?.status === "inactive" ? req.body.status : null;
+      if (!userId) return res.status(400).json({ error: "userId is required" });
+      if (!moduleIds.length) return res.status(400).json({ error: "moduleIds required" });
+      if (!status) return res.status(400).json({ error: "status must be active or inactive" });
+      const { data: mods } = await supabaseAdmin.from("modules").select("id,course_id").in("id", moduleIds);
+      const courseIds = [...new Set((mods || []).map((m: any) => String(m.course_id)))];
+      for (const cid of courseIds) {
+        const gate = await assertTeacherOwnsCourse(userId, cid);
+        if (!gate.ok) return res.status(403).json({ error: "Access denied" });
+      }
+      const { error } = await supabaseAdmin.from("modules").update({ status, updated_at: new Date().toISOString() }).in("id", moduleIds);
+      if (error) throw error;
+      res.json({ success: true, updated: moduleIds.length });
+    } catch (e: any) {
+      console.error("POST /api/teacher/modules/bulk-status", e);
+      res.status(500).json({ error: e.message || "Server error" });
+    }
+  });
+
+  // ── Duplicate a module with all its lessons + lesson contents ─────────────
+  app.post("/api/teacher/modules/:id/duplicate", async (req: Request, res: Response) => {
+    try {
+      const caller = await assertAuthenticated(req, res);
+      if (!caller) return;
+      const moduleId = req.params.id;
+      const userId = typeof req.body?.userId === "string" ? req.body.userId.trim() : "";
+      if (!userId) return res.status(400).json({ error: "userId is required" });
+      const { data: mod, error: mErr } = await supabaseAdmin.from("modules").select("*").eq("id", moduleId).maybeSingle();
+      if (mErr) throw mErr;
+      if (!mod) return res.status(404).json({ error: "Module not found" });
+      const gate = await assertTeacherOwnsCourse(userId, String(mod.course_id));
+      if (!gate.ok) return res.status(403).json({ error: "Access denied" });
+      const { data: maxOrd } = await supabaseAdmin.from("modules").select("order").eq("course_id", mod.course_id).order("order", { ascending: false }).limit(1).maybeSingle();
+      const newOrder = ((maxOrd as any)?.order ?? 0) + 1;
+      const ts = Date.now();
+      const slugBase = String(mod.slug || mod.title || "module").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+      const { data: newMod, error: newErr } = await supabaseAdmin.from("modules")
+        .insert({ course_id: mod.course_id, title: `${mod.title} (Copy)`, slug: `${slugBase}-copy-${ts}`, description: mod.description, status: "inactive", order: newOrder })
+        .select("id").single();
+      if (newErr) throw newErr;
+      const { data: lessons } = await supabaseAdmin.from("lessons").select("*").eq("module_id", moduleId).order("order");
+      if (lessons && lessons.length > 0) {
+        const newLessons = lessons.map((l: any) => ({
+          course_id: l.course_id, module_id: newMod.id, title: l.title,
+          slug: `${String(l.slug || l.title || "lesson").toLowerCase().replace(/[^a-z0-9]+/g, "-")}-${ts}`,
+          type: l.type, short_description: l.short_description, order: l.order,
+          status: l.status, duration_minutes: l.duration_minutes, is_free_preview: l.is_free_preview,
+        }));
+        const { data: createdLessons } = await supabaseAdmin.from("lessons").insert(newLessons).select("id");
+        if (createdLessons) {
+          for (let i = 0; i < lessons.length; i++) {
+            const newId = createdLessons[i]?.id;
+            if (!newId) continue;
+            const { data: contents } = await supabaseAdmin.from("lesson_contents").select("type,content_type,text_content,content,position").eq("lesson_id", lessons[i].id);
+            if (contents?.length) await supabaseAdmin.from("lesson_contents").insert(contents.map((c: any) => ({ ...c, lesson_id: newId })));
+          }
+        }
+      }
+      res.json({ success: true, moduleId: newMod.id });
+    } catch (e: any) {
+      console.error("POST /api/teacher/modules/:id/duplicate", e);
+      res.status(500).json({ error: e.message || "Server error" });
+    }
+  });
+
+  // ── Re-generate audio/video download content for an existing lesson ───────
+  app.post("/api/teacher/lessons/:id/regenerate-content", async (req: Request, res: Response) => {
+    try {
+      const caller = await assertAuthenticated(req, res);
+      if (!caller) return;
+      const lessonId = req.params.id;
+      const userId = typeof req.body?.userId === "string" ? req.body.userId.trim() : "";
+      if (!userId) return res.status(400).json({ error: "userId is required" });
+      const { data: lesson, error: lErr } = await supabaseAdmin.from("lessons").select("id,title,short_description,course_id").eq("id", lessonId).maybeSingle();
+      if (lErr) throw lErr;
+      if (!lesson) return res.status(404).json({ error: "Lesson not found" });
+      const gate = await assertTeacherOwnsCourse(userId, String(lesson.course_id));
+      if (!gate.ok) return res.status(403).json({ error: "Access denied" });
+      const title = String(lesson.title || "");
+      const desc = String(lesson.short_description || "").split("\n")[0];
+      const url = String(lesson.short_description || "").split("\n")[1] || "";
+      const isAudioDL = title.includes("Audio");
+      const isVideoDL = title.includes("Video") && !isAudioDL;
+      if (!isAudioDL && !isVideoDL) return res.status(400).json({ error: "Not an audio/video download lesson" });
+      const OUP_BASE = "https://elt.oup.com";
+      const CC_STR = "?cc=global&selLanguage=en";
+      const slugMatch = url.match(/\/student\/headway\/([^/?]+)\//);
+      const levelSlug = slugMatch ? slugMatch[1] : (url.match(/headway_([a-z]+)_students/) ? "beg" : "preint4");
+      const dlPage = `${OUP_BASE}/student/headway/${levelSlug}/download${CC_STR}`;
+      const zipLink = url ? `<p style="margin:10px 0 4px;font-size:12px">or download directly:</p><a href="${url}" target="_blank" rel="noopener noreferrer" style="font-size:12px;font-weight:600;text-decoration:underline">⬇ Direct ZIP download</a>` : "";
+      let html = "";
+      if (isAudioDL) {
+        html = `<div style="margin:0 auto;max-width:480px;padding:28px 24px;border:1.5px solid #99f6e4;border-radius:16px;background:linear-gradient(135deg,#f0fdfa 0%,#ccfbf1 100%);text-align:center;font-family:system-ui,sans-serif"><div style="font-size:40px;margin-bottom:10px">🎧</div><p style="margin:0 0 4px;color:#0f766e;font-size:17px;font-weight:700">${title}</p><p style="margin:0 0 6px;color:#115e59;font-size:13px">${desc}</p><p style="margin:0 0 20px;color:#0d9488;font-size:12px;background:#ccfbf1;display:inline-block;padding:4px 12px;border-radius:99px;border:1px solid #5eead4">📦 MP3 audio files</p><br/><a href="${dlPage}" target="_blank" rel="noopener noreferrer" style="display:inline-flex;align-items:center;gap:8px;background:#0d9488;color:#fff;padding:12px 28px;border-radius:10px;text-decoration:none;font-weight:700;font-size:14px">🔗 Open Downloads Page</a>${zipLink}<p style="margin:14px 0 0;color:#5eead4;font-size:11px">Oxford University Press · elt.oup.com</p></div>`;
+      } else {
+        html = `<div style="margin:0 auto;max-width:480px;padding:28px 24px;border:1.5px solid #bae6fd;border-radius:16px;background:linear-gradient(135deg,#f0f9ff 0%,#e0f2fe 100%);text-align:center;font-family:system-ui,sans-serif"><div style="font-size:40px;margin-bottom:10px">🎬</div><p style="margin:0 0 4px;color:#0369a1;font-size:17px;font-weight:700">${title}</p><p style="margin:0 0 6px;color:#075985;font-size:13px">${desc}</p><p style="margin:0 0 20px;color:#0284c7;font-size:12px;background:#e0f2fe;display:inline-block;padding:4px 12px;border-radius:99px;border:1px solid #7dd3fc">📦 MP4 video clips</p><br/><a href="${dlPage}" target="_blank" rel="noopener noreferrer" style="display:inline-flex;align-items:center;gap:8px;background:#0284c7;color:#fff;padding:12px 28px;border-radius:10px;text-decoration:none;font-weight:700;font-size:14px">🔗 Open Downloads Page</a>${zipLink}<p style="margin:14px 0 0;color:#7dd3fc;font-size:11px">Oxford University Press · elt.oup.com</p></div>`;
+      }
+      const { data: existing } = await supabaseAdmin.from("lesson_contents").select("id").eq("lesson_id", lessonId).maybeSingle();
+      if (existing?.id) {
+        await supabaseAdmin.from("lesson_contents").update({ text_content: html, content: html }).eq("id", existing.id);
+      } else {
+        await supabaseAdmin.from("lesson_contents").insert({ lesson_id: lessonId, type: "text", content_type: "text", text_content: html, content: html, position: 1 });
+      }
+      res.json({ success: true });
+    } catch (e: any) {
+      console.error("POST /api/teacher/lessons/:id/regenerate-content", e);
+      res.status(500).json({ error: e.message || "Server error" });
+    }
+  });
+
+  // ── Reset a student's progress (quiz attempts + lesson progress) ──────────
+  app.post("/api/teacher/students/:studentId/reset-progress", async (req: Request, res: Response) => {
+    try {
+      const caller = await assertAuthenticated(req, res);
+      if (!caller) return;
+      const studentId = req.params.studentId;
+      const userId = typeof req.body?.userId === "string" ? req.body.userId.trim() : "";
+      const courseId = typeof req.body?.courseId === "string" && req.body.courseId ? req.body.courseId.trim() : null;
+      if (!userId) return res.status(400).json({ error: "userId is required" });
+      const { data: teacherCourses } = await supabaseAdmin.from("courses").select("id").eq("teacher_id", userId);
+      const allowedIds = (teacherCourses || []).map((c: any) => String(c.id));
+      if (courseId && !allowedIds.includes(courseId)) return res.status(403).json({ error: "Access denied" });
+      const scopedCourseIds = courseId ? [courseId] : allowedIds;
+      const { data: quizzes } = await supabaseAdmin.from("quizzes").select("id").in("course_id", scopedCourseIds);
+      const quizIds = (quizzes || []).map((q: any) => String(q.id));
+      let deletedAttempts = 0;
+      if (quizIds.length) {
+        const { data: d } = await supabaseAdmin.from("quiz_attempts").delete().eq("student_id", studentId).in("quiz_id", quizIds).select("id");
+        deletedAttempts = d?.length ?? 0;
+      }
+      const { data: lessons } = await supabaseAdmin.from("lessons").select("id").in("course_id", scopedCourseIds);
+      const lessonIds = (lessons || []).map((l: any) => String(l.id));
+      let deletedProgress = 0;
+      if (lessonIds.length) {
+        const { data: d } = await supabaseAdmin.from("lesson_progress").delete().eq("student_id", studentId).in("lesson_id", lessonIds).select("id");
+        deletedProgress = d?.length ?? 0;
+      }
+      res.json({ success: true, deletedAttempts, deletedProgress });
+    } catch (e: any) {
+      console.error("POST /api/teacher/students/:studentId/reset-progress", e);
+      res.status(500).json({ error: e.message || "Server error" });
+    }
+  });
+
+  // ── Suggestion 7: Per-module completion dashboard ────────────────────────
+  app.get("/api/teacher/courses/:courseId/module-completion", async (req: Request, res: Response) => {
+    try {
+      const caller = await assertAuthenticated(req, res);
+      if (!caller) return;
+      if (caller.role !== "teacher" && caller.role !== "admin") {
+        return res.status(403).json({ error: "Forbidden: teacher role required" });
+      }
+      const courseId = String(req.params.courseId || "").trim();
+      if (!courseId) return res.status(400).json({ error: "courseId is required" });
+
+      const gate = await assertTeacherOwnsCourse(caller.userId, courseId);
+      if (!gate.ok) return res.status(403).json({ error: "Access denied" });
+
+      const [modulesRes, lessonsRes, courseRes] = await Promise.all([
+        supabaseAdmin.from("modules").select("id, title, order_index").eq("course_id", courseId).order("order_index"),
+        supabaseAdmin.from("lessons").select("id, module_id, title, status").eq("course_id", courseId).eq("status", "published"),
+        supabaseAdmin.from("courses").select("id, student_ids").eq("id", courseId).maybeSingle(),
+      ]);
+      if (modulesRes.error) throw modulesRes.error;
+      if (lessonsRes.error) throw lessonsRes.error;
+
+      const modules = modulesRes.data || [];
+      const lessons = lessonsRes.data || [];
+      const studentIds: string[] = Array.isArray(courseRes.data?.student_ids)
+        ? (courseRes.data.student_ids as string[]).filter(Boolean)
+        : [];
+
+      if (studentIds.length === 0 || lessons.length === 0) {
+        return res.json({ success: true, modules, studentCount: studentIds.length, completion: [] });
+      }
+
+      // Fetch all profiles for students
+      const profilesRes = await supabaseAdmin.from("profiles").select("id, display_name, email").in("id", studentIds);
+      const profiles = (profilesRes.data || []) as Array<{ id: string; display_name: string; email: string }>;
+
+      // Fetch all lesson progress for these lessons
+      const lessonIds = lessons.map((l: any) => String(l.id));
+      const progressRes = await supabaseAdmin
+        .from("lesson_progress")
+        .select("student_id, lesson_id, completed")
+        .in("lesson_id", lessonIds)
+        .in("student_id", studentIds);
+      const progressRows = (progressRes.data || []) as Array<{ student_id: string; lesson_id: string; completed: boolean }>;
+
+      // Build completion map: studentId -> lessonId -> completed
+      const completionMap: Record<string, Record<string, boolean>> = {};
+      for (const row of progressRows) {
+        const sid = String(row.student_id);
+        const lid = String(row.lesson_id);
+        if (!completionMap[sid]) completionMap[sid] = {};
+        completionMap[sid][lid] = Boolean(row.completed);
+      }
+
+      // Build lesson-to-module map
+      const lessonToModule: Record<string, string> = {};
+      for (const lesson of lessons) {
+        if (lesson.module_id) lessonToModule[String(lesson.id)] = String(lesson.module_id);
+      }
+
+      // Build per-student, per-module completion
+      const completion = profiles.map(profile => {
+        const sid = profile.id;
+        const studentProgress = completionMap[sid] || {};
+        const modulesProgress = modules.map((mod: any) => {
+          const modLessons = lessons.filter((l: any) => String(l.module_id) === String(mod.id));
+          const completedCount = modLessons.filter((l: any) => studentProgress[String(l.id)]).length;
+          return {
+            moduleId: String(mod.id),
+            moduleTitle: String(mod.title || ""),
+            total: modLessons.length,
+            completed: completedCount,
+            percent: modLessons.length > 0 ? Math.round((completedCount / modLessons.length) * 100) : 0,
+          };
+        });
+        const totalCompleted = modulesProgress.reduce((s, m) => s + m.completed, 0);
+        const totalLessons = lessons.length;
+        return {
+          studentId: sid,
+          studentName: String(profile.display_name || profile.email || sid),
+          studentEmail: String(profile.email || ""),
+          overallPercent: totalLessons > 0 ? Math.round((totalCompleted / totalLessons) * 100) : 0,
+          modules: modulesProgress,
+        };
+      });
+
+      return res.json({ success: true, modules, studentCount: studentIds.length, completion });
+    } catch (e: any) {
+      console.error("GET /api/teacher/courses/:courseId/module-completion", e);
+      return res.status(500).json({ error: e.message || "Server error" });
+    }
+  });
+
   // ── Teacher Lesson routes (service-role, bypasses RLS) ──────────────────
   app.get("/api/teacher/lessons", async (req, res) => {
     try {
@@ -5130,25 +5375,31 @@ When giving instructions, number each step clearly. Be precise and technical whe
 
             if (isAudioDL) {
               // ── 🎧 Audio Download ─────────────────────────────────────────────
+              const dlPage = `${OUP}/student/headway/${levelData.slug}/download${CC}`;
               html = `<div style="margin:0 auto;max-width:480px;padding:28px 24px;border:1.5px solid #99f6e4;border-radius:16px;background:linear-gradient(135deg,#f0fdfa 0%,#ccfbf1 100%);text-align:center;font-family:system-ui,sans-serif">
   <div style="font-size:40px;margin-bottom:10px">🎧</div>
   <p style="margin:0 0 4px;color:#0f766e;font-size:17px;font-weight:700">${title}</p>
   <p style="margin:0 0 6px;color:#115e59;font-size:13px">${desc}</p>
-  <p style="margin:0 0 20px;color:#0d9488;font-size:12px;background:#ccfbf1;display:inline-block;padding:4px 12px;border-radius:99px;border:1px solid #5eead4">📦 ZIP · MP3 audio files</p>
+  <p style="margin:0 0 20px;color:#0d9488;font-size:12px;background:#ccfbf1;display:inline-block;padding:4px 12px;border-radius:99px;border:1px solid #5eead4">📦 MP3 audio files · Unit ${unit.num}</p>
   <br/>
-  <a href="${url}" target="_blank" rel="noopener noreferrer" style="display:inline-flex;align-items:center;gap:8px;background:#0d9488;color:#fff;padding:12px 28px;border-radius:10px;text-decoration:none;font-weight:700;font-size:14px">⬇ Download Audio ZIP</a>
-  <p style="margin:14px 0 0;color:#5eead4;font-size:11px">Opens Oxford University Press · elt.oup.com</p>
+  <a href="${dlPage}" target="_blank" rel="noopener noreferrer" style="display:inline-flex;align-items:center;gap:8px;background:#0d9488;color:#fff;padding:12px 28px;border-radius:10px;text-decoration:none;font-weight:700;font-size:14px">🔗 Open Downloads Page</a>
+  <p style="margin:10px 0 4px;color:#0f766e;font-size:12px">or download unit audio directly:</p>
+  <a href="${url}" target="_blank" rel="noopener noreferrer" style="color:#0f766e;font-size:12px;font-weight:600;text-decoration:underline">⬇ Unit ${unit.num} Audio ZIP</a>
+  <p style="margin:12px 0 0;color:#5eead4;font-size:11px">Oxford University Press · elt.oup.com</p>
 </div>`;
             } else if (isVideoDL) {
               // ── 🎬 Video Download ─────────────────────────────────────────────
+              const dlPage = `${OUP}/student/headway/${levelData.slug}/download${CC}`;
               html = `<div style="margin:0 auto;max-width:480px;padding:28px 24px;border:1.5px solid #bae6fd;border-radius:16px;background:linear-gradient(135deg,#f0f9ff 0%,#e0f2fe 100%);text-align:center;font-family:system-ui,sans-serif">
   <div style="font-size:40px;margin-bottom:10px">🎬</div>
   <p style="margin:0 0 4px;color:#0369a1;font-size:17px;font-weight:700">${title}</p>
   <p style="margin:0 0 6px;color:#075985;font-size:13px">${desc}</p>
-  <p style="margin:0 0 20px;color:#0284c7;font-size:12px;background:#e0f2fe;display:inline-block;padding:4px 12px;border-radius:99px;border:1px solid #7dd3fc">📦 ZIP · MP4 video clips</p>
+  <p style="margin:0 0 20px;color:#0284c7;font-size:12px;background:#e0f2fe;display:inline-block;padding:4px 12px;border-radius:99px;border:1px solid #7dd3fc">📦 MP4 video clips · Unit ${unit.num}</p>
   <br/>
-  <a href="${url}" target="_blank" rel="noopener noreferrer" style="display:inline-flex;align-items:center;gap:8px;background:#0284c7;color:#fff;padding:12px 28px;border-radius:10px;text-decoration:none;font-weight:700;font-size:14px">⬇ Download Video ZIP</a>
-  <p style="margin:14px 0 0;color:#7dd3fc;font-size:11px">Opens Oxford University Press · elt.oup.com</p>
+  <a href="${dlPage}" target="_blank" rel="noopener noreferrer" style="display:inline-flex;align-items:center;gap:8px;background:#0284c7;color:#fff;padding:12px 28px;border-radius:10px;text-decoration:none;font-weight:700;font-size:14px">🔗 Open Downloads Page</a>
+  <p style="margin:10px 0 4px;color:#075985;font-size:12px">or download unit video directly:</p>
+  <a href="${url}" target="_blank" rel="noopener noreferrer" style="color:#0369a1;font-size:12px;font-weight:600;text-decoration:underline">⬇ Unit ${unit.num} Video ZIP</a>
+  <p style="margin:12px 0 0;color:#7dd3fc;font-size:11px">Oxford University Press · elt.oup.com</p>
 </div>`;
             } else if (isEE) {
               // ── 🎤 Everyday English ───────────────────────────────────────────
@@ -8125,6 +8376,80 @@ When giving instructions, number each step clearly. Be precise and technical whe
     }
   });
 
+  // ── Suggestion 5: CSV Student Enrollment into a class ─────────────────────
+  app.post('/api/teacher/classes/:classId/enroll-csv', async (req, res) => {
+    try {
+      const caller = await assertAuthenticated(req, res);
+      if (!caller) return;
+      if (caller.role !== 'teacher' && caller.role !== 'admin') {
+        return res.status(403).json({ error: 'Forbidden: teacher role required' });
+      }
+      const classId = String(req.params.classId || '').trim();
+      if (!classId) return res.status(400).json({ error: 'classId is required' });
+
+      // emails can be an array or a comma/newline-separated string
+      let rawEmails: string[] = [];
+      if (Array.isArray(req.body?.emails)) {
+        rawEmails = req.body.emails.map((e: any) => String(e).trim().toLowerCase()).filter(Boolean);
+      } else if (typeof req.body?.emails === 'string') {
+        rawEmails = req.body.emails.split(/[\n,;]+/).map((e: string) => e.trim().toLowerCase()).filter(Boolean);
+      }
+      if (rawEmails.length === 0) return res.status(400).json({ error: 'No emails provided' });
+
+      // Get class row
+      const classSnap = await supabaseAdmin.from('classes').select('id, teacher_id, student_ids, course_id').eq('id', classId).maybeSingle();
+      if (classSnap.error) throw classSnap.error;
+      const cls = classSnap.data as any;
+      if (!cls) return res.status(404).json({ error: 'Class not found' });
+
+      // Resolve teacher access
+      const teacherIdCandidates = await getTeacherIdCandidates(caller.userId);
+      const scopedIds = teacherIdCandidates.length > 0 ? teacherIdCandidates : [caller.userId];
+      if (cls.teacher_id && !scopedIds.includes(String(cls.teacher_id))) {
+        return res.status(403).json({ error: 'Access denied to this class' });
+      }
+
+      // Look up profiles by email
+      const profilesRes = await supabaseAdmin.from('profiles').select('id, email, role').in('email', rawEmails);
+      if (profilesRes.error) throw profilesRes.error;
+      const profiles = (profilesRes.data || []) as Array<{ id: string; email: string; role: string }>;
+
+      const foundEmails = new Set(profiles.map(p => p.email.toLowerCase()));
+      const notFound = rawEmails.filter(e => !foundEmails.has(e));
+      const studentProfiles = profiles.filter(p => p.role === 'student' || p.role === 'admin');
+
+      // Add to class
+      const existingIds: string[] = Array.isArray(cls.student_ids) ? cls.student_ids.map((s: any) => String(s)) : [];
+      const newIds = studentProfiles.map(p => p.id).filter(id => !existingIds.includes(id));
+      const mergedIds = [...new Set([...existingIds, ...newIds])];
+
+      const classUpdate = await supabaseAdmin.from('classes').update({ student_ids: mergedIds }).eq('id', classId);
+      if (classUpdate.error) throw classUpdate.error;
+
+      // Also enroll in the linked course if present
+      if (cls.course_id && newIds.length > 0) {
+        const courseSnap = await supabaseAdmin.from('courses').select('id, student_ids, total_students').eq('id', String(cls.course_id)).maybeSingle();
+        if (!courseSnap.error && courseSnap.data) {
+          const course = courseSnap.data as any;
+          const courseStudentIds: string[] = Array.isArray(course.student_ids) ? course.student_ids.map((s: any) => String(s)) : [];
+          const nextCourseIds = [...new Set([...courseStudentIds, ...newIds])];
+          await supabaseAdmin.from('courses').update({ student_ids: nextCourseIds, total_students: nextCourseIds.length }).eq('id', String(cls.course_id));
+        }
+      }
+
+      return res.json({
+        success: true,
+        enrolled: newIds.length,
+        alreadyEnrolled: existingIds.filter(id => studentProfiles.map(p => p.id).includes(id)).length,
+        notFound,
+        notStudents: profiles.filter(p => p.role !== 'student' && p.role !== 'admin').map(p => p.email),
+      });
+    } catch (e: any) {
+      console.error('POST /api/teacher/classes/:classId/enroll-csv', e);
+      return res.status(500).json({ error: e?.message || 'Failed to enroll students' });
+    }
+  });
+
   // ── STUDENT LIVE SESSIONS ───────────────────────────────────
 
   // Return all published courses belonging to the student's assigned teacher.
@@ -9414,7 +9739,50 @@ When giving instructions, number each step clearly. Be precise and technical whe
         : 0;
 
       const upsertRes = await upsertLessonProgressWithFallback(caller.userId, lessonId, completed, lastVideoPosition);
-      return res.json({ success: true, progress: upsertRes.row, storage: upsertRes.storage });
+
+      // --- Suggestion 9: Auto-issue certificate when all lessons complete ---
+      let autoCertificateIssued = false;
+      if (completed) {
+        try {
+          const lessonSnap = await supabaseAdmin.from('lessons').select('course_id').eq('id', lessonId).maybeSingle();
+          const courseId = lessonSnap.data?.course_id ? String(lessonSnap.data.course_id) : '';
+          if (courseId) {
+            const allLessonsRes = await supabaseAdmin.from('lessons').select('id').eq('course_id', courseId).eq('status', 'published');
+            const allLessonIds = (allLessonsRes.data || []).map((l: any) => String(l.id));
+            if (allLessonIds.length > 0) {
+              const progressRes = await fetchLessonProgressRows(caller.userId, allLessonIds);
+              const completedIds = new Set(
+                (progressRes.rows || [])
+                  .filter((p: any) => toLessonCompleted(p))
+                  .map((p: any) => String(p.lesson_id))
+              );
+              const allComplete = allLessonIds.every(id => completedIds.has(id));
+              if (allComplete) {
+                const existingCert = await supabaseAdmin
+                  .from('certificates')
+                  .select('id')
+                  .eq('student_id', caller.userId)
+                  .eq('course_id', courseId)
+                  .maybeSingle();
+                if (!existingCert.error && !existingCert.data) {
+                  await supabaseAdmin.from('certificates').insert({
+                    student_id: caller.userId,
+                    course_id: courseId,
+                    status: 'issued',
+                    issued_date: new Date().toISOString(),
+                  });
+                  autoCertificateIssued = true;
+                  console.log(`[auto-cert] Certificate issued student=${caller.userId} course=${courseId}`);
+                }
+              }
+            }
+          }
+        } catch (certErr: any) {
+          console.warn('[auto-cert] Failed to issue certificate:', certErr?.message);
+        }
+      }
+
+      return res.json({ success: true, progress: upsertRes.row, storage: upsertRes.storage, autoCertificateIssued });
     } catch (e: any) {
       return res.status(500).json({ error: e?.message || 'Failed to update lesson progress' });
     }

@@ -16,7 +16,7 @@ import {
   School, Plus, Search, Filter, Users, BookOpen, CalendarDays,
   MoreHorizontal, X, Pencil, Trash2, Eye,
   Clock, CheckCircle2, AlertCircle, Archive, TrendingUp,
-  Link2, Copy, Check,
+  Link2, Copy, Check, Upload,
 } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import StyledSelect from '../../components/ui/StyledSelect';
@@ -92,6 +92,10 @@ export default function TeacherClasses() {
   const [viewClass, setViewClass] = useState<ClassRecord | null>(null);
   const [activeMenu, setActiveMenu] = useState<string | null>(null);
   const [copiedInvite, setCopiedInvite] = useState<string | null>(null);
+  const [csvClass, setCsvClass] = useState<ClassRecord | null>(null);
+  const [csvEmails, setCsvEmails] = useState('');
+  const [csvEnrolling, setCsvEnrolling] = useState(false);
+  const [csvResult, setCsvResult] = useState<{ enrolled: number; notFound: string[]; notStudents: string[] } | null>(null);
 
   useEffect(() => {
     const init = async () => {
@@ -262,6 +266,27 @@ export default function TeacherClasses() {
     setActiveMenu(null);
   };
 
+  const handleCsvEnroll = async () => {
+    if (!csvClass) return;
+    setCsvEnrolling(true);
+    setCsvResult(null);
+    try {
+      const res = await authFetch(`/api/teacher/classes/${encodeURIComponent(csvClass.id)}/enroll-csv`, {
+        method: 'POST',
+        body: JSON.stringify({ emails: csvEmails }),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json?.error || 'Enrollment failed');
+      setCsvResult({ enrolled: json.enrolled, notFound: json.notFound || [], notStudents: json.notStudents || [] });
+      toast.success(`Enrolled ${json.enrolled} student${json.enrolled !== 1 ? 's' : ''}`);
+      if (teacherId) fetchData(teacherId);
+    } catch (e: any) {
+      toast.error(e?.message || 'Failed to enroll students');
+    } finally {
+      setCsvEnrolling(false);
+    }
+  };
+
   const handleStatusChange = async (cls: ClassRecord, status: ClassStatus) => {
     try {
       const { error } = await supabase.from('classes').update({ status }).eq('id', cls.id);
@@ -429,6 +454,14 @@ export default function TeacherClasses() {
                           title="Copy invite link"
                         >
                           {copiedInvite === cls.id ? <Check className="w-4 h-4 text-emerald-500" /> : <Link2 className="w-4 h-4" />}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => { setCsvClass(cls); setCsvEmails(''); setCsvResult(null); }}
+                          className="p-2 rounded-lg text-slate-400 hover:text-teal-600 hover:bg-teal-50 transition-all"
+                          title="Enroll students via CSV/email list"
+                        >
+                          <Upload className="w-4 h-4" />
                         </button>
                         <button
                           type="button"
@@ -689,6 +722,70 @@ export default function TeacherClasses() {
                 <button
                   type="button"
                   onClick={() => setViewClass(null)}
+                  className="px-4 py-2.5 bg-slate-100 text-slate-600 rounded-xl font-semibold text-sm hover:bg-slate-200 transition-all"
+                >
+                  Close
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* CSV Enrollment Modal */}
+      {csvClass && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl w-full max-w-md overflow-hidden shadow-2xl border border-slate-100">
+            <div className="px-6 py-5 border-b border-slate-100 flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className="w-9 h-9 bg-teal-50 rounded-xl flex items-center justify-center">
+                  <Upload className="w-[18px] h-[18px] text-teal-600" />
+                </div>
+                <div>
+                  <h2 className="text-base font-bold text-slate-900">Enroll by Email</h2>
+                  <p className="text-xs text-slate-400 mt-0.5">{csvClass.name}</p>
+                </div>
+              </div>
+              <button type="button" onClick={() => { setCsvClass(null); setCsvResult(null); }} className="p-2 hover:bg-slate-100 rounded-xl transition-colors">
+                <X className="w-4 h-4 text-slate-400" />
+              </button>
+            </div>
+            <div className="px-6 py-5 space-y-4">
+              <div>
+                <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1.5">Student Emails</label>
+                <textarea
+                  rows={6}
+                  value={csvEmails}
+                  onChange={e => setCsvEmails(e.target.value)}
+                  placeholder={"student1@example.com\nstudent2@example.com\nor comma-separated"}
+                  className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm font-mono focus:outline-none focus:ring-2 focus:ring-teal-500/30 focus:border-teal-400 transition-all resize-none"
+                />
+                <p className="text-xs text-slate-400 mt-1">One email per line, or comma/semicolon separated. Students must already have accounts.</p>
+              </div>
+              {csvResult && (
+                <div className="rounded-xl border border-slate-100 bg-slate-50 p-3 space-y-1 text-sm">
+                  <p className="font-semibold text-emerald-600">✓ {csvResult.enrolled} student{csvResult.enrolled !== 1 ? 's' : ''} enrolled</p>
+                  {csvResult.notFound.length > 0 && (
+                    <p className="text-amber-600 text-xs">Not found: {csvResult.notFound.join(', ')}</p>
+                  )}
+                  {csvResult.notStudents.length > 0 && (
+                    <p className="text-slate-500 text-xs">Not student role: {csvResult.notStudents.join(', ')}</p>
+                  )}
+                </div>
+              )}
+              <div className="flex gap-3 pt-1">
+                <button
+                  type="button"
+                  onClick={() => void handleCsvEnroll()}
+                  disabled={csvEnrolling || !csvEmails.trim()}
+                  className="flex-1 flex items-center justify-center gap-2 px-4 py-2.5 bg-teal-600 text-white rounded-xl font-semibold text-sm hover:bg-teal-700 disabled:opacity-50 transition-all shadow-md shadow-teal-200"
+                >
+                  {csvEnrolling ? <span className="w-4 h-4 rounded-full border-2 border-white border-t-transparent animate-spin" /> : <Upload className="w-4 h-4" />}
+                  {csvEnrolling ? 'Enrolling...' : 'Enroll Students'}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => { setCsvClass(null); setCsvResult(null); }}
                   className="px-4 py-2.5 bg-slate-100 text-slate-600 rounded-xl font-semibold text-sm hover:bg-slate-200 transition-all"
                 >
                   Close
