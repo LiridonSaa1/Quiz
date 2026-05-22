@@ -4616,6 +4616,186 @@ When giving instructions, number each step clearly. Be precise and technical whe
     }
   });
 
+  // Headway auto-populate: creates 12 modules × 7 lessons in 3 batch DB operations
+  app.post("/api/teacher/courses/:courseId/headway-populate", async (req: Request, res: Response) => {
+    try {
+      const caller = await assertAuthenticated(req, res);
+      if (!caller) return;
+      const { courseId } = req.params;
+      const userId = typeof req.body?.userId === "string" ? req.body.userId.trim() : "";
+      const level   = typeof req.body?.level  === "string" ? req.body.level.trim()  : "";
+      if (!userId) return res.status(400).json({ error: "userId is required" });
+      if (!level)  return res.status(400).json({ error: "level is required" });
+      if (!canAccessTeacherCourses(caller, userId)) return res.status(403).json({ error: "Forbidden" });
+
+      const gate = await assertTeacherOwnsCourse(userId, courseId);
+      if (!gate.ok) return res.status(403).json({ error: "You do not have access to this course." });
+
+      const UNIT_LESSONS = [
+        { suffix: "Grammar",          type: "video" },
+        { suffix: "Vocabulary",       type: "video" },
+        { suffix: "Reading",          type: "text"  },
+        { suffix: "Listening",        type: "video" },
+        { suffix: "Speaking",         type: "video" },
+        { suffix: "Writing",          type: "text"  },
+        { suffix: "Everyday English", type: "video" },
+      ];
+
+      const CURRICULUM: Record<string, { title: string; description: string }[]> = {
+        "Beginner": [
+          { title: "Unit 1 — Hello!",                 description: "Greetings, introductions and basic personal information." },
+          { title: "Unit 2 — Your world",              description: "Countries, nationalities and describing where you are from." },
+          { title: "Unit 3 — All about you!",          description: "Personal information, jobs and family." },
+          { title: "Unit 4 — Family and friends",      description: "Talking about family members and describing people." },
+          { title: "Unit 5 — It's my life!",           description: "Daily routines, likes and dislikes." },
+          { title: "Unit 6 — Every day",               description: "Everyday activities and telling the time." },
+          { title: "Unit 7 — Places I like",           description: "Describing places and talking about towns and cities." },
+          { title: "Unit 8 — Clothes and colours",     description: "Shopping for clothes, colours and describing what people wear." },
+          { title: "Unit 9 — Food and drink",          description: "Ordering food, talking about meals and cooking." },
+          { title: "Unit 10 — I can do it!",           description: "Talking about abilities and making requests." },
+          { title: "Unit 11 — The past",               description: "Talking about past events and telling life stories." },
+          { title: "Unit 12 — Thank you and goodbye!", description: "Making plans, saying goodbye and reviewing the course." },
+        ],
+        "Elementary": [
+          { title: "Unit 1 — Getting to know you",           description: "Meeting people and sharing personal information." },
+          { title: "Unit 2 — Work hard, play hard!",         description: "Jobs, routines and leisure activities." },
+          { title: "Unit 3 — It's a wonderful world!",       description: "Countries, languages and world knowledge." },
+          { title: "Unit 4 — Eat, drink and be merry!",      description: "Food, drink and eating out." },
+          { title: "Unit 5 — A sense of history",            description: "Historical events and biographies." },
+          { title: "Unit 6 — Time off",                      description: "Free time, hobbies and weekend activities." },
+          { title: "Unit 7 — Passions!",                     description: "Talking about things you love and feel strongly about." },
+          { title: "Unit 8 — How things began",              description: "Inventions and the history of everyday things." },
+          { title: "Unit 9 — Changing times",                description: "Changes in society, life and technology." },
+          { title: "Unit 10 — How does that make you feel?", description: "Emotions, feelings and expressing opinions." },
+          { title: "Unit 11 — In my life",                   description: "Personal experiences and important life events." },
+          { title: "Unit 12 — Looking ahead",                description: "Future plans, hopes and ambitions." },
+        ],
+        "Pre-Intermediate": [
+          { title: "Unit 1 — No place like home",        description: "Homes, houses and living spaces." },
+          { title: "Unit 2 — Whatever makes you happy!", description: "Happiness, lifestyle and what matters to people." },
+          { title: "Unit 3 — What happened next?",       description: "Telling stories and narrative past tenses." },
+          { title: "Unit 4 — Doing the right thing",     description: "Rules, obligations and moral dilemmas." },
+          { title: "Unit 5 — On the road",               description: "Travel, transport and holiday experiences." },
+          { title: "Unit 6 — Life's great events",       description: "Celebrations, milestones and life events." },
+          { title: "Unit 7 — Learning for life",         description: "Education, learning styles and schools." },
+          { title: "Unit 8 — A matter of opinion",       description: "Giving opinions, agreeing and disagreeing." },
+          { title: "Unit 9 — Buying and selling",        description: "Shopping, money and consumer culture." },
+          { title: "Unit 10 — All things high-tech",     description: "Technology, gadgets and the digital world." },
+          { title: "Unit 11 — What a story!",            description: "News stories, media and storytelling." },
+          { title: "Unit 12 — It's never too late!",     description: "Ambitions, second chances and life goals." },
+        ],
+        "Intermediate": [
+          { title: "Unit 1 — A world of difference",         description: "Comparing cultures and ways of life around the world." },
+          { title: "Unit 2 — Buying and selling",            description: "The world of commerce, advertising and consumerism." },
+          { title: "Unit 3 — What is beauty?",               description: "Concepts of beauty, art and aesthetic judgement." },
+          { title: "Unit 4 — Never stop learning",           description: "Lifelong learning, education systems and study skills." },
+          { title: "Unit 5 — A short history of sport",      description: "Sports history, famous athletes and competition." },
+          { title: "Unit 6 — The right person for the job",  description: "Work, careers, job applications and interviews." },
+          { title: "Unit 7 — Cultures meeting",              description: "Cross-cultural communication and global society." },
+          { title: "Unit 8 — It's a crime",                  description: "Crime, justice and the law." },
+          { title: "Unit 9 — Travel the world",              description: "Travel experiences, tourism and world destinations." },
+          { title: "Unit 10 — Our future",                   description: "Environmental issues, predictions and global challenges." },
+          { title: "Unit 11 — Telling stories",              description: "Literature, fiction and the art of storytelling." },
+          { title: "Unit 12 — Music of the night",           description: "Music, entertainment and cultural expression." },
+        ],
+        "Upper-Intermediate": [
+          { title: "Unit 1 — My world",                      description: "Personal identity, background and modern life." },
+          { title: "Unit 2 — All in the mind?",              description: "Psychology, memory and the human brain." },
+          { title: "Unit 3 — Getting and spending",          description: "Money, economics and consumerism." },
+          { title: "Unit 4 — It depends how you look at it", description: "Different perspectives and critical thinking." },
+          { title: "Unit 5 — Clues to the past",             description: "History, archaeology and ancient civilizations." },
+          { title: "Unit 6 — Writing and speaking",          description: "Communication skills — written and spoken English." },
+          { title: "Unit 7 — Success and failure",           description: "Ambition, achievement and learning from mistakes." },
+          { title: "Unit 8 — First world problems?",         description: "Modern society, inequality and global issues." },
+          { title: "Unit 9 — Places and communities",        description: "Urban and rural life, community and belonging." },
+          { title: "Unit 10 — Science and technology",       description: "Scientific discoveries and technological innovation." },
+          { title: "Unit 11 — Language and communication",   description: "How language works and how we communicate." },
+          { title: "Unit 12 — The big picture",              description: "Global issues, the future and big ideas." },
+        ],
+        "Advanced": [
+          { title: "Unit 1 — Meeting people and places",   description: "First impressions, social interactions and places." },
+          { title: "Unit 2 — Getting on and getting away", description: "Relationships, travel and escaping everyday life." },
+          { title: "Unit 3 — What's in the news?",         description: "Media literacy, news reporting and current events." },
+          { title: "Unit 4 — Hard times",                  description: "Challenges, adversity and resilience." },
+          { title: "Unit 5 — Divided loyalties",           description: "Conflicting values, ethics and moral choices." },
+          { title: "Unit 6 — I love literature",           description: "English literature, books and literary analysis." },
+          { title: "Unit 7 — Talking business",            description: "Business English, the economy and entrepreneurship." },
+          { title: "Unit 8 — Looking at language",         description: "Linguistics, language evolution and usage." },
+          { title: "Unit 9 — It takes all sorts...",       description: "Personality types, human behaviour and society." },
+          { title: "Unit 10 — Nothing but the truth",      description: "Truth, deception, trust and honesty." },
+          { title: "Unit 11 — Over to you!",               description: "Independent learning, projects and presentations." },
+          { title: "Unit 12 — Life goes on",               description: "Reflecting on language learning, the future and change." },
+        ],
+      };
+
+      const units = CURRICULUM[level];
+      if (!units) return res.status(400).json({ error: `Unknown Headway level: "${level}"` });
+
+      const slugify = (s: string) =>
+        s.toLowerCase().replace(/[^\w\s-]/g, "").replace(/\s+/g, "-").replace(/-+/g, "-").trim();
+
+      // ── Step 1: batch-insert all 12 modules ─────────────────────────────────
+      const moduleRows = units.map((u, i) => ({
+        course_id:   courseId,
+        title:       u.title,
+        slug:        slugify(u.title),
+        description: u.description,
+        order:       i + 1,
+        status:      "active",
+      }));
+
+      const { data: createdModules, error: modErr } = await supabaseAdmin
+        .from("modules")
+        .insert(moduleRows)
+        .select("id, order");
+
+      if (modErr) {
+        const msg = [modErr.message, modErr.details, modErr.hint].filter(Boolean).join(" — ");
+        return res.status(400).json({ error: msg || "Failed to create modules" });
+      }
+      if (!createdModules || createdModules.length === 0) {
+        return res.status(400).json({ error: "Modules were not created" });
+      }
+
+      // ── Step 2: build all 84 lesson rows ────────────────────────────────────
+      const lessonRows: Record<string, unknown>[] = [];
+      for (const mod of createdModules) {
+        const unitIdx = (Number(mod.order) || 1) - 1;
+        const unitTitle = units[unitIdx]?.title ?? `Unit ${mod.order}`;
+        UNIT_LESSONS.forEach((l, j) => {
+          lessonRows.push({
+            course_id:        courseId,
+            module_id:        mod.id,
+            title:            `${unitTitle} — ${l.suffix}`,
+            slug:             slugify(`${unitTitle}-${l.suffix}-${mod.id}`),
+            type:             l.type,
+            order:            j + 1,
+            status:           "published",
+            duration_minutes: 0,
+            is_free_preview:  j === 0,
+          });
+        });
+      }
+
+      // ── Step 3: batch-insert all 84 lessons ──────────────────────────────────
+      const { error: lessonErr } = await supabaseAdmin.from("lessons").insert(lessonRows);
+      if (lessonErr) {
+        const msg = [lessonErr.message, lessonErr.details, lessonErr.hint].filter(Boolean).join(" — ");
+        return res.status(400).json({ error: msg || "Failed to create lessons" });
+      }
+
+      res.json({
+        success:  true,
+        modules:  createdModules.length,
+        lessons:  lessonRows.length,
+        level,
+      });
+    } catch (e: any) {
+      console.error("POST /api/teacher/courses/:courseId/headway-populate", e);
+      res.status(500).json({ error: e?.message || "Server error" });
+    }
+  });
+
   app.patch("/api/teacher/lessons/:id", async (req, res) => {
     try {
       const caller = await assertAuthenticated(req, res);
