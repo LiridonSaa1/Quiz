@@ -11,3 +11,9 @@ id = "EkyusWo6_j7CQdOtclgbB"
 uri = "file://artifacts/mockup-sandbox/public/images/teacher-avatar.jpg"
 type = "image"
 title = "professional headshot of a friendly teacher looking at camera warm lighting"
+
+[[outputs]]
+id = "O8gAg-zv2r-WDrbQ-Keg0"
+uri = "file://sql/fresh_database.txt"
+type = "text"
+title = "QuizMaster — Fresh Database SQL"
