@@ -5,7 +5,8 @@ import LoadingButton from '../../components/ui/LoadingButton';
 import { useTranslation } from 'react-i18next';
 import {
   Plus, Search, Layers, Trash2, Edit2,
-  BookOpen, X, Save, PlayCircle, ChevronRight, HelpCircle, AlertTriangle, Calendar
+  BookOpen, X, Save, PlayCircle, ChevronRight, HelpCircle, AlertTriangle, Calendar,
+  Download, Globe, CheckCircle2, ChevronDown
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { Module, Course } from '../../types';
@@ -99,6 +100,11 @@ export default function TeacherModules() {
   const [saving, setSaving] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<Module | null>(null);
   const [deleting, setDeleting] = useState(false);
+  const [showHeadwayModal, setShowHeadwayModal] = useState(false);
+  const [headwayLevel, setHeadwayLevel] = useState('Beginner');
+  const [headwayCourseId, setHeadwayCourseId] = useState('');
+  const [headwayImporting, setHeadwayImporting] = useState(false);
+  const [headwayDone, setHeadwayDone] = useState<{ modules: number; lessons: number } | null>(null);
   const { can } = useTeacherPermissions();
 
   const fetchData = async () => {
@@ -332,6 +338,35 @@ export default function TeacherModules() {
     }
   };
 
+  const openHeadwayModal = () => {
+    setHeadwayDone(null);
+    setHeadwayCourseId(courses.length === 1 ? courses[0].id : '');
+    setHeadwayLevel('Beginner');
+    setShowHeadwayModal(true);
+  };
+
+  const handleHeadwayImport = async () => {
+    if (!headwayCourseId) { toast.error('Please select a course'); return; }
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session) { toast.error('Not signed in'); return; }
+    setHeadwayImporting(true);
+    try {
+      const res = await authFetch(`/api/teacher/courses/${encodeURIComponent(headwayCourseId)}/headway-populate`, {
+        method: 'POST',
+        body: JSON.stringify({ userId: session.user.id, level: headwayLevel }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(json?.error || 'Import failed');
+      setHeadwayDone({ modules: json.modules ?? 0, lessons: json.lessons ?? 0 });
+      toast.success(`Headway ${headwayLevel} imported — ${json.modules} modules, ${json.lessons} lessons`);
+      fetchData();
+    } catch (e: any) {
+      toast.error(e?.message || 'Import failed');
+    } finally {
+      setHeadwayImporting(false);
+    }
+  };
+
   const handleDelete = (mod: Module) => {
     setDeleteTarget(mod);
   };
@@ -448,20 +483,39 @@ export default function TeacherModules() {
                     {t('modules.modulesDesc')}
                   </p>
                 </div>
-                {can('actions.teacher.modules.manage') && <motion.button
-                  onClick={openCreate}
-                  disabled={courses.length === 0}
-                  whileHover={{ scale: 1.04, y: -2 }}
-                  whileTap={{ scale: 0.97 }}
-                  className="inline-flex items-center gap-2 px-6 py-3 rounded-2xl font-bold text-sm text-white shrink-0 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
-                  style={{
-                    background: 'linear-gradient(135deg, #818cf8 0%, #a78bfa 100%)',
-                    boxShadow: '0 8px 32px rgba(139,92,246,0.45), 0 2px 8px rgba(0,0,0,0.15)',
-                  }}
-                >
-                  <Plus className="w-4 h-4" />
-                  {t('modules.createModule')}
-                </motion.button>}
+                {can('actions.teacher.modules.manage') && (
+                  <div className="flex flex-wrap gap-3 shrink-0">
+                    <motion.button
+                      onClick={openHeadwayModal}
+                      disabled={courses.length === 0}
+                      whileHover={{ scale: 1.04, y: -2 }}
+                      whileTap={{ scale: 0.97 }}
+                      className="inline-flex items-center gap-2 px-5 py-3 rounded-2xl font-bold text-sm text-white disabled:opacity-50 disabled:cursor-not-allowed transition-all"
+                      style={{
+                        background: 'linear-gradient(135deg, #1e3a5f 0%, #1565c0 100%)',
+                        boxShadow: '0 8px 32px rgba(21,101,192,0.4), 0 2px 8px rgba(0,0,0,0.15)',
+                      }}
+                      title="Import Oxford Headway curriculum"
+                    >
+                      <Globe className="w-4 h-4" />
+                      Import Headway
+                    </motion.button>
+                    <motion.button
+                      onClick={openCreate}
+                      disabled={courses.length === 0}
+                      whileHover={{ scale: 1.04, y: -2 }}
+                      whileTap={{ scale: 0.97 }}
+                      className="inline-flex items-center gap-2 px-6 py-3 rounded-2xl font-bold text-sm text-white disabled:opacity-50 disabled:cursor-not-allowed transition-all"
+                      style={{
+                        background: 'linear-gradient(135deg, #818cf8 0%, #a78bfa 100%)',
+                        boxShadow: '0 8px 32px rgba(139,92,246,0.45), 0 2px 8px rgba(0,0,0,0.15)',
+                      }}
+                    >
+                      <Plus className="w-4 h-4" />
+                      {t('modules.createModule')}
+                    </motion.button>
+                  </div>
+                )}
               </div>
             </div>
           </div>
@@ -937,6 +991,154 @@ export default function TeacherModules() {
       </AnimatePresence>
 
       {/* ── Delete Confirmation Modal ── */}
+      {/* Headway Import Modal */}
+      <AnimatePresence>
+        {showHeadwayModal && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[60] flex items-center justify-center p-4"
+            onClick={() => !headwayImporting && setShowHeadwayModal(false)}
+          >
+            <motion.div
+              initial={{ opacity: 0, scale: 0.9, y: 24 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.9, y: 24 }}
+              transition={{ type: 'spring', stiffness: 300, damping: 28 }}
+              className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden"
+              onClick={e => e.stopPropagation()}
+            >
+              {/* Header stripe */}
+              <div className="h-1.5 w-full" style={{ background: 'linear-gradient(90deg,#1565c0,#42a5f5)' }} />
+              <div className="p-6">
+                {/* Logo row */}
+                <div className="flex items-center gap-3 mb-5">
+                  <div className="w-12 h-12 rounded-xl flex items-center justify-center shrink-0"
+                    style={{ background: 'linear-gradient(135deg,#1e3a5f,#1565c0)' }}>
+                    <Globe className="w-6 h-6 text-white" />
+                  </div>
+                  <div>
+                    <h3 className="text-base font-bold text-slate-900">Import Oxford Headway</h3>
+                    <p className="text-xs text-slate-500">Creates modules, lessons &amp; quizzes from the Oxford curriculum</p>
+                  </div>
+                  <button
+                    type="button"
+                    disabled={headwayImporting}
+                    onClick={() => setShowHeadwayModal(false)}
+                    className="ml-auto p-2 rounded-xl hover:bg-slate-100 transition-colors disabled:opacity-40"
+                  >
+                    <X className="w-4 h-4 text-slate-500" />
+                  </button>
+                </div>
+
+                {headwayDone ? (
+                  /* Success state */
+                  <div className="text-center py-4">
+                    <div className="w-16 h-16 rounded-2xl flex items-center justify-center mx-auto mb-4"
+                      style={{ background: 'linear-gradient(135deg,#d1fae5,#a7f3d0)' }}>
+                      <CheckCircle2 className="w-8 h-8 text-emerald-600" />
+                    </div>
+                    <p className="text-lg font-bold text-slate-900 mb-1">Import complete!</p>
+                    <p className="text-sm text-slate-500 mb-1">
+                      <span className="font-semibold text-slate-700">{headwayDone.modules}</span> modules and{' '}
+                      <span className="font-semibold text-slate-700">{headwayDone.lessons}</span> lessons created
+                    </p>
+                    <p className="text-xs text-slate-400 mb-6">Each lesson links to the real Oxford exercise page</p>
+                    <button
+                      type="button"
+                      onClick={() => setShowHeadwayModal(false)}
+                      className="px-6 py-2.5 rounded-xl text-sm font-semibold text-white transition-all"
+                      style={{ background: 'linear-gradient(135deg,#1565c0,#42a5f5)' }}
+                    >
+                      Done
+                    </button>
+                  </div>
+                ) : (
+                  /* Form state */
+                  <div className="space-y-4">
+                    {/* Course selector */}
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-600 mb-1.5">Course</label>
+                      <div className="relative">
+                        <select
+                          value={headwayCourseId}
+                          onChange={e => setHeadwayCourseId(e.target.value)}
+                          disabled={headwayImporting}
+                          className="w-full appearance-none bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 text-sm font-medium text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500 pr-9 disabled:opacity-50"
+                        >
+                          <option value="">Select a course…</option>
+                          {courses.map(c => (
+                            <option key={c.id} value={c.id}>{c.name || c.title || 'Untitled'}</option>
+                          ))}
+                        </select>
+                        <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 pointer-events-none" />
+                      </div>
+                    </div>
+
+                    {/* Level selector */}
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-600 mb-1.5">Level</label>
+                      <div className="grid grid-cols-2 gap-2">
+                        {['Beginner','Elementary','Pre-Intermediate','Intermediate','Upper-Intermediate','Advanced'].map(lvl => (
+                          <button
+                            key={lvl}
+                            type="button"
+                            disabled={headwayImporting}
+                            onClick={() => setHeadwayLevel(lvl)}
+                            className={`px-3 py-2 rounded-xl text-xs font-semibold transition-all border ${
+                              headwayLevel === lvl
+                                ? 'border-blue-600 bg-blue-600 text-white shadow'
+                                : 'border-slate-200 bg-slate-50 text-slate-600 hover:border-blue-400 hover:bg-blue-50'
+                            } disabled:opacity-50`}
+                          >
+                            {lvl}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* Unit count info */}
+                    <div className="rounded-xl bg-blue-50 border border-blue-100 px-4 py-3 text-xs text-blue-800 flex items-start gap-2">
+                      <BookOpen className="w-4 h-4 text-blue-500 shrink-0 mt-0.5" />
+                      <span>
+                        {headwayLevel === 'Beginner' ? '14 units' : '12 units'} will be created as modules.
+                        Each unit gets Grammar, Vocabulary, Everyday English, and Audio/Video download lessons — all linked to the official Oxford exercise pages.
+                        {headwayLevel === 'Beginner' && ' Audio &amp; video ZIP downloads are included for every unit.'}
+                      </span>
+                    </div>
+
+                    <div className="flex gap-3 pt-1">
+                      <button
+                        type="button"
+                        disabled={headwayImporting}
+                        onClick={() => setShowHeadwayModal(false)}
+                        className="flex-1 py-2.5 rounded-xl text-sm font-semibold text-slate-600 bg-slate-100 hover:bg-slate-200 transition-all disabled:opacity-50"
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        type="button"
+                        disabled={headwayImporting || !headwayCourseId}
+                        onClick={() => void handleHeadwayImport()}
+                        className="flex-1 py-2.5 rounded-xl text-sm font-semibold text-white transition-all disabled:opacity-60 flex items-center justify-center gap-2"
+                        style={{ background: 'linear-gradient(135deg,#1565c0,#42a5f5)' }}
+                      >
+                        {headwayImporting ? (
+                          <><span className="w-4 h-4 rounded-full border-2 border-white border-t-transparent animate-spin" />Importing…</>
+                        ) : (
+                          <><Download className="w-4 h-4" />Import</>
+                        )}
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       <AnimatePresence>
         {deleteTarget && (
           <motion.div
