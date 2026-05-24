@@ -6,10 +6,12 @@ import { supabase } from '../supabase';
 import { apiUrl } from '../lib/apiUrl';
 import { isProfileAccessAllowed } from '../lib/profileAccess';
 import LanguageDropdown from '../components/LanguageDropdown';
+import { usePWAInstall } from '../hooks/usePWAInstall';
 import {
   Mail, Lock, Shield, GraduationCap,
   BookOpen, Users, Trophy, Eye, EyeOff,
   ArrowRight, Sparkles, CheckCircle2, BarChart3, Loader2,
+  Download, Share, CheckCircle, X,
 } from 'lucide-react';
 
 const Noise = () => (
@@ -38,7 +40,8 @@ export default function Login() {
   const [configError, setConfigError] = useState<string | null>(null);
   const [checking, setChecking]     = useState(false);
   const [seeding, setSeeding]       = useState(false);
-  const [googleLoading, setGoogleLoading] = useState(false);
+  const [showIOSModal, setShowIOSModal] = useState(false);
+  const { state: pwaState, install: pwaInstall } = usePWAInstall();
   const [activeField, setActiveField] = useState<'email' | 'password' | null>(null);
   const [maintenanceMode, setMaintenanceMode] = useState(false);
   const mouseRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
@@ -169,15 +172,15 @@ export default function Login() {
     } finally { setLoading(false); }
   };
 
-  const handleGoogleLogin = async () => {
-    setGoogleLoading(true);
-    try {
-      const redirectTo = `${window.location.origin}/`;
-      const { error } = await supabase.auth.signInWithOAuth({ provider: 'google', options: { redirectTo } });
-      if (error) throw error;
-    } catch (err: any) {
-      toast.error(err.message || 'Google login failed');
-      setGoogleLoading(false);
+  const handleInstallApp = async () => {
+    if (pwaState === 'ios') {
+      setShowIOSModal(true);
+    } else if (pwaState === 'available') {
+      await pwaInstall();
+    } else if (pwaState === 'installed') {
+      toast.success('App is already installed!');
+    } else {
+      toast.info('Install not available yet — try from your browser menu.');
     }
   };
 
@@ -425,13 +428,24 @@ export default function Login() {
               <div className="h-px flex-1 bg-white/[0.08]" />
             </div>
 
-            <button
-              type="button" onClick={handleGoogleLogin}
-              disabled={googleLoading || loading}
-              className="w-full py-3 rounded-xl text-sm font-semibold border border-white/10 bg-white/[0.03] text-slate-200 hover:bg-white/[0.06] transition-all disabled:opacity-60 disabled:cursor-not-allowed"
-            >
-              {googleLoading ? t('login.redirectingToGoogle') : t('login.continueWithGoogle')}
-            </button>
+            {pwaState !== 'installed' && (
+              <button
+                type="button"
+                onClick={handleInstallApp}
+                disabled={loading || pwaState === 'installing'}
+                className="w-full py-3 rounded-xl text-sm font-semibold border border-white/10 bg-white/[0.03] text-slate-200 hover:bg-white/[0.06] transition-all disabled:opacity-60 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+              >
+                {pwaState === 'installing' ? (
+                  <><Loader2 className="w-4 h-4 animate-spin" /> Installing…</>
+                ) : pwaState === 'available' ? (
+                  <><Download className="w-4 h-4" /> Install App</>
+                ) : pwaState === 'ios' ? (
+                  <><Share className="w-4 h-4" /> Install App</>
+                ) : (
+                  <><Download className="w-4 h-4" /> Install App</>
+                )}
+              </button>
+            )}
           </div>
 
           {/* dev utility links */}
@@ -456,6 +470,56 @@ export default function Login() {
           <p className="mt-5 text-center text-[11px] text-slate-700">{t('login.noAccount')}</p>
         </div>
       </div>
+
+      {/* iOS Install Instructions Modal */}
+      {showIOSModal && (
+        <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-4" style={{ background: 'rgba(0,0,0,0.7)' }}>
+          <div className="w-full max-w-sm rounded-2xl border border-white/10 p-6" style={{ background: '#12151f' }}>
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-white font-semibold text-base">Install QuizMaster</h3>
+              <button onClick={() => setShowIOSModal(false)} className="text-slate-500 hover:text-slate-300 transition-colors">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            <p className="text-slate-400 text-sm mb-5">Follow these steps to add QuizMaster to your home screen:</p>
+            <div className="space-y-4">
+              <div className="flex items-start gap-3">
+                <div className="w-7 h-7 rounded-full bg-violet-600/20 border border-violet-500/30 flex items-center justify-center flex-shrink-0 mt-0.5">
+                  <span className="text-violet-400 text-xs font-bold">1</span>
+                </div>
+                <div>
+                  <p className="text-slate-200 text-sm font-medium">Tap the Share button</p>
+                  <p className="text-slate-500 text-xs mt-0.5">Tap <Share className="w-3 h-3 inline mx-0.5" /> at the bottom of Safari</p>
+                </div>
+              </div>
+              <div className="flex items-start gap-3">
+                <div className="w-7 h-7 rounded-full bg-violet-600/20 border border-violet-500/30 flex items-center justify-center flex-shrink-0 mt-0.5">
+                  <span className="text-violet-400 text-xs font-bold">2</span>
+                </div>
+                <div>
+                  <p className="text-slate-200 text-sm font-medium">Scroll down and tap</p>
+                  <p className="text-slate-500 text-xs mt-0.5">"Add to Home Screen"</p>
+                </div>
+              </div>
+              <div className="flex items-start gap-3">
+                <div className="w-7 h-7 rounded-full bg-violet-600/20 border border-violet-500/30 flex items-center justify-center flex-shrink-0 mt-0.5">
+                  <span className="text-violet-400 text-xs font-bold">3</span>
+                </div>
+                <div>
+                  <p className="text-slate-200 text-sm font-medium">Tap "Add"</p>
+                  <p className="text-slate-500 text-xs mt-0.5">QuizMaster will appear on your home screen</p>
+                </div>
+              </div>
+            </div>
+            <button
+              onClick={() => setShowIOSModal(false)}
+              className="mt-6 w-full py-3 rounded-xl text-sm font-semibold bg-violet-600 hover:bg-violet-500 text-white transition-colors flex items-center justify-center gap-2"
+            >
+              <CheckCircle className="w-4 h-4" /> Got it
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
