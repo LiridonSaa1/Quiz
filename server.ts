@@ -5158,8 +5158,10 @@ When giving instructions, number each step clearly. Be precise and technical whe
       // Delete lessons first (avoids FK issues if no cascade)
       await supabaseAdmin.from("lessons").delete().in("module_id", moduleIds);
 
-      // Delete quizzes tied to those modules (if quiz table has module_id)
-      await supabaseAdmin.from("quizzes").delete().in("module_id", moduleIds).throwOnError().catch(() => {});
+      // Delete quizzes tied to those modules (if quiz table has module_id — silently ignore if column absent)
+      try {
+        await supabaseAdmin.from("quizzes").delete().in("module_id", moduleIds);
+      } catch { /* module_id column may not exist on quizzes */ }
 
       // Delete the modules
       const { error: dErr } = await supabaseAdmin.from("modules").delete().in("id", moduleIds);
