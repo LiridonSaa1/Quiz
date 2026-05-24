@@ -8,7 +8,7 @@ import TeacherLayout from '../../components/layout/TeacherLayout';
 import {
   Plus, Search, PlayCircle, Trash2, Edit2, X, Save,
   BookOpen, Layers, Video, FileText, HelpCircle, Clock,
-  Lock, Unlock, ChevronRight, Calendar, AlertTriangle
+  Lock, Unlock, ChevronRight, ChevronLeft, Calendar, AlertTriangle
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { Lesson } from '../../types';
@@ -85,6 +85,7 @@ export default function TeacherLessons() {
   const [classFilter, setClassFilter] = useState('all');
   const [moduleFilter, setModuleFilter] = useState('all');
   const [typeFilter, setTypeFilter] = useState('all');
+  const [currentPage, setCurrentPage] = useState(1);
   const [showModal, setShowModal] = useState(false);
   const [editing, setEditing] = useState<Lesson | null>(null);
   const [form, setForm] = useState(emptyForm);
@@ -191,6 +192,7 @@ export default function TeacherLessons() {
   };
 
   useEffect(() => { fetchData(); }, []);
+  useEffect(() => { setCurrentPage(1); }, [search, courseFilter, classFilter, moduleFilter, typeFilter]);
 
   const modulesForCourse = (courseId: string) =>
     modules.filter(m => m.course_id === courseId);
@@ -198,6 +200,8 @@ export default function TeacherLessons() {
   const getCourseTitle = (courseId: string) =>
     courses.find((c: any) => c.id === courseId)?.name ||
     courses.find((c: any) => c.id === courseId)?.title || 'Unknown Course';
+
+  const ITEMS_PER_PAGE = 12;
 
   const filtered = lessons.filter(l => {
     const matchSearch = l.title.toLowerCase().includes(search.toLowerCase()) ||
@@ -210,9 +214,12 @@ export default function TeacherLessons() {
     return matchSearch && matchCourse && matchClass && matchModule && matchType;
   });
 
+  const totalPages = Math.ceil(filtered.length / ITEMS_PER_PAGE);
+  const paginatedFiltered = filtered.slice((currentPage - 1) * ITEMS_PER_PAGE, currentPage * ITEMS_PER_PAGE);
+
   const groupedLessons = (() => {
-    const map = new Map<string, typeof filtered>();
-    filtered.forEach(l => {
+    const map = new Map<string, typeof paginatedFiltered>();
+    paginatedFiltered.forEach(l => {
       const key = l.courseId || 'unknown';
       if (!map.has(key)) map.set(key, []);
       map.get(key)!.push(l);
@@ -615,6 +622,27 @@ export default function TeacherLessons() {
                     </motion.div>
                   </div>
                 ))}
+              </div>
+            )}
+
+            {/* Pagination */}
+            {!loading && totalPages > 1 && (
+              <div className="flex items-center justify-center gap-2 pt-4">
+                <button onClick={() => { setCurrentPage(p => Math.max(1, p - 1)); window.scrollTo({ top: 0, behavior: 'smooth' }); }} disabled={currentPage === 1}
+                  className="w-9 h-9 flex items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-500 hover:bg-slate-50 disabled:opacity-40 transition-all shadow-sm">
+                  <ChevronLeft className="w-4 h-4" />
+                </button>
+                {Array.from({ length: totalPages }, (_, i) => i + 1).map(page => (
+                  <button key={page} onClick={() => { setCurrentPage(page); window.scrollTo({ top: 0, behavior: 'smooth' }); }}
+                    className={cn('w-9 h-9 flex items-center justify-center rounded-xl text-sm font-semibold transition-all',
+                      currentPage === page ? 'bg-indigo-600 text-white shadow-md' : 'border border-slate-200 bg-white text-slate-600 hover:bg-slate-50')}>
+                    {page}
+                  </button>
+                ))}
+                <button onClick={() => { setCurrentPage(p => Math.min(totalPages, p + 1)); window.scrollTo({ top: 0, behavior: 'smooth' }); }} disabled={currentPage === totalPages}
+                  className="w-9 h-9 flex items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-500 hover:bg-slate-50 disabled:opacity-40 transition-all shadow-sm">
+                  <ChevronRight className="w-4 h-4" />
+                </button>
               </div>
             )}
           </div>
