@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Link, useParams, useNavigate } from 'react-router-dom';
+import { Link, useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import {
   DndContext,
   PointerSensor,
@@ -135,6 +135,7 @@ export default function TeacherModules() {
   const { t } = useTranslation();
   const { courseId: paramCourseId } = useParams<{ courseId?: string }>();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const [modules, setModules] = useState<Module[]>([]);
   const [courses, setCourses] = useState<Course[]>([]);
   const [classes, setClasses] = useState<Array<{ id: string; name: string; course_id: string | null }>>([]);
@@ -332,6 +333,20 @@ export default function TeacherModules() {
 
   useEffect(() => { fetchData(); }, []);
   useEffect(() => { setCurrentPage(1); }, [search, courseFilter, classFilter]);
+
+  // Auto-open Headway import modal when navigated here with ?import=headway
+  useEffect(() => {
+    if (!loading && searchParams.get('import') === 'headway') {
+      setHeadwayDone(null);
+      setHeadwayProgress(null);
+      setHeadwayClearing(false);
+      setHeadwayClearConfirm(false);
+      setHeadwayCourseId(paramCourseId || (courses.length === 1 ? courses[0].id : ''));
+      setHeadwayLevel('Beginner');
+      setHeadwayOptions({ grammar: true, vocabulary: true, everydayEnglish: true, audioDownload: true, videoDownload: true, testBuilder: true });
+      setShowHeadwayModal(true);
+    }
+  }, [loading, searchParams]);
 
   const openCreate = () => {
     setEditing(null);
