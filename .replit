@@ -47,10 +47,6 @@ build = ["npm", "run", "build"]
 [userenv]
 
 [userenv.shared]
-PORT = "5000"
-TELEGRAM_ALERT_COOLDOWN_MS = "120000"
-BREVO_SENDER_NAME = "Britanicha School"
-VITE_SUPABASE_URL = "https://uwwfozpchsziaslusfln.supabase.co"
 
 [postMerge]
 path = "scripts/post-merge.sh"

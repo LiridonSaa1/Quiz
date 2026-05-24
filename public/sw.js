@@ -1,6 +1,6 @@
-const CACHE_NAME = 'quizmaster-v1';
-const STATIC_CACHE = 'quizmaster-static-v1';
-const API_CACHE = 'quizmaster-api-v1';
+const CACHE_NAME = 'quizmaster-v2';
+const STATIC_CACHE = 'quizmaster-static-v2';
+const API_CACHE = 'quizmaster-api-v2';
 
 const STATIC_ASSETS = [
   '/',
@@ -21,7 +21,7 @@ self.addEventListener('install', (event) => {
   );
 });
 
-// Activate: clean up old caches
+// Activate: clean up ALL old caches
 self.addEventListener('activate', (event) => {
   event.waitUntil(
     caches.keys().then((keys) => {
@@ -35,9 +35,10 @@ self.addEventListener('activate', (event) => {
 });
 
 // Fetch strategy:
+// - Vite dev assets (/node_modules/.vite/, /src/, /@vite/, /@fs/): always network — never cache
 // - API routes (/api/*): network-first, fall back to cache
-// - Static assets: cache-first, fall back to network
 // - Navigation: network-first (SPA), fall back to cached /
+// - Static assets: cache-first, fall back to network
 self.addEventListener('fetch', (event) => {
   const { request } = event;
   const url = new URL(request.url);
@@ -45,6 +46,13 @@ self.addEventListener('fetch', (event) => {
   // Skip non-GET and cross-origin requests
   if (request.method !== 'GET') return;
   if (url.origin !== self.location.origin) return;
+
+  // Never cache Vite dev-server internals or source files
+  const devPaths = ['/node_modules/.vite/', '/src/', '/@vite/', '/@fs/', '/@id/'];
+  if (devPaths.some((p) => url.pathname.startsWith(p))) {
+    event.respondWith(fetch(request));
+    return;
+  }
 
   // API routes: network-first with short cache
   if (url.pathname.startsWith('/api/')) {

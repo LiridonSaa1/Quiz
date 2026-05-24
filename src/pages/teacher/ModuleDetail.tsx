@@ -82,7 +82,7 @@ export default function TeacherModuleDetail() {
 
       if (mod?.course_id) {
         const { data: courseData } = await supabase
-          .from('courses').select('id, title, name, level, language').eq('id', mod.course_id).single();
+          .from('courses').select('id, title, level, language').eq('id', mod.course_id).single();
         setCourse(courseData);
       }
 

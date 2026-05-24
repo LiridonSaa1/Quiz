@@ -12,6 +12,10 @@ import { createRequire } from "module";
 import path from "path";
 import { fileURLToPath } from "url";
 import { createClient } from '@supabase/supabase-js';
+import { createRequire as _cr } from "module";
+const _require = _cr(import.meta.url);
+let _ws: any;
+try { _ws = _require("ws"); } catch { _ws = undefined; }
 const require = createRequire(import.meta.url);
 let poolPromise: Promise<any> | null = null;
 const stripProfilesJoin = (sql: string): string =>
@@ -621,7 +625,8 @@ const getSupabaseAdmin = () => {
       auth: {
         autoRefreshToken: false,
         persistSession: false
-      }
+      },
+      ...(_ws ? { realtime: { transport: _ws } } : {}),
     });
   }
   return supabaseAdminInstance;
@@ -12968,6 +12973,51 @@ Speaker notes: 2-3 sentences on a single line with no line breaks.`;
         hmrConfig = options.httpServer ? { server: options.httpServer } : true;
       }
       const vite = await createServer({
+        configFile: false,
+        root: process.cwd(),
+        plugins: [
+          (await import("@vitejs/plugin-react")).default(),
+          (await import("@tailwindcss/vite")).default(),
+        ],
+        resolve: {
+          alias: { '@': process.cwd() },
+          dedupe: ['react', 'react-dom', 'react-dom/client', 'react/jsx-runtime'],
+        },
+        optimizeDeps: {
+          include: [
+            'react',
+            'react-dom',
+            'react-dom/client',
+            'react/jsx-runtime',
+            'react/jsx-dev-runtime',
+            'react-router-dom',
+            'react-hook-form',
+            'react-i18next',
+            '@hookform/resolvers/zod',
+            'zod',
+            'lucide-react',
+            'clsx',
+            'tailwind-merge',
+            'sonner',
+            'motion/react',
+            'date-fns',
+            'recharts',
+            'i18next',
+            'i18next-browser-languagedetector',
+            '@supabase/supabase-js',
+            '@dnd-kit/core',
+            '@dnd-kit/sortable',
+            '@dnd-kit/utilities',
+            'canvas-confetti',
+            'dompurify',
+          ],
+          force: true,
+          esbuildOptions: {
+            // Banner changes chunk content → new content hash → new chunk filename.
+            // This busts any browser-cached copies from prior optimization runs.
+            banner: { js: '/* qm-deps-v3 */' },
+          },
+        },
         server: {
           middlewareMode: true,
           hmr: hmrConfig,
@@ -12983,9 +13033,6 @@ Speaker notes: 2-3 sentences on a single line with no line breaks.`;
               "**/tmp/**",
               "**/.replit",
               "**/replit.md",
-              // Backend-only and non-source files — Vite cannot hot-replace
-              // them so watching them forces a full page reload, which breaks
-              // mid-flow states such as the 2FA code-entry screen.
               "**/server.ts",
               "**/server.js",
               "**/*.server.ts",
@@ -12998,6 +13045,13 @@ Speaker notes: 2-3 sentences on a single line with no line breaks.`;
           },
         },
         appType: "spa",
+      });
+      // Prevent browser from caching Vite pre-bundled dep chunks across
+      // optimization runs — stale cached chunks from prior runs cause
+      // mismatched React instances and "Invalid hook call" errors.
+      app.use('/node_modules/.vite/deps/', (_req: any, res: any, next: any) => {
+        res.set('Cache-Control', 'no-store');
+        next();
       });
       app.use(vite.middlewares);
     } else {
