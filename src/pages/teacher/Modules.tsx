@@ -1,11 +1,30 @@
 import React, { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
+import {
+  DndContext,
+  PointerSensor,
+  KeyboardSensor,
+  useSensor,
+  useSensors,
+  closestCenter,
+  DragOverlay,
+  type DragEndEvent,
+  type DragStartEvent,
+} from '@dnd-kit/core';
+import {
+  SortableContext,
+  useSortable,
+  rectSortingStrategy,
+  arrayMove,
+  sortableKeyboardCoordinates,
+} from '@dnd-kit/sortable';
+import { CSS } from '@dnd-kit/utilities';
 import { supabase } from '../../supabase';
 import TeacherLayout from '../../components/layout/TeacherLayout';
 import LoadingButton from '../../components/ui/LoadingButton';
 import { useTranslation } from 'react-i18next';
 import {
-  Plus, Search, Layers, Trash2, Edit2,
+  Plus, Search, Layers, Trash2, Edit2, GripVertical,
   BookOpen, X, Save, PlayCircle, ChevronRight, ChevronLeft, HelpCircle, AlertTriangle, Calendar,
   Download, Globe, CheckCircle2, ChevronDown, RefreshCw, Copy, CheckSquare, Square,
   Eye, EyeOff, RotateCcw, BarChart2,
@@ -40,6 +59,32 @@ const normalizeModuleStatus = (s: string) => {
   if (s === 'draft' || s === 'inactive') return 'inactive';
   return s === 'inactive' ? 'inactive' : 'active';
 };
+
+function SortableCardShell({
+  id,
+  canDrag,
+  children,
+}: {
+  id: string;
+  canDrag: boolean;
+  children: (props: { dragHandleProps: Record<string, unknown>; dragHandleRef: (node: HTMLElement | null) => void; isDragging: boolean }) => React.ReactNode;
+}) {
+  const { attributes, listeners, setNodeRef, setActivatorNodeRef, transform, transition, isDragging } = useSortable({ id });
+  const style: React.CSSProperties = {
+    transform: CSS.Transform.toString(transform),
+    transition: transition || undefined,
+    zIndex: isDragging ? 50 : undefined,
+  };
+  return (
+    <div ref={setNodeRef} style={style}>
+      {children({
+        dragHandleProps: canDrag ? { ...attributes, ...listeners } : {},
+        dragHandleRef: setActivatorNodeRef,
+        isDragging,
+      })}
+    </div>
+  );
+}
 
 const STAT_CONFIG = [
   {
@@ -101,6 +146,8 @@ export default function TeacherModules() {
   const [formCourseId, setFormCourseId] = useState('');
   const [saving, setSaving] = useState(false);
   const [currentPage, setCurrentPage] = useState(1);
+  const [activeId, setActiveId] = useState<string | null>(null);
+  const [savingOrder, setSavingOrder] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<Module | null>(null);
   const [deleting, setDeleting] = useState(false);
   const [showHeadwayModal, setShowHeadwayModal] = useState(false);
@@ -128,6 +175,11 @@ export default function TeacherModules() {
   const [completionLoading, setCompletionLoading] = useState(false);
   const [completionData, setCompletionData] = useState<any | null>(null);
   const { can } = useTeacherPermissions();
+
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
+  );
 
   const fetchData = async () => {
     setLoading(true);
@@ -621,6 +673,53 @@ export default function TeacherModules() {
     }
   };
 
+  const handleDragStart = (event: DragStartEvent) => {
+    setActiveId(event.active.id as string);
+  };
+
+  const handleDragEnd = async (event: DragEndEvent) => {
+    const { active, over } = event;
+    setActiveId(null);
+    if (!over || active.id === over.id) return;
+
+    const activeModule = modules.find(m => m.id === active.id);
+    const overModule = modules.find(m => m.id === over.id);
+    if (!activeModule || !overModule || activeModule.courseId !== overModule.courseId) return;
+
+    const courseId = activeModule.courseId;
+    const courseModules = modules
+      .filter(m => m.courseId === courseId)
+      .sort((a, b) => a.order - b.order);
+
+    const oldIndex = courseModules.findIndex(m => m.id === active.id);
+    const newIndex = courseModules.findIndex(m => m.id === over.id);
+    if (oldIndex === newIndex) return;
+
+    const reordered = arrayMove(courseModules, oldIndex, newIndex).map((m, i) => ({ ...m, order: i + 1 }));
+
+    setModules(prev => prev.map(m => reordered.find(r => r.id === m.id) || m));
+
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session) return;
+    setSavingOrder(true);
+    try {
+      await Promise.all(
+        reordered.map(m =>
+          authFetch(
+            `/api/teacher/modules/${encodeURIComponent(m.id)}?userId=${encodeURIComponent(session.user.id)}`,
+            { method: 'PATCH', body: JSON.stringify({ order: m.order }) }
+          )
+        )
+      );
+      toast.success('Order saved');
+    } catch {
+      toast.error('Failed to save order');
+      fetchData();
+    } finally {
+      setSavingOrder(false);
+    }
+  };
+
   const ITEMS_PER_PAGE = 12;
 
   const filtered = modules.filter(m => {
@@ -954,170 +1053,239 @@ export default function TeacherModules() {
                 )}
               </motion.div>
             ) : (
-              <div className="space-y-8">
-                {groupedModules.map(({ courseId, courseTitle, items }) => (
-                  <div key={courseId} className="space-y-4">
-                    <div className="flex items-center gap-3 pb-2 border-b border-slate-100">
-                      <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-indigo-500 to-violet-600 flex items-center justify-center shrink-0">
-                        <BookOpen className="w-4 h-4 text-white" />
-                      </div>
-                      <div>
-                        <h2 className="text-base font-bold text-slate-900">{courseTitle}</h2>
-                        <p className="text-xs text-slate-400">{items.length} module{items.length !== 1 ? 's' : ''}</p>
-                      </div>
-                    </div>
-                    <motion.div
-                      className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-5"
-                      initial="hidden"
-                      animate="visible"
-                      variants={{ hidden: {}, visible: { transition: { staggerChildren: 0.07 } } }}
-                    >
-                      {items.map((mod) => {
-                  const isActive = normalizeModuleStatus(mod.status) === 'active';
-                  return (
-                    <motion.div
-                      key={mod.id}
-                      variants={{
-                        hidden: { opacity: 0, y: 20 },
-                        visible: { opacity: 1, y: 0, transition: { duration: 0.35, ease: 'easeOut' } },
-                      }}
-                      whileHover={{ y: -4, boxShadow: '0 20px 48px rgba(99,102,241,0.15)' }}
-                      className={cn(
-                        "group relative bg-white rounded-2xl border shadow-sm overflow-hidden flex flex-col transition-all duration-200",
-                        selectedIds.has(mod.id) ? "border-indigo-400 ring-2 ring-indigo-200" : "border-slate-100"
-                      )}
-                    >
-                      {/* Select checkbox (top-left corner) */}
-                      {can('actions.teacher.modules.manage') && (
-                        <button
-                          onClick={e => { e.stopPropagation(); toggleSelect(mod.id); }}
-                          className="absolute top-3 left-3 z-10 opacity-0 group-hover:opacity-100 transition-opacity focus:opacity-100"
-                          style={{ opacity: selectedIds.has(mod.id) ? 1 : undefined }}
-                          title={selectedIds.has(mod.id) ? 'Deselect' : 'Select'}
-                        >
-                          {selectedIds.has(mod.id)
-                            ? <CheckSquare className="w-4 h-4 text-indigo-600" />
-                            : <Square className="w-4 h-4 text-slate-400" />}
-                        </button>
-                      )}
-
-                      {/* Card top accent */}
-                      <div
-                        className="h-1.5 w-full"
-                        style={{
-                          background: isActive
-                            ? 'linear-gradient(90deg,#6366f1,#8b5cf6)'
-                            : 'linear-gradient(90deg,#f59e0b,#fbbf24)',
-                        }}
-                      />
-
-                      <div className="p-5 flex flex-col flex-1">
-                        {/* Icon + Status */}
-                        <div className="flex items-start justify-between mb-3">
-                          <div className="w-11 h-11 rounded-xl flex items-center justify-center shrink-0"
-                            style={{ background: 'linear-gradient(135deg,#e0e7ff,#ede9fe)' }}
-                          >
-                            <Layers className="w-5 h-5 text-indigo-500" />
-                          </div>
-                          {can('actions.teacher.modules.manage') && <button
-                            onClick={() => handleToggleStatus(mod)}
-                            className={cn(
-                              'inline-flex items-center gap-1.5 text-[11px] font-bold px-2.5 py-1 rounded-full transition-all',
-                              isActive
-                                ? 'bg-emerald-50 text-emerald-700 hover:bg-emerald-100'
-                                : 'bg-amber-50 text-amber-700 hover:bg-amber-100'
-                            )}
-                          >
-                            <span className={cn('w-1.5 h-1.5 rounded-full', isActive ? 'bg-emerald-500' : 'bg-amber-500')} />
-                            {isActive ? t('modules.activeModule') : t('modules.inactiveModule')}
-                          </button>}
-                        </div>
-
-                        {/* Title & Description */}
-                        <h3 className="text-sm font-bold text-slate-900 line-clamp-2 mb-1 leading-snug">{mod.title}</h3>
-                        {mod.description && (
-                          <p className="text-xs text-slate-400 line-clamp-2 mb-3">{mod.description}</p>
-                        )}
-
-                        {/* Meta */}
-                        <div className="mt-auto space-y-2 pt-3 border-t border-slate-50">
-                          <div className="flex items-center gap-1.5 flex-wrap">
-                            <span className="inline-flex items-center gap-1.5 px-2 py-1 bg-slate-100 text-slate-600 rounded-lg text-[11px] font-medium max-w-[120px] truncate">
-                              <BookOpen className="w-3 h-3 shrink-0" />
-                              <span className="truncate">{getCourseTitle(mod.courseId)}</span>
-                            </span>
-                            {getCourseLevel(mod.courseId) && (
-                              <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold bg-indigo-100 text-indigo-700">
-                                {getCourseLevel(mod.courseId)}
-                              </span>
-                            )}
-                          </div>
-                          <div className="flex items-center justify-between">
-                            <span className="inline-flex items-center gap-1 text-xs text-slate-400">
-                              <BookOpen className="w-3.5 h-3.5 text-slate-300" />
-                              {mod.totalLessons} {mod.totalLessons !== 1 ? t('modules.lessons') : t('modules.lesson')}
-                            </span>
-                            <span className="inline-flex items-center gap-1 text-xs text-slate-500">
-                              <HelpCircle className="w-3.5 h-3.5 text-slate-300" />
-                              {mod.totalQuizzes || 0} {(mod.totalQuizzes || 0) !== 1 ? t('modules.quizzes') : t('modules.quiz')}
-                            </span>
-                          </div>
-                          <div className="flex items-center justify-between">
-                            <div className="flex items-center gap-1">
-                              <span className="w-6 h-6 flex items-center justify-center bg-indigo-50 text-indigo-600 rounded-lg text-[11px] font-bold">
-                                {mod.order}
-                              </span>
-                              <span className="text-[11px] text-slate-400">{t('modules.orderText')}</span>
-                            </div>
-                            <div className="flex items-center gap-1.5">
-                              <Calendar className="w-3 h-3 text-slate-300 shrink-0" />
-                              <span className="text-[11px] text-slate-400">
-                                {mod.createdAt ? new Date(mod.createdAt).toLocaleDateString('sq-AL', { day: '2-digit', month: 'short', year: 'numeric' }) : '—'}
-                              </span>
-                            </div>
-                          </div>
-                        </div>
-
-                        {/* Actions — always visible on mobile touch, hover-revealed on desktop */}
-                        <div className="flex items-center gap-1.5 pt-3 sm:opacity-0 sm:group-hover:opacity-100 opacity-100 transition-all duration-200 sm:translate-y-1 sm:group-hover:translate-y-0">
-                          <Link
-                            to={`/teacher/modules/${mod.id}`}
-                            className="flex-1 flex items-center justify-center gap-1 py-2 rounded-xl text-xs font-semibold text-slate-700 bg-slate-100 hover:bg-slate-200 transition-all"
-                          >
-                            <PlayCircle className="w-3.5 h-3.5" /> View
-                          </Link>
-                          {can('actions.teacher.modules.manage') && <button
-                            onClick={() => openEdit(mod)}
-                            className="flex-1 flex items-center justify-center gap-1 py-2 rounded-xl text-xs font-semibold text-indigo-600 bg-indigo-50 hover:bg-indigo-100 transition-all"
-                          >
-                            <Edit2 className="w-3.5 h-3.5" /> {t('modules.editAction')}
-                          </button>}
-                          {can('actions.teacher.modules.manage') && <button
-                            onClick={() => void handleDuplicate(mod)}
-                            disabled={duplicatingId === mod.id}
-                            className="flex items-center justify-center gap-1 py-2 px-2.5 rounded-xl text-xs font-semibold text-violet-600 bg-violet-50 hover:bg-violet-100 transition-all disabled:opacity-50"
-                            title="Duplicate module"
-                          >
-                            {duplicatingId === mod.id
-                              ? <span className="w-3.5 h-3.5 rounded-full border-2 border-violet-400 border-t-transparent animate-spin" />
-                              : <Copy className="w-3.5 h-3.5" />}
-                          </button>}
-                          {can('actions.teacher.modules.manage') && <button
-                            onClick={() => handleDelete(mod)}
-                            className="flex items-center justify-center gap-1 py-2 px-2.5 rounded-xl text-xs font-semibold text-red-500 bg-red-50 hover:bg-red-100 transition-all"
-                            title="Delete module"
-                          >
-                            <Trash2 className="w-3.5 h-3.5" />
-                          </button>}
-                        </div>
-                      </div>
-                    </motion.div>
-                  );
-                })}
-                    </motion.div>
+              <DndContext
+                sensors={sensors}
+                collisionDetection={closestCenter}
+                onDragStart={handleDragStart}
+                onDragEnd={handleDragEnd}
+              >
+                {savingOrder && (
+                  <div className="flex items-center justify-center gap-2 py-2 text-xs font-semibold text-indigo-600">
+                    <span className="w-3.5 h-3.5 rounded-full border-2 border-indigo-400 border-t-transparent animate-spin" />
+                    Saving order…
                   </div>
-                ))}
-              </div>
+                )}
+                <div className="space-y-8">
+                  {groupedModules.map(({ courseId, courseTitle, items }) => (
+                    <div key={courseId} className="space-y-4">
+                      <div className="flex items-center gap-3 pb-2 border-b border-slate-100">
+                        <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-indigo-500 to-violet-600 flex items-center justify-center shrink-0">
+                          <BookOpen className="w-4 h-4 text-white" />
+                        </div>
+                        <div>
+                          <h2 className="text-base font-bold text-slate-900">{courseTitle}</h2>
+                          <p className="text-xs text-slate-400">{items.length} module{items.length !== 1 ? 's' : ''}</p>
+                        </div>
+                        {can('actions.teacher.modules.manage') && (
+                          <span className="ml-auto flex items-center gap-1 text-[11px] font-medium text-slate-400">
+                            <GripVertical className="w-3.5 h-3.5" /> drag to reorder
+                          </span>
+                        )}
+                      </div>
+                      <SortableContext items={items.map(m => m.id)} strategy={rectSortingStrategy}>
+                        <motion.div
+                          className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-5"
+                          initial="hidden"
+                          animate="visible"
+                          variants={{ hidden: {}, visible: { transition: { staggerChildren: 0.07 } } }}
+                        >
+                          {items.map((mod) => {
+                            const isActive = normalizeModuleStatus(mod.status) === 'active';
+                            const isDragTarget = activeId === mod.id;
+                            return (
+                              <SortableCardShell key={mod.id} id={mod.id} canDrag={can('actions.teacher.modules.manage')}>
+                                {({ dragHandleProps, dragHandleRef, isDragging }) => (
+                                  <motion.div
+                                    variants={{
+                                      hidden: { opacity: 0, y: 20 },
+                                      visible: { opacity: 1, y: 0, transition: { duration: 0.35, ease: 'easeOut' } },
+                                    }}
+                                    whileHover={isDragging ? undefined : { y: -4, boxShadow: '0 20px 48px rgba(99,102,241,0.15)' }}
+                                    className={cn(
+                                      "group relative bg-white rounded-2xl border shadow-sm overflow-hidden flex flex-col transition-all duration-200",
+                                      selectedIds.has(mod.id) ? "border-indigo-400 ring-2 ring-indigo-200" : "border-slate-100",
+                                      isDragging && "opacity-40 scale-95"
+                                    )}
+                                  >
+                                    {/* Drag handle — top-right */}
+                                    {can('actions.teacher.modules.manage') && (
+                                      <button
+                                        ref={dragHandleRef}
+                                        {...dragHandleProps}
+                                        className="absolute top-2 right-2 z-10 p-1.5 rounded-lg opacity-0 group-hover:opacity-100 focus:opacity-100 transition-opacity cursor-grab active:cursor-grabbing hover:bg-slate-100"
+                                        title="Drag to reorder"
+                                        tabIndex={-1}
+                                      >
+                                        <GripVertical className="w-4 h-4 text-slate-400" />
+                                      </button>
+                                    )}
+
+                                    {/* Select checkbox (top-left corner) */}
+                                    {can('actions.teacher.modules.manage') && (
+                                      <button
+                                        onClick={e => { e.stopPropagation(); toggleSelect(mod.id); }}
+                                        className="absolute top-3 left-3 z-10 opacity-0 group-hover:opacity-100 transition-opacity focus:opacity-100"
+                                        style={{ opacity: selectedIds.has(mod.id) ? 1 : undefined }}
+                                        title={selectedIds.has(mod.id) ? 'Deselect' : 'Select'}
+                                      >
+                                        {selectedIds.has(mod.id)
+                                          ? <CheckSquare className="w-4 h-4 text-indigo-600" />
+                                          : <Square className="w-4 h-4 text-slate-400" />}
+                                      </button>
+                                    )}
+
+                                    {/* Card top accent */}
+                                    <div
+                                      className="h-1.5 w-full"
+                                      style={{
+                                        background: isActive
+                                          ? 'linear-gradient(90deg,#6366f1,#8b5cf6)'
+                                          : 'linear-gradient(90deg,#f59e0b,#fbbf24)',
+                                      }}
+                                    />
+
+                                    <div className="p-5 flex flex-col flex-1">
+                                      {/* Icon + Status */}
+                                      <div className="flex items-start justify-between mb-3">
+                                        <div className="w-11 h-11 rounded-xl flex items-center justify-center shrink-0"
+                                          style={{ background: 'linear-gradient(135deg,#e0e7ff,#ede9fe)' }}
+                                        >
+                                          <Layers className="w-5 h-5 text-indigo-500" />
+                                        </div>
+                                        {can('actions.teacher.modules.manage') && (
+                                          <button
+                                            onClick={() => handleToggleStatus(mod)}
+                                            className={cn(
+                                              'inline-flex items-center gap-1.5 text-[11px] font-bold px-2.5 py-1 rounded-full transition-all',
+                                              isActive
+                                                ? 'bg-emerald-50 text-emerald-700 hover:bg-emerald-100'
+                                                : 'bg-amber-50 text-amber-700 hover:bg-amber-100'
+                                            )}
+                                          >
+                                            <span className={cn('w-1.5 h-1.5 rounded-full', isActive ? 'bg-emerald-500' : 'bg-amber-500')} />
+                                            {isActive ? t('modules.activeModule') : t('modules.inactiveModule')}
+                                          </button>
+                                        )}
+                                      </div>
+
+                                      {/* Title & Description */}
+                                      <h3 className="text-sm font-bold text-slate-900 line-clamp-2 mb-1 leading-snug">{mod.title}</h3>
+                                      {mod.description && (
+                                        <p className="text-xs text-slate-400 line-clamp-2 mb-3">{mod.description}</p>
+                                      )}
+
+                                      {/* Meta */}
+                                      <div className="mt-auto space-y-2 pt-3 border-t border-slate-50">
+                                        <div className="flex items-center gap-1.5 flex-wrap">
+                                          <span className="inline-flex items-center gap-1.5 px-2 py-1 bg-slate-100 text-slate-600 rounded-lg text-[11px] font-medium max-w-[120px] truncate">
+                                            <BookOpen className="w-3 h-3 shrink-0" />
+                                            <span className="truncate">{getCourseTitle(mod.courseId)}</span>
+                                          </span>
+                                          {getCourseLevel(mod.courseId) && (
+                                            <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold bg-indigo-100 text-indigo-700">
+                                              {getCourseLevel(mod.courseId)}
+                                            </span>
+                                          )}
+                                        </div>
+                                        <div className="flex items-center justify-between">
+                                          <span className="inline-flex items-center gap-1 text-xs text-slate-400">
+                                            <BookOpen className="w-3.5 h-3.5 text-slate-300" />
+                                            {mod.totalLessons} {mod.totalLessons !== 1 ? t('modules.lessons') : t('modules.lesson')}
+                                          </span>
+                                          <span className="inline-flex items-center gap-1 text-xs text-slate-500">
+                                            <HelpCircle className="w-3.5 h-3.5 text-slate-300" />
+                                            {mod.totalQuizzes || 0} {(mod.totalQuizzes || 0) !== 1 ? t('modules.quizzes') : t('modules.quiz')}
+                                          </span>
+                                        </div>
+                                        <div className="flex items-center justify-between">
+                                          <div className="flex items-center gap-1">
+                                            <span className="w-6 h-6 flex items-center justify-center bg-indigo-50 text-indigo-600 rounded-lg text-[11px] font-bold">
+                                              {mod.order}
+                                            </span>
+                                            <span className="text-[11px] text-slate-400">{t('modules.orderText')}</span>
+                                          </div>
+                                          <div className="flex items-center gap-1.5">
+                                            <Calendar className="w-3 h-3 text-slate-300 shrink-0" />
+                                            <span className="text-[11px] text-slate-400">
+                                              {mod.createdAt ? new Date(mod.createdAt).toLocaleDateString('sq-AL', { day: '2-digit', month: 'short', year: 'numeric' }) : '—'}
+                                            </span>
+                                          </div>
+                                        </div>
+                                      </div>
+
+                                      {/* Actions */}
+                                      <div className="flex items-center gap-1.5 pt-3 sm:opacity-0 sm:group-hover:opacity-100 opacity-100 transition-all duration-200 sm:translate-y-1 sm:group-hover:translate-y-0">
+                                        <Link
+                                          to={`/teacher/modules/${mod.id}`}
+                                          className="flex-1 flex items-center justify-center gap-1 py-2 rounded-xl text-xs font-semibold text-slate-700 bg-slate-100 hover:bg-slate-200 transition-all"
+                                        >
+                                          <PlayCircle className="w-3.5 h-3.5" /> View
+                                        </Link>
+                                        {can('actions.teacher.modules.manage') && (
+                                          <button
+                                            onClick={() => openEdit(mod)}
+                                            className="flex-1 flex items-center justify-center gap-1 py-2 rounded-xl text-xs font-semibold text-indigo-600 bg-indigo-50 hover:bg-indigo-100 transition-all"
+                                          >
+                                            <Edit2 className="w-3.5 h-3.5" /> {t('modules.editAction')}
+                                          </button>
+                                        )}
+                                        {can('actions.teacher.modules.manage') && (
+                                          <button
+                                            onClick={() => void handleDuplicate(mod)}
+                                            disabled={duplicatingId === mod.id}
+                                            className="flex items-center justify-center gap-1 py-2 px-2.5 rounded-xl text-xs font-semibold text-violet-600 bg-violet-50 hover:bg-violet-100 transition-all disabled:opacity-50"
+                                            title="Duplicate module"
+                                          >
+                                            {duplicatingId === mod.id
+                                              ? <span className="w-3.5 h-3.5 rounded-full border-2 border-violet-400 border-t-transparent animate-spin" />
+                                              : <Copy className="w-3.5 h-3.5" />}
+                                          </button>
+                                        )}
+                                        {can('actions.teacher.modules.manage') && (
+                                          <button
+                                            onClick={() => handleDelete(mod)}
+                                            className="flex items-center justify-center gap-1 py-2 px-2.5 rounded-xl text-xs font-semibold text-red-500 bg-red-50 hover:bg-red-100 transition-all"
+                                            title="Delete module"
+                                          >
+                                            <Trash2 className="w-3.5 h-3.5" />
+                                          </button>
+                                        )}
+                                      </div>
+                                    </div>
+                                  </motion.div>
+                                )}
+                              </SortableCardShell>
+                            );
+                          })}
+                        </motion.div>
+                      </SortableContext>
+                    </div>
+                  ))}
+                </div>
+
+                <DragOverlay>
+                  {activeId ? (() => {
+                    const mod = modules.find(m => m.id === activeId);
+                    if (!mod) return null;
+                    const isActive = normalizeModuleStatus(mod.status) === 'active';
+                    return (
+                      <div className="bg-white rounded-2xl border-2 border-indigo-400 shadow-2xl overflow-hidden opacity-95 rotate-1 scale-105">
+                        <div className="h-1.5 w-full" style={{ background: isActive ? 'linear-gradient(90deg,#6366f1,#8b5cf6)' : 'linear-gradient(90deg,#f59e0b,#fbbf24)' }} />
+                        <div className="p-5">
+                          <div className="flex items-center gap-2 mb-2">
+                            <div className="w-9 h-9 rounded-xl flex items-center justify-center shrink-0" style={{ background: 'linear-gradient(135deg,#e0e7ff,#ede9fe)' }}>
+                              <Layers className="w-4 h-4 text-indigo-500" />
+                            </div>
+                            <GripVertical className="w-4 h-4 text-indigo-400" />
+                          </div>
+                          <p className="text-sm font-bold text-slate-900 line-clamp-2">{mod.title}</p>
+                          <p className="text-xs text-slate-400 mt-1">{getCourseTitle(mod.courseId)}</p>
+                        </div>
+                      </div>
+                    );
+                  })() : null}
+                </DragOverlay>
+              </DndContext>
             )}
 
             {/* Pagination */}
