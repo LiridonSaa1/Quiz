@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import {
-  Plus, BookOpen, Layers, Globe, ChevronRight, BarChart2, Download,
+  Plus, BookOpen, Layers, Globe, ChevronRight, BarChart2,
 } from 'lucide-react';
 import { supabase } from '../../supabase';
 import TeacherLayout from '../../components/layout/TeacherLayout';
@@ -228,10 +228,10 @@ export default function TeacherCoursesList() {
                           View Modules
                         </Link>
                         <Link
-                          to={`/teacher/courses/${course.id}/modules?import=headway`}
-                          title="Import Headway curriculum"
-                          className="flex items-center justify-center w-11 rounded-xl text-blue-700 bg-blue-50 hover:bg-blue-100 transition-all active:scale-95">
-                          <Download className="w-4 h-4" />
+                          to={`/teacher/courses/${course.id}/modules`}
+                          title="Quizzes & Analytics"
+                          className="flex items-center justify-center w-11 rounded-xl text-indigo-600 bg-indigo-50 hover:bg-indigo-100 transition-all active:scale-95">
+                          <BarChart2 className="w-4 h-4" />
                         </Link>
                       </div>
                     </div>

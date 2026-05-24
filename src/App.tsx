@@ -429,7 +429,7 @@ function TeacherRoutes({ features }: { features: FeatureFlags }) {
       <Route path="/live-quiz/reports" element={<RealtimeQuizReports />} />
       <Route path="/exams" element={<TeacherExams />} />
       <Route path="/results" element={<TeacherResults />} />
-      <Route path="/modules" element={<TeacherCoursesList />} />
+      <Route path="/modules" element={<TeacherModules />} />
       <Route path="/modules/:moduleId" element={<TeacherModuleDetail />} />
       <Route path="/courses/:courseId/modules" element={<TeacherModules />} />
       <Route path="/headway-tests" element={<HeadwayTestImport />} />

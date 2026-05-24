@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Link, useParams, useNavigate, useSearchParams } from 'react-router-dom';
+import { Link, useParams, useNavigate } from 'react-router-dom';
 import {
   DndContext,
   PointerSensor,
@@ -135,7 +135,6 @@ export default function TeacherModules() {
   const { t } = useTranslation();
   const { courseId: paramCourseId } = useParams<{ courseId?: string }>();
   const navigate = useNavigate();
-  const [searchParams] = useSearchParams();
   const [modules, setModules] = useState<Module[]>([]);
   const [courses, setCourses] = useState<Course[]>([]);
   const [classes, setClasses] = useState<Array<{ id: string; name: string; course_id: string | null }>>([]);
@@ -334,19 +333,6 @@ export default function TeacherModules() {
   useEffect(() => { fetchData(); }, []);
   useEffect(() => { setCurrentPage(1); }, [search, courseFilter, classFilter]);
 
-  // Auto-open Headway import modal when navigated here with ?import=headway
-  useEffect(() => {
-    if (!loading && searchParams.get('import') === 'headway') {
-      setHeadwayDone(null);
-      setHeadwayProgress(null);
-      setHeadwayClearing(false);
-      setHeadwayClearConfirm(false);
-      setHeadwayCourseId(paramCourseId || (courses.length === 1 ? courses[0].id : ''));
-      setHeadwayLevel('Beginner');
-      setHeadwayOptions({ grammar: true, vocabulary: true, everydayEnglish: true, audioDownload: true, videoDownload: true, testBuilder: true });
-      setShowHeadwayModal(true);
-    }
-  }, [loading, searchParams]);
 
   const openCreate = () => {
     setEditing(null);
@@ -824,27 +810,13 @@ export default function TeacherModules() {
                   <nav className="flex items-center gap-1.5 text-xs font-semibold mb-3" aria-label="Breadcrumb">
                     <span className="text-indigo-400 tracking-wider uppercase">{t('modules.portalLabel')}</span>
                     <ChevronRight className="w-3.5 h-3.5 text-indigo-500/50" />
-                    {paramCourseId && courses.find(c => c.id === paramCourseId) && (
-                      <>
-                        <span className="text-indigo-300 tracking-wider uppercase">
-                          {courses.find(c => c.id === paramCourseId)?.name ||
-                           (courses.find(c => c.id === paramCourseId) as any)?.title || 'Course'}
-                        </span>
-                        <ChevronRight className="w-3.5 h-3.5 text-indigo-500/50" />
-                      </>
-                    )}
                     <span className="text-indigo-200 tracking-wider uppercase">{t('modules.modulesLabel')}</span>
                   </nav>
                   <h1 className="text-3xl sm:text-4xl font-extrabold text-white tracking-tight leading-tight">
-                    {paramCourseId && courses.find(c => c.id === paramCourseId)
-                      ? (courses.find(c => c.id === paramCourseId)?.name ||
-                         (courses.find(c => c.id === paramCourseId) as any)?.title || t('modules.modulesLabel'))
-                      : t('modules.modulesLabel')}
+                    {t('modules.modulesLabel')}
                   </h1>
                   <p className="text-indigo-200 text-sm mt-2 max-w-md">
-                    {paramCourseId
-                      ? 'Manage modules and lessons for this course'
-                      : t('modules.modulesDesc')}
+                    {t('modules.modulesDesc')}
                   </p>
                 </div>
                 {can('actions.teacher.modules.manage') && (
