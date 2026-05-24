@@ -258,7 +258,7 @@ export default function HeadwayTestImport() {
             </div>
           </div>
 
-          {/* Embedded Test Builder */}
+          {/* Unit-by-unit Test Builder launcher */}
           <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
             <div className="flex items-center justify-between p-5 border-b border-slate-100">
               <div className="flex items-center gap-3">
@@ -269,25 +269,64 @@ export default function HeadwayTestImport() {
                   <h3 className="text-sm font-bold text-slate-900">
                     Test Builder — Headway {activeLevel.key}
                   </h3>
-                  <p className="text-xs text-slate-400">Live preview from Oxford University Press</p>
+                  <p className="text-xs text-slate-400">
+                    Opens on the Oxford University Press site — each unit in a new tab
+                  </p>
                 </div>
               </div>
               <a href={testBuilderBase} target="_blank" rel="noopener noreferrer"
-                className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-slate-100 text-slate-700 text-xs font-bold hover:bg-slate-200 transition-colors">
-                <ExternalLink className="w-3.5 h-3.5" /> Full Screen
+                className={`inline-flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-bold text-white transition-all bg-gradient-to-r ${activeLevel.color} hover:opacity-90`}>
+                <ExternalLink className="w-4 h-4" /> Open All Units
               </a>
             </div>
-            <div className="relative bg-slate-100" style={{ height: '500px' }}>
-              <iframe
-                key={activeLevel.slug}
-                src={testBuilderBase}
-                title={`Headway ${activeLevel.key} Test Builder`}
-                className="w-full h-full border-0"
-                sandbox="allow-scripts allow-same-origin allow-forms allow-popups"
-              />
-              <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-                <p className="text-slate-400 text-sm">Loading Test Builder...</p>
+
+            {/* Notice banner */}
+            <div className="mx-5 mt-5 flex items-start gap-3 p-4 rounded-xl bg-amber-50 border border-amber-100">
+              <span className="text-amber-500 text-lg leading-none mt-0.5">⚠️</span>
+              <div>
+                <p className="text-sm font-bold text-amber-800">Opens in a new tab</p>
+                <p className="text-xs text-amber-600 mt-0.5">
+                  The OUP Test Builder cannot be embedded — clicking any unit below opens it directly on the Oxford University Press website in a new tab.
+                </p>
               </div>
+            </div>
+
+            {/* Unit grid */}
+            <div className="p-5">
+              <p className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-4">
+                Click a unit to open its test
+              </p>
+              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-3">
+                {Array.from({ length: activeLevel.units }, (_, i) => i + 1).map(n => (
+                  <a
+                    key={n}
+                    href={`${testBuilderBase}&testUnit=${n}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className={`group flex flex-col items-center gap-2 p-4 rounded-2xl border-2 transition-all hover:shadow-md active:scale-95 ${activeLevel.badge} border-transparent hover:border-current`}>
+                    <div className={`w-10 h-10 rounded-xl bg-gradient-to-br ${activeLevel.color} flex items-center justify-center shadow-sm group-hover:scale-110 transition-transform`}>
+                      <FlaskConical className="w-5 h-5 text-white" />
+                    </div>
+                    <div className="text-center">
+                      <p className="text-[11px] font-bold leading-tight">Unit {n}</p>
+                      <p className="text-[10px] opacity-60 mt-0.5">Test</p>
+                    </div>
+                    <ExternalLink className="w-3 h-3 opacity-40 group-hover:opacity-80 transition-opacity" />
+                  </a>
+                ))}
+              </div>
+            </div>
+
+            {/* Footer */}
+            <div className="px-5 pb-5 flex items-center justify-between gap-4 pt-3 border-t border-slate-100">
+              <p className="text-xs text-slate-400">
+                Source: <span className="font-semibold">elt.oup.com</span> — Oxford Headway {activeLevel.key} Test Builder
+              </p>
+              <Link to="/teacher/quizzes/new"
+                className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-bold text-white shrink-0"
+                style={{ background: 'linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%)' }}>
+                <Play className="w-3.5 h-3.5" /> Build Custom Quiz
+              </Link>
             </div>
           </div>
 
