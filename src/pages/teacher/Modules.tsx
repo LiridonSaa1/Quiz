@@ -631,6 +631,20 @@ export default function TeacherModules() {
     courses.find(c => c.id === courseId)?.name ||
     courses.find(c => c.id === courseId)?.title || 'Unknown Course';
 
+  const groupedModules = (() => {
+    const map = new Map<string, typeof filtered>();
+    filtered.forEach(m => {
+      const key = m.courseId || 'unknown';
+      if (!map.has(key)) map.set(key, []);
+      map.get(key)!.push(m);
+    });
+    return Array.from(map.entries()).map(([courseId, items]) => ({
+      courseId,
+      courseTitle: getCourseTitle(courseId),
+      items,
+    }));
+  })();
+
   const stats = [
     { ...STAT_CONFIG[0], label: t(STAT_CONFIG[0].key), value: modules.length },
     { ...STAT_CONFIG[1], label: t(STAT_CONFIG[1].key), value: modules.filter(m => normalizeModuleStatus(m.status) === 'active').length },
@@ -928,16 +942,25 @@ export default function TeacherModules() {
                 )}
               </motion.div>
             ) : (
-              <motion.div
-                className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-5"
-                initial="hidden"
-                animate="visible"
-                variants={{
-                  hidden: {},
-                  visible: { transition: { staggerChildren: 0.07 } },
-                }}
-              >
-                {filtered.map((mod) => {
+              <div className="space-y-8">
+                {groupedModules.map(({ courseId, courseTitle, items }) => (
+                  <div key={courseId} className="space-y-4">
+                    <div className="flex items-center gap-3 pb-2 border-b border-slate-100">
+                      <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-indigo-500 to-violet-600 flex items-center justify-center shrink-0">
+                        <BookOpen className="w-4 h-4 text-white" />
+                      </div>
+                      <div>
+                        <h2 className="text-base font-bold text-slate-900">{courseTitle}</h2>
+                        <p className="text-xs text-slate-400">{items.length} module{items.length !== 1 ? 's' : ''}</p>
+                      </div>
+                    </div>
+                    <motion.div
+                      className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-5"
+                      initial="hidden"
+                      animate="visible"
+                      variants={{ hidden: {}, visible: { transition: { staggerChildren: 0.07 } } }}
+                    >
+                      {items.map((mod) => {
                   const isActive = normalizeModuleStatus(mod.status) === 'active';
                   return (
                     <motion.div
@@ -1069,7 +1092,10 @@ export default function TeacherModules() {
                     </motion.div>
                   );
                 })}
-              </motion.div>
+                    </motion.div>
+                  </div>
+                ))}
+              </div>
             )}
           </div>
         </div>

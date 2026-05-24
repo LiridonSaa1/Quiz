@@ -63,6 +63,7 @@ export default function StudentLayout({ children }: { children: React.ReactNode 
     {
       key: 'headway',
       items: [
+        { icon: BookOpen,     label: 'Grammar',        path: '/student/headway-grammar' },
         { icon: Headphones,   label: 'Audio & Video',  path: '/student/headway-audio' },
         { icon: FlaskConical, label: 'Test Builder',   path: '/student/test-builder' },
       ]
