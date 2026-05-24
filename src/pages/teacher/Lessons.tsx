@@ -199,6 +199,17 @@ export default function TeacherLessons() {
     courses.find((c: any) => c.id === courseId)?.name ||
     courses.find((c: any) => c.id === courseId)?.title || 'Unknown Course';
 
+  const filtered = lessons.filter(l => {
+    const matchSearch = l.title.toLowerCase().includes(search.toLowerCase()) ||
+      (l.shortDescription || '').toLowerCase().includes(search.toLowerCase());
+    const matchCourse = courseFilter === 'all' || l.courseId === courseFilter;
+    const selectedClass = classes.find((c) => c.id === classFilter);
+    const matchClass = classFilter === 'all' || (selectedClass?.course_id ? l.courseId === selectedClass.course_id : false);
+    const matchModule = moduleFilter === 'all' || l.moduleId === moduleFilter;
+    const matchType = typeFilter === 'all' || l.type === typeFilter;
+    return matchSearch && matchCourse && matchClass && matchModule && matchType;
+  });
+
   const groupedLessons = (() => {
     const map = new Map<string, typeof filtered>();
     filtered.forEach(l => {
@@ -353,17 +364,6 @@ export default function TeacherLessons() {
 
   const getModuleName = (id: string) =>
     modules.find(m => m.id === id)?.title || 'Unknown';
-
-  const filtered = lessons.filter(l => {
-    const matchSearch = l.title.toLowerCase().includes(search.toLowerCase()) ||
-      (l.shortDescription || '').toLowerCase().includes(search.toLowerCase());
-    const matchCourse = courseFilter === 'all' || l.courseId === courseFilter;
-    const selectedClass = classes.find((c) => c.id === classFilter);
-    const matchClass = classFilter === 'all' || (selectedClass?.course_id ? l.courseId === selectedClass.course_id : false);
-    const matchModule = moduleFilter === 'all' || l.moduleId === moduleFilter;
-    const matchType = typeFilter === 'all' || l.type === typeFilter;
-    return matchSearch && matchCourse && matchClass && matchModule && matchType;
-  });
 
   const stats = [
     { ...STAT_CONFIG[0], value: lessons.length },
