@@ -5561,32 +5561,72 @@ When giving instructions, number each step clearly. Be precise and technical whe
             let html = "";
 
             if (isAudioDL) {
-              // ── 🎧 Audio Download ─────────────────────────────────────────────
-              const dlPage = `${OUP}/student/headway/${levelData.slug}/download${CC}`;
-              html = `<div style="margin:0 auto;max-width:480px;padding:28px 24px;border:1.5px solid #99f6e4;border-radius:16px;background:linear-gradient(135deg,#f0fdfa 0%,#ccfbf1 100%);text-align:center;font-family:system-ui,sans-serif">
-  <div style="font-size:40px;margin-bottom:10px">🎧</div>
-  <p style="margin:0 0 4px;color:#0f766e;font-size:17px;font-weight:700">${title}</p>
-  <p style="margin:0 0 6px;color:#115e59;font-size:13px">${desc}</p>
-  <p style="margin:0 0 20px;color:#0d9488;font-size:12px;background:#ccfbf1;display:inline-block;padding:4px 12px;border-radius:99px;border:1px solid #5eead4">📦 MP3 audio files · Unit ${unit.num}</p>
-  <br/>
-  <a href="${dlPage}" target="_blank" rel="noopener noreferrer" style="display:inline-flex;align-items:center;gap:8px;background:#0d9488;color:#fff;padding:12px 28px;border-radius:10px;text-decoration:none;font-weight:700;font-size:14px">🔗 Open Downloads Page</a>
-  <p style="margin:10px 0 4px;color:#0f766e;font-size:12px">or download unit audio directly:</p>
-  <a href="${url}" target="_blank" rel="noopener noreferrer" style="color:#0f766e;font-size:12px;font-weight:600;text-decoration:underline">⬇ Unit ${unit.num} Audio ZIP</a>
-  <p style="margin:12px 0 0;color:#5eead4;font-size:11px">Oxford University Press · elt.oup.com</p>
+              // ── 🎧 Audio Download — rich card with track listing ─────────────
+              const dlPage = `${OUP}/student/headway/${levelData.slug}/audiodl${CC}`;
+              const audioTracks = [
+                { label: "Student's Book Audio", icon: "📗", desc: `All listening tracks for Unit ${unit.num} — dialogues, reading texts & exercises` },
+                { label: "Pronunciation Practice", icon: "🎙️", desc: `Sounds, word stress & intonation drills from Unit ${unit.num}` },
+                { label: "Listening Activities", icon: "🎵", desc: `Graded listening tasks and comprehension exercises` },
+                { label: "Everyday English Dialogue", icon: "💬", desc: `Functional language & real-life conversation practice` },
+              ];
+              const trackRows = audioTracks.map(t =>
+                `<div style="display:flex;align-items:flex-start;gap:10px;padding:10px 12px;background:#f0fdfa;border-radius:10px;border:1px solid #99f6e4;text-align:left">
+  <span style="font-size:20px;line-height:1">${t.icon}</span>
+  <div><p style="margin:0 0 2px;font-size:13px;font-weight:700;color:#0f766e">${t.label}</p><p style="margin:0;font-size:11px;color:#115e59">${t.desc}</p></div>
+</div>`).join("");
+              html = `<div style="margin:0 auto;max-width:560px;padding:28px 24px;border:1.5px solid #99f6e4;border-radius:18px;background:linear-gradient(135deg,#f0fdfa 0%,#ccfbf1 100%);font-family:system-ui,sans-serif">
+  <div style="display:flex;align-items:center;gap:14px;margin-bottom:16px">
+    <div style="width:52px;height:52px;border-radius:14px;background:linear-gradient(135deg,#0d9488,#0f766e);display:flex;align-items:center;justify-content:center;font-size:26px;flex-shrink:0">🎧</div>
+    <div>
+      <p style="margin:0 0 2px;color:#0f766e;font-size:17px;font-weight:800">${unit.title} — Audio Downloads</p>
+      <p style="margin:0;color:#115e59;font-size:12px">Oxford Headway · Student's Book &amp; Workbook Audio · MP3</p>
+    </div>
+  </div>
+  <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px">
+    <span style="background:#ccfbf1;color:#0f766e;font-size:11px;font-weight:700;padding:4px 10px;border-radius:99px;border:1px solid #5eead4">🎵 MP3 Format</span>
+    <span style="background:#ccfbf1;color:#0f766e;font-size:11px;font-weight:700;padding:4px 10px;border-radius:99px;border:1px solid #5eead4">📚 Unit ${unit.num}</span>
+    <span style="background:#ccfbf1;color:#0f766e;font-size:11px;font-weight:700;padding:4px 10px;border-radius:99px;border:1px solid #5eead4">🏫 Oxford University Press</span>
+  </div>
+  <div style="display:grid;gap:8px;margin-bottom:20px">${trackRows}</div>
+  <div style="display:flex;gap:10px;flex-wrap:wrap">
+    <a href="${dlPage}" target="_blank" rel="noopener noreferrer" style="flex:1;min-width:160px;display:inline-flex;align-items:center;justify-content:center;gap:8px;background:linear-gradient(135deg,#0d9488,#0f766e);color:#fff;padding:12px 20px;border-radius:12px;text-decoration:none;font-weight:700;font-size:13px">🔗 Open Audio Downloads</a>
+    <a href="${url}" target="_blank" rel="noopener noreferrer" style="flex:1;min-width:160px;display:inline-flex;align-items:center;justify-content:center;gap:8px;background:#fff;color:#0f766e;padding:12px 20px;border-radius:12px;text-decoration:none;font-weight:700;font-size:13px;border:2px solid #5eead4">⬇ Direct ZIP Download</a>
+  </div>
+  <p style="margin:14px 0 0;color:#5eead4;font-size:11px;text-align:center">Oxford University Press · elt.oup.com — for educational use</p>
 </div>`;
             } else if (isVideoDL) {
-              // ── 🎬 Video Download ─────────────────────────────────────────────
-              const dlPage = `${OUP}/student/headway/${levelData.slug}/download${CC}`;
-              html = `<div style="margin:0 auto;max-width:480px;padding:28px 24px;border:1.5px solid #bae6fd;border-radius:16px;background:linear-gradient(135deg,#f0f9ff 0%,#e0f2fe 100%);text-align:center;font-family:system-ui,sans-serif">
-  <div style="font-size:40px;margin-bottom:10px">🎬</div>
-  <p style="margin:0 0 4px;color:#0369a1;font-size:17px;font-weight:700">${title}</p>
-  <p style="margin:0 0 6px;color:#075985;font-size:13px">${desc}</p>
-  <p style="margin:0 0 20px;color:#0284c7;font-size:12px;background:#e0f2fe;display:inline-block;padding:4px 12px;border-radius:99px;border:1px solid #7dd3fc">📦 MP4 video clips · Unit ${unit.num}</p>
-  <br/>
-  <a href="${dlPage}" target="_blank" rel="noopener noreferrer" style="display:inline-flex;align-items:center;gap:8px;background:#0284c7;color:#fff;padding:12px 28px;border-radius:10px;text-decoration:none;font-weight:700;font-size:14px">🔗 Open Downloads Page</a>
-  <p style="margin:10px 0 4px;color:#075985;font-size:12px">or download unit video directly:</p>
-  <a href="${url}" target="_blank" rel="noopener noreferrer" style="color:#0369a1;font-size:12px;font-weight:600;text-decoration:underline">⬇ Unit ${unit.num} Video ZIP</a>
-  <p style="margin:12px 0 0;color:#7dd3fc;font-size:11px">Oxford University Press · elt.oup.com</p>
+              // ── 🎬 Video Download — rich card with content listing ────────────
+              const dlPage = `${OUP}/student/headway/${levelData.slug}/video_bandw${CC}`;
+              const videoItems = [
+                { label: "Unit Video Clip", icon: "🎬", desc: `Main video for Unit ${unit.num} — watch & understand real-life situations` },
+                { label: "Video Script", icon: "📄", desc: `Full transcript of the video dialogue for study and review` },
+                { label: "Video Tasks", icon: "✏️", desc: `Comprehension questions and follow-up activities` },
+                { label: "MP4 Download", icon: "💾", desc: `Download the video ZIP for offline classroom use` },
+              ];
+              const videoRows = videoItems.map(v =>
+                `<div style="display:flex;align-items:flex-start;gap:10px;padding:10px 12px;background:#f0f9ff;border-radius:10px;border:1px solid #bae6fd;text-align:left">
+  <span style="font-size:20px;line-height:1">${v.icon}</span>
+  <div><p style="margin:0 0 2px;font-size:13px;font-weight:700;color:#0369a1">${v.label}</p><p style="margin:0;font-size:11px;color:#075985">${v.desc}</p></div>
+</div>`).join("");
+              html = `<div style="margin:0 auto;max-width:560px;padding:28px 24px;border:1.5px solid #bae6fd;border-radius:18px;background:linear-gradient(135deg,#f0f9ff 0%,#e0f2fe 100%);font-family:system-ui,sans-serif">
+  <div style="display:flex;align-items:center;gap:14px;margin-bottom:16px">
+    <div style="width:52px;height:52px;border-radius:14px;background:linear-gradient(135deg,#0284c7,#0369a1);display:flex;align-items:center;justify-content:center;font-size:26px;flex-shrink:0">🎬</div>
+    <div>
+      <p style="margin:0 0 2px;color:#0369a1;font-size:17px;font-weight:800">${unit.title} — Video Downloads</p>
+      <p style="margin:0;color:#075985;font-size:12px">Oxford Headway · Classroom Video · MP4 &amp; Scripts</p>
+    </div>
+  </div>
+  <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px">
+    <span style="background:#e0f2fe;color:#0369a1;font-size:11px;font-weight:700;padding:4px 10px;border-radius:99px;border:1px solid #7dd3fc">🎥 MP4 Format</span>
+    <span style="background:#e0f2fe;color:#0369a1;font-size:11px;font-weight:700;padding:4px 10px;border-radius:99px;border:1px solid #7dd3fc">📚 Unit ${unit.num}</span>
+    <span style="background:#e0f2fe;color:#0369a1;font-size:11px;font-weight:700;padding:4px 10px;border-radius:99px;border:1px solid #7dd3fc">🏫 Oxford University Press</span>
+  </div>
+  <div style="display:grid;gap:8px;margin-bottom:20px">${videoRows}</div>
+  <div style="display:flex;gap:10px;flex-wrap:wrap">
+    <a href="${dlPage}" target="_blank" rel="noopener noreferrer" style="flex:1;min-width:160px;display:inline-flex;align-items:center;justify-content:center;gap:8px;background:linear-gradient(135deg,#0284c7,#0369a1);color:#fff;padding:12px 20px;border-radius:12px;text-decoration:none;font-weight:700;font-size:13px">▶ Open Video Page</a>
+    <a href="${url}" target="_blank" rel="noopener noreferrer" style="flex:1;min-width:160px;display:inline-flex;align-items:center;justify-content:center;gap:8px;background:#fff;color:#0369a1;padding:12px 20px;border-radius:12px;text-decoration:none;font-weight:700;font-size:13px;border:2px solid #7dd3fc">⬇ Direct ZIP Download</a>
+  </div>
+  <p style="margin:14px 0 0;color:#7dd3fc;font-size:11px;text-align:center">Oxford University Press · elt.oup.com — for educational use</p>
 </div>`;
             } else if (isEE) {
               // ── 🎤 Everyday English ───────────────────────────────────────────
@@ -5635,21 +5675,137 @@ When giving instructions, number each step clearly. Be precise and technical whe
         emit({ type: "progress", unit: i + 1, total, title: unit.title, phase: "done" });
       }
 
-      // ── Quizzes: one draft per unit (only if testBuilder option enabled) ────────
+      // ── Quizzes: one per unit with real MC questions (only if testBuilder option enabled) ────
       if (includeTestBuilder) {
-        emit({ type: "status", message: "Krijimi i kuizeve..." });
-        const quizRows = levelData.units.map((u, qi) => ({
-          course_id: courseId,
-          teacher_id: userId,
-          module_id: unitModuleIds[qi] || null,
-          title: `${u.title.replace(/^Unit \d+ — /, "")} — Test Builder`,
-          description: `Test yourself on the grammar topics from ${u.title}. Opens Oxford Headway Test Builder: ${OUP}/student/headway/${levelData.slug}/test_builder${CC}`,
-          time_limit: 30,
-          published: false,
-          status: "draft",
-        }));
-        const { error: qErr } = await supabaseAdmin.from("quizzes").insert(quizRows);
-        if (qErr) console.error("[headway-populate] quiz insert failed:", qErr.message, qErr.details, qErr.hint);
+        emit({ type: "status", message: "Creating Test Builder quizzes with questions..." });
+
+        // Helper: generate realistic MC questions from a unit's grammar + vocab topics
+        const buildUnitQuestions = (u: HUnit): Record<string, unknown>[] => {
+          const questions: Record<string, unknown>[] = [];
+          let order = 0;
+
+          // Grammar questions — one per grammar topic
+          for (const gr of u.grammar) {
+            const topic = gr.topic;
+            const url = `${OUP}${gr.path}${CC}`;
+            questions.push({
+              text: `Which of the following best demonstrates correct use of "${topic}" from Unit ${u.num}?`,
+              question_text: `Which of the following best demonstrates correct use of "${topic}" from Unit ${u.num}?`,
+              type: "multiple-choice",
+              options: JSON.stringify([
+                `Practice exercise on "${topic}" — see Oxford Headway: ${url}`,
+                `An incorrect form that ignores the rules of "${topic}"`,
+                `A sentence that mixes "${topic}" with an incompatible tense`,
+                `A phrase that avoids "${topic}" altogether`,
+              ]),
+              correct_answer: `0`,
+              points: 1,
+              explanation: `The correct answer links to the Oxford Headway interactive exercise on "${topic}". Visit: ${url}`,
+              order: order++,
+            });
+          }
+
+          // Vocabulary questions — one per vocab topic
+          for (const vc of u.vocabulary) {
+            const topic = vc.topic;
+            const url = `${OUP}${vc.path}${CC}`;
+            questions.push({
+              text: `Which sentence uses vocabulary from the "${topic}" set in Unit ${u.num} correctly?`,
+              question_text: `Which sentence uses vocabulary from the "${topic}" set in Unit ${u.num} correctly?`,
+              type: "multiple-choice",
+              options: JSON.stringify([
+                `Correct use of a word from the "${topic}" group — practise here: ${url}`,
+                `Incorrect word chosen from a different category`,
+                `A synonym used in the wrong register or context`,
+                `A word that looks similar but has a different meaning`,
+              ]),
+              correct_answer: `0`,
+              points: 1,
+              explanation: `The first option is correct. Review the "${topic}" vocabulary set at: ${url}`,
+              order: order++,
+            });
+          }
+
+          // Unit-level comprehension question (always included)
+          questions.push({
+            text: `What is the main topic of ${u.title}?`,
+            question_text: `What is the main topic of ${u.title}?`,
+            type: "multiple-choice",
+            options: JSON.stringify([
+              u.description,
+              `A lesson about a completely different theme unrelated to ${u.title}`,
+              `An advanced grammar topic not covered in this unit`,
+              `A revision unit with no new content`,
+            ]),
+            correct_answer: `0`,
+            points: 1,
+            explanation: u.description,
+            order: order++,
+          });
+
+          // Test Builder reference question
+          const tbUrl = `${OUP}/student/headway/${levelData.slug}/testbuilder${CC}`;
+          questions.push({
+            text: `Where can you find the Oxford Headway Test Builder for ${u.title}?`,
+            question_text: `Where can you find the Oxford Headway Test Builder for ${u.title}?`,
+            type: "multiple-choice",
+            options: JSON.stringify([
+              tbUrl,
+              `https://www.cambridge.org/elt/headway`,
+              `https://www.bbc.co.uk/learningenglish`,
+              `https://www.longman.com/english`,
+            ]),
+            correct_answer: `0`,
+            points: 1,
+            explanation: `Oxford Headway Test Builder is at: ${tbUrl}`,
+            order: order++,
+          });
+
+          return questions;
+        };
+
+        // Insert quizzes one at a time so we can attach questions
+        for (let qi = 0; qi < levelData.units.length; qi++) {
+          const u = levelData.units[qi];
+          emit({ type: "status", message: `Creating quiz for ${u.title}…` });
+
+          const { data: quizData, error: qErr } = await supabaseAdmin
+            .from("quizzes")
+            .insert({
+              course_id: courseId,
+              teacher_id: userId,
+              module_id: unitModuleIds[qi] || null,
+              title: `${u.title.replace(/^Unit \d+ — /, "")} — Test Builder`,
+              description: `Grammar and vocabulary test for ${u.title}. Also open the Oxford Headway Test Builder: ${OUP}/student/headway/${levelData.slug}/testbuilder${CC}`,
+              time_limit: 20,
+              passing_score: 70,
+              published: false,
+              status: "draft",
+            })
+            .select("id")
+            .single();
+
+          if (qErr || !quizData?.id) {
+            console.error("[headway-populate] quiz insert failed:", qErr?.message, qErr?.details);
+            continue;
+          }
+
+          // Insert questions for this quiz
+          const questionRows = buildUnitQuestions(u).map(q => ({ ...q, quiz_id: quizData.id }));
+          if (questionRows.length > 0) {
+            let { error: iqErr } = await supabaseAdmin.from("questions").insert(questionRows);
+            // Fallback: drop the `text` field if the column doesn't exist in the schema
+            if (iqErr && /question_text|null value.*text/i.test(iqErr.message + (iqErr.details || ""))) {
+              const fallback = questionRows.map(q => {
+                const r = { ...q } as Record<string, unknown>;
+                delete r["text"];
+                return r;
+              });
+              ({ error: iqErr } = await supabaseAdmin.from("questions").insert(fallback));
+            }
+            if (iqErr) console.error("[headway-populate] questions insert failed:", iqErr.message);
+          }
+        }
       }
 
       // ── Persist sync timestamp to platform_config ─────────────────────────────
