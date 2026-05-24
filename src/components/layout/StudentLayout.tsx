@@ -11,7 +11,7 @@ import { useBranding } from '../../lib/useBranding';
 import {
   LayoutDashboard, BookOpen, PlayCircle, HelpCircle, ClipboardList, BarChart3,
   FileBarChart, Award, MessageSquare, Video, Radio, User, LogOut, Menu, X,
-  GraduationCap, ScrollText, Zap, Trophy, Megaphone, Presentation,
+  GraduationCap, ScrollText, Zap, Trophy, Megaphone, Presentation, Headphones, FlaskConical,
 } from 'lucide-react';
 
 interface NavItemDef { icon: React.ElementType; label: string; path: string; }
@@ -58,6 +58,13 @@ export default function StudentLayout({ children }: { children: React.ReactNode 
       items: [
         { icon: Award,     label: t('nav.certificates'),  path: '/student/certificates'  },
         { icon: Megaphone, label: t('nav.announcements'), path: '/student/announcements' },
+      ]
+    },
+    {
+      key: 'headway',
+      items: [
+        { icon: Headphones,   label: 'Audio & Video',  path: '/student/headway-audio' },
+        { icon: FlaskConical, label: 'Test Builder',   path: '/student/test-builder' },
       ]
     },
     {

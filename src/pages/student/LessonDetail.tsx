@@ -235,75 +235,117 @@ export default function StudentLessonDetail() {
               )}
             </div>
 
+            {/* ── Featured media: show primary video or audio player prominently ── */}
+            {sections.video.length > 0 && (
+              <div className="bg-slate-950 rounded-3xl overflow-hidden shadow-xl">
+                <div className="px-5 pt-4 pb-2 flex items-center gap-2">
+                  <Video className="w-4 h-4 text-slate-400" />
+                  <span className="text-xs font-semibold text-slate-400 uppercase tracking-wider">
+                    {sections.video[0].title || t('common.video')}
+                  </span>
+                </div>
+                <video
+                  ref={videoRef}
+                  src={sections.video[0].signed_url ?? undefined}
+                  controls
+                  className="w-full"
+                  style={{ maxHeight: '520px', background: '#000' }}
+                  onLoadedMetadata={(e) => {
+                    if (lastVideoPosition > 0) e.currentTarget.currentTime = lastVideoPosition;
+                  }}
+                  onTimeUpdate={(e) => {
+                    const current = e.currentTarget.currentTime;
+                    setLastVideoPosition(current);
+                    const now = Date.now();
+                    if (now - lastSyncRef.current > 5000) {
+                      lastSyncRef.current = now;
+                      void persistProgress(completed, current);
+                    }
+                  }}
+                />
+                {sections.video[0].description && (
+                  <p className="px-5 py-3 text-sm text-slate-400">{sections.video[0].description}</p>
+                )}
+                {/* Additional videos */}
+                {sections.video.slice(1).map((item) => (
+                  <div key={item.id} className="border-t border-slate-800 px-5 py-4 space-y-2">
+                    <p className="text-xs font-semibold text-slate-400">{item.title}</p>
+                    <video src={item.signed_url ?? undefined} controls className="w-full rounded-xl" style={{ background: '#000' }} />
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* ── Featured audio player (shown when no video, or alongside video) ── */}
+            {sections.audio.length > 0 && (
+              <div className="bg-white rounded-3xl border border-slate-100 p-5 space-y-3">
+                <div className="flex items-center gap-2 mb-1">
+                  <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-indigo-500 to-violet-600 flex items-center justify-center">
+                    <Headphones className="w-4 h-4 text-white" />
+                  </div>
+                  <span className="text-sm font-bold text-slate-800">{t('common.audio')}</span>
+                  <span className="text-xs text-slate-400 ml-1">({sections.audio.length} {sections.audio.length === 1 ? 'track' : 'tracks'})</span>
+                </div>
+                {sections.audio.map((item) => (
+                  <div key={item.id} className="rounded-2xl bg-gradient-to-r from-indigo-50 to-violet-50 border border-indigo-100 p-4 space-y-2">
+                    {item.title && <p className="text-sm font-semibold text-slate-800">{item.title}</p>}
+                    {item.description && <p className="text-xs text-slate-500">{item.description}</p>}
+                    <audio src={item.signed_url ?? undefined} controls className="w-full" style={{ borderRadius: '12px' }} />
+                  </div>
+                ))}
+              </div>
+            )}
+
             {contents.length > 0 ? (
               <div className="bg-white rounded-3xl border border-slate-100 p-6 space-y-4">
-                <div className="flex flex-wrap gap-2">
-                  {tabConfig
-                    .filter((tab) => (sections[tab.key] || []).length > 0)
-                    .map((tab) => (
-                      <button
-                        key={tab.key}
-                        onClick={() => setActiveTab(tab.key)}
-                        className={cn(
-                          'inline-flex items-center gap-2 px-3 py-2 rounded-xl text-sm font-semibold transition-all',
-                          activeTab === tab.key
-                            ? 'bg-indigo-600 text-white'
-                            : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
-                        )}
-                      >
-                        <tab.icon className="w-4 h-4" />
-                        {tab.label}
-                      </button>
-                    ))}
-                </div>
-
-                <div className="space-y-4">
-                  {activeItems.map((item) => (
-                    <div key={item.id} className="rounded-2xl border border-slate-100 p-4 space-y-2">
-                      <h3 className="text-base font-bold text-slate-900">{item.title || t('student.lessons.untitledContent')}</h3>
-                      {item.description && <p className="text-sm text-slate-500">{item.description}</p>}
-
-                      {item.type === 'video' && item.signed_url && (
-                        <video
-                          ref={videoRef}
-                          src={item.signed_url}
-                          controls
-                          className="w-full rounded-xl bg-black"
-                          onLoadedMetadata={(e) => {
-                            if (lastVideoPosition > 0) {
-                              e.currentTarget.currentTime = lastVideoPosition;
-                            }
-                          }}
-                          onTimeUpdate={(e) => {
-                            const current = e.currentTarget.currentTime;
-                            setLastVideoPosition(current);
-                            const now = Date.now();
-                            if (now - lastSyncRef.current > 5000) {
-                              lastSyncRef.current = now;
-                              void persistProgress(completed, current);
-                            }
-                          }}
-                        />
-                      )}
-                      {item.type === 'audio' && item.signed_url && (
-                        <audio src={item.signed_url} controls className="w-full" />
-                      )}
-                      {item.type === 'pdf' && item.signed_url && (
-                        <iframe
-                          title={item.title || 'PDF'}
-                          src={`${item.signed_url}#page=${Math.max(1, Number(item.pdf_page || 1))}`}
-                          className="w-full h-[70vh] rounded-xl border border-slate-200"
-                        />
-                      )}
-                      {item.type === 'text' && (
-                        <div
-                          className="prose prose-slate max-w-none"
-                          dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(item.text_content || `<p>${t('student.lessons.noTextContent')}</p>`) }}
-                        />
-                      )}
+                {/* Only show tabs if there are non-video/audio content types */}
+                {(sections.pdf.length > 0 || sections.text.length > 0) && (
+                  <>
+                    <div className="flex flex-wrap gap-2">
+                      {tabConfig
+                        .filter((tab) => tab.key !== 'video' && tab.key !== 'audio' && (sections[tab.key] || []).length > 0)
+                        .map((tab) => (
+                          <button
+                            key={tab.key}
+                            onClick={() => setActiveTab(tab.key)}
+                            className={cn(
+                              'inline-flex items-center gap-2 px-3 py-2 rounded-xl text-sm font-semibold transition-all',
+                              activeTab === tab.key
+                                ? 'bg-indigo-600 text-white'
+                                : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                            )}
+                          >
+                            <tab.icon className="w-4 h-4" />
+                            {tab.label}
+                          </button>
+                        ))}
                     </div>
-                  ))}
-                </div>
+
+                    <div className="space-y-4">
+                      {(sections[activeTab] || [])
+                        .filter((item) => item.type !== 'video' && item.type !== 'audio')
+                        .map((item) => (
+                          <div key={item.id} className="rounded-2xl border border-slate-100 p-4 space-y-2">
+                            <h3 className="text-base font-bold text-slate-900">{item.title || t('student.lessons.untitledContent')}</h3>
+                            {item.description && <p className="text-sm text-slate-500">{item.description}</p>}
+                            {item.type === 'pdf' && item.signed_url && (
+                              <iframe
+                                title={item.title || 'PDF'}
+                                src={`${item.signed_url}#page=${Math.max(1, Number(item.pdf_page || 1))}`}
+                                className="w-full h-[70vh] rounded-xl border border-slate-200"
+                              />
+                            )}
+                            {item.type === 'text' && (
+                              <div
+                                className="prose prose-slate max-w-none"
+                                dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(item.text_content || `<p>${t('student.lessons.noTextContent')}</p>`) }}
+                              />
+                            )}
+                          </div>
+                        ))}
+                    </div>
+                  </>
+                )}
               </div>
             ) : (
               <div className="bg-white rounded-3xl border border-slate-100 p-8 text-sm text-slate-500">
