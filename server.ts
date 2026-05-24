@@ -2922,6 +2922,115 @@ When giving instructions, number each step clearly. Be precise and technical whe
     }
   });
 
+  // ── Clear all database data except admin users ────────────────────────────
+  app.post("/api/admin/clear-database", async (req, res) => {
+    try {
+      const { confirmation } = req.body || {};
+      if (confirmation !== "DELETE") {
+        return res.status(400).json({ error: "Confirmation text must be 'DELETE'" });
+      }
+
+      const caller = await getAuthUser(req);
+      if (!caller || caller.role !== "admin") {
+        return res.status(403).json({ error: "Forbidden" });
+      }
+
+      const adminId = caller.userId;
+
+      // Step 1: find all non-admin user IDs so we can delete their auth accounts
+      const { data: nonAdminProfiles } = await supabaseAdmin
+        .from("profiles")
+        .select("id")
+        .neq("role", "admin");
+
+      const nonAdminIds: string[] = (nonAdminProfiles || []).map((p: any) => p.id);
+
+      // Step 2: delete non-admin auth users in Supabase Auth
+      const authDeletions = nonAdminIds.map((id) =>
+        supabaseAdmin.auth.admin.deleteUser(id).catch(() => null)
+      );
+      await Promise.all(authDeletions);
+
+      // Step 3: truncate all data tables (order matters for foreign keys)
+      const tables = [
+        // Discussion system (children first)
+        "discussion_moderation_actions",
+        "discussion_user_badges",
+        "discussion_badges",
+        "discussion_user_stats",
+        "lesson_discussion_reports",
+        "lesson_discussion_reactions",
+        "lesson_discussion_replies",
+        "lesson_discussion_answers",
+        "lesson_discussion_questions",
+        // Live sessions
+        "session_reactions",
+        "session_chat_messages",
+        "session_participants",
+        "live_sessions",
+        // Community & announcements
+        "community_posts",
+        "announcements",
+        // Quiz data
+        "quiz_runtime_state",
+        "quiz_attempts",
+        "attempts",
+        "questions",
+        "quizzes",
+        // Lesson content & progress
+        "lesson_progress",
+        "lesson_contents",
+        "lessons",
+        // Academic records
+        "assignment_submissions",
+        "assignments",
+        "attendance",
+        "certificates",
+        // Finance
+        "invoices",
+        "payments",
+        // Course structure
+        "modules",
+        "courses",
+        "classes",
+        // User data (non-admins only – handled below)
+        "teachers",
+        "students",
+        "notifications",
+        // Config & monitoring
+        "platform_config",
+        "error_alert_context",
+      ];
+
+      const errors: string[] = [];
+      for (const table of tables) {
+        try {
+          const { error } = await supabaseAdmin.from(table).delete().neq("id", "00000000-0000-0000-0000-000000000000");
+          if (error && !error.message.includes("does not exist") && !error.message.includes("relation")) {
+            errors.push(`${table}: ${error.message}`);
+          }
+        } catch {
+          // Table doesn't exist — skip silently
+        }
+      }
+
+      // Step 4: delete non-admin profiles (keep admins)
+      await supabaseAdmin.from("profiles").delete().neq("role", "admin");
+
+      console.log(`[clear-database] Cleared by admin ${adminId}. Errors: ${errors.length ? errors.join("; ") : "none"}`);
+
+      return res.json({
+        success: true,
+        message: "Database cleared. All data deleted except admin accounts.",
+        deletedUsers: nonAdminIds.length,
+        errors,
+      });
+    } catch (err: any) {
+      console.error("[clear-database] Error:", err);
+      return res.status(500).json({ error: err.message || "Failed to clear database" });
+    }
+  });
+
   // Route to create a course (bypasses RLS using service role)
   app.post("/api/admin/create-course", async (req, res) => {
     try {

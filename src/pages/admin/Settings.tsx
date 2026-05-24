@@ -10,7 +10,7 @@ import {
   Settings, Globe, Bell, Shield, Database, Mail,
   Clock, Languages, Save, ToggleLeft, ToggleRight,
   ChevronRight, School, Phone, MapPin, AlertTriangle,
-  GraduationCap, Briefcase, Crown, Info
+  GraduationCap, Briefcase, Crown, Info, Trash2, X
 } from 'lucide-react';
 
 type Role = 'student' | 'teacher' | 'admin';
@@ -60,6 +60,9 @@ export default function AdminSettings() {
   const [maxLoginAttempts, setMaxLoginAttempts] = useState<RoleNumMap>({ student: 5, teacher: 5, admin: 5 });
   const [telegramErrorAlerts, setTelegramErrorAlerts] = useState(true);
   const [features, setFeatures] = useState<FeatureFlags>(defaultFeatureFlags);
+  const [showClearModal, setShowClearModal] = useState(false);
+  const [clearConfirmText, setClearConfirmText] = useState('');
+  const [clearing, setClearing] = useState(false);
 
   const TABS_LOCAL = [
     { id: 'general',       label: t('settings.tabs.general'),       icon: School },
@@ -196,6 +199,26 @@ export default function AdminSettings() {
       }
     })();
   }, []);
+
+  const handleClearDatabase = async () => {
+    if (clearConfirmText !== 'DELETE') return;
+    setClearing(true);
+    try {
+      const res = await authFetch('/api/admin/clear-database', {
+        method: 'POST',
+        body: JSON.stringify({ confirmation: 'DELETE' }),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error || 'Failed');
+      toast.success(`Database cleared — ${json.deletedUsers ?? 0} user(s) removed. Admin accounts preserved.`);
+      setShowClearModal(false);
+      setClearConfirmText('');
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to clear database');
+    } finally {
+      setClearing(false);
+    }
+  };
 
   return (
     <AdminLayout>
@@ -574,7 +597,109 @@ export default function AdminSettings() {
                     <button className="text-sm text-rose-600 font-semibold hover:underline">{t('settings.advanced.clearCache')}</button>
                   </div>
                 </Section>
+
+                {/* ── Danger Zone ── */}
+                <div className="rounded-2xl border-2 border-rose-200 bg-rose-50/40 p-6 space-y-4">
+                  <div className="flex items-center gap-3 pb-3 border-b border-rose-200">
+                    <div className="w-8 h-8 rounded-xl bg-rose-100 flex items-center justify-center">
+                      <AlertTriangle className="w-4 h-4 text-rose-600" />
+                    </div>
+                    <div>
+                      <h3 className="text-base font-bold text-rose-700">Danger Zone</h3>
+                      <p className="text-xs text-rose-500">These actions are permanent and cannot be undone</p>
+                    </div>
+                  </div>
+
+                  <div className="flex items-start justify-between gap-6">
+                    <div>
+                      <p className="text-sm font-semibold text-slate-800">Clear All Database Data</p>
+                      <p className="text-xs text-slate-500 mt-0.5">
+                        Deletes <strong>all</strong> courses, lessons, quizzes, students, teachers, results, and every other record.
+                        Your admin account will be kept.
+                      </p>
+                    </div>
+                    <button
+                      onClick={() => { setShowClearModal(true); setClearConfirmText(''); }}
+                      className="flex-shrink-0 inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-rose-600 hover:bg-rose-700 text-white text-sm font-semibold transition-colors"
+                    >
+                      <Trash2 className="w-4 h-4" /> Clear Database
+                    </button>
+                  </div>
+                </div>
               </>
+            )}
+
+            {/* ── Clear Database Confirmation Modal ── */}
+            {showClearModal && (
+              <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
+                <div className="bg-white rounded-3xl border border-slate-200 shadow-2xl w-full max-w-md p-6 space-y-5">
+                  <div className="flex items-start justify-between">
+                    <div className="flex items-center gap-3">
+                      <div className="w-10 h-10 rounded-2xl bg-rose-100 flex items-center justify-center">
+                        <Trash2 className="w-5 h-5 text-rose-600" />
+                      </div>
+                      <div>
+                        <h2 className="text-lg font-black text-slate-900">Clear All Data</h2>
+                        <p className="text-xs text-slate-500">This cannot be undone</p>
+                      </div>
+                    </div>
+                    <button onClick={() => setShowClearModal(false)} className="p-1.5 rounded-xl hover:bg-slate-100 transition-colors">
+                      <X className="w-4 h-4 text-slate-500" />
+                    </button>
+                  </div>
+
+                  <div className="bg-rose-50 border border-rose-200 rounded-2xl p-4 space-y-2">
+                    <p className="text-sm font-semibold text-rose-700 flex items-center gap-2">
+                      <AlertTriangle className="w-4 h-4" /> What will be deleted:
+                    </p>
+                    <ul className="text-xs text-rose-600 space-y-1 list-disc list-inside">
+                      <li>All courses, modules, lessons and content</li>
+                      <li>All quizzes, questions and attempts</li>
+                      <li>All students and teachers (their accounts)</li>
+                      <li>All assignments, attendance, certificates</li>
+                      <li>All live sessions, chat, notifications</li>
+                    </ul>
+                    <p className="text-xs font-semibold text-emerald-700 pt-1">
+                      ✓ Admin accounts will be preserved
+                    </p>
+                  </div>
+
+                  <div className="space-y-2">
+                    <label className="block text-xs font-bold text-slate-700 uppercase tracking-wide">
+                      Type <span className="text-rose-600 font-mono">DELETE</span> to confirm
+                    </label>
+                    <input
+                      type="text"
+                      value={clearConfirmText}
+                      onChange={e => setClearConfirmText(e.target.value)}
+                      placeholder="Type DELETE here"
+                      className="w-full px-4 py-2.5 rounded-xl border-2 border-slate-200 focus:border-rose-400 focus:outline-none text-sm font-mono text-slate-800"
+                      autoFocus
+                      onKeyDown={e => { if (e.key === 'Enter' && clearConfirmText === 'DELETE') void handleClearDatabase(); }}
+                    />
+                  </div>
+
+                  <div className="flex gap-3">
+                    <button
+                      onClick={() => setShowClearModal(false)}
+                      className="flex-1 px-4 py-2.5 rounded-xl border border-slate-200 text-sm font-semibold text-slate-700 hover:bg-slate-50 transition-colors"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      onClick={() => void handleClearDatabase()}
+                      disabled={clearConfirmText !== 'DELETE' || clearing}
+                      className="flex-1 px-4 py-2.5 rounded-xl bg-rose-600 hover:bg-rose-700 disabled:opacity-40 disabled:cursor-not-allowed text-white text-sm font-semibold transition-colors inline-flex items-center justify-center gap-2"
+                    >
+                      {clearing ? (
+                        <><div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" /> Clearing…</>
+                      ) : (
+                        <><Trash2 className="w-4 h-4" /> Clear All Data</>
+                      )}
+                    </button>
+                  </div>
+                </div>
+              </div>
             )}
           </div>
         </div>
