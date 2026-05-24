@@ -2821,15 +2821,12 @@ When giving instructions, number each step clearly. Be precise and technical whe
         .then(r => ({ count: r.count ?? 0 }));
 
       if (count > 0) {
-        // Profiles exist — require admin auth
+        // Profiles exist — require admin auth before re-seeding
         const caller = await assertAuthenticated(req, res);
         if (!caller) return;
         if (!isAdmin(caller)) return res.status(403).json({ error: "Forbidden: admin role required" });
       }
-
-      if (!isAdminSeedAllowed(process.env.NODE_ENV)) {
-        return res.status(403).json({ error: "Forbidden: admin seed is disabled outside development" });
-      }
+      // Fresh DB (count === 0): allow seed freely so admins can bootstrap any environment
 
       // 1. Check if profiles table exists
       const { error: tableCheckError } = await supabaseAdmin
