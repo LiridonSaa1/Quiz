@@ -513,116 +513,86 @@ export default function TeacherLessons() {
               )}
             </motion.div>
 
-            {/* Lessons Grid */}
+            {/* Modules Grid — click a module to see its lessons */}
             {loading ? (
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-5">
-                {Array(6).fill(0).map((_, i) => <div key={i} className="bg-white rounded-2xl border border-slate-100 h-52 animate-pulse" />)}
+                {Array(8).fill(0).map((_, i) => <div key={i} className="bg-white rounded-2xl border border-slate-100 h-52 animate-pulse" />)}
               </div>
-            ) : filtered.length === 0 ? (
+            ) : modules.length === 0 ? (
               <motion.div initial={{ opacity: 0, scale: 0.97 }} animate={{ opacity: 1, scale: 1 }} transition={{ duration: 0.4 }}
                 className="py-20 flex flex-col items-center justify-center bg-white rounded-2xl border border-dashed border-indigo-200 shadow-sm">
                 <EmptyIllustration />
-                <h3 className="text-xl font-extrabold text-slate-800 mt-6 mb-2">{hasActiveFilters ? 'No results found' : 'No lessons yet'}</h3>
+                <h3 className="text-xl font-extrabold text-slate-800 mt-6 mb-2">No modules yet</h3>
                 <p className="text-slate-400 text-sm mb-8 max-w-xs text-center">
-                  {hasActiveFilters ? "Try adjusting your search or filters." : 'Create your first lesson to start building content inside your modules.'}
+                  Create modules first under a course, then add lessons inside each module.
                 </p>
-                {courses.length > 0 && !hasActiveFilters && can('actions.teacher.lessons.manage') && (
-                  <motion.button onClick={openCreate} whileHover={{ scale: 1.04, y: -2 }} whileTap={{ scale: 0.97 }}
-                    className="inline-flex items-center gap-2 px-6 py-3 rounded-2xl font-bold text-sm text-white"
-                    style={{ background: 'linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%)', boxShadow: '0 8px 24px rgba(99,102,241,0.35)' }}>
-                    <Plus className="w-4 h-4" /> Create Your First Lesson
-                  </motion.button>
-                )}
+                <Link to="/teacher/modules"
+                  className="inline-flex items-center gap-2 px-6 py-3 rounded-2xl font-bold text-sm text-white"
+                  style={{ background: 'linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%)', boxShadow: '0 8px 24px rgba(99,102,241,0.35)' }}>
+                  <Layers className="w-4 h-4" /> Go to Courses & Modules
+                </Link>
               </motion.div>
             ) : (
-              <div className="space-y-8">
-                {groupedLessons.map(({ courseId, courseTitle, items }) => (
-                  <div key={courseId} className="space-y-4">
-                    <div className="flex items-center gap-3 pb-2 border-b border-slate-100">
-                      <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-indigo-500 to-violet-600 flex items-center justify-center shrink-0">
-                        <BookOpen className="w-4 h-4 text-white" />
-                      </div>
-                      <div>
-                        <h2 className="text-base font-bold text-slate-900">{courseTitle}</h2>
-                        <p className="text-xs text-slate-400">{items.length} lesson{items.length !== 1 ? 's' : ''}</p>
-                      </div>
-                    </div>
-                    <motion.div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-5"
-                      initial="hidden" animate="visible" variants={{ hidden: {}, visible: { transition: { staggerChildren: 0.07 } } }}>
-                      {items.map((lesson) => {
-                  const lt = getLessonType(lesson.type);
-                  const isPublished = lesson.status === 'published';
+              <motion.div
+                className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-5"
+                initial="hidden" animate="visible"
+                variants={{ hidden: {}, visible: { transition: { staggerChildren: 0.06 } } }}>
+                {(courseFilter !== 'all'
+                  ? modules.filter(m => (m as any).course_id === courseFilter)
+                  : modules
+                ).map((mod) => {
+                  const courseObj = courses.find(c => c.id === (mod as any).course_id);
+                  const courseTitle = (courseObj as any)?.name || (courseObj as any)?.title || 'Unknown Course';
+                  const lessonCount = (mod as any).totalLessons ?? 0;
+                  const isActive = mod.status === 'active' || mod.status === 'published';
                   return (
-                    <motion.div key={lesson.id}
+                    <motion.div
+                      key={mod.id}
                       variants={{ hidden: { opacity: 0, y: 20 }, visible: { opacity: 1, y: 0, transition: { duration: 0.35, ease: 'easeOut' } } }}
                       whileHover={{ y: -4, boxShadow: '0 20px 48px rgba(99,102,241,0.15)' }}
-                      className="group relative bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden flex flex-col transition-all duration-200">
-                      <div className="h-1.5 w-full" style={{ background: lt.accentGradient }} />
+                      className="group bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden flex flex-col transition-all duration-200">
+                      <div className="h-1.5 w-full bg-gradient-to-r from-indigo-500 to-violet-600" />
                       <div className="p-5 flex flex-col flex-1">
                         <div className="flex items-start justify-between mb-3">
-                          <div className={cn('w-11 h-11 rounded-xl flex items-center justify-center shrink-0', lt.bg)}>
-                            <lt.icon className={cn('w-5 h-5', lt.color)} />
+                          <div className="w-11 h-11 rounded-xl bg-gradient-to-br from-indigo-500 to-violet-600 flex items-center justify-center shrink-0">
+                            <Layers className="w-5 h-5 text-white" />
                           </div>
-                          {can('actions.teacher.lessons.manage') && (
-                            <button onClick={() => handleToggleStatus(lesson)}
-                              className={cn('inline-flex items-center gap-1.5 text-[11px] font-bold px-2.5 py-1 rounded-full transition-all',
-                                isPublished ? 'bg-emerald-50 text-emerald-700 hover:bg-emerald-100' : 'bg-amber-50 text-amber-700 hover:bg-amber-100')}>
-                              <span className={cn('w-1.5 h-1.5 rounded-full', isPublished ? 'bg-emerald-500' : 'bg-amber-500')} />
-                              {isPublished ? 'Published' : 'Draft'}
-                            </button>
-                          )}
+                          <span className={cn(
+                            'inline-flex items-center gap-1.5 text-[11px] font-bold px-2.5 py-1 rounded-full',
+                            isActive ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-700'
+                          )}>
+                            <span className={cn('w-1.5 h-1.5 rounded-full', isActive ? 'bg-emerald-500' : 'bg-amber-500')} />
+                            {isActive ? 'Active' : 'Inactive'}
+                          </span>
                         </div>
-                        <h3 className="text-sm font-bold text-slate-900 line-clamp-2 mb-1 leading-snug">{lesson.title}</h3>
-                        {lesson.shortDescription && <p className="text-xs text-slate-400 line-clamp-2 mb-2">{lesson.shortDescription}</p>}
-                        <div className="mt-auto space-y-2 pt-3 border-t border-slate-50">
-                          <div className="flex items-center justify-between">
-                            <span className="inline-flex items-center gap-1.5 px-2 py-1 bg-slate-100 text-slate-600 rounded-lg text-[11px] font-medium max-w-[130px] truncate">
-                              <Layers className="w-3 h-3 shrink-0" />
-                              <span className="truncate">{getModuleName(lesson.moduleId)}</span>
-                            </span>
-                            <span className="inline-flex items-center gap-1 text-xs text-slate-400">
-                              <Clock className="w-3.5 h-3.5 text-slate-300" />
-                              {lesson.durationMinutes} min
-                            </span>
-                          </div>
-                          <div className="flex items-center gap-1">
+                        <h3 className="text-sm font-bold text-slate-900 line-clamp-2 mb-1 leading-snug">{mod.title}</h3>
+                        <p className="text-xs text-slate-400 line-clamp-1 mb-auto">{courseTitle}</p>
+                        <div className="mt-3 pt-3 border-t border-slate-50 space-y-2">
+                          <div className="flex items-center gap-1.5 text-xs text-slate-500">
+                            <BookOpen className="w-3.5 h-3.5 text-violet-400" />
+                            <span className="font-bold text-slate-700">{lessonCount}</span>
+                            <span>lessons</span>
                             {can('actions.teacher.lessons.manage') && (
-                              <button onClick={() => handleToggleFreePreview(lesson)}
-                                title={lesson.isFreePreview ? 'Remove free preview' : 'Set as free preview'}
-                                className={cn('inline-flex items-center gap-1.5 text-[11px] font-semibold px-2.5 py-1 rounded-full transition-all',
-                                  lesson.isFreePreview ? 'bg-emerald-50 text-emerald-700 hover:bg-emerald-100' : 'bg-slate-100 text-slate-400 hover:bg-slate-200')}>
-                                {lesson.isFreePreview ? <Unlock className="w-3 h-3" /> : <Lock className="w-3 h-3" />}
-                                {lesson.isFreePreview ? 'Free Preview' : 'Locked'}
+                              <button
+                                onClick={() => openCreate()}
+                                className="ml-auto inline-flex items-center gap-1 text-[11px] font-semibold text-indigo-500 hover:text-indigo-700 transition-colors"
+                              >
+                                <Plus className="w-3 h-3" /> Add
                               </button>
                             )}
                           </div>
-                        </div>
-                        <div className="flex items-center gap-2 pt-3 sm:opacity-0 sm:group-hover:opacity-100 opacity-100 transition-all duration-200 sm:translate-y-1 sm:group-hover:translate-y-0">
-                          <Link to={`/teacher/lessons/${encodeURIComponent(lesson.id)}/content`}
-                            className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-xl text-xs font-semibold text-slate-700 bg-slate-100 hover:bg-slate-200 transition-all">
-                            Manage Content
+                          <Link
+                            to={`/teacher/modules/${encodeURIComponent(mod.id)}`}
+                            className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl text-sm font-bold text-white transition-all hover:opacity-90 active:scale-95"
+                            style={{ background: 'linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%)' }}>
+                            <BookOpen className="w-3.5 h-3.5" /> View Lessons
                           </Link>
-                          {can('actions.teacher.lessons.manage') && (
-                            <button onClick={() => openEdit(lesson)}
-                              className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-xl text-xs font-semibold text-indigo-600 bg-indigo-50 hover:bg-indigo-100 transition-all">
-                              <Edit2 className="w-3.5 h-3.5" /> Edit
-                            </button>
-                          )}
-                          {can('actions.teacher.lessons.manage') && (
-                            <button onClick={() => handleDelete(lesson)}
-                              className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-xl text-xs font-semibold text-red-500 bg-red-50 hover:bg-red-100 transition-all">
-                              <Trash2 className="w-3.5 h-3.5" /> Delete
-                            </button>
-                          )}
                         </div>
                       </div>
                     </motion.div>
                   );
                 })}
-                    </motion.div>
-                  </div>
-                ))}
-              </div>
+              </motion.div>
             )}
 
             {/* Pagination */}

@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useParams, useNavigate } from 'react-router-dom';
 import {
   DndContext,
   PointerSensor,
@@ -27,7 +27,7 @@ import {
   Plus, Search, Layers, Trash2, Edit2, GripVertical,
   BookOpen, X, Save, PlayCircle, ChevronRight, ChevronLeft, HelpCircle, AlertTriangle, Calendar,
   Download, Globe, CheckCircle2, ChevronDown, RefreshCw, Copy, CheckSquare, Square,
-  Eye, EyeOff, RotateCcw, BarChart2,
+  Eye, EyeOff, RotateCcw, BarChart2, ArrowLeft,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { Module, Course } from '../../types';
@@ -133,12 +133,14 @@ function EmptyIllustration() {
 
 export default function TeacherModules() {
   const { t } = useTranslation();
+  const { courseId: paramCourseId } = useParams<{ courseId?: string }>();
+  const navigate = useNavigate();
   const [modules, setModules] = useState<Module[]>([]);
   const [courses, setCourses] = useState<Course[]>([]);
   const [classes, setClasses] = useState<Array<{ id: string; name: string; course_id: string | null }>>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
-  const [courseFilter, setCourseFilter] = useState('all');
+  const [courseFilter, setCourseFilter] = useState(() => paramCourseId || 'all');
   const [classFilter, setClassFilter] = useState('all');
   const [showModal, setShowModal] = useState(false);
   const [editing, setEditing] = useState<Module | null>(null);
@@ -796,6 +798,14 @@ export default function TeacherModules() {
             <div className="relative px-6 sm:px-8 lg:px-10 py-10">
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-6">
                 <div>
+                  {paramCourseId && (
+                    <button
+                      onClick={() => navigate('/teacher/modules')}
+                      className="mb-3 inline-flex items-center gap-1.5 text-xs font-semibold text-indigo-300 hover:text-white transition-colors"
+                    >
+                      <ArrowLeft className="w-3.5 h-3.5" /> Back to Courses
+                    </button>
+                  )}
                   <nav className="flex items-center gap-1.5 text-xs font-semibold mb-3" aria-label="Breadcrumb">
                     <span className="text-indigo-400 tracking-wider uppercase">{t('modules.portalLabel')}</span>
                     <ChevronRight className="w-3.5 h-3.5 text-indigo-500/50" />

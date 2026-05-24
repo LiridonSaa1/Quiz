@@ -29,6 +29,8 @@ const TeacherResults = lazy(() => import('./pages/teacher/Results'));
 const TeacherModules = lazy(() => import('./pages/teacher/Modules'));
 const TeacherModuleDetail = lazy(() => import('./pages/teacher/ModuleDetail'));
 const TeacherLessons = lazy(() => import('./pages/teacher/Lessons'));
+const TeacherCoursesList = lazy(() => import('./pages/teacher/TeacherCoursesList'));
+const HeadwayTestImport = lazy(() => import('./pages/teacher/HeadwayTestImport'));
 const TeacherLessonContentManager = lazy(() => import('./pages/teacher/LessonContentManager'));
 const TeacherAssignments = lazy(() => import('./pages/teacher/Assignments'));
 const TeacherAttendance = lazy(() => import('./pages/teacher/Attendance'));
@@ -427,8 +429,10 @@ function TeacherRoutes({ features }: { features: FeatureFlags }) {
       <Route path="/live-quiz/reports" element={<RealtimeQuizReports />} />
       <Route path="/exams" element={<TeacherExams />} />
       <Route path="/results" element={<TeacherResults />} />
-      <Route path="/modules" element={<TeacherModules />} />
+      <Route path="/modules" element={<TeacherCoursesList />} />
       <Route path="/modules/:moduleId" element={<TeacherModuleDetail />} />
+      <Route path="/courses/:courseId/modules" element={<TeacherModules />} />
+      <Route path="/headway-tests" element={<HeadwayTestImport />} />
       <Route path="/lessons" element={<TeacherLessons />} />
       <Route path="/lessons/:lessonId/content" element={<TeacherLessonContentManager />} />
       <Route path="/assignments" element={<TeacherAssignments />} />

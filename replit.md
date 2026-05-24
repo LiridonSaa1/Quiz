@@ -45,6 +45,13 @@ The live Supabase DB has schema differences from what some pages expect. All aff
 - `courses.student_ids` column does not exist → enrolled courses show empty for students
 - `Notification` type now includes `title: string` and `read: boolean` fields
 
+## Navigation Hierarchy (Teacher)
+- `/teacher/modules` → **Course Cards** — shows all teacher courses as cards with module/lesson counts; clicking "View Modules" navigates to `/teacher/courses/:courseId/modules`
+- `/teacher/courses/:courseId/modules` → **Module Manager** — full CRUD for modules within that course; includes Back to Courses button
+- `/teacher/lessons` → **Module Cards** — shows all modules as cards; clicking "View Lessons" navigates to `/teacher/modules/:moduleId` (ModuleDetail with lessons)
+- `/teacher/lessons/:id/content` → **Lesson Content Manager** — now includes collapsible **Headway Resources panel** (level selector + links to Test Builder, Audio, Video, Grammar) and a new **Link** content type for embedding external URLs
+- `/teacher/headway-tests` → **Headway Tests & Resources** — browse and open OUP Test Builder, audio, video, grammar and vocabulary for all 6 Headway levels (Beginner → Advanced); embedded Test Builder iframe + unit quick-links
+
 ## Running the App
 - **Production (workflow)**: `npm start` — serves built `dist/` via Express on port 5000. **This is what the workflow runs.**
 - **Build**: `npm run build` — builds frontend to `dist/` (required before starting). After any frontend code change: run `npm run build`, then restart the workflow.
