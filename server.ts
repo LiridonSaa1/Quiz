@@ -5596,6 +5596,69 @@ When giving instructions, number each step clearly. Be precise and technical whe
     }
   });
 
+  // ── POST /api/teacher/headway/save-unit-quiz — save one unit's Test Builder quiz to Supabase ──
+  app.post("/api/teacher/headway/save-unit-quiz", async (req: Request, res: Response) => {
+    try {
+      const caller = await assertAuthenticated(req, res);
+      if (!caller) return;
+      const userId   = typeof req.body?.userId   === "string" ? req.body.userId.trim()   : "";
+      const courseId = typeof req.body?.courseId === "string" ? req.body.courseId.trim() : "";
+      const level    = typeof req.body?.level    === "string" ? req.body.level.trim()    : "";
+      const unitNum  = Number(req.body?.unitNum ?? 0);
+      if (!userId)   return res.status(400).json({ error: "userId is required" });
+      if (!courseId) return res.status(400).json({ error: "courseId is required" });
+      if (!level)    return res.status(400).json({ error: "level is required" });
+      if (!unitNum)  return res.status(400).json({ error: "unitNum is required" });
+      if (!canAccessTeacherCourses(caller, userId)) return res.status(403).json({ error: "Forbidden" });
+
+      const levelData = HEADWAY_FULL_DATA[level];
+      if (!levelData) return res.status(400).json({ error: `Unknown level "${level}"` });
+      const unit = levelData.units.find(u => u.num === unitNum);
+      if (!unit) return res.status(404).json({ error: `Unit ${unitNum} not found` });
+
+      const OUP = "https://elt.oup.com";
+      const CC  = "?cc=global&selLanguage=en";
+      const tbUrl = `${OUP}/student/headway/${levelData.slug}/testbuilder${CC}`;
+
+      // Insert quiz
+      const { data: quizData, error: qErr } = await supabaseAdmin
+        .from("quizzes")
+        .insert({
+          course_id:     courseId,
+          teacher_id:    userId,
+          title:         `${unit.title.replace(/^Unit \d+ — /, "")} — Test Builder`,
+          description:   `Grammar and vocabulary test for ${unit.title}. Also open the Oxford Headway Test Builder: ${tbUrl}`,
+          time_limit:    20,
+          passing_score: 70,
+          published:     false,
+          status:        "draft",
+        })
+        .select("id")
+        .single();
+
+      if (qErr || !quizData?.id) {
+        const msg = qErr ? [qErr.message, qErr.details].filter(Boolean).join(" — ") : "Quiz not created";
+        return res.status(400).json({ error: msg });
+      }
+
+      // Build questions
+      const questions = buildHwUnitQuestions(unit, levelData.slug).map(q => ({ ...q, quiz_id: quizData.id }));
+      if (questions.length > 0) {
+        let { error: iqErr } = await supabaseAdmin.from("questions").insert(questions);
+        if (iqErr && /question_text|null value.*text/i.test(iqErr.message + (iqErr.details || ""))) {
+          const fallback = questions.map(q => { const r = { ...q } as Record<string, unknown>; delete r["text"]; return r; });
+          ({ error: iqErr } = await supabaseAdmin.from("questions").insert(fallback));
+        }
+        if (iqErr) console.warn("[save-unit-quiz] questions insert warning:", iqErr.message);
+      }
+
+      return res.json({ success: true, quizId: quizData.id, questions: questions.length });
+    } catch (e: any) {
+      console.error("POST /api/teacher/headway/save-unit-quiz", e);
+      return res.status(500).json({ error: e?.message || "Server error" });
+    }
+  });
+
   // ── GET /api/teacher/headway-preview — return MC questions for a unit (no DB writes) ──
   app.get("/api/teacher/headway-preview", (req: Request, res: Response) => {
     try {

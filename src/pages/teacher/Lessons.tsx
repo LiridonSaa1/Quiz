@@ -5,10 +5,12 @@ import { authFetch, readApiError } from '../../lib/apiUrl';
 import LoadingButton from '../../components/ui/LoadingButton';
 import { resolveTeacherIdCandidates } from '../../lib/teacherScope';
 import TeacherLayout from '../../components/layout/TeacherLayout';
+import HeadwayLibraryTab from '../../components/teacher/HeadwayLibraryTab';
 import {
   Plus, Search, PlayCircle, Trash2, Edit2, X, Save,
   BookOpen, Layers, Video, FileText, HelpCircle, Clock,
-  Lock, Unlock, ChevronRight, ChevronLeft, Calendar, AlertTriangle
+  Lock, Unlock, ChevronRight, ChevronLeft, Calendar, AlertTriangle,
+  Library
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { Lesson } from '../../types';
@@ -80,6 +82,7 @@ export default function TeacherLessons() {
   const [classes, setClasses] = useState<Array<{ id: string; name: string; course_id: string | null }>>([]);
   const [userId, setUserId] = useState('');
   const [loading, setLoading] = useState(true);
+  const [activeTab, setActiveTab] = useState<'myLessons' | 'headway'>('myLessons');
   const [search, setSearch] = useState('');
   const [courseFilter, setCourseFilter] = useState('all');
   const [classFilter, setClassFilter] = useState('all');
@@ -446,7 +449,36 @@ export default function TeacherLessons() {
           {/* Main Content */}
           <div className="px-6 sm:px-8 lg:px-10 py-8 space-y-8 bg-slate-50">
 
-            {!loading && courses.length === 0 && (
+            {/* Tab Switcher */}
+            <div className="flex items-center gap-2 p-1 bg-white rounded-2xl border border-slate-100 shadow-sm w-fit">
+              <button
+                onClick={() => setActiveTab('myLessons')}
+                className={cn(
+                  'inline-flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-bold transition-all',
+                  activeTab === 'myLessons'
+                    ? 'bg-gradient-to-r from-indigo-500 to-violet-600 text-white shadow-md'
+                    : 'text-slate-500 hover:text-slate-700 hover:bg-slate-50'
+                )}>
+                <BookOpen className="w-4 h-4" />
+                My Lessons
+              </button>
+              <button
+                onClick={() => setActiveTab('headway')}
+                className={cn(
+                  'inline-flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-bold transition-all',
+                  activeTab === 'headway'
+                    ? 'bg-gradient-to-r from-indigo-500 to-violet-600 text-white shadow-md'
+                    : 'text-slate-500 hover:text-slate-700 hover:bg-slate-50'
+                )}>
+                <Library className="w-4 h-4" />
+                OUP Headway Library
+              </button>
+            </div>
+
+            {/* Headway OUP Library Tab */}
+            {activeTab === 'headway' && <HeadwayLibraryTab />}
+
+            {activeTab === 'myLessons' && !loading && courses.length === 0 && (
               <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className="bg-amber-50 border border-amber-200 rounded-2xl p-5 flex items-start gap-3">
                 <BookOpen className="w-5 h-5 text-amber-500 mt-0.5 shrink-0" />
                 <div>
@@ -456,8 +488,8 @@ export default function TeacherLessons() {
               </motion.div>
             )}
 
-            {/* Stats */}
-            <motion.div className="grid grid-cols-2 lg:grid-cols-4 gap-4" initial="hidden" animate="visible" variants={{ hidden: {}, visible: { transition: { staggerChildren: 0.08 } } }}>
+            {/* Stats — My Lessons tab only */}
+            {activeTab === 'myLessons' && <motion.div className="grid grid-cols-2 lg:grid-cols-4 gap-4" initial="hidden" animate="visible" variants={{ hidden: {}, visible: { transition: { staggerChildren: 0.08 } } }}>
               {stats.map((stat) => {
                 const Icon = stat.icon;
                 return (
@@ -480,8 +512,9 @@ export default function TeacherLessons() {
                   </motion.div>
                 );
               })}
-            </motion.div>
+            </motion.div>}
 
+            {activeTab === 'myLessons' && (<>
             {/* Filter Bar */}
             <motion.div
               initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.2, duration: 0.4 }}
@@ -634,6 +667,7 @@ export default function TeacherLessons() {
                 </button>
               </div>
             )}
+            </>)}
           </div>
         </div>
       </div>

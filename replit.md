@@ -51,6 +51,7 @@ The live Supabase DB has schema differences from what some pages expect. All aff
 - `/teacher/lessons` → **Module Cards** — shows all modules as cards; clicking "View Lessons" navigates to `/teacher/modules/:moduleId` (ModuleDetail with lessons)
 - `/teacher/lessons/:id/content` → **Lesson Content Manager** — now includes collapsible **Headway Resources panel** (level selector + links to Test Builder, Audio, Video, Grammar) and a new **Link** content type for embedding external URLs
 - `/teacher/headway-tests` → **Headway Tests & Resources** — browse and open OUP Test Builder, audio, video, grammar and vocabulary for all 6 Headway levels (Beginner → Advanced); embedded Test Builder iframe + unit quick-links
+- `/teacher/lessons` → **OUP Headway Library tab** — tab switcher between "My Lessons" and "OUP Headway Library". The library shows all 6 levels with a unit accordion; each unit lists Grammar, Vocabulary, Everyday English, Audio, Video, and Test Builder lesson cards. Clicking a card opens a detail modal with OUP exercise link, audio/video download buttons, and a "Save as Quiz" flow for Test Builder entries (course picker → saves quiz + questions to Supabase).
 
 ## Running the App
 - **Production (workflow)**: `npm start` — serves built `dist/` via Express on port 5000. **This is what the workflow runs.**
