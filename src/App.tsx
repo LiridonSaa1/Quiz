@@ -23,6 +23,7 @@ const RealtimeQuizHost = lazy(() => import('./pages/teacher/RealtimeQuizHost'));
 const RealtimeQuizReports = lazy(() => import('./pages/teacher/RealtimeQuizReports'));
 const RealtimeQuizPlay = lazy(() => import('./pages/student/RealtimeQuizPlay'));
 const QuizTaking = lazy(() => import('./pages/student/QuizTaking'));
+const QuizExperience = lazy(() => import('./pages/student/QuizExperience'));
 const QuizResults = lazy(() => import('./pages/student/QuizResults'));
 const StudentProfile = lazy(() => import('./pages/student/Profile'));
 const TeacherResults = lazy(() => import('./pages/teacher/Results'));
@@ -475,7 +476,7 @@ function StudentRoutes({ features }: { features: FeatureFlags }) {
       <Route path="/badges" element={<Badges />} />
       <Route path="/exams" element={<StudentExams />} />
       <Route path="/announcements" element={features.announcementsEnabled ? <StudentAnnouncements /> : <Navigate to="/not-found" replace />} />
-      <Route path="/quiz/:quizId" element={<QuizTaking />} />
+      <Route path="/quiz/:quizId" element={<QuizExperience />} />
       <Route path="/results/:attemptId" element={<QuizResults />} />
       <Route path="/profile" element={<StudentProfile />} />
       <Route path="/headway-audio" element={<HeadwayAudio />} />

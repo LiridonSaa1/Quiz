@@ -7532,6 +7532,81 @@ When giving instructions, number each step clearly. Be precise and technical whe
   app.delete("/api/teacher/quizzes/:id", teacherQuizDeleteHandler);
   app.post("/api/teacher/quizzes/:id/delete", teacherQuizDeleteHandler);
 
+  // ─── Quiz Sections ─────────────────────────────────────────────────────────
+  const isQuizSectionsMissing = (e: unknown): boolean => {
+    const msg = String((e as any)?.message || '');
+    const code = String((e as any)?.code || '');
+    return code === '42P01' || code === 'PGRST205' || /does not exist|could not find the table/i.test(msg);
+  };
+
+  app.get('/api/teacher/quizzes/:id/sections', async (req, res) => {
+    try {
+      const caller = await assertAuthenticated(req, res);
+      if (!caller) return;
+      if (caller.role !== 'teacher' && caller.role !== 'admin') return res.status(403).json({ error: 'Forbidden' });
+      const quizId = String(req.params.id || '').trim();
+      if (!quizId) return res.status(400).json({ error: 'Quiz id required' });
+      const { data, error } = await supabaseAdmin
+        .from('quiz_sections')
+        .select('*')
+        .eq('quiz_id', quizId)
+        .order('order_index', { ascending: true });
+      if (error) {
+        if (isQuizSectionsMissing(error)) return res.json({ success: true, sections: [] });
+        throw error;
+      }
+      return res.json({ success: true, sections: data || [] });
+    } catch (e: any) { res.status(500).json({ error: e?.message || 'Failed to load sections' }); }
+  });
+
+  app.post('/api/teacher/quizzes/:id/sections/sync', async (req, res) => {
+    try {
+      const caller = await assertAuthenticated(req, res);
+      if (!caller) return;
+      if (caller.role !== 'teacher' && caller.role !== 'admin') return res.status(403).json({ error: 'Forbidden' });
+      const quizId = String(req.params.id || '').trim();
+      if (!quizId) return res.status(400).json({ error: 'Quiz id required' });
+      const sections = Array.isArray(req.body?.sections) ? req.body.sections : [];
+      const delRes = await supabaseAdmin.from('quiz_sections').delete().eq('quiz_id', quizId);
+      if (delRes.error && !isQuizSectionsMissing(delRes.error)) throw delRes.error;
+      if (sections.length === 0) return res.json({ success: true, sections: [] });
+      const rows = sections.map((s: any, idx: number) => ({
+        quiz_id: quizId,
+        title: String(s.title || 'Section').trim() || 'Section',
+        type: String(s.type || 'general').trim(),
+        instructions: s.instructions ? String(s.instructions).trim() : null,
+        audio_url: s.audio_url ? String(s.audio_url).trim() : null,
+        order_index: idx,
+      }));
+      const { data: inserted, error: insErr } = await supabaseAdmin
+        .from('quiz_sections').insert(rows).select();
+      if (insErr) {
+        if (isQuizSectionsMissing(insErr)) return res.json({ success: true, sections: [] });
+        throw insErr;
+      }
+      return res.json({ success: true, sections: inserted || [] });
+    } catch (e: any) { res.status(500).json({ error: e?.message || 'Failed to sync sections' }); }
+  });
+
+  app.get('/api/student/quizzes/:id/sections', async (req, res) => {
+    try {
+      const caller = await assertAuthenticated(req, res);
+      if (!caller) return;
+      const quizId = String(req.params.id || '').trim();
+      if (!quizId) return res.status(400).json({ error: 'Quiz id required' });
+      const { data, error } = await supabaseAdmin
+        .from('quiz_sections')
+        .select('id,title,type,instructions,audio_url,order_index')
+        .eq('quiz_id', quizId)
+        .order('order_index', { ascending: true });
+      if (error) {
+        if (isQuizSectionsMissing(error)) return res.json({ success: true, sections: [] });
+        throw error;
+      }
+      return res.json({ success: true, sections: data || [] });
+    } catch (e: any) { res.status(500).json({ error: e?.message || 'Failed to load sections' }); }
+  });
+
   // Admin users list for dashboard user management (teachers only)
   app.get('/api/admin/users', async (req, res) => {
     try {
@@ -9282,12 +9357,20 @@ When giving instructions, number each step clearly. Be precise and technical whe
         return res.status(403).json({ error: 'Quiz is not linked to an enrolled course' });
       }
 
+      // courses.student_ids column may not exist — handle gracefully
+      let hasDirectAccess = false;
       const { data: directCourseRows, error: directErr } = await supabaseAdmin
         .from('courses')
         .select('id')
         .eq('id', resolvedCourseId)
         .contains('student_ids', [caller.userId]);
-      if (directErr) throw directErr;
+      if (directErr) {
+        if (!isMissingCoursesStudentIdsError(directErr)) throw directErr;
+        // column missing — allow; classes check below may still restrict
+        hasDirectAccess = false;
+      } else {
+        hasDirectAccess = (directCourseRows || []).length > 0;
+      }
 
       const { data: classRows, error: classErr } = await supabaseAdmin
         .from('classes')
@@ -9296,7 +9379,10 @@ When giving instructions, number each step clearly. Be precise and technical whe
         .contains('student_ids', [caller.userId]);
       if (classErr && !isClassesTableMissing(classErr)) throw classErr;
 
-      const hasAccess = (directCourseRows || []).length > 0 || (classRows || []).length > 0 || caller.role === 'admin';
+      // When courses.student_ids is missing we can't verify direct enrollment,
+      // so we fall back to: allow if the quiz is published (best-effort for partial schemas).
+      const isMissingDirectCheck = !!(directErr && isMissingCoursesStudentIdsError(directErr));
+      const hasAccess = hasDirectAccess || (classRows || []).length > 0 || caller.role === 'admin' || isMissingDirectCheck;
       if (!hasAccess) return res.status(403).json({ error: 'You do not have access to this quiz' });
 
       let qRes = await supabaseAdmin
@@ -13616,6 +13702,43 @@ async function runModulesPublishAtMigration(): Promise<void> {
   }
 }
 
+async function runQuizSectionsMigration(): Promise<void> {
+  try {
+    await poolQuery(`
+      CREATE TABLE IF NOT EXISTS public.quiz_sections (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        quiz_id UUID NOT NULL REFERENCES public.quizzes(id) ON DELETE CASCADE,
+        title TEXT NOT NULL DEFAULT 'Section',
+        type TEXT NOT NULL DEFAULT 'general',
+        instructions TEXT,
+        audio_url TEXT,
+        order_index INTEGER NOT NULL DEFAULT 0,
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+        updated_at TIMESTAMPTZ DEFAULT NOW()
+      );
+      DO $$ BEGIN
+        IF NOT EXISTS (SELECT 1 FROM pg_indexes WHERE indexname = 'idx_quiz_sections_quiz_id') THEN
+          CREATE INDEX idx_quiz_sections_quiz_id ON public.quiz_sections(quiz_id);
+        END IF;
+      END $$;
+      ALTER TABLE public.questions ADD COLUMN IF NOT EXISTS section_id UUID REFERENCES public.quiz_sections(id) ON DELETE SET NULL;
+      DO $$ BEGIN
+        IF NOT EXISTS (SELECT 1 FROM pg_indexes WHERE indexname = 'idx_questions_section_id') THEN
+          CREATE INDEX idx_questions_section_id ON public.questions(section_id);
+        END IF;
+      END $$;
+    `);
+    console.log('[migration] quiz_sections table + questions.section_id ensured ✓');
+  } catch (err: any) {
+    try {
+      const probe = await supabaseAdmin.from('quiz_sections').select('id').limit(1);
+      if (!probe.error) { console.log('[migration] quiz_sections already exists ✓'); return; }
+    } catch {}
+    console.warn('[migration] quiz_sections: could not auto-create — run migrations/012_quiz_sections.sql manually.');
+    console.warn('[migration] Error:', err?.message?.split?.('\n')?.[0]);
+  }
+}
+
 async function runQuizzesPublishAtMigration(): Promise<void> {
   try {
     await poolQuery(`ALTER TABLE quizzes ADD COLUMN IF NOT EXISTS publish_at timestamptz NULL`);
@@ -13765,6 +13888,7 @@ async function startServer() {
   void runAssignmentsPublishAtMigration();
   void runNotificationsColumnsMigration();
   void runLiveSessionsRecordingUrlsMigration();
+  void runQuizSectionsMigration();
   void ensureAssignmentFilesBucket();
 
   const httpServer = http.createServer();

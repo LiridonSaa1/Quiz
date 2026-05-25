@@ -29,6 +29,7 @@ import {
   AlignLeft,
   Calendar,
   RefreshCw,
+  Layers,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { Quiz, Question, Course, QuestionType } from '../../types';
@@ -54,6 +55,16 @@ const QUIZ_MEDIA_BUCKET = 'quiz-media';
 type QuizSettingsExtended = NonNullable<Quiz['settings']> & {
   introMediaUrl?: string;
   introMediaType?: 'video' | 'image';
+};
+
+type SectionDraft = {
+  _tempId: string;
+  id?: string;
+  title: string;
+  type: string;
+  instructions: string;
+  audio_url: string;
+  order_index: number;
 };
 
 const defaultSettings = (): QuizSettingsExtended => ({
@@ -212,6 +223,10 @@ export default function QuizBuilder() {
   });
 
   const [questions, setQuestions] = useState<Partial<Question>[]>([]);
+  const [quizSections, setQuizSections] = useState<SectionDraft[]>([]);
+  const [addingSection, setAddingSection] = useState(false);
+  const [newSectionForm, setNewSectionForm] = useState({ title: '', type: 'general', instructions: '', audio_url: '' });
+  const [questionSectionMap, setQuestionSectionMap] = useState<Record<number, string>>({});
 
   const setSettings = useCallback((patch: Partial<QuizSettingsExtended>) => {
     setQuizData((prev) => ({
@@ -331,6 +346,32 @@ export default function QuizBuilder() {
             explanation: q.explanation,
             orderIndex: (q as { order?: number; order_index?: number }).order_index ?? (q as { order?: number }).order,
           } as Question)));
+
+          // Restore question → section mapping from DB data
+          const secMap: Record<number, string> = {};
+          questionRows.forEach((q: any, idx: number) => {
+            if (q.section_id) secMap[idx] = q.section_id;
+          });
+          setQuestionSectionMap(secMap);
+
+          // Fetch sections (graceful — quiz_sections table may not exist yet)
+          try {
+            const secRes = await authFetch(`/api/teacher/quizzes/${encodeURIComponent(quizId)}/sections`);
+            if (secRes.ok) {
+              const secJson = await secRes.json().catch(() => ({}));
+              if (Array.isArray(secJson?.sections) && secJson.sections.length > 0) {
+                setQuizSections(secJson.sections.map((s: any) => ({
+                  _tempId: String(s.id || `loaded-${s.order_index}`),
+                  id: s.id,
+                  title: s.title,
+                  type: s.type || 'general',
+                  instructions: s.instructions || '',
+                  audio_url: s.audio_url || '',
+                  order_index: s.order_index,
+                })));
+              }
+            }
+          } catch { /* quiz_sections table may not exist yet */ }
         }
       } catch {
         toast.error(t('common.error'));
@@ -637,6 +678,26 @@ export default function QuizBuilder() {
       const quizIdForQuestions = currentQuizId || quizId;
       if (!quizIdForQuestions) throw new Error(t('common.error'));
 
+      // Sync sections first → get real DB IDs for question section_id assignment
+      let sectionIdMap: Record<string, string> = {};
+      if (quizSections.length > 0) {
+        try {
+          const syncRes = await authFetch(
+            `/api/teacher/quizzes/${encodeURIComponent(quizIdForQuestions)}/sections/sync`,
+            { method: 'POST', body: JSON.stringify({ sections: quizSections.map((s, idx) => ({ ...s, order_index: idx })) }) }
+          );
+          if (syncRes.ok) {
+            const syncJson = await syncRes.json().catch(() => ({}));
+            if (Array.isArray(syncJson?.sections)) {
+              quizSections.forEach((sec, idx) => {
+                const realId = syncJson.sections[idx]?.id;
+                if (realId) sectionIdMap[sec._tempId] = realId;
+              });
+            }
+          }
+        } catch { /* quiz_sections table may not exist yet */ }
+      }
+
       const questionsPayload = questions.map((q, idx) => ({
         quiz_id: quizIdForQuestions,
         type: toDbQuestionType(q.type),
@@ -649,6 +710,9 @@ export default function QuizBuilder() {
         points: q.type === 'instruction' ? 0 : (q.points ?? 1),
         explanation: q.explanation,
         order: idx,
+        section_id: questionSectionMap[idx]
+          ? (sectionIdMap[questionSectionMap[idx]] || questionSectionMap[idx] || null)
+          : null,
       }));
 
       const saveQ = await authFetch(
@@ -1041,6 +1105,105 @@ export default function QuizBuilder() {
                   </div>
                 </div>
 
+                {/* Sections panel */}
+                <div className="rounded-2xl border border-white/60 shadow-sm p-5 space-y-3 bg-white/90 backdrop-blur-md">
+                  <div className="flex items-center justify-between">
+                    <h2 className="text-base font-bold text-slate-900 flex items-center gap-2">
+                      <Layers className="w-5 h-5 text-violet-500" />
+                      Sections
+                    </h2>
+                    <button
+                      type="button"
+                      onClick={() => setAddingSection(!addingSection)}
+                      className="w-7 h-7 flex items-center justify-center rounded-xl bg-violet-50 text-violet-600 hover:bg-violet-100 transition-colors"
+                    >
+                      <Plus className="w-4 h-4" />
+                    </button>
+                  </div>
+
+                  {quizSections.length === 0 && !addingSection && (
+                    <p className="text-xs text-slate-400 italic">No sections yet. Add sections to organise your quiz into parts (Grammar, Listening, etc.).</p>
+                  )}
+
+                  {quizSections.map((sec, idx) => (
+                    <div key={sec._tempId} className="flex items-center gap-2 rounded-xl border border-slate-100 bg-slate-50 px-3 py-2">
+                      <span className="text-[10px] font-bold text-violet-600 capitalize bg-violet-50 px-1.5 py-0.5 rounded-md shrink-0">{sec.type}</span>
+                      <span className="text-sm font-medium text-slate-700 flex-1 truncate">{sec.title}</span>
+                      {sec.audio_url && <span title="Has audio" className="text-amber-500 text-xs">♪</span>}
+                      <button
+                        type="button"
+                        onClick={() => setQuizSections(quizSections.filter((_, i) => i !== idx))}
+                        className="text-slate-400 hover:text-red-500 transition-colors shrink-0"
+                      >
+                        <X className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  ))}
+
+                  {addingSection && (
+                    <div className="space-y-2 rounded-xl border border-violet-100 bg-violet-50/40 p-3">
+                      <input
+                        type="text"
+                        value={newSectionForm.title}
+                        onChange={(e) => setNewSectionForm({ ...newSectionForm, title: e.target.value })}
+                        className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-violet-400"
+                        placeholder="Section title (e.g. Grammar)"
+                      />
+                      <select
+                        value={newSectionForm.type}
+                        onChange={(e) => setNewSectionForm({ ...newSectionForm, type: e.target.value })}
+                        className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-violet-400"
+                      >
+                        {['general', 'grammar', 'listening', 'reading', 'writing', 'vocabulary'].map((tp) => (
+                          <option key={tp} value={tp}>{tp.charAt(0).toUpperCase() + tp.slice(1)}</option>
+                        ))}
+                      </select>
+                      <textarea
+                        value={newSectionForm.instructions}
+                        onChange={(e) => setNewSectionForm({ ...newSectionForm, instructions: e.target.value })}
+                        rows={2}
+                        className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-violet-400 resize-none"
+                        placeholder="Instructions for students (optional)"
+                      />
+                      <input
+                        type="url"
+                        value={newSectionForm.audio_url}
+                        onChange={(e) => setNewSectionForm({ ...newSectionForm, audio_url: e.target.value })}
+                        className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-violet-400"
+                        placeholder="Audio URL (optional, for listening sections)"
+                      />
+                      <div className="flex gap-2">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (!newSectionForm.title.trim()) return;
+                            setQuizSections([
+                              ...quizSections,
+                              {
+                                _tempId: `draft-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+                                ...newSectionForm,
+                                order_index: quizSections.length,
+                              },
+                            ]);
+                            setNewSectionForm({ title: '', type: 'general', instructions: '', audio_url: '' });
+                            setAddingSection(false);
+                          }}
+                          className="flex-1 py-2 rounded-xl bg-violet-600 text-white text-xs font-bold hover:bg-violet-700 transition-colors"
+                        >
+                          Add Section
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setAddingSection(false)}
+                          className="py-2 px-3 rounded-xl border border-slate-200 text-xs font-semibold text-slate-600 hover:bg-slate-50 transition-colors"
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+
                 <div
                   className="rounded-2xl p-5 text-white space-y-4"
                   style={{
@@ -1087,8 +1250,8 @@ export default function QuizBuilder() {
                         animate={{ opacity: 1, y: 0 }}
                         className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden"
                       >
-                        <div className="p-4 bg-gradient-to-r from-slate-50 to-indigo-50/30 border-b border-slate-100 flex items-center justify-between gap-3">
-                          <div className="flex items-center gap-3 min-w-0">
+                        <div className="p-4 bg-gradient-to-r from-slate-50 to-indigo-50/30 border-b border-slate-100 flex items-center gap-3">
+                          <div className="flex items-center gap-3 min-w-0 flex-1">
                             <span className="w-9 h-9 rounded-xl bg-gradient-to-br from-violet-600 to-indigo-600 text-white flex items-center justify-center font-bold text-sm shrink-0">
                               {index + 1}
                             </span>
@@ -1096,6 +1259,18 @@ export default function QuizBuilder() {
                               {String(q.type || '').replace(/-/g, ' ')}
                             </span>
                           </div>
+                          {quizSections.length > 0 && (
+                            <select
+                              value={questionSectionMap[index] || ''}
+                              onChange={(e) => setQuestionSectionMap((prev) => ({ ...prev, [index]: e.target.value }))}
+                              className="text-xs text-slate-500 border border-slate-200 rounded-lg px-2 py-1 bg-white focus:outline-none focus:ring-1 focus:ring-violet-400 max-w-[130px] shrink-0"
+                            >
+                              <option value="">No section</option>
+                              {quizSections.map((sec) => (
+                                <option key={sec._tempId} value={sec._tempId}>{sec.title}</option>
+                              ))}
+                            </select>
+                          )}
                           <button
                             type="button"
                             onClick={() => removeQuestion(index)}
