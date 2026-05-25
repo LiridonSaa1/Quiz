@@ -5,7 +5,7 @@ import { supabase } from '../../supabase';
 import StudentLayout from '../../components/layout/StudentLayout';
 import {
   Trophy, CheckCircle2, XCircle, ChevronLeft, ArrowRight,
-  AlertCircle, HelpCircle, Info, Clock, Target, TrendingUp, BarChart2,
+  AlertCircle, HelpCircle, Info, Clock, Target, TrendingUp, BarChart2, Layers,
 } from 'lucide-react';
 import { QuizAttempt, Quiz, Question } from '../../types';
 import { cn } from '../../lib/utils';
@@ -142,7 +142,8 @@ export default function QuizResults() {
   const [quiz, setQuiz] = useState<Quiz | null>(null);
   const [questions, setQuestions] = useState<Question[]>([]);
   const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState<'overview' | 'review'>('overview');
+  const [activeTab, setActiveTab] = useState<'overview' | 'sections' | 'review'>('overview');
+  const [quizSections, setQuizSections] = useState<any[]>([]);
 
   useEffect(() => {
     const fetchData = async () => {
@@ -207,8 +208,18 @@ export default function QuizResults() {
             mediaType: q.media_type,
             readingPassage: q.reading_passage,
             orderIndex: q.order_index ?? q.order,
-          } as Question)));
+            sectionId: q.section_id ?? null,
+          } as Question & { sectionId: string | null })));
         }
+
+        // Fetch sections (graceful — table may not exist yet)
+        try {
+          const secRes = await authFetch(`/api/student/quizzes/${encodeURIComponent(norm.quiz_id)}/sections`);
+          if (secRes.ok) {
+            const secJson = await secRes.json().catch(() => ({}));
+            if (Array.isArray(secJson?.sections)) setQuizSections(secJson.sections);
+          }
+        } catch { /* quiz_sections table may not exist */ }
       } catch (err) {
         console.error('Error fetching results:', err);
       } finally {
@@ -401,19 +412,23 @@ export default function QuizResults() {
         )}
 
         {/* Tabs */}
-        <div className="flex gap-2">
-          {(['overview', 'review'] as const).map(t => (
+        <div className="flex gap-2 flex-wrap">
+          {((['overview', ...(quizSections.length > 0 ? ['sections'] : []), 'review']) as Array<'overview' | 'sections' | 'review'>).map(tab => (
             <button
-              key={t}
-              onClick={() => setActiveTab(t)}
+              key={tab}
+              onClick={() => setActiveTab(tab)}
               className={cn(
                 'px-4 py-2 rounded-xl text-sm font-semibold transition-all border',
-                activeTab === t
+                activeTab === tab
                   ? 'bg-slate-900 text-white border-transparent'
                   : 'bg-white border-slate-200 text-slate-600 hover:border-slate-400',
               )}
             >
-              {t === 'overview' ? t('student.quizResults.overviewTab') : t('student.quizResults.reviewTab')}
+              {tab === 'overview'
+                ? t('student.quizResults.overviewTab')
+                : tab === 'sections'
+                  ? <span className="flex items-center gap-1.5"><Layers className="w-3.5 h-3.5" />Sections</span>
+                  : t('student.quizResults.reviewTab')}
             </button>
           ))}
         </div>
@@ -450,6 +465,130 @@ export default function QuizResults() {
                   {t('student.quizResults.completionDate', { date: format(new Date(attempt.completedAt), 'dd MMM yyyy, HH:mm') })}
                 </p>
               )}
+            </motion.div>
+          )}
+
+          {/* Sections breakdown tab */}
+          {activeTab === 'sections' && (
+            <motion.div
+              key="sections"
+              initial={{ opacity: 0, y: 8 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0 }}
+              className="space-y-4"
+            >
+              {quizSections.map((sec) => {
+                const secQuestions = (questions as any[]).filter(
+                  (q) => q.sectionId === sec.id && GRADABLE_QUESTION_TYPES.has(String(q.type).toLowerCase())
+                );
+                const secTotal = secQuestions.reduce((a: number, q: Question) => a + (Number(q.points) || 0), 0);
+                const secEarned = secQuestions.reduce((a: number, q: Question) =>
+                  a + (isAnswerCorrect(q, attempt.answers?.[q.id]) ? (Number(q.points) || 0) : 0), 0);
+                const secPct = secTotal > 0 ? Math.round((secEarned / secTotal) * 100) : null;
+                const secCorrect = secQuestions.filter((q: Question) => isAnswerCorrect(q, attempt.answers?.[q.id])).length;
+                const secIncorrect = secQuestions.length - secCorrect;
+
+                const typeColors: Record<string, string> = {
+                  grammar: 'bg-violet-100 text-violet-700',
+                  listening: 'bg-amber-100 text-amber-700',
+                  reading: 'bg-blue-100 text-blue-700',
+                  writing: 'bg-emerald-100 text-emerald-700',
+                  vocabulary: 'bg-pink-100 text-pink-700',
+                  general: 'bg-slate-100 text-slate-600',
+                };
+                const colorClass = typeColors[sec.type] || typeColors.general;
+                const barColor = secPct === null ? '#94a3b8' : secPct >= 70 ? '#10b981' : secPct >= 40 ? '#f59e0b' : '#ef4444';
+
+                return (
+                  <motion.div
+                    key={sec.id}
+                    initial={{ opacity: 0, y: 8 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden"
+                  >
+                    {/* Section header */}
+                    <div className="px-5 py-4 border-b border-slate-100 flex items-center gap-3">
+                      <div className="w-9 h-9 rounded-xl bg-slate-900 flex items-center justify-center shrink-0">
+                        <Layers className="w-4 h-4 text-white" />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <h3 className="text-sm font-bold text-slate-900">{sec.title}</h3>
+                          <span className={cn('text-[10px] font-bold px-2 py-0.5 rounded-full capitalize', colorClass)}>
+                            {sec.type}
+                          </span>
+                        </div>
+                        {sec.instructions && (
+                          <p className="text-xs text-slate-400 mt-0.5 truncate">{sec.instructions}</p>
+                        )}
+                      </div>
+                      {secPct !== null && (
+                        <div className="text-right shrink-0">
+                          <div className="text-xl font-black" style={{ color: barColor }}>{secPct}%</div>
+                          <div className="text-[10px] text-slate-400 font-semibold">{secEarned}/{secTotal} pts</div>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Progress bar + stats */}
+                    <div className="px-5 py-4 space-y-3">
+                      {secPct !== null && (
+                        <div className="w-full h-2.5 bg-slate-100 rounded-full overflow-hidden">
+                          <div
+                            className="h-full rounded-full transition-all duration-700"
+                            style={{ width: `${secPct}%`, background: barColor }}
+                          />
+                        </div>
+                      )}
+
+                      {secQuestions.length === 0 ? (
+                        <p className="text-xs text-slate-400 italic">No gradable questions assigned to this section.</p>
+                      ) : (
+                        <div className="flex gap-4">
+                          <div className="flex items-center gap-1.5">
+                            <div className="w-2.5 h-2.5 rounded-full bg-emerald-400" />
+                            <span className="text-xs font-semibold text-slate-600">{secCorrect} correct</span>
+                          </div>
+                          <div className="flex items-center gap-1.5">
+                            <div className="w-2.5 h-2.5 rounded-full bg-red-400" />
+                            <span className="text-xs font-semibold text-slate-600">{secIncorrect} incorrect</span>
+                          </div>
+                          <div className="flex items-center gap-1.5">
+                            <div className="w-2.5 h-2.5 rounded-full bg-slate-300" />
+                            <span className="text-xs font-semibold text-slate-600">{secQuestions.length} questions</span>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  </motion.div>
+                );
+              })}
+
+              {/* Unsectioned questions summary */}
+              {(() => {
+                const unsectioned = (questions as any[]).filter(
+                  (q) => !q.sectionId && GRADABLE_QUESTION_TYPES.has(String(q.type).toLowerCase())
+                );
+                if (unsectioned.length === 0) return null;
+                const usTotal = unsectioned.reduce((a: number, q: Question) => a + (Number(q.points) || 0), 0);
+                const usEarned = unsectioned.reduce((a: number, q: Question) =>
+                  a + (isAnswerCorrect(q, attempt.answers?.[q.id]) ? (Number(q.points) || 0) : 0), 0);
+                const usPct = usTotal > 0 ? Math.round((usEarned / usTotal) * 100) : null;
+                return (
+                  <div className="bg-slate-50 rounded-2xl border border-slate-200 px-5 py-4 flex items-center gap-4">
+                    <div className="flex-1">
+                      <div className="text-sm font-bold text-slate-600">Other questions</div>
+                      <div className="text-xs text-slate-400">{unsectioned.length} questions not assigned to a section</div>
+                    </div>
+                    {usPct !== null && (
+                      <div className="text-right">
+                        <div className="text-lg font-black text-slate-700">{usPct}%</div>
+                        <div className="text-[10px] text-slate-400">{usEarned}/{usTotal} pts</div>
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
             </motion.div>
           )}
 
