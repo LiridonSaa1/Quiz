@@ -891,10 +891,13 @@ export async function createApp(options: CreateAppOptions = {}) {
   app.use('/api/auth/', authLimiter);
 
   // ── Admin Auth Middleware ─────────────────────────────────────────────────────
-  // Protects ALL /api/admin/* routes. Exception: /api/admin/seed has its own
-  // first-run logic that allows unauthenticated access when DB is empty.
+  // Protects ALL /api/admin/* routes. Exceptions:
+  //   - /api/admin/seed      — first-run unauthenticated access when DB is empty
+  //   - /api/admin/create-student — teachers are allowed; the route handler does its own role check
   app.use('/api/admin', async (req: Request, res: Response, next) => {
     if (req.path === '/seed' && req.method === 'GET') return next();
+    // Teachers may create students; skip the admin-only gate and let the route handler decide.
+    if (req.path === '/create-student' && req.method === 'POST') return next();
     const caller = await assertAuthenticated(req, res);
     if (!caller) return;
     if (caller.role !== 'admin') return res.status(403).json({ error: 'Forbidden: admin role required' });
