@@ -3,16 +3,18 @@ import { Link, useNavigate } from 'react-router-dom';
 import {
   FlaskConical, ExternalLink, Globe, ChevronRight, ArrowLeft,
   BookOpen, Headphones, Video, Play, Layers, Download, CheckCircle2,
-  Loader2, ChevronDown, X, Import,
+  Loader2, ChevronDown, X, Import, Eye, ChevronLeft, ChevronRight as ChevronRightIcon,
 } from 'lucide-react';
 import TeacherLayout from '../../components/layout/TeacherLayout';
 import { motion, AnimatePresence } from 'motion/react';
 import { supabase } from '../../supabase';
 import { authFetch } from '../../lib/apiUrl';
 import { toast } from 'sonner';
-
-const OUP = 'https://elt.oup.com';
-const CC  = '?cc=global&selLanguage=en';
+import {
+  HEADWAY_FULL_DATA, buildUnitQuestions,
+  type HUnit, type PreviewQuestion,
+  OUP, CC,
+} from '../../lib/headwayData';
 
 const LEVELS = [
   { key: 'Beginner',          slug: 'beg',              color: 'from-emerald-500 to-teal-600',  badge: 'bg-emerald-100 text-emerald-700', units: 14 },
@@ -52,6 +54,23 @@ export default function HeadwayTestImport() {
   const [importing, setImporting] = useState(false);
   const [importProgress, setImportProgress] = useState<ImportProgress | null>(null);
   const [importDone, setImportDone] = useState<{ modules: number; lessons: number } | null>(null);
+
+  // Preview state
+  const [previewUnit, setPreviewUnit] = useState<HUnit | null>(null);
+  const [previewQuestions, setPreviewQuestions] = useState<PreviewQuestion[]>([]);
+  const [previewQIdx, setPreviewQIdx] = useState(0);
+  const [previewSelected, setPreviewSelected] = useState<number | null>(null);
+  const [showPreviewModal, setShowPreviewModal] = useState(false);
+
+  const openPreview = (unit: HUnit) => {
+    const levelData = HEADWAY_FULL_DATA[activeLevel.key];
+    const qs = buildUnitQuestions(unit, levelData?.slug ?? activeLevel.slug);
+    setPreviewUnit(unit);
+    setPreviewQuestions(qs);
+    setPreviewQIdx(0);
+    setPreviewSelected(null);
+    setShowPreviewModal(true);
+  };
 
   const testBuilderBase = `${OUP}/student/headway/${activeLevel.slug}/testbuilder${CC}`;
   const audioBase = `${OUP}/student/headway/${activeLevel.slug}/audiodl${CC}`;
@@ -439,26 +458,48 @@ export default function HeadwayTestImport() {
 
             {/* Unit grid */}
             <div className="p-5">
-              <p className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-4">
-                Click a unit to open its test
-              </p>
+              <div className="flex items-center justify-between mb-4">
+                <p className="text-xs font-bold text-slate-500 uppercase tracking-wider">
+                  Units — Click to preview questions or open on Oxford site
+                </p>
+                <span className="text-xs text-slate-400 italic">
+                  {HEADWAY_FULL_DATA[activeLevel.key]?.units[0]?.grammar?.length
+                    ? 'Grammar & vocab questions included'
+                    : 'Comprehension questions included'}
+                </span>
+              </div>
               <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-3">
-                {Array.from({ length: activeLevel.units }, (_, i) => i + 1).map(n => (
-                  <a
-                    key={n}
-                    href={`${testBuilderBase}&testUnit=${n}`}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className={`group flex flex-col items-center gap-2 p-4 rounded-2xl border-2 transition-all hover:shadow-md active:scale-95 ${activeLevel.badge} border-transparent hover:border-current`}>
-                    <div className={`w-10 h-10 rounded-xl bg-gradient-to-br ${activeLevel.color} flex items-center justify-center shadow-sm group-hover:scale-110 transition-transform`}>
+                {(HEADWAY_FULL_DATA[activeLevel.key]?.units ?? Array.from({ length: activeLevel.units }, (_, i) => ({ num: i + 1 } as HUnit))).map(unit => (
+                  <div
+                    key={unit.num}
+                    className={`flex flex-col items-center gap-1.5 p-3 rounded-2xl border-2 transition-all ${activeLevel.badge} border-transparent hover:shadow-md`}>
+                    <div className={`w-10 h-10 rounded-xl bg-gradient-to-br ${activeLevel.color} flex items-center justify-center shadow-sm`}>
                       <FlaskConical className="w-5 h-5 text-white" />
                     </div>
-                    <div className="text-center">
-                      <p className="text-[11px] font-bold leading-tight">Unit {n}</p>
-                      <p className="text-[10px] opacity-60 mt-0.5">Test</p>
+                    <p className="text-[11px] font-bold leading-tight text-center">Unit {unit.num}</p>
+                    {unit.grammar && unit.grammar.length > 0 && (
+                      <p className="text-[9px] opacity-50 text-center leading-tight">
+                        {unit.grammar.length}gr · {(unit.vocabulary?.length ?? 0)}voc
+                      </p>
+                    )}
+                    <div className="flex gap-1 w-full mt-0.5">
+                      <button
+                        type="button"
+                        onClick={() => openPreview(unit)}
+                        className="flex-1 flex items-center justify-center gap-1 py-1.5 rounded-lg text-[10px] font-bold bg-white/70 hover:bg-white transition-all border border-current/20"
+                        title={`Preview questions for Unit ${unit.num}`}>
+                        <Eye className="w-2.5 h-2.5" /> Preview
+                      </button>
+                      <a
+                        href={`${testBuilderBase}&testUnit=${unit.num}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="flex-1 flex items-center justify-center gap-1 py-1.5 rounded-lg text-[10px] font-bold bg-white/70 hover:bg-white transition-all border border-current/20"
+                        title={`Open Unit ${unit.num} on Oxford site`}>
+                        <ExternalLink className="w-2.5 h-2.5" /> Open
+                      </a>
                     </div>
-                    <ExternalLink className="w-3 h-3 opacity-40 group-hover:opacity-80 transition-opacity" />
-                  </a>
+                  </div>
                 ))}
               </div>
             </div>
@@ -682,6 +723,183 @@ export default function HeadwayTestImport() {
             </motion.div>
           </motion.div>
         )}
+      </AnimatePresence>
+
+      {/* ── Quiz Preview Modal ──────────────────────────────────────────────── */}
+      <AnimatePresence>
+        {showPreviewModal && previewUnit && previewQuestions.length > 0 && (() => {
+          const q = previewQuestions[previewQIdx];
+          const typeColors: Record<string, string> = {
+            grammar:     'bg-indigo-100 text-indigo-700',
+            vocabulary:  'bg-emerald-100 text-emerald-700',
+            comprehension: 'bg-amber-100 text-amber-700',
+            testbuilder: 'bg-sky-100 text-sky-700',
+          };
+          const typeLabel: Record<string, string> = {
+            grammar:     '📘 Grammar',
+            vocabulary:  '🌿 Vocabulary',
+            comprehension: '🧠 Comprehension',
+            testbuilder: '🔗 Test Builder',
+          };
+          return (
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[80] flex items-center justify-center p-4"
+              onClick={() => setShowPreviewModal(false)}
+            >
+              <motion.div
+                initial={{ opacity: 0, scale: 0.9, y: 24 }}
+                animate={{ opacity: 1, scale: 1, y: 0 }}
+                exit={{ opacity: 0, scale: 0.9, y: 24 }}
+                transition={{ type: 'spring', stiffness: 300, damping: 28 }}
+                className="bg-white rounded-2xl shadow-2xl w-full max-w-lg overflow-hidden"
+                onClick={e => e.stopPropagation()}
+              >
+                {/* Colour stripe */}
+                <div className={`h-1.5 w-full bg-gradient-to-r ${activeLevel.color}`} />
+
+                {/* Header */}
+                <div className="flex items-center gap-3 px-5 pt-5 pb-3">
+                  <div className={`w-10 h-10 rounded-xl bg-gradient-to-br ${activeLevel.color} flex items-center justify-center shrink-0`}>
+                    <Eye className="w-5 h-5 text-white" />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Quiz Preview</p>
+                    <h3 className="text-sm font-bold text-slate-900 truncate">{previewUnit.title}</h3>
+                  </div>
+                  <div className="flex items-center gap-1 shrink-0">
+                    <span className="text-xs text-slate-400 font-medium">
+                      {previewQIdx + 1} / {previewQuestions.length}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setShowPreviewModal(false)}
+                      className="ml-2 p-1.5 rounded-xl hover:bg-slate-100 transition-colors"
+                    >
+                      <X className="w-4 h-4 text-slate-500" />
+                    </button>
+                  </div>
+                </div>
+
+                {/* Progress dots */}
+                <div className="flex gap-1 px-5 pb-3">
+                  {previewQuestions.map((_, idx) => (
+                    <button
+                      key={idx}
+                      type="button"
+                      onClick={() => { setPreviewQIdx(idx); setPreviewSelected(null); }}
+                      className={`h-1.5 rounded-full transition-all ${
+                        idx === previewQIdx
+                          ? `flex-[3] bg-gradient-to-r ${activeLevel.color}`
+                          : 'flex-1 bg-slate-200 hover:bg-slate-300'
+                      }`}
+                    />
+                  ))}
+                </div>
+
+                {/* Question body */}
+                <div className="px-5 pb-5">
+                  {/* Type badge + topic */}
+                  <div className="flex items-center gap-2 mb-3">
+                    <span className={`text-[11px] font-bold px-2.5 py-1 rounded-full ${typeColors[q.type] ?? 'bg-slate-100 text-slate-600'}`}>
+                      {typeLabel[q.type] ?? q.type}
+                    </span>
+                    <span className="text-xs text-slate-400 font-medium truncate">{q.topic}</span>
+                  </div>
+
+                  {/* Question text */}
+                  <p className="text-sm font-semibold text-slate-800 mb-4 leading-snug">{q.questionText}</p>
+
+                  {/* Options */}
+                  <div className="space-y-2 mb-4">
+                    {q.options.map((opt, oi) => {
+                      const isCorrect  = oi === q.correctIndex;
+                      const isSelected = previewSelected === oi;
+                      const revealed   = previewSelected !== null;
+                      let cls = 'border-slate-200 bg-slate-50 hover:border-slate-300 hover:bg-slate-100 text-slate-700';
+                      if (revealed && isCorrect)  cls = 'border-emerald-400 bg-emerald-50 text-emerald-800';
+                      else if (revealed && isSelected) cls = 'border-rose-300 bg-rose-50 text-rose-700';
+                      return (
+                        <button
+                          key={oi}
+                          type="button"
+                          disabled={previewSelected !== null}
+                          onClick={() => setPreviewSelected(oi)}
+                          className={`w-full text-left px-3.5 py-2.5 rounded-xl border-2 text-xs font-medium transition-all flex items-start gap-2.5 ${cls}`}
+                        >
+                          <span className={`shrink-0 w-5 h-5 rounded-full border-2 flex items-center justify-center text-[10px] font-bold mt-px ${
+                            revealed && isCorrect  ? 'border-emerald-500 bg-emerald-500 text-white'
+                            : revealed && isSelected ? 'border-rose-400 bg-rose-400 text-white'
+                            : 'border-slate-300 text-slate-400'
+                          }`}>
+                            {String.fromCharCode(65 + oi)}
+                          </span>
+                          <span className="leading-relaxed break-all">{opt}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+
+                  {/* Explanation after answer */}
+                  {previewSelected !== null && (
+                    <motion.div
+                      initial={{ opacity: 0, y: 6 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      className={`p-3 rounded-xl text-xs mb-4 ${
+                        previewSelected === q.correctIndex
+                          ? 'bg-emerald-50 border border-emerald-200 text-emerald-800'
+                          : 'bg-rose-50 border border-rose-200 text-rose-800'
+                      }`}
+                    >
+                      <p className="font-bold mb-1">
+                        {previewSelected === q.correctIndex ? '✓ Correct!' : '✗ Not quite.'}
+                      </p>
+                      <p className="leading-relaxed line-clamp-3">{q.explanation}</p>
+                      {q.oxfordUrl && (
+                        <a href={q.oxfordUrl} target="_blank" rel="noopener noreferrer"
+                          className="inline-flex items-center gap-1 mt-1.5 font-semibold underline hover:no-underline">
+                          <ExternalLink className="w-3 h-3" /> Open on Oxford site
+                        </a>
+                      )}
+                    </motion.div>
+                  )}
+
+                  {/* Nav footer */}
+                  <div className="flex items-center justify-between gap-3">
+                    <button
+                      type="button"
+                      disabled={previewQIdx === 0}
+                      onClick={() => { setPreviewQIdx(i => i - 1); setPreviewSelected(null); }}
+                      className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-bold border border-slate-200 text-slate-600 hover:bg-slate-50 disabled:opacity-40 transition-all"
+                    >
+                      <ChevronLeft className="w-3.5 h-3.5" /> Prev
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => { setShowImportPanel(true); setShowPreviewModal(false); setImportDone(null); }}
+                      className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-xl text-xs font-bold text-white transition-all"
+                      style={{ background: 'linear-gradient(135deg,#6366f1,#8b5cf6)' }}
+                    >
+                      <Import className="w-3.5 h-3.5" /> Import to Course
+                    </button>
+
+                    <button
+                      type="button"
+                      disabled={previewQIdx === previewQuestions.length - 1}
+                      onClick={() => { setPreviewQIdx(i => i + 1); setPreviewSelected(null); }}
+                      className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-bold border border-slate-200 text-slate-600 hover:bg-slate-50 disabled:opacity-40 transition-all"
+                    >
+                      Next <ChevronRightIcon className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                </div>
+              </motion.div>
+            </motion.div>
+          );
+        })()}
       </AnimatePresence>
     </TeacherLayout>
   );
