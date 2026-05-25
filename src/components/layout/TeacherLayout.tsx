@@ -7,7 +7,7 @@ import {
   Menu, X, Layers, PlayCircle, School, ClipboardList, CalendarCheck,
   Award, Video, MessageSquare, Megaphone, FileBarChart, User,
   GraduationCap, ScrollText, ChevronRight, PanelLeftClose, PanelLeftOpen,
-  Zap, FileBarChart2, Presentation
+  Zap, FileBarChart2, Presentation, ListChecks
 } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import NotificationCenter from '../NotificationCenter';
@@ -246,6 +246,14 @@ export default function TeacherLayout({ children }: { children: React.ReactNode 
         { icon: Video,         label: t('nav.liveSessions'),  path: '/teacher/live-sessions' },
         { icon: MessageSquare, label: t('nav.community'),     path: '/teacher/community' },
         { icon: Megaphone,     label: t('nav.announcements'), path: '/teacher/announcements' },
+      ],
+    },
+    {
+      key: 'headway',
+      title: 'Headway Resources',
+      items: [
+        { icon: BookOpen,    label: 'Headway Tests',   path: '/teacher/headway-tests' },
+        { icon: ListChecks,  label: 'Module Tests',    path: '/teacher/module-tests' },
       ],
     },
     {

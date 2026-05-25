@@ -32,6 +32,7 @@ const TeacherModuleDetail = lazy(() => import('./pages/teacher/ModuleDetail'));
 const TeacherLessons = lazy(() => import('./pages/teacher/Lessons'));
 const TeacherCoursesList = lazy(() => import('./pages/teacher/TeacherCoursesList'));
 const HeadwayTestImport = lazy(() => import('./pages/teacher/HeadwayTestImport'));
+const TeacherModuleTests = lazy(() => import('./pages/teacher/TeacherModuleTests'));
 const TeacherLessonContentManager = lazy(() => import('./pages/teacher/LessonContentManager'));
 const TeacherAssignments = lazy(() => import('./pages/teacher/Assignments'));
 const TeacherAttendance = lazy(() => import('./pages/teacher/Attendance'));
@@ -444,6 +445,7 @@ function TeacherRoutes({ features }: { features: FeatureFlags }) {
       <Route path="/modules/:moduleId" element={<TeacherModuleDetail />} />
       <Route path="/courses/:courseId/modules" element={<TeacherModules />} />
       <Route path="/headway-tests" element={<HeadwayTestImport />} />
+      <Route path="/module-tests" element={<TeacherModuleTests />} />
       <Route path="/lessons" element={<TeacherLessons />} />
       <Route path="/lessons/:lessonId/content" element={<TeacherLessonContentManager />} />
       <Route path="/assignments" element={<TeacherAssignments />} />

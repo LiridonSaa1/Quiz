@@ -9208,7 +9208,7 @@ When giving instructions, number each step clearly. Be precise and technical whe
 
       const { data: enrolledCourses, error: ecErr } = await supabaseAdmin
         .from('courses')
-        .select('id,title')
+        .select('id,title,level')
         .contains('student_ids', [caller.userId]);
       if (ecErr) throw ecErr;
 
@@ -9233,18 +9233,21 @@ When giving instructions, number each step clearly. Be precise and technical whe
       if (courseIds.length === 0) return res.json({ success: true, quizzes: [] });
 
       const courseTitleById: Record<string, string> = {};
+      const courseLevelById: Record<string, string> = {};
       (enrolledCourses || []).forEach((course: any) => {
         courseTitleById[String(course.id)] = String(course.title || 'Course');
+        courseLevelById[String(course.id)] = String(course.level || '');
       });
       if (classCourseIds.length > 0) {
         const missingTitleIds = classCourseIds.filter((cid) => !courseTitleById[cid]);
         if (missingTitleIds.length > 0) {
           const { data: classLinkedCourses } = await supabaseAdmin
             .from('courses')
-            .select('id,title')
+            .select('id,title,level')
             .in('id', missingTitleIds);
           (classLinkedCourses || []).forEach((course: any) => {
             courseTitleById[String(course.id)] = String(course.title || 'Course');
+            courseLevelById[String(course.id)] = String(course.level || '');
           });
         }
       }
@@ -9321,11 +9324,15 @@ When giving instructions, number each step clearly. Be precise and technical whe
         const publishedText = String(row?.published || '').trim().toLowerCase();
         if (publishedText) return publishedText === 'true' || publishedText === '1' || publishedText === 'yes';
         return true;
-      }).map((row: any) => ({
-        ...row,
-        course_id: String(row?.course_id || '') || lessonToCourse[String(row?.lesson_id || '')] || '',
-        course_title: courseTitleById[String(row?.course_id || '') || lessonToCourse[String(row?.lesson_id || '')] || ''] || 'Course',
-      }));
+      }).map((row: any) => {
+        const resolvedCourseId = String(row?.course_id || '') || lessonToCourse[String(row?.lesson_id || '')] || '';
+        return {
+          ...row,
+          course_id: resolvedCourseId,
+          course_title: courseTitleById[resolvedCourseId] || 'Course',
+          course_level: courseLevelById[resolvedCourseId] || '',
+        };
+      });
 
       return res.json({ success: true, quizzes });
     } catch (e: any) {
