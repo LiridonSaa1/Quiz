@@ -162,7 +162,8 @@ export default function Login() {
       }
 
       toast.success(t('login.welcomeBack') + '!');
-      navigate('/');
+      // Navigation is handled automatically by App.tsx's onAuthStateChange → fetchProfile → setUser.
+      // Calling navigate('/') here races with that async flow and causes a blank page.
     } catch (err: any) {
       const msg = err.message || 'Login failed';
       toast.error(msg);
