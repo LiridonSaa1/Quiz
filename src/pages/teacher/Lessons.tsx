@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 import { supabase } from '../../supabase';
 import { authFetch, readApiError } from '../../lib/apiUrl';
@@ -202,6 +202,23 @@ export default function TeacherLessons() {
     courses.find((c: any) => c.id === courseId)?.title || 'Unknown Course';
 
   const ITEMS_PER_PAGE = 12;
+
+  const availableTypes = useMemo(() => {
+    const contextLessons = lessons.filter(l => {
+      const matchCourse = courseFilter === 'all' || l.courseId === courseFilter;
+      const selectedClass = classes.find((c) => c.id === classFilter);
+      const matchClass = classFilter === 'all' || (selectedClass?.course_id ? l.courseId === selectedClass.course_id : false);
+      const matchModule = moduleFilter === 'all' || l.moduleId === moduleFilter;
+      return matchCourse && matchClass && matchModule;
+    });
+    return LESSON_TYPES.filter(lt => contextLessons.some(l => l.type === lt.value));
+  }, [lessons, courseFilter, classFilter, moduleFilter]);
+
+  useEffect(() => {
+    if (typeFilter !== 'all' && availableTypes.length > 0 && !availableTypes.some(t => t.value === typeFilter)) {
+      setTypeFilter('all');
+    }
+  }, [availableTypes, typeFilter]);
 
   const filtered = lessons.filter(l => {
     const matchSearch = l.title.toLowerCase().includes(search.toLowerCase()) ||
@@ -503,7 +520,9 @@ export default function TeacherLessons() {
               <select value={typeFilter} onChange={e => setTypeFilter(e.target.value)}
                 className="px-4 py-2.5 rounded-full text-sm border border-indigo-100 bg-white/80 focus:outline-none focus:ring-2 focus:ring-violet-400 focus:border-transparent transition-all shadow-sm text-slate-700">
                 <option value="all">{t('lessons.allTypes')}</option>
-                {LESSON_TYPES.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
+                {(availableTypes.length > 0 ? availableTypes : LESSON_TYPES).map(lt => (
+                  <option key={lt.value} value={lt.value}>{lt.label}</option>
+                ))}
               </select>
               {hasActiveFilters && (
                 <button onClick={() => { setSearch(''); setCourseFilter('all'); setClassFilter('all'); setModuleFilter('all'); setTypeFilter('all'); }}

@@ -12,7 +12,7 @@ import { cn } from '../../lib/utils';
 import { motion, AnimatePresence } from 'motion/react';
 import { toast } from 'sonner';
 import { resolveTeacherIdCandidates } from '../../lib/teacherScope';
-import { authFetch } from '../../lib/apiUrl';
+import { apiUrl, authFetch } from '../../lib/apiUrl';
 import { AIPanel, AITriggerButton } from '../../components/AIPanel';
 import { generateCourseData } from '../../lib/gemini';
 import { useTeacherPermissions } from '../../lib/teacherPermissions';
