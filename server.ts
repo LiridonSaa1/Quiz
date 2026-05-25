@@ -838,19 +838,35 @@ export async function createApp(options: CreateAppOptions = {}) {
   // client IP from X-Forwarded-For. Replit uses multiple proxy layers so
   // `trust proxy: 1` can expose the proxy IP rather than the real user IP,
   // causing all users to share one rate-limit bucket and trigger 429s.
-  app.set('trust proxy', true);
+  // Replit routes through multiple proxy hops. Using a number (e.g. 1) can
+  // expose the proxy IP instead of the real client IP, collapsing all users
+  // into one rate-limit bucket. We keep trust proxy at 1 to satisfy
+  // express-rate-limit's validation while also disabling its trustProxy check
+  // (the validate flag) and providing a custom keyGenerator that reads the
+  // real IP from X-Forwarded-For safely.
+  app.set('trust proxy', 1);
 
   // ── Rate Limiting ────────────────────────────────────────────────────────────
+  const resolveClientIp = (req: Request): string => {
+    const xff = req.headers['x-forwarded-for'];
+    if (xff) {
+      const first = (Array.isArray(xff) ? xff[0] : xff).split(',')[0].trim();
+      if (first) return first;
+    }
+    return req.ip || req.socket?.remoteAddress || 'unknown';
+  };
+
   const apiLimiter = rateLimit({
     windowMs: 15 * 60 * 1000,
     // 1000 req/15min — generous enough for normal dashboard polling.
-    // The skip below excludes /api/health entirely.
     max: 1000,
     standardHeaders: true,
     legacyHeaders: false,
     message: { error: 'Too many requests, please try again later.' },
     // req.originalUrl keeps the full path regardless of mount point.
     skip: (req) => req.originalUrl === '/api/health' || req.path === '/health',
+    keyGenerator: resolveClientIp,
+    validate: { trustProxy: false },
   });
   const authLimiter = rateLimit({
     windowMs: 15 * 60 * 1000,

@@ -332,20 +332,31 @@ export default function QuizBuilder() {
             questionRows = questionsData ?? [];
           }
 
-          setQuestions(questionRows.map((q) => ({
-            id: q.id,
-            quizId: q.quiz_id,
-            type: q.type,
-            text: questionBodyFromRow(q as Record<string, unknown>),
-            mediaUrl: q.media_url,
-            mediaType: q.media_type,
-            readingPassage: q.reading_passage,
-            options: q.options,
-            correctAnswer: q.correct_answer,
-            points: q.points,
-            explanation: q.explanation,
-            orderIndex: (q as { order?: number; order_index?: number }).order_index ?? (q as { order?: number }).order,
-          } as Question)));
+          setQuestions(questionRows.map((q) => {
+            const rawOptions = q.options;
+            const safeOptions: Array<{ id: string; text: string }> | undefined = Array.isArray(rawOptions)
+              ? rawOptions.map((opt: unknown, i: number) => {
+                  if (opt && typeof opt === 'object' && 'id' in opt && 'text' in opt) {
+                    return { id: String((opt as { id: unknown }).id ?? i), text: String((opt as { text: unknown }).text ?? '') };
+                  }
+                  return { id: String(i + 1), text: String(opt ?? '') };
+                })
+              : undefined;
+            return {
+              id: q.id,
+              quizId: q.quiz_id,
+              type: q.type,
+              text: questionBodyFromRow(q as Record<string, unknown>),
+              mediaUrl: q.media_url,
+              mediaType: q.media_type,
+              readingPassage: q.reading_passage,
+              options: safeOptions,
+              correctAnswer: q.correct_answer,
+              points: q.points,
+              explanation: q.explanation,
+              orderIndex: (q as { order?: number; order_index?: number }).order_index ?? (q as { order?: number }).order,
+            } as Question;
+          }));
 
           // Restore question → section mapping from DB data
           const secMap: Record<number, string> = {};
@@ -1394,8 +1405,8 @@ export default function QuizBuilder() {
                             <div className="space-y-3">
                               <label className="block text-xs font-semibold text-slate-600">Answer options</label>
                               <div className="space-y-2">
-                                {q.options?.map((opt, optIndex) => (
-                                  <div key={opt.id} className="flex items-center gap-2 group/opt">
+                                {(Array.isArray(q.options) ? q.options : []).map((opt, optIndex) => (
+                                  <div key={opt.id ?? optIndex} className="flex items-center gap-2 group/opt">
                                     <button
                                       type="button"
                                       onClick={() => updateQuestion(index, { correctAnswer: opt.id })}
@@ -1410,19 +1421,20 @@ export default function QuizBuilder() {
                                     </button>
                                     <input
                                       type="text"
-                                      value={opt.text}
+                                      value={opt.text ?? ''}
                                       onChange={(e) => {
-                                        const newOpts = [...q.options!];
+                                        const safeOpts = Array.isArray(q.options) ? q.options : [];
+                                        const newOpts = [...safeOpts];
                                         newOpts[optIndex] = { ...opt, text: e.target.value };
                                         updateQuestion(index, { options: newOpts });
                                       }}
                                       className="flex-1 px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-violet-400"
                                     />
-                                    {q.type === 'multiple-choice' && q.options!.length > 2 && (
+                                    {q.type === 'multiple-choice' && Array.isArray(q.options) && q.options.length > 2 && (
                                       <button
                                         type="button"
                                         onClick={() => {
-                                          const newOpts = q.options!.filter((_, i) => i !== optIndex);
+                                          const newOpts = (Array.isArray(q.options) ? q.options : []).filter((_, i) => i !== optIndex);
                                           updateQuestion(index, { options: newOpts });
                                         }}
                                         className="p-2 text-slate-400 hover:text-red-600 opacity-0 group-hover/opt:opacity-100 transition-all"
@@ -1436,7 +1448,8 @@ export default function QuizBuilder() {
                                   <button
                                     type="button"
                                     onClick={() => {
-                                      const newOpts = [...q.options!, { id: Math.random().toString(36).slice(2, 11), text: `Option ${q.options!.length + 1}` }];
+                                      const safeOpts = Array.isArray(q.options) ? q.options : [];
+                                      const newOpts = [...safeOpts, { id: Math.random().toString(36).slice(2, 11), text: `Option ${safeOpts.length + 1}` }];
                                       updateQuestion(index, { options: newOpts });
                                     }}
                                     className="text-xs font-bold text-violet-600 hover:text-violet-700 flex items-center gap-1.5 pl-9 pt-1"

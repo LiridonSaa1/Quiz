@@ -8,6 +8,8 @@ type Props = {
 type State = {
   hasError: boolean;
   reloading: boolean;
+  errorMessage: string;
+  errorStack: string;
 };
 
 // Transient errors caused by Vite HMR / stale module cache — safe to auto-reload
@@ -29,15 +31,22 @@ function isTransientError(err: Error): boolean {
 }
 
 export default class ErrorBoundary extends React.Component<Props, State> {
-  state: State = { hasError: false, reloading: false };
+  state: State = { hasError: false, reloading: false, errorMessage: "", errorStack: "" };
 
-  static getDerivedStateFromError(): State {
-    return { hasError: true, reloading: false };
+  static getDerivedStateFromError(error: Error): State {
+    return {
+      hasError: true,
+      reloading: false,
+      errorMessage: error?.message || String(error) || "Unknown error",
+      errorStack: error?.stack || "",
+    };
   }
 
   componentDidCatch(error: Error, errorInfo: React.ErrorInfo): void {
+    console.error("[ErrorBoundary] Caught render error:", error.message, error.stack);
+    console.error("[ErrorBoundary] Component stack:", errorInfo.componentStack);
+
     if (isTransientError(error)) {
-      // Stale Vite/HMR chunk — silently reload once
       sessionStorage.setItem("__eb_reload_ts", String(Date.now()));
       window.location.reload();
       this.setState({ reloading: true });
@@ -78,10 +87,11 @@ export default class ErrorBoundary extends React.Component<Props, State> {
     }
 
     if (this.state.hasError) {
+      const isDev = import.meta.env.DEV;
       return (
         <div style={{
           display: "flex", alignItems: "center", justifyContent: "center",
-          height: "100vh", fontFamily: "sans-serif",
+          minHeight: "100vh", fontFamily: "sans-serif",
           flexDirection: "column", gap: 16, padding: 24,
         }}>
           <div style={{ fontSize: 48 }}>⚠️</div>
@@ -89,6 +99,22 @@ export default class ErrorBoundary extends React.Component<Props, State> {
           <p style={{ margin: 0, fontSize: 14, color: "#64748b", textAlign: "center", maxWidth: 360 }}>
             An unexpected error occurred. The issue has been reported automatically.
           </p>
+          {isDev && this.state.errorMessage && (
+            <div style={{
+              marginTop: 8, padding: "12px 16px", borderRadius: 8,
+              background: "#fef2f2", border: "1px solid #fecaca",
+              maxWidth: 600, width: "100%", overflowX: "auto",
+            }}>
+              <p style={{ margin: "0 0 6px 0", fontSize: 12, fontWeight: 700, color: "#dc2626" }}>
+                Error: {this.state.errorMessage}
+              </p>
+              {this.state.errorStack && (
+                <pre style={{ margin: 0, fontSize: 11, color: "#7f1d1d", whiteSpace: "pre-wrap", wordBreak: "break-word" }}>
+                  {this.state.errorStack.slice(0, 800)}
+                </pre>
+              )}
+            </div>
+          )}
           <button
             onClick={this.handleReload}
             style={{
