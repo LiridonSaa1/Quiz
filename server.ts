@@ -1938,7 +1938,15 @@ When giving instructions, number each step clearly. Be precise and technical whe
         .from("courses")
         .select("id")
         .in("teacher_id", scopedIds);
-      if (ce) throw ce;
+      // When courses.teacher_id column is missing, fall back to all quizzes (sorted by date)
+      if (ce) {
+        const msg = `${ce.message || ''} ${ce.details || ''}`.toLowerCase();
+        if (ce.code === 'PGRST204' || /teacher_id/.test(msg) || /does not exist|42703|undefined column/.test(msg)) {
+          const fallbackQ = await supabaseAdmin.from("quizzes").select("*").order("created_at", { ascending: false }).limit(500);
+          return sortRows(fallbackQ.data || []);
+        }
+        throw ce;
+      }
       const courseIds = (crs || []).map((c: any) => c?.id).filter(Boolean);
       if (courseIds.length === 0) return [];
       let q2 = await supabaseAdmin
@@ -5534,24 +5542,20 @@ When giving instructions, number each step clearly. Be precise and technical whe
           const u = levelData.units[qi];
           emit({ type: "status", message: `Creating quiz for ${u.title}…` });
 
-          const { data: quizData, error: qErr } = await supabaseAdmin
-            .from("quizzes")
-            .insert({
-              course_id: courseId,
-              teacher_id: userId,
-              module_id: unitModuleIds[qi] || null,
-              title: `${u.title.replace(/^Unit \d+ — /, "")} — Test Builder`,
-              description: `Grammar and vocabulary test for ${u.title}. Also open the Oxford Headway Test Builder: ${OUP}/student/headway/${levelData.slug}/testbuilder${CC}`,
-              time_limit: 20,
-              passing_score: 70,
-              published: false,
-              status: "draft",
-            })
-            .select("id")
-            .single();
+          const { data: quizData } = await insertCompatibleQuizAdmin({
+            course_id: courseId,
+            teacher_id: userId,
+            module_id: unitModuleIds[qi] || null,
+            title: `${u.title.replace(/^Unit \d+ — /, "")} — Test Builder`,
+            description: `Grammar and vocabulary test for ${u.title}. Also open the Oxford Headway Test Builder: ${OUP}/student/headway/${levelData.slug}/testbuilder${CC}`,
+            time_limit: 20,
+            passing_score: 70,
+            published: false,
+            status: "draft",
+          }, userId);
 
-          if (qErr || !quizData?.id) {
-            console.error("[headway-populate] quiz insert failed:", qErr?.message, qErr?.details);
+          if (!quizData?.id) {
+            console.error("[headway-populate] quiz insert failed (all retries exhausted)");
             continue;
           }
 
@@ -5620,24 +5624,20 @@ When giving instructions, number each step clearly. Be precise and technical whe
       const CC  = "?cc=global&selLanguage=en";
       const tbUrl = `${OUP}/student/headway/${levelData.slug}/testbuilder${CC}`;
 
-      // Insert quiz
-      const { data: quizData, error: qErr } = await supabaseAdmin
-        .from("quizzes")
-        .insert({
-          course_id:     courseId,
-          teacher_id:    userId,
-          title:         `${unit.title.replace(/^Unit \d+ — /, "")} — Test Builder`,
-          description:   `Grammar and vocabulary test for ${unit.title}. Also open the Oxford Headway Test Builder: ${tbUrl}`,
-          time_limit:    20,
-          passing_score: 70,
-          published:     false,
-          status:        "draft",
-        })
-        .select("id")
-        .single();
+      // Insert quiz — compatible insert strips teacher_id / published if columns are absent
+      const { data: quizData, error: quizErr } = await insertCompatibleQuizAdmin({
+        course_id:     courseId,
+        teacher_id:    userId,
+        title:         `${unit.title.replace(/^Unit \d+ — /, "")} — Test Builder`,
+        description:   `Grammar and vocabulary test for ${unit.title}. Also open the Oxford Headway Test Builder: ${tbUrl}`,
+        time_limit:    20,
+        passing_score: 70,
+        published:     false,
+        status:        "draft",
+      }, userId);
 
-      if (qErr || !quizData?.id) {
-        const msg = qErr ? [qErr.message, qErr.details].filter(Boolean).join(" — ") : "Quiz not created";
+      if (!quizData?.id) {
+        const msg = quizErr ? (quizErr as any)?.message || String(quizErr) : "Quiz could not be created";
         return res.status(400).json({ error: msg });
       }
 
