@@ -1918,6 +1918,18 @@ When giving instructions, number each step clearly. Be precise and technical whe
         payload = rest;
         continue;
       }
+      // Generic: if the error mentions a specific column name, strip it and retry
+      const errMsg = String((err as any)?.message || (err as any)?.details || "");
+      const colMatch = errMsg.match(/column[^''"]*[''"]([\w]+)[''"]|[''"]([\w]+)[''"][^''"]* column|Could not find[^''"]+'([\w]+)'/i);
+      if (colMatch) {
+        const missingCol = colMatch[1] || colMatch[2] || colMatch[3];
+        if (missingCol && missingCol in payload) {
+          const { [missingCol]: _dropped, ...rest } = payload as Record<string, unknown>;
+          void _dropped;
+          payload = rest;
+          continue;
+        }
+      }
       return { data: null, error: err };
     }
     return { data: null, error: new Error("Quiz insert: max compatibility retries") };
