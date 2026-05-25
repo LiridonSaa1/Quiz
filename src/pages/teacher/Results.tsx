@@ -16,7 +16,7 @@ import {
 import {
   BarChart3, Search, Download, ChevronDown, ChevronUp,
   CheckCircle2, XCircle, TrendingUp, FileText, Clock,
-  Trophy, Flame, Activity, ClipboardList,
+  Trophy, Flame, Activity, ClipboardList, Layers,
 } from 'lucide-react';
 import {
   AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip,
@@ -259,6 +259,118 @@ export default function TeacherResults() {
     { label: t('teacher.results.bestScore'), value: stats.highScore, gradient: 'from-amber-500 to-orange-600', shadow: 'shadow-amber-500/25', icon: BarChart3 },
     { label: t('teacher.results.avgTime'), value: stats.avgDuration || 0, gradient: 'from-sky-500 to-indigo-600', shadow: 'shadow-sky-500/25', icon: Clock },
   ];
+
+  // ── Section performance state ─────────────────────────────────────────────
+  const [sectionData, setSectionData] = useState<{ sections: any[]; questions: any[] } | null>(null);
+  const [sectionDataLoading, setSectionDataLoading] = useState(false);
+
+  // Fetch sections + questions when a specific quiz is selected
+  useEffect(() => {
+    if (selectedQuiz === 'all') { setSectionData(null); return; }
+    let cancelled = false;
+    (async () => {
+      setSectionDataLoading(true);
+      try {
+        const [secRes, qRes] = await Promise.all([
+          authFetch(`/api/teacher/quizzes/${encodeURIComponent(selectedQuiz)}/sections`),
+          authFetch(`/api/teacher/quizzes/${encodeURIComponent(selectedQuiz)}/questions`),
+        ]);
+        if (cancelled) return;
+        const secJson = secRes.ok ? await secRes.json().catch(() => ({})) : {};
+        const qJson = qRes.ok ? await qRes.json().catch(() => ({})) : {};
+        setSectionData({
+          sections: Array.isArray(secJson?.sections) ? secJson.sections : [],
+          questions: Array.isArray(qJson?.questions) ? qJson.questions : [],
+        });
+      } catch { setSectionData(null); }
+      finally { if (!cancelled) setSectionDataLoading(false); }
+    })();
+    return () => { cancelled = true; };
+  }, [selectedQuiz]);
+
+  // ── Per-section performance (computed from attempts + section data) ────────
+  const sectionReport = useMemo(() => {
+    if (!sectionData || sectionData.sections.length === 0) return null;
+    const { sections, questions } = sectionData;
+
+    // Grading helpers (mirrors QuizResults.tsx logic)
+    const normalizeAns = (value: unknown): string => {
+      if (value === null || value === undefined) return '';
+      if (typeof value === 'number' || typeof value === 'boolean') return String(value);
+      if (Array.isArray(value)) return value.length === 1 ? normalizeAns(value[0]) : value.map(normalizeAns).join('|');
+      if (typeof value === 'object') {
+        const c = value as Record<string, unknown>;
+        if (c.id !== undefined) return normalizeAns(c.id);
+        if (c.value !== undefined) return normalizeAns(c.value);
+        if (c.answer !== undefined) return normalizeAns(c.answer);
+        return JSON.stringify(c);
+      }
+      const raw = String(value).trim();
+      try { const p = JSON.parse(raw); if (p !== raw) return normalizeAns(p); } catch { }
+      return raw;
+    };
+
+    const GRADABLE = new Set(['multiple-choice', 'true-false', 'image', 'video', 'reading', 'open-text', 'fill-in-the-blank']);
+
+    const isCorrect = (q: any, studentAnswerRaw: unknown): boolean => {
+      const qType = String(q.type || '').trim().toLowerCase();
+      const student = normalizeAns(studentAnswerRaw);
+      const correct = normalizeAns(q.correct_answer);
+      if (qType === 'open-text' || qType === 'fill-in-the-blank') {
+        return correct.toLowerCase().split(',').map((k: string) => k.trim()).filter(Boolean).some((k: string) => student.toLowerCase().includes(k));
+      }
+      if (Array.isArray(q.options) && q.options.length > 0) {
+        const selOpt = q.options.find((o: any) => normalizeAns(o.id) === student);
+        const selText = selOpt ? normalizeAns(selOpt.text) : student;
+        const corrOpt = q.options.find((o: any) => normalizeAns(o.id) === correct);
+        const corrText = corrOpt ? normalizeAns(corrOpt.text) : correct;
+        return student === correct || selText === correct || student === corrText || selText === corrText;
+      }
+      return student === correct;
+    };
+
+    const quizAttempts = attempts.filter(
+      (a) => a.quizId === selectedQuiz && a.status === 'completed'
+    );
+
+    return sections.map((sec: any) => {
+      const secQs = questions.filter((q: any) => q.section_id === sec.id && GRADABLE.has(String(q.type || '').toLowerCase()));
+      const totalPts = secQs.reduce((s: number, q: any) => s + (Number(q.points) || 0), 0);
+
+      let totalEarned = 0;
+      let totalCorrect = 0;
+      let totalPossible = 0;
+
+      quizAttempts.forEach((attempt) => {
+        const answers = (attempt as any).answers || {};
+        secQs.forEach((q: any) => {
+          if (isCorrect(q, answers[q.id])) {
+            totalEarned += Number(q.points) || 0;
+            totalCorrect++;
+          }
+          totalPossible += Number(q.points) || 0;
+        });
+      });
+
+      const totalAnswered = quizAttempts.length * secQs.length;
+      const avgPct = totalPossible > 0 ? Math.round((totalEarned / totalPossible) * 100) : null;
+      const passRate = totalAnswered > 0 ? Math.round((totalCorrect / totalAnswered) * 100) : null;
+
+      return {
+        id: sec.id,
+        title: sec.title,
+        type: sec.type || 'general',
+        instructions: sec.instructions,
+        questionCount: secQs.length,
+        avgPct,
+        passRate,
+        totalCorrect,
+        totalAnswered,
+        attemptCount: quizAttempts.length,
+        totalPts,
+      };
+    });
+  }, [sectionData, attempts, selectedQuiz]);
 
   const [exportOpen, setExportOpen] = useState(false);
   const exportRef = useRef<HTMLDivElement>(null);
@@ -525,6 +637,117 @@ export default function TeacherResults() {
                   )}
                 </div>
               </div>
+            </div>
+          </div>
+        )}
+
+        {/* ── Section Performance Report ──────────────────────────────────── */}
+        {selectedQuiz !== 'all' && (sectionDataLoading || (sectionReport && sectionReport.length > 0)) && (
+          <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden mb-6">
+            <div
+              className="h-1"
+              style={{ background: 'linear-gradient(90deg, #7c3aed, #a78bfa)' }}
+            />
+            <div className="p-6">
+              <div className="flex items-center gap-2 mb-5">
+                <div className="w-8 h-8 rounded-xl bg-violet-50 flex items-center justify-center">
+                  <Layers className="w-4 h-4 text-violet-600" />
+                </div>
+                <div>
+                  <h2 className="text-base font-bold text-slate-900">Section Performance</h2>
+                  <p className="text-xs text-slate-400">
+                    Class averages across {attempts.filter(a => a.quizId === selectedQuiz && a.status === 'completed').length} completed attempt(s) — {quizzes[selectedQuiz] || 'selected quiz'}
+                  </p>
+                </div>
+              </div>
+
+              {sectionDataLoading ? (
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                  {Array(3).fill(0).map((_, i) => (
+                    <div key={i} className="h-24 rounded-2xl bg-slate-100 animate-pulse" />
+                  ))}
+                </div>
+              ) : sectionReport && sectionReport.length > 0 ? (
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                  {sectionReport.map((sec) => {
+                    const typeColors: Record<string, { badge: string; bar: string; ring: string }> = {
+                      grammar:    { badge: 'bg-violet-100 text-violet-700',  bar: '#7c3aed', ring: 'ring-violet-100' },
+                      listening:  { badge: 'bg-amber-100 text-amber-700',    bar: '#d97706', ring: 'ring-amber-100' },
+                      reading:    { badge: 'bg-blue-100 text-blue-700',      bar: '#2563eb', ring: 'ring-blue-100' },
+                      writing:    { badge: 'bg-emerald-100 text-emerald-700',bar: '#059669', ring: 'ring-emerald-100' },
+                      vocabulary: { badge: 'bg-pink-100 text-pink-700',      bar: '#db2777', ring: 'ring-pink-100' },
+                      general:    { badge: 'bg-slate-100 text-slate-600',    bar: '#6366f1', ring: 'ring-slate-100' },
+                    };
+                    const c = typeColors[sec.type] || typeColors.general;
+                    const pct = sec.avgPct ?? 0;
+                    const barColor = pct >= 70 ? '#10b981' : pct >= 40 ? '#f59e0b' : '#ef4444';
+
+                    return (
+                      <motion.div
+                        key={sec.id}
+                        initial={{ opacity: 0, y: 8 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        className={cn('rounded-2xl border p-4 space-y-3 ring-2', c.ring)}
+                        style={{ borderColor: c.bar + '30' }}
+                      >
+                        {/* Header */}
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <span className="text-sm font-bold text-slate-900 truncate">{sec.title}</span>
+                              <span className={cn('text-[10px] font-bold px-2 py-0.5 rounded-full capitalize shrink-0', c.badge)}>
+                                {sec.type}
+                              </span>
+                            </div>
+                            <p className="text-[11px] text-slate-400 mt-0.5">{sec.questionCount} question{sec.questionCount !== 1 ? 's' : ''}</p>
+                          </div>
+                          {sec.avgPct !== null && (
+                            <div className="text-right shrink-0">
+                              <div className="text-xl font-black" style={{ color: barColor }}>
+                                {sec.avgPct}%
+                              </div>
+                              <div className="text-[10px] text-slate-400">class avg</div>
+                            </div>
+                          )}
+                        </div>
+
+                        {/* Progress bar */}
+                        {sec.avgPct !== null && (
+                          <div className="w-full h-2 bg-slate-100 rounded-full overflow-hidden">
+                            <motion.div
+                              initial={{ width: 0 }}
+                              animate={{ width: `${sec.avgPct}%` }}
+                              transition={{ duration: 0.7, ease: 'easeOut' }}
+                              className="h-full rounded-full"
+                              style={{ background: barColor }}
+                            />
+                          </div>
+                        )}
+
+                        {/* Stats row */}
+                        <div className="flex items-center gap-3 text-xs text-slate-500">
+                          {sec.totalAnswered > 0 ? (
+                            <>
+                              <span className="flex items-center gap-1">
+                                <CheckCircle2 className="w-3 h-3 text-emerald-500" />
+                                {sec.totalCorrect}/{sec.totalAnswered} correct
+                              </span>
+                              {sec.passRate !== null && (
+                                <span className="flex items-center gap-1 ml-auto">
+                                  <Trophy className="w-3 h-3 text-amber-500" />
+                                  {sec.passRate}% pass rate
+                                </span>
+                              )}
+                            </>
+                          ) : (
+                            <span className="text-slate-400 italic">No attempts yet</span>
+                          )}
+                        </div>
+                      </motion.div>
+                    );
+                  })}
+                </div>
+              ) : null}
             </div>
           </div>
         )}
