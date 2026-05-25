@@ -113,13 +113,22 @@ export default function App() {
 
   useEffect(() => {
     const checkBackend = async () => {
-      try {
-        const res = await fetch(apiUrl('/api/health'));
-        if (!res.ok) throw new Error('Backend not responding');
-        console.log('Backend health check: OK');
-      } catch (error) {
-        console.error('Backend health check failed:', error);
-        toast.error('Backend server is not reachable.');
+      const maxAttempts = 3;
+      const delayMs = 1500;
+      for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+        try {
+          const res = await fetch(apiUrl('/api/health'));
+          if (!res.ok) throw new Error('Backend not responding');
+          console.log('Backend health check: OK');
+          return;
+        } catch (error) {
+          if (attempt < maxAttempts) {
+            await new Promise(r => setTimeout(r, delayMs));
+          } else {
+            console.error('Backend health check failed:', error);
+            toast.error('Backend server is not reachable.');
+          }
+        }
       }
     };
 
