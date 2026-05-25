@@ -834,18 +834,23 @@ export async function createApp(options: CreateAppOptions = {}) {
   app.use(express.json({ limit: "15mb" }));
   app.use(express.urlencoded({ extended: true, limit: "15mb" }));
 
-  // Trust the Replit reverse-proxy so that express-rate-limit can read the
-  // real client IP from X-Forwarded-For instead of seeing the proxy's IP.
-  app.set('trust proxy', 1);
+  // Trust all Replit reverse-proxy hops so express-rate-limit reads the real
+  // client IP from X-Forwarded-For. Replit uses multiple proxy layers so
+  // `trust proxy: 1` can expose the proxy IP rather than the real user IP,
+  // causing all users to share one rate-limit bucket and trigger 429s.
+  app.set('trust proxy', true);
 
   // ── Rate Limiting ────────────────────────────────────────────────────────────
   const apiLimiter = rateLimit({
     windowMs: 15 * 60 * 1000,
-    max: 200,
+    // 1000 req/15min — generous enough for normal dashboard polling.
+    // The skip below excludes /api/health entirely.
+    max: 1000,
     standardHeaders: true,
     legacyHeaders: false,
     message: { error: 'Too many requests, please try again later.' },
-    skip: (req) => req.path === '/api/health',
+    // req.originalUrl keeps the full path regardless of mount point.
+    skip: (req) => req.originalUrl === '/api/health' || req.path === '/health',
   });
   const authLimiter = rateLimit({
     windowMs: 15 * 60 * 1000,
