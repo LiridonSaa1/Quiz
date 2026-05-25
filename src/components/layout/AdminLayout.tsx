@@ -4,6 +4,7 @@ import { useTranslation } from 'react-i18next';
 import { supabase } from '../../supabase';
 import { cn } from '../../lib/utils';
 import NotificationCenter from '../NotificationCenter';
+import BackendStatus from '../BackendStatus';
 import LanguageDropdown from '../LanguageDropdown';
 import { authFetch } from '../../lib/apiUrl';
 import { defaultFeatureFlags, extractFeatureFlags, FeatureFlags } from '../../lib/platformFeatures';
@@ -225,6 +226,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
       <header className="hidden lg:flex fixed top-0 right-0 left-60 h-14 bg-white border-b border-slate-200 items-center justify-between px-6 z-20">
         <span className="text-sm font-semibold text-slate-500">{currentLabel}</span>
         <div className="flex items-center gap-2">
+          <BackendStatus />
           <LanguageDropdown variant="light" />
           <NotificationCenter />
         </div>

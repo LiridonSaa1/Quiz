@@ -11,6 +11,7 @@ import {
 } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import NotificationCenter from '../NotificationCenter';
+import BackendStatus from '../BackendStatus';
 import LanguageDropdown from '../LanguageDropdown';
 import { authFetch } from '../../lib/apiUrl';
 import { defaultFeatureFlags, extractFeatureFlags, FeatureFlags } from '../../lib/platformFeatures';
@@ -360,6 +361,7 @@ export default function TeacherLayout({ children }: { children: React.ReactNode 
           <span className="text-slate-800 font-semibold text-sm truncate">{currentLabel}</span>
         </div>
         <div className="flex items-center gap-2 shrink-0">
+          <BackendStatus />
           <LanguageDropdown variant="light" />
           <NotificationCenter />
         </div>
