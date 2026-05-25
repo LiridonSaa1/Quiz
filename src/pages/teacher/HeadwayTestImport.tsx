@@ -25,7 +25,7 @@ const LEVELS = [
   { key: 'Advanced',          slug: 'adv4',             color: 'from-indigo-600 to-blue-700',   badge: 'bg-indigo-100 text-indigo-700',   units: 12 },
 ];
 
-interface Course { id: string; title?: string; name?: string; }
+interface Course { id: string; title?: string; name?: string; level?: string; }
 
 interface ImportProgress {
   unit: number;
@@ -87,7 +87,7 @@ export default function HeadwayTestImport() {
         const list = Array.isArray(json) ? json : (json.courses ?? json.data ?? []);
         setCourses(list);
       } else {
-        const { data } = await supabase.from('courses').select('id, title').order('created_at', { ascending: false });
+        const { data } = await supabase.from('courses').select('id, title, level').order('created_at', { ascending: false });
         setCourses((data ?? []) as Course[]);
       }
     } catch {
@@ -602,6 +602,23 @@ export default function HeadwayTestImport() {
                 ) : (
                   /* Form state */
                   <div className="space-y-4">
+                    {/* Auto-level banner */}
+                    <div className={`flex items-start gap-3 px-4 py-3 rounded-xl border bg-gradient-to-r ${activeLevel.badge} border-current/10`}>
+                      <span className="text-base mt-0.5">🎯</span>
+                      <div className="min-w-0">
+                        <p className="text-xs font-bold text-slate-800">
+                          Course level will be set automatically
+                        </p>
+                        <p className="text-xs text-slate-600 mt-0.5">
+                          After import, the selected course's level will be updated to{' '}
+                          <span className={`font-black ${activeLevel.badge.split(' ')[1]}`}>
+                            Headway {activeLevel.key}
+                          </span>
+                          {' '}— so tests appear under the correct level tab in Module Tests.
+                        </p>
+                      </div>
+                    </div>
+
                     {/* Course selector */}
                     <div>
                       <label className="block text-xs font-semibold text-slate-600 mb-1.5">Target Course</label>
@@ -611,19 +628,44 @@ export default function HeadwayTestImport() {
                             <Loader2 className="w-4 h-4 animate-spin" /> Loading courses…
                           </div>
                         ) : (
-                          <select
-                            value={importCourseId}
-                            onChange={e => setImportCourseId(e.target.value)}
-                            disabled={importing}
-                            className="w-full appearance-none bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 text-sm font-medium text-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-500 pr-9 disabled:opacity-50"
-                          >
-                            <option value="">Select a course…</option>
-                            {courses.map(c => (
-                              <option key={c.id} value={c.id}>{c.name || c.title || 'Untitled'}</option>
-                            ))}
-                          </select>
+                          <>
+                            <select
+                              value={importCourseId}
+                              onChange={e => setImportCourseId(e.target.value)}
+                              disabled={importing}
+                              className="w-full appearance-none bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 text-sm font-medium text-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-500 pr-9 disabled:opacity-50"
+                            >
+                              <option value="">Select a course…</option>
+                              {courses.map(c => {
+                                const courseLevel = String(c.level || '').toLowerCase();
+                                const targetLevel = activeLevel.key.toLowerCase();
+                                const matches = courseLevel === targetLevel || courseLevel.replace(/[- ]/g, '') === targetLevel.replace(/[- ]/g, '');
+                                return (
+                                  <option key={c.id} value={c.id}>
+                                    {matches ? '✓ ' : ''}{c.name || c.title || 'Untitled'}{c.level ? ` [${c.level}]` : ''}
+                                  </option>
+                                );
+                              })}
+                            </select>
+                            <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 pointer-events-none" />
+                            {importCourseId && (() => {
+                              const sel = courses.find(c => c.id === importCourseId);
+                              const courseLevel = String(sel?.level || '').toLowerCase();
+                              const targetLevel = activeLevel.key.toLowerCase();
+                              const matches = courseLevel === targetLevel || courseLevel.replace(/[- ]/g, '') === targetLevel.replace(/[- ]/g, '');
+                              return sel && !matches ? (
+                                <p className="text-[10px] text-amber-600 mt-1 pl-1">
+                                  ⚠️ This course is currently <strong>{sel.level || 'no level'}</strong> — it will be updated to <strong>{activeLevel.key}</strong> after import.
+                                </p>
+                              ) : sel ? (
+                                <p className="text-[10px] text-emerald-600 mt-1 pl-1">
+                                  ✓ Level already matches — <strong>{activeLevel.key}</strong>
+                                </p>
+                              ) : null;
+                            })()}
+                          </>
                         )}
-                        <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 pointer-events-none" />
+                        {!importCourseId && <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 pointer-events-none" />}
                       </div>
                     </div>
 

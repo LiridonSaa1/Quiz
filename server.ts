@@ -5613,6 +5613,11 @@ When giving instructions, number each step clearly. Be precise and technical whe
         }
       }
 
+      // ── Auto-update course level to match Headway level ─────────────────────
+      try {
+        await supabaseAdmin.from("courses").update({ level }).eq("id", courseId);
+      } catch { /* non-critical — course level update is best-effort */ }
+
       // ── Persist sync timestamp to platform_config ─────────────────────────────
       const syncedAt = new Date().toISOString();
       try {
@@ -5687,6 +5692,11 @@ When giving instructions, number each step clearly. Be precise and technical whe
         }
         if (iqErr) console.warn("[save-unit-quiz] questions insert warning:", iqErr.message);
       }
+
+      // Auto-update course level to match Headway level
+      try {
+        await supabaseAdmin.from("courses").update({ level }).eq("id", courseId);
+      } catch { /* non-critical */ }
 
       return res.json({ success: true, quizId: quizData.id, questions: questions.length });
     } catch (e: any) {
