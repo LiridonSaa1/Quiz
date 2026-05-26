@@ -565,81 +565,122 @@ export default function TeacherLessons() {
               )}
             </motion.div>
 
-            {/* Modules Grid — click a module to see its lessons */}
+            {/* Lessons Grid — individual lesson cards */}
             {loading ? (
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-5">
-                {Array(8).fill(0).map((_, i) => <div key={i} className="bg-white rounded-2xl border border-slate-100 h-52 animate-pulse" />)}
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                {Array(9).fill(0).map((_, i) => <div key={i} className="bg-white rounded-2xl border border-slate-100 h-44 animate-pulse" />)}
               </div>
-            ) : modules.length === 0 ? (
+            ) : filtered.length === 0 ? (
               <motion.div initial={{ opacity: 0, scale: 0.97 }} animate={{ opacity: 1, scale: 1 }} transition={{ duration: 0.4 }}
                 className="py-20 flex flex-col items-center justify-center bg-white rounded-2xl border border-dashed border-indigo-200 shadow-sm">
                 <EmptyIllustration />
-                <h3 className="text-xl font-extrabold text-slate-800 mt-6 mb-2">No modules yet</h3>
+                <h3 className="text-xl font-extrabold text-slate-800 mt-6 mb-2">
+                  {modules.length === 0 ? 'No modules yet' : 'No lessons found'}
+                </h3>
                 <p className="text-slate-400 text-sm mb-8 max-w-xs text-center">
-                  Create modules first under a course, then add lessons inside each module.
+                  {modules.length === 0
+                    ? 'Create modules first under a course, then add lessons inside each module.'
+                    : hasActiveFilters
+                      ? 'Try adjusting your filters or search query.'
+                      : 'No lessons have been created yet. Click "+ New Lesson" to get started.'}
                 </p>
-                <Link to="/teacher/modules"
-                  className="inline-flex items-center gap-2 px-6 py-3 rounded-2xl font-bold text-sm text-white"
-                  style={{ background: 'linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%)', boxShadow: '0 8px 24px rgba(99,102,241,0.35)' }}>
-                  <Layers className="w-4 h-4" /> Go to Courses & Modules
-                </Link>
+                {modules.length === 0 ? (
+                  <Link to="/teacher/modules"
+                    className="inline-flex items-center gap-2 px-6 py-3 rounded-2xl font-bold text-sm text-white"
+                    style={{ background: 'linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%)', boxShadow: '0 8px 24px rgba(99,102,241,0.35)' }}>
+                    <Layers className="w-4 h-4" /> Go to Courses & Modules
+                  </Link>
+                ) : hasActiveFilters ? (
+                  <button onClick={() => { setSearch(''); setCourseFilter('all'); setClassFilter('all'); setModuleFilter('all'); setTypeFilter('all'); }}
+                    className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl font-bold text-sm text-indigo-600 border border-indigo-200 hover:bg-indigo-50 transition-colors">
+                    <X className="w-4 h-4" /> Clear filters
+                  </button>
+                ) : null}
               </motion.div>
             ) : (
               <motion.div
-                className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-5"
+                className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4"
                 initial="hidden" animate="visible"
-                variants={{ hidden: {}, visible: { transition: { staggerChildren: 0.06 } } }}>
-                {(courseFilter !== 'all'
-                  ? modules.filter(m => (m as any).course_id === courseFilter)
-                  : modules
-                ).map((mod) => {
-                  const courseObj = courses.find(c => c.id === (mod as any).course_id);
-                  const courseTitle = (courseObj as any)?.name || (courseObj as any)?.title || 'Unknown Course';
-                  const lessonCount = (mod as any).totalLessons ?? 0;
-                  const isActive = mod.status === 'active' || mod.status === 'published';
+                variants={{ hidden: {}, visible: { transition: { staggerChildren: 0.05 } } }}>
+                {paginatedFiltered.map((lesson) => {
+                  const lt = getLessonType(lesson.type);
+                  const LIcon = lt.icon;
+                  const isPublished = lesson.status === 'published';
+                  const modTitle = getModuleName(lesson.moduleId);
+                  const courseTitle = getCourseTitle(lesson.courseId);
                   return (
                     <motion.div
-                      key={mod.id}
-                      variants={{ hidden: { opacity: 0, y: 20 }, visible: { opacity: 1, y: 0, transition: { duration: 0.35, ease: 'easeOut' } } }}
-                      whileHover={{ y: -4, boxShadow: '0 20px 48px rgba(99,102,241,0.15)' }}
+                      key={lesson.id}
+                      variants={{ hidden: { opacity: 0, y: 16 }, visible: { opacity: 1, y: 0, transition: { duration: 0.3, ease: 'easeOut' } } }}
+                      whileHover={{ y: -3, boxShadow: '0 16px 40px rgba(99,102,241,0.12)' }}
                       className="group bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden flex flex-col transition-all duration-200">
-                      <div className="h-1.5 w-full bg-gradient-to-r from-indigo-500 to-violet-600" />
-                      <div className="p-5 flex flex-col flex-1">
-                        <div className="flex items-start justify-between mb-3">
-                          <div className="w-11 h-11 rounded-xl bg-gradient-to-br from-indigo-500 to-violet-600 flex items-center justify-center shrink-0">
-                            <Layers className="w-5 h-5 text-white" />
+                      {/* Accent bar */}
+                      <div className="h-1 w-full" style={{ background: lt.accentGradient }} />
+                      <div className="p-4 flex flex-col flex-1 gap-3">
+                        {/* Header row */}
+                        <div className="flex items-start gap-3">
+                          <div className={cn('w-10 h-10 rounded-xl flex items-center justify-center shrink-0', lt.bg)}>
+                            <LIcon className={cn('w-5 h-5', lt.color)} />
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <h3 className="text-sm font-bold text-slate-900 line-clamp-2 leading-snug">{lesson.title}</h3>
+                            <p className="text-[11px] text-slate-400 mt-0.5 truncate">{modTitle} · {courseTitle}</p>
                           </div>
                           <span className={cn(
-                            'inline-flex items-center gap-1.5 text-[11px] font-bold px-2.5 py-1 rounded-full',
-                            isActive ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-700'
+                            'shrink-0 inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full',
+                            isPublished ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-700'
                           )}>
-                            <span className={cn('w-1.5 h-1.5 rounded-full', isActive ? 'bg-emerald-500' : 'bg-amber-500')} />
-                            {isActive ? 'Active' : 'Inactive'}
+                            <span className={cn('w-1.5 h-1.5 rounded-full', isPublished ? 'bg-emerald-500' : 'bg-amber-500')} />
+                            {isPublished ? 'Live' : 'Draft'}
                           </span>
                         </div>
-                        <h3 className="text-sm font-bold text-slate-900 line-clamp-2 mb-1 leading-snug">{mod.title}</h3>
-                        <p className="text-xs text-slate-400 line-clamp-1 mb-auto">{courseTitle}</p>
-                        <div className="mt-3 pt-3 border-t border-slate-50 space-y-2">
-                          <div className="flex items-center gap-1.5 text-xs text-slate-500">
-                            <BookOpen className="w-3.5 h-3.5 text-violet-400" />
-                            <span className="font-bold text-slate-700">{lessonCount}</span>
-                            <span>lessons</span>
-                            {can('actions.teacher.lessons.manage') && (
-                              <button
-                                onClick={() => openCreate()}
-                                className="ml-auto inline-flex items-center gap-1 text-[11px] font-semibold text-indigo-500 hover:text-indigo-700 transition-colors"
-                              >
-                                <Plus className="w-3 h-3" /> Add
-                              </button>
-                            )}
-                          </div>
-                          <Link
-                            to={`/teacher/modules/${encodeURIComponent(mod.id)}`}
-                            className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl text-sm font-bold text-white transition-all hover:opacity-90 active:scale-95"
-                            style={{ background: 'linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%)' }}>
-                            <BookOpen className="w-3.5 h-3.5" /> View Lessons
-                          </Link>
+
+                        {/* Meta row */}
+                        <div className="flex items-center gap-3 text-[11px] text-slate-400">
+                          {lesson.durationMinutes > 0 && (
+                            <span className="flex items-center gap-1">
+                              <Clock className="w-3 h-3" /> {lesson.durationMinutes}m
+                            </span>
+                          )}
+                          <span className={cn('px-2 py-0.5 rounded-full font-semibold uppercase tracking-wide text-[10px]', lt.bg, lt.color, lt.border, 'border')}>
+                            {lt.label}
+                          </span>
+                          {lesson.isFreePreview && (
+                            <span className="flex items-center gap-1 text-violet-500 font-semibold">
+                              <Unlock className="w-3 h-3" /> Free
+                            </span>
+                          )}
                         </div>
+
+                        {/* Action buttons */}
+                        {can('actions.teacher.lessons.manage') && (
+                          <div className="flex items-center gap-1.5 pt-1 border-t border-slate-50">
+                            <Link
+                              to={`/teacher/lessons/${encodeURIComponent(lesson.id)}/content`}
+                              className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-xl text-xs font-bold text-white transition-all hover:opacity-90"
+                              style={{ background: 'linear-gradient(135deg,#6366f1,#8b5cf6)' }}>
+                              <BookOpen className="w-3.5 h-3.5" /> Manage
+                            </Link>
+                            <button
+                              onClick={() => openEdit(lesson)}
+                              className="p-2 rounded-xl bg-slate-50 text-slate-500 hover:bg-indigo-50 hover:text-indigo-600 transition-colors border border-slate-100"
+                              title="Edit lesson">
+                              <Edit2 className="w-3.5 h-3.5" />
+                            </button>
+                            <button
+                              onClick={() => void handleToggleFreePreview(lesson)}
+                              className={cn('p-2 rounded-xl border transition-colors', lesson.isFreePreview ? 'bg-violet-50 text-violet-600 border-violet-100 hover:bg-violet-100' : 'bg-slate-50 text-slate-400 border-slate-100 hover:bg-slate-100')}
+                              title={lesson.isFreePreview ? 'Remove free preview' : 'Set as free preview'}>
+                              {lesson.isFreePreview ? <Unlock className="w-3.5 h-3.5" /> : <Lock className="w-3.5 h-3.5" />}
+                            </button>
+                            <button
+                              onClick={() => handleDelete(lesson)}
+                              className="p-2 rounded-xl bg-slate-50 text-slate-400 hover:bg-rose-50 hover:text-rose-600 transition-colors border border-slate-100"
+                              title="Delete lesson">
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                        )}
                       </div>
                     </motion.div>
                   );
