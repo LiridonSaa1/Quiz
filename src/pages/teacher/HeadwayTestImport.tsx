@@ -4,6 +4,7 @@ import {
   FlaskConical, ExternalLink, Globe, ChevronRight, ArrowLeft,
   BookOpen, Headphones, Video, Play, Layers, Download, CheckCircle2,
   Loader2, ChevronDown, X, Import, Eye, ChevronLeft, ChevronRight as ChevronRightIcon,
+  RefreshCw,
 } from 'lucide-react';
 import TeacherLayout from '../../components/layout/TeacherLayout';
 import { motion, AnimatePresence } from 'motion/react';
@@ -980,14 +981,24 @@ export default function HeadwayTestImport() {
                       <ChevronLeft className="w-3.5 h-3.5" /> Prev
                     </button>
 
-                    <button
-                      type="button"
-                      onClick={() => { setShowImportPanel(true); setShowPreviewModal(false); setImportDone(null); }}
-                      className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-xl text-xs font-bold text-white transition-all"
-                      style={{ background: 'linear-gradient(135deg,#6366f1,#8b5cf6)' }}
-                    >
-                      <Import className="w-3.5 h-3.5" /> Import to Course
-                    </button>
+                    <div className="flex-1 flex flex-col gap-1.5">
+                      <button
+                        type="button"
+                        onClick={() => { setShowImportPanel(true); setShowPreviewModal(false); setImportDone(null); }}
+                        className="w-full flex items-center justify-center gap-1.5 py-2 rounded-xl text-xs font-bold text-white transition-all"
+                        style={{ background: 'linear-gradient(135deg,#6366f1,#8b5cf6)' }}
+                      >
+                        <Import className="w-3.5 h-3.5" /> Import to Course
+                      </button>
+                      <button
+                        type="button"
+                        disabled={previewLoading}
+                        onClick={() => previewUnit && void openPreview(previewUnit)}
+                        className="w-full flex items-center justify-center gap-1.5 py-1.5 rounded-xl text-xs font-bold border border-slate-200 text-slate-600 hover:bg-slate-50 disabled:opacity-40 transition-all"
+                      >
+                        <RefreshCw className={`w-3 h-3 ${previewLoading ? 'animate-spin' : ''}`} /> Regenerate Questions
+                      </button>
+                    </div>
 
                     <button
                       type="button"

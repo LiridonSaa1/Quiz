@@ -5729,17 +5729,23 @@ Return ONLY a valid JSON array — no markdown, no code fences:
           if (Array.isArray(parsed)) {
             questionRows = parsed
               .filter((q: any) => q && typeof q.text === "string" && Array.isArray(q.options))
-              .map((q: any, idx: number) => ({
-                quiz_id:       quizData.id,
-                type:          "multiple-choice",
-                text:          String(q.text),
-                question_text: String(q.text),
-                options:       (q.options as string[]).slice(0, 4),
-                correct_answer: (q.options as string[])[Math.max(0, Math.min(3, Number(q.correct) || 0))],
-                explanation:   String(q.explanation || ""),
-                points:        1,
-                order:         idx,
-              }));
+              .map((q: any, idx: number) => {
+                const correctIdx = Math.max(0, Math.min(3, Number(q.correct) || 0));
+                const opts = (q.options as string[]).slice(0, 4);
+                // Store options as {id, text} objects so QuizBuilder can match correct_answer by id
+                const optionObjects = opts.map((text, i) => ({ id: String(i + 1), text }));
+                return {
+                  quiz_id:       quizData.id,
+                  type:          "multiple-choice",
+                  text:          String(q.text),
+                  question_text: String(q.text),
+                  options:       optionObjects,
+                  correct_answer: String(correctIdx + 1), // "1"-based id matching QuizBuilder convention
+                  explanation:   String(q.explanation || ""),
+                  points:        1,
+                  order:         idx,
+                };
+              });
           }
         } catch (aiErr: any) {
           console.warn("[save-unit-quiz] AI generation failed, using static bank:", aiErr?.message);
