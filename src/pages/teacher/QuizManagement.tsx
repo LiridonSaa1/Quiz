@@ -7,7 +7,7 @@ import {
   Plus, Search, FileText, Trash2, Edit2,
   Clock, BookOpen, AlertTriangle,
   HelpCircle, Shuffle, RotateCcw, Target,
-  ChevronRight, X, PlayCircle,
+  ChevronRight, X, PlayCircle, Sparkles,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { Quiz } from '../../types';
@@ -327,19 +327,37 @@ export default function QuizManagement() {
                     Build and manage quizzes to assess your students.
                   </p>
                 </div>
-                <motion.div whileHover={{ scale: 1.04, y: -2 }} whileTap={{ scale: 0.97 }}>
-                  {can('actions.teacher.quizzes.create') && <Link
-                    to="/teacher/quizzes/new"
-                    className="inline-flex items-center gap-2 px-6 py-3 rounded-2xl font-bold text-sm text-white shrink-0 transition-all"
-                    style={{
-                      background: 'linear-gradient(135deg, #818cf8 0%, #a78bfa 100%)',
-                      boxShadow: '0 8px 32px rgba(139,92,246,0.45), 0 2px 8px rgba(0,0,0,0.15)',
-                    }}
-                  >
-                    <Plus className="w-4 h-4" />
-                    Create Quiz
-                  </Link>}
-                </motion.div>
+                {can('actions.teacher.quizzes.create') && (
+                  <div className="flex items-center gap-2 shrink-0">
+                    <motion.div whileHover={{ scale: 1.04, y: -2 }} whileTap={{ scale: 0.97 }}>
+                      <Link
+                        to="/teacher/quizzes/new"
+                        className="inline-flex items-center gap-2 px-4 py-2.5 rounded-2xl font-bold text-sm text-white transition-all"
+                        style={{
+                          background: 'rgba(255,255,255,0.15)',
+                          backdropFilter: 'blur(8px)',
+                          border: '1px solid rgba(255,255,255,0.25)',
+                        }}
+                      >
+                        <Plus className="w-4 h-4" />
+                        Manual Quiz
+                      </Link>
+                    </motion.div>
+                    <motion.div whileHover={{ scale: 1.04, y: -2 }} whileTap={{ scale: 0.97 }}>
+                      <Link
+                        to="/teacher/quizzes/test-builder"
+                        className="inline-flex items-center gap-2 px-5 py-2.5 rounded-2xl font-bold text-sm text-white transition-all"
+                        style={{
+                          background: 'linear-gradient(135deg, #f59e0b 0%, #f97316 100%)',
+                          boxShadow: '0 8px 32px rgba(249,115,22,0.45), 0 2px 8px rgba(0,0,0,0.15)',
+                        }}
+                      >
+                        <Sparkles className="w-4 h-4" />
+                        Test Builder
+                      </Link>
+                    </motion.div>
+                  </div>
+                )}
               </div>
             </div>
           </div>

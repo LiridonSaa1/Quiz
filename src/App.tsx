@@ -19,6 +19,7 @@ const TeacherCourseForm = lazy(() => import('./pages/teacher/CourseForm'));
 const StudentManagement = lazy(() => import('./pages/teacher/StudentManagement'));
 const QuizManagement = lazy(() => import('./pages/teacher/QuizManagement'));
 const QuizBuilder = lazy(() => import('./pages/teacher/QuizBuilder'));
+const SmartTestBuilder = lazy(() => import('./pages/teacher/SmartTestBuilder'));
 const RealtimeQuizHost = lazy(() => import('./pages/teacher/RealtimeQuizHost'));
 const RealtimeQuizReports = lazy(() => import('./pages/teacher/RealtimeQuizReports'));
 const RealtimeQuizPlay = lazy(() => import('./pages/student/RealtimeQuizPlay'));
@@ -437,6 +438,7 @@ function TeacherRoutes({ features }: { features: FeatureFlags }) {
       <Route path="/quizzes" element={<QuizManagement />} />
       <Route path="/quizzes/new" element={<QuizBuilder />} />
       <Route path="/quizzes/edit/:quizId" element={<QuizBuilder />} />
+      <Route path="/quizzes/test-builder" element={<SmartTestBuilder />} />
       <Route path="/live-quiz" element={<RealtimeQuizHost />} />
       <Route path="/live-quiz/reports" element={<RealtimeQuizReports />} />
       <Route path="/exams" element={<TeacherExams />} />

@@ -7264,6 +7264,180 @@ When giving instructions, number each step clearly. Be precise and technical whe
   app.post("/api/teacher/quizzes", teacherQuizzesPostHandler);
   app.post("/api/teacher/quizzes/", teacherQuizzesPostHandler);
 
+  /** Smart Test Builder — AI generates questions from Headway grammar/vocabulary sections */
+  app.post("/api/teacher/smart-quiz/generate", async (req: Request, res: Response) => {
+    try {
+      const caller = await assertAuthenticated(req, res);
+      if (!caller) return;
+      if (caller.role !== "teacher" && caller.role !== "admin") {
+        return res.status(403).json({ error: "Forbidden" });
+      }
+
+      const body = req.body as {
+        level: string;
+        selectedSections: Array<{ id: string; topic: string; type: string; unitTitle: string }>;
+        courseId: string;
+        title: string;
+        timeLimit?: number;
+        passmark?: number;
+        questionsPerSection?: number;
+      };
+
+      const { level, selectedSections, courseId, title } = body;
+      const timeLimit = Number(body.timeLimit) || 30;
+      const passmark = Number(body.passmark) || 70;
+      const questionsPerSection = Math.min(Math.max(Number(body.questionsPerSection) || 3, 2), 8);
+
+      if (!level || !Array.isArray(selectedSections) || selectedSections.length === 0) {
+        return res.status(400).json({ error: "level and selectedSections are required" });
+      }
+      if (!courseId) return res.status(400).json({ error: "courseId is required" });
+      if (!title?.trim()) return res.status(400).json({ error: "title is required" });
+
+      // Verify teacher owns the course
+      if (caller.role !== "admin") {
+        const { data: course } = await supabaseAdmin.from("courses").select("teacher_id").eq("id", courseId).maybeSingle();
+        if (!course) return res.status(404).json({ error: "Course not found" });
+        const scopedIds = await getTeacherIdCandidates(caller.userId);
+        const tid = course.teacher_id ? String(course.teacher_id) : "";
+        if (tid && !scopedIds.includes(tid) && tid !== caller.userId) {
+          return res.status(403).json({ error: "You do not own this course" });
+        }
+      }
+
+      // Build AI prompt for question generation
+      const apiKey = (process.env.AI_INTEGRATIONS_GEMINI_API_KEY || process.env.GEMINI_API_KEY || "").trim();
+      if (!apiKey) {
+        return res.status(503).json({ error: "AI API key not configured. Please add GEMINI_API_KEY to your Secrets." });
+      }
+
+      const sectionSummary = selectedSections
+        .map(s => `- ${s.type === "grammar" ? "Grammar" : "Vocabulary"}: "${s.topic}" (from ${s.unitTitle})`)
+        .join("\n");
+
+      const prompt = `You are an English language test generator inspired by Oxford Headway.
+Generate exactly ${questionsPerSection} multiple-choice questions for EACH of the following ${selectedSections.length} grammar/vocabulary sections.
+Level: ${level}
+
+Sections to cover:
+${sectionSummary}
+
+Rules:
+- Each question must be clearly labeled with which section it belongs to
+- Questions should test practical usage, fill-in-the-blank or choose the correct form
+- Each question must have exactly 4 options (A, B, C, D)
+- Clearly mark the correct answer
+- Keep language appropriate for ${level} level
+
+Return ONLY a valid JSON array with this exact structure:
+[
+  {
+    "section": "<topic name>",
+    "text": "<question text with blank if fill-in-the-blank>",
+    "options": ["option A", "option B", "option C", "option D"],
+    "correct_answer": "option A",
+    "explanation": "<brief explanation>",
+    "type": "multiple-choice"
+  }
+]
+
+Generate ${selectedSections.length * questionsPerSection} questions total (${questionsPerSection} per section). Return only the JSON array, no other text.`;
+
+      const { GoogleGenAI } = await import("@google/genai");
+      const geminiBaseUrl = (process.env.AI_INTEGRATIONS_GEMINI_BASE_URL || "").trim();
+      const ai = geminiBaseUrl
+        ? new GoogleGenAI({ apiKey, httpOptions: { apiVersion: "", baseUrl: geminiBaseUrl } })
+        : new GoogleGenAI({ apiKey });
+
+      let rawText = "";
+      try {
+        const result = await ai.models.generateContent({
+          model: "gemini-2.5-flash",
+          contents: prompt,
+        });
+        rawText = (result.text || "").trim();
+      } catch (aiErr: any) {
+        console.error("[smart-quiz] AI generation failed:", aiErr?.message);
+        return res.status(500).json({ error: "AI generation failed: " + (aiErr?.message || "unknown error") });
+      }
+
+      // Parse the JSON
+      let questions: any[] = [];
+      try {
+        const jsonMatch = rawText.match(/\[[\s\S]*\]/);
+        if (jsonMatch) {
+          questions = JSON.parse(jsonMatch[0]);
+        } else {
+          questions = JSON.parse(rawText);
+        }
+      } catch (parseErr) {
+        console.error("[smart-quiz] JSON parse failed:", rawText.slice(0, 500));
+        return res.status(500).json({ error: "Failed to parse AI-generated questions. Please try again." });
+      }
+
+      if (!Array.isArray(questions) || questions.length === 0) {
+        return res.status(500).json({ error: "AI returned no valid questions. Please try again." });
+      }
+
+      // Create the quiz
+      const quizPayload: Record<string, unknown> = {
+        title: title.trim(),
+        description: `Smart Test Builder — ${level} · ${selectedSections.length} sections · Generated with AI`,
+        course_id: courseId,
+        teacher_id: caller.userId,
+        time_limit: timeLimit,
+        pass_mark: passmark,
+        published: false,
+        settings: {
+          shuffleQuestions: false,
+          shuffleAnswers: false,
+          allowRetry: true,
+          passingScore: passmark,
+        },
+      };
+
+      const { data: inserted, error: insErr } = await insertCompatibleQuizAdmin(quizPayload, caller.userId);
+      if (insErr || !inserted?.id) {
+        console.error("[smart-quiz] quiz insert error:", insErr);
+        return res.status(500).json({ error: insErr?.message || "Failed to create quiz" });
+      }
+
+      const quizId = inserted.id;
+
+      // Insert questions
+      const questionRows = questions.map((q: any, idx: number) => ({
+        quiz_id: quizId,
+        type: "multiple-choice",
+        text: String(q.text || q.question || "").trim() || " ",
+        question_text: String(q.text || q.question || "").trim() || " ",
+        options: Array.isArray(q.options) ? q.options : [],
+        correct_answer: q.correct_answer ?? (Array.isArray(q.options) ? q.options[0] : ""),
+        explanation: q.explanation ?? null,
+        points: 1,
+        order: idx,
+      }));
+
+      // Try inserting with text column first, fallback to question_text
+      let { error: qInsErr } = await supabaseAdmin.from("questions").insert(
+        questionRows.map(({ question_text: _qt, ...r }: any) => r)
+      );
+      if (qInsErr && /question_text|does not exist|PGRST204/i.test(qInsErr.message || "")) {
+        ({ error: qInsErr } = await supabaseAdmin.from("questions").insert(
+          questionRows.map(({ text: _t, ...r }: any) => ({ ...r, question_text: r.question_text }))
+        ));
+      }
+      if (qInsErr) {
+        console.warn("[smart-quiz] question insert warning:", qInsErr.message);
+      }
+
+      console.log(`[smart-quiz] Created quiz ${quizId} with ${questions.length} questions for level=${level}`);
+      return res.json({ success: true, quizId, questionCount: questions.length });
+    } catch (e: any) {
+      console.error("POST /api/teacher/smart-quiz/generate", e);
+      return res.status(500).json({ error: e?.message || "Failed to generate smart quiz" });
+    }
+  });
+
   /** Update quiz metadata (service role — bypasses RLS for schemas without teacher_id). */
   app.patch("/api/teacher/quizzes/:id", async (req: Request, res: Response) => {
     try {

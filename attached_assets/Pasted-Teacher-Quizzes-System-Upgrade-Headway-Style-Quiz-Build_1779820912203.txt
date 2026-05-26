@@ -1,0 +1,159 @@
+Teacher/Quizzes System Upgrade – Headway Style Quiz Builder
+
+Dua qe tek paneli Teacher → Quizzes te implementohet nje sistem i avancuar quizzes, i inspiruar nga Oxford Headway Test Builder.
+
+Referencat qe duhet te analizohen:
+
+Hapi 1:
+https://elt.oup.com/student/headway/?cc=global&selLanguage=en
+
+Hapi 2:
+https://elt.oup.com/student/headway/preint4/?cc=global&selLanguage=en
+
+Hapi 3:
+https://elt.oup.com/student/headway/preint4/testbuilder?cc=global&selLanguage=en
+
+Analizo sidomos Hapin 3 per menyren se si duket dhe funksionon quiz builder-i.
+
+Qellimi:
+Teacher duhet te kete mundesi te krijoje quizzes moderne me pamje dhe logjike te ngjashme me Headway Test Builder.
+
+FUNKSIONALITETET QE DUHET TE KETE:
+
+1. Quiz Builder Modern
+
+* UI moderne dhe profesionale
+* Layout i ngjashëm me Headway
+* Sidebar me:
+
+  * Units
+  * Lessons
+  * Skills
+  * Grammar
+  * Vocabulary
+  * Reading
+  * Listening
+  * Writing
+* Preview live ne anen e djathte
+* Teacher mund te zgjedhe pyetje dhe ato shtohen automatikisht ne quiz
+
+2. Question Types
+   Duhet te suportohen:
+
+* Multiple Choice
+* True / False
+* Fill in the Blank
+* Matching
+* Drag & Drop
+* Listening Questions
+* Reading Comprehension
+* Essay/Writing
+* Reorder Sentences
+* Image Questions
+* Audio Based Questions
+
+3. Automatic Quiz Generator
+   Teacher mund te zgjedhe:
+
+* Level
+* Unit
+* Lesson
+* Difficulty
+* Number of Questions
+* Skills
+
+Dhe sistemi automatikisht gjeneron quiz.
+
+4. Manual Quiz Mode
+   MOS e hiq sistemin aktual.
+
+Teacher duhet te kete:
+
+* Create Manual Quiz (sikur tani)
+* Create Smart Quiz (Headway Style)
+
+Pra duhet te ekzistojne te dyja.
+
+5. Quiz UI
+   Quiz player duhet te kete:
+
+* Progress bar
+* Timer
+* Next / Previous
+* Flag Question
+* Question Navigator
+* Auto Save
+* Responsive design
+* Dark/Light mode
+* Animations smooth
+
+6. Database Structure
+   Krijo strukture scalable:
+
+* quizzes
+* quiz_questions
+* quiz_attempts
+* question_bank
+* question_categories
+* quiz_sections
+* quiz_settings
+
+7. Teacher Features
+   Teacher mund te:
+
+* Save as Draft
+* Duplicate Quiz
+* Import/Export Quiz
+* Shuffle Questions
+* Shuffle Answers
+* Assign to Class
+* Schedule Quiz
+* Add Time Limit
+* Add Passing Grade
+
+8. Student Experience
+   Student duhet te kete:
+
+* Modern clean interface
+* Real-time progress
+* Instant results (optional)
+* Review answers
+* Retry quiz
+* Resume unfinished quiz
+
+9. Performance
+   Sistemi duhet:
+
+* te jete optimized
+* lazy loading
+* pagination
+* cache pyetjet
+* realtime updates pa refresh
+* scalable per shume users
+
+10. Design Requirements
+
+* Professional education platform look
+* Similar feeling to Headway Test Builder
+* Minimal clean UI
+* TailwindCSS
+* Responsive mobile/tablet/desktop
+* Modern cards/tables/modals
+* Smooth transitions
+
+11. Important
+    Do te dergoj edhe foto reference se si gjenerohet quiz dhe si duket UI.
+
+Deri atehere:
+
+* pergatite architecture
+* komponentet
+* databasen
+* backend APIs
+* frontend pages
+* reusable components
+* state management
+* optimization strategy
+
+Mos e prish sistemin aktual te manual quizzes.
+Shto sistemin e ri si advanced quiz builder paralel me ekzistuesin.
