@@ -14310,6 +14310,65 @@ async function ensureAssignmentFilesBucket(): Promise<void> {
   }
 }
 
+/**
+ * Fix existing multiple-choice questions where correct_answer was stored as
+ * option text instead of option id ("1","2","3","4").
+ * Runs once at startup and is idempotent.
+ */
+async function fixHeadwayQuizCorrectAnswers(): Promise<void> {
+  try {
+    // Fetch all MC questions that have options as objects
+    const { data: rows, error } = await supabaseAdmin
+      .from("questions")
+      .select("id, options, correct_answer")
+      .eq("type", "multiple-choice");
+
+    if (error || !rows || rows.length === 0) return;
+
+    const updates: { id: string; correct_answer: string }[] = [];
+
+    for (const row of rows) {
+      const opts: unknown = row.options;
+      if (!Array.isArray(opts) || opts.length === 0) continue;
+
+      const firstOpt = opts[0];
+      // Only process rows where options are {id, text} objects
+      if (!firstOpt || typeof firstOpt !== "object" || !("id" in firstOpt) || !("text" in firstOpt)) continue;
+
+      const optObjs = opts as { id: string; text: string }[];
+      const ca = String(row.correct_answer ?? "");
+
+      // If correct_answer is already a valid option id, skip
+      if (optObjs.some(o => o.id === ca)) continue;
+
+      // Try to find an option whose text matches the stored correct_answer
+      const matchByText = optObjs.find(o => o.text === ca);
+      if (matchByText) {
+        updates.push({ id: row.id, correct_answer: matchByText.id });
+        continue;
+      }
+
+      // Try case-insensitive match
+      const caLower = ca.toLowerCase();
+      const matchCi = optObjs.find(o => o.text.toLowerCase() === caLower);
+      if (matchCi) {
+        updates.push({ id: row.id, correct_answer: matchCi.id });
+      }
+    }
+
+    if (updates.length === 0) return;
+
+    // Apply updates in batches
+    for (const { id, correct_answer } of updates) {
+      await supabaseAdmin.from("questions").update({ correct_answer }).eq("id", id);
+    }
+
+    console.log(`[migration] fixed correct_answer for ${updates.length} quiz question(s) ✓`);
+  } catch (e: any) {
+    console.warn("[migration] fixHeadwayQuizCorrectAnswers:", e?.message);
+  }
+}
+
 async function startServer() {
   const parsedPort = Number(process.env.PORT);
   const preferredPort = Number.isInteger(parsedPort) && parsedPort > 0 ? parsedPort : 5000;
@@ -14329,6 +14388,7 @@ async function startServer() {
   void runLiveSessionsRecordingUrlsMigration();
   void runQuizSectionsMigration();
   void ensureAssignmentFilesBucket();
+  void fixHeadwayQuizCorrectAnswers();
 
   const httpServer = http.createServer();
   const app = await createApp({ includeFrontend: true, httpServer });

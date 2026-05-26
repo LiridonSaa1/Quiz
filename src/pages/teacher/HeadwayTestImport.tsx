@@ -61,7 +61,6 @@ export default function HeadwayTestImport() {
     everydayEnglish: true,
     audioDownload: true,
     videoDownload: true,
-    testBuilder: true,
   });
   const [importing, setImporting] = useState(false);
   const [importProgress, setImportProgress] = useState<ImportProgress | null>(null);
@@ -729,7 +728,6 @@ export default function HeadwayTestImport() {
                           { key: 'everydayEnglish',  label: 'Everyday English',            icon: '🎤', desc: 'Dialogue videos and listening activities' },
                           { key: 'audioDownload',    label: 'Audio Downloads',             icon: '🎧', desc: "Student's Book MP3 audio with track listing" },
                           { key: 'videoDownload',    label: 'Video Downloads',             icon: '🎬', desc: 'Unit video clips with script & tasks' },
-                          { key: 'testBuilder',      label: 'Test Builder (quizzes)',      icon: '📝', desc: 'MC quizzes with questions linked to Oxford exercises' },
                         ].map(({ key, label, icon, desc }) => (
                           <label
                             key={key}
