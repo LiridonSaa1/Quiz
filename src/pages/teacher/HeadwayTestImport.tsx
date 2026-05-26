@@ -11,10 +11,21 @@ import { supabase } from '../../supabase';
 import { authFetch } from '../../lib/apiUrl';
 import { toast } from 'sonner';
 import {
-  HEADWAY_FULL_DATA, buildUnitQuestions,
-  type HUnit, type PreviewQuestion,
+  HEADWAY_FULL_DATA,
+  type HUnit,
   OUP, CC,
 } from '../../lib/headwayData';
+
+interface PreviewQuestion {
+  order: number;
+  type: string;
+  topic: string;
+  questionText: string;
+  options: string[];
+  correctIndex: number;
+  explanation: string;
+  oxfordUrl: string;
+}
 
 const LEVELS = [
   { key: 'Beginner',          slug: 'beg',              color: 'from-emerald-500 to-teal-600',  badge: 'bg-emerald-100 text-emerald-700', units: 14 },
@@ -61,15 +72,45 @@ export default function HeadwayTestImport() {
   const [previewQIdx, setPreviewQIdx] = useState(0);
   const [previewSelected, setPreviewSelected] = useState<number | null>(null);
   const [showPreviewModal, setShowPreviewModal] = useState(false);
+  const [previewLoading, setPreviewLoading] = useState(false);
 
-  const openPreview = (unit: HUnit) => {
-    const levelData = HEADWAY_FULL_DATA[activeLevel.key];
-    const qs = buildUnitQuestions(unit, levelData?.slug ?? activeLevel.slug);
+  const openPreview = async (unit: HUnit) => {
     setPreviewUnit(unit);
-    setPreviewQuestions(qs);
+    setPreviewQuestions([]);
     setPreviewQIdx(0);
     setPreviewSelected(null);
     setShowPreviewModal(true);
+    setPreviewLoading(true);
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+      if (session?.access_token) headers['Authorization'] = `Bearer ${session.access_token}`;
+      const res = await authFetch('/api/teacher/headway/generate-questions', {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ level: activeLevel.key, unitNum: unit.num }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (res.ok && Array.isArray(json.questions) && json.questions.length > 0) {
+        const mapped: PreviewQuestion[] = json.questions.map((q: any, i: number) => ({
+          order:        i,
+          type:         q.type ?? 'grammar',
+          topic:        q.topic ?? '',
+          questionText: q.questionText ?? q.text ?? '',
+          options:      Array.isArray(q.options) ? q.options : [],
+          correctIndex: typeof q.correctIndex === 'number' ? q.correctIndex : 0,
+          explanation:  q.explanation ?? '',
+          oxfordUrl:    q.oxfordUrl ?? `${OUP}/student/headway/${activeLevel.slug}/testbuilder${CC}`,
+        }));
+        setPreviewQuestions(mapped);
+      } else {
+        toast.error(json.error ?? 'Could not generate questions. Check your Gemini API key.');
+      }
+    } catch (e: any) {
+      toast.error('Failed to load AI questions. Please try again.');
+    } finally {
+      setPreviewLoading(false);
+    }
   };
 
   const testBuilderBase = `${OUP}/student/headway/${activeLevel.slug}/testbuilder${CC}`;
@@ -485,9 +526,9 @@ export default function HeadwayTestImport() {
                     <div className="flex gap-1 w-full mt-0.5">
                       <button
                         type="button"
-                        onClick={() => openPreview(unit)}
+                        onClick={() => { void openPreview(unit); }}
                         className="flex-1 flex items-center justify-center gap-1 py-1.5 rounded-lg text-[10px] font-bold bg-white/70 hover:bg-white transition-all border border-current/20"
-                        title={`Preview questions for Unit ${unit.num}`}>
+                        title={`Preview AI-generated questions for Unit ${unit.num}`}>
                         <Eye className="w-2.5 h-2.5" /> Preview
                       </button>
                       <a
@@ -769,7 +810,7 @@ export default function HeadwayTestImport() {
 
       {/* ── Quiz Preview Modal ──────────────────────────────────────────────── */}
       <AnimatePresence>
-        {showPreviewModal && previewUnit && previewQuestions.length > 0 && (() => {
+        {showPreviewModal && previewUnit && (() => {
           const q = previewQuestions[previewQIdx];
           const typeColors: Record<string, string> = {
             grammar:     'bg-indigo-100 text-indigo-700',
@@ -805,16 +846,20 @@ export default function HeadwayTestImport() {
                 {/* Header */}
                 <div className="flex items-center gap-3 px-5 pt-5 pb-3">
                   <div className={`w-10 h-10 rounded-xl bg-gradient-to-br ${activeLevel.color} flex items-center justify-center shrink-0`}>
-                    <Eye className="w-5 h-5 text-white" />
+                    {previewLoading ? <Loader2 className="w-5 h-5 text-white animate-spin" /> : <Eye className="w-5 h-5 text-white" />}
                   </div>
                   <div className="flex-1 min-w-0">
-                    <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Quiz Preview</p>
+                    <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider">
+                      {previewLoading ? 'AI Generating Questions…' : 'Quiz Preview — AI Generated'}
+                    </p>
                     <h3 className="text-sm font-bold text-slate-900 truncate">{previewUnit.title}</h3>
                   </div>
                   <div className="flex items-center gap-1 shrink-0">
-                    <span className="text-xs text-slate-400 font-medium">
-                      {previewQIdx + 1} / {previewQuestions.length}
-                    </span>
+                    {!previewLoading && previewQuestions.length > 0 && (
+                      <span className="text-xs text-slate-400 font-medium">
+                        {previewQIdx + 1} / {previewQuestions.length}
+                      </span>
+                    )}
                     <button
                       type="button"
                       onClick={() => setShowPreviewModal(false)}
@@ -825,7 +870,21 @@ export default function HeadwayTestImport() {
                   </div>
                 </div>
 
+                {/* Loading state */}
+                {previewLoading && (
+                  <div className="px-5 pb-8 flex flex-col items-center justify-center gap-3 text-center">
+                    <div className="w-14 h-14 rounded-2xl bg-slate-50 flex items-center justify-center">
+                      <Loader2 className="w-7 h-7 text-indigo-500 animate-spin" />
+                    </div>
+                    <div>
+                      <p className="text-sm font-semibold text-slate-700">Generating questions with Gemini AI…</p>
+                      <p className="text-xs text-slate-400 mt-1">Creating real fill-in-the-blank exercises for this unit</p>
+                    </div>
+                  </div>
+                )}
+
                 {/* Progress dots */}
+                {!previewLoading && previewQuestions.length > 0 && (
                 <div className="flex gap-1 px-5 pb-3">
                   {previewQuestions.map((_, idx) => (
                     <button
@@ -840,8 +899,10 @@ export default function HeadwayTestImport() {
                     />
                   ))}
                 </div>
+                )}
 
                 {/* Question body */}
+                {!previewLoading && q && (
                 <div className="px-5 pb-5">
                   {/* Type badge + topic */}
                   <div className="flex items-center gap-2 mb-3">
@@ -938,6 +999,7 @@ export default function HeadwayTestImport() {
                     </button>
                   </div>
                 </div>
+                )}
               </motion.div>
             </motion.div>
           );

@@ -5685,12 +5685,76 @@ When giving instructions, number each step clearly. Be precise and technical whe
         return res.status(400).json({ error: msg });
       }
 
-      // Build questions
-      const questions = buildHwUnitQuestions(unit, levelData.slug).map(q => ({ ...q, quiz_id: quizData.id }));
-      if (questions.length > 0) {
-        let { error: iqErr } = await supabaseAdmin.from("questions").insert(questions);
+      // Build questions — try AI first, fall back to static bank
+      const aiApiKey = (process.env.AI_INTEGRATIONS_GEMINI_API_KEY || process.env.GEMINI_API_KEY || "").trim();
+      let questionRows: Record<string, unknown>[] = [];
+
+      if (aiApiKey && (unit.grammar.length > 0 || unit.vocabulary.length > 0)) {
+        try {
+          const cefrMap: Record<string, string> = {
+            "Beginner": "A1", "Elementary": "A2", "Pre-Intermediate": "B1",
+            "Intermediate": "B1+", "Upper-Intermediate": "B2", "Advanced": "C1",
+          };
+          const cefr = cefrMap[level] || "B1";
+          const topics = [
+            ...unit.grammar.map(g => ({ type: "grammar" as const, topic: g.topic })),
+            ...unit.vocabulary.map(v => ({ type: "vocabulary" as const, topic: v.topic })),
+          ];
+          const prompt = `You are an Oxford Headway English language test generator.
+Level: ${level} (${cefr}) — ${unit.title}
+Unit theme: ${unit.description}
+
+Generate ONE fill-in-the-blank multiple-choice question for each topic below.
+Each question must be a realistic English sentence with _____ (5 underscores) for the blank.
+Provide 4 plausible options where exactly ONE is correct.
+
+Topics:
+${topics.map((t, i) => `${i + 1}. [${t.type}] ${t.topic}`).join("\n")}
+
+Return ONLY a valid JSON array — no markdown, no code fences:
+[{"topic":"...","type":"grammar","text":"She _____ to work.","options":["goes","is going","went","has gone"],"correct":0,"explanation":"..."}]`;
+
+          const { GoogleGenAI } = await import("@google/genai");
+          const geminiBaseUrl = (process.env.AI_INTEGRATIONS_GEMINI_BASE_URL || "").trim();
+          const ai = geminiBaseUrl
+            ? new GoogleGenAI({ apiKey: aiApiKey, httpOptions: { apiVersion: "", baseUrl: geminiBaseUrl } })
+            : new GoogleGenAI({ apiKey: aiApiKey });
+          const aiResult = await ai.models.generateContent({
+            model: "gemini-2.5-flash",
+            contents: prompt,
+            config: { temperature: 0.4 },
+          });
+          const raw = (aiResult.text || "").trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```\s*$/i, "").trim();
+          const parsed = JSON.parse(raw);
+          if (Array.isArray(parsed)) {
+            questionRows = parsed
+              .filter((q: any) => q && typeof q.text === "string" && Array.isArray(q.options))
+              .map((q: any, idx: number) => ({
+                quiz_id:       quizData.id,
+                type:          "multiple-choice",
+                text:          String(q.text),
+                question_text: String(q.text),
+                options:       (q.options as string[]).slice(0, 4),
+                correct_answer: (q.options as string[])[Math.max(0, Math.min(3, Number(q.correct) || 0))],
+                explanation:   String(q.explanation || ""),
+                points:        1,
+                order:         idx,
+              }));
+          }
+        } catch (aiErr: any) {
+          console.warn("[save-unit-quiz] AI generation failed, using static bank:", aiErr?.message);
+        }
+      }
+
+      // Fall back to static placeholder questions if AI didn't produce anything
+      if (questionRows.length === 0) {
+        questionRows = buildHwUnitQuestions(unit, levelData.slug).map(q => ({ ...q, quiz_id: quizData.id }));
+      }
+
+      if (questionRows.length > 0) {
+        let { error: iqErr } = await supabaseAdmin.from("questions").insert(questionRows);
         if (iqErr && /question_text|null value.*text/i.test(iqErr.message + (iqErr.details || ""))) {
-          const fallback = questions.map(q => { const r = { ...q } as Record<string, unknown>; delete r["text"]; return r; });
+          const fallback = questionRows.map(q => { const r = { ...q } as Record<string, unknown>; delete r["text"]; return r; });
           ({ error: iqErr } = await supabaseAdmin.from("questions").insert(fallback));
         }
         if (iqErr) console.warn("[save-unit-quiz] questions insert warning:", iqErr.message);
@@ -5701,7 +5765,7 @@ When giving instructions, number each step clearly. Be precise and technical whe
         await supabaseAdmin.from("courses").update({ level }).eq("id", courseId);
       } catch { /* non-critical */ }
 
-      return res.json({ success: true, quizId: quizData.id, questions: questions.length });
+      return res.json({ success: true, quizId: quizData.id, questions: questionRows.length });
     } catch (e: any) {
       console.error("POST /api/teacher/headway/save-unit-quiz", e);
       return res.status(500).json({ error: e?.message || "Server error" });
@@ -5721,6 +5785,121 @@ When giving instructions, number each step clearly. Be precise and technical whe
       const questions = buildHwUnitQuestions(unit, levelData.slug);
       return res.json({ level, unit: unitNum, title: unit.title, description: unit.description, questions });
     } catch (e: any) {
+      return res.status(500).json({ error: e?.message || "Server error" });
+    }
+  });
+
+  // ── POST /api/teacher/headway/generate-questions — AI generates real fill-in-the-blank questions ──
+  app.post("/api/teacher/headway/generate-questions", async (req: Request, res: Response) => {
+    try {
+      const caller = await assertAuthenticated(req, res);
+      if (!caller) return;
+
+      const level   = typeof req.body?.level   === "string" ? req.body.level.trim()        : "";
+      const unitNum = Number(req.body?.unitNum ?? 0);
+      if (!level)   return res.status(400).json({ error: "level is required" });
+      if (!unitNum) return res.status(400).json({ error: "unitNum is required" });
+
+      const levelData = HEADWAY_FULL_DATA[level];
+      if (!levelData) return res.status(400).json({ error: `Unknown level "${level}"` });
+      const unit = levelData.units.find(u => u.num === unitNum);
+      if (!unit)  return res.status(404).json({ error: `Unit ${unitNum} not found` });
+
+      const apiKey = (process.env.AI_INTEGRATIONS_GEMINI_API_KEY || process.env.GEMINI_API_KEY || "").trim();
+      if (!apiKey) return res.status(503).json({ error: "AI not configured — set GEMINI_API_KEY in Secrets." });
+
+      const topics: Array<{ type: "grammar" | "vocabulary"; topic: string }> = [
+        ...unit.grammar.map(g => ({ type: "grammar"    as const, topic: g.topic })),
+        ...unit.vocabulary.map(v => ({ type: "vocabulary" as const, topic: v.topic })),
+      ];
+
+      if (topics.length === 0) {
+        return res.json({ level, unitNum, title: unit.title, questions: [] });
+      }
+
+      const cefrMap: Record<string, string> = {
+        "Beginner": "A1", "Elementary": "A2", "Pre-Intermediate": "B1",
+        "Intermediate": "B1+", "Upper-Intermediate": "B2", "Advanced": "C1",
+      };
+      const cefr = cefrMap[level] || "B1";
+
+      const prompt = `You are an Oxford Headway English language test generator.
+Level: ${level} (${cefr}) — ${unit.title}
+Unit theme: ${unit.description}
+
+Generate ONE fill-in-the-blank multiple-choice question for each topic below.
+Each question must be a realistic English sentence with _____ (5 underscores) for the blank.
+Provide 4 plausible options where exactly ONE is correct. Use vocabulary and grammar appropriate for ${cefr} learners.
+
+Topics:
+${topics.map((t, i) => `${i + 1}. [${t.type}] ${t.topic}`).join("\n")}
+
+Return ONLY a valid JSON array — no markdown, no code fences, no extra text:
+[
+  {
+    "topic": "exact topic name from the list above",
+    "type": "grammar",
+    "text": "She _____ to work every day.",
+    "options": ["goes", "is going", "went", "has gone"],
+    "correct": 0,
+    "explanation": "Use Present Simple for habits and routines."
+  }
+]
+
+Rules:
+- text must contain exactly one _____ (5 underscores)
+- options must have exactly 4 items
+- correct is the 0-based index of the correct option
+- explanation is one concise sentence
+- For vocabulary: test word choice, collocations, or meaning in context
+- Make sentences natural, realistic and appropriate for the unit theme`;
+
+      const { GoogleGenAI } = await import("@google/genai");
+      const geminiBaseUrl = (process.env.AI_INTEGRATIONS_GEMINI_BASE_URL || "").trim();
+      const ai = geminiBaseUrl
+        ? new GoogleGenAI({ apiKey, httpOptions: { apiVersion: "", baseUrl: geminiBaseUrl } })
+        : new GoogleGenAI({ apiKey });
+
+      const result = await ai.models.generateContent({
+        model: "gemini-2.5-flash",
+        contents: prompt,
+        config: { temperature: 0.4 },
+      });
+
+      const raw = (result.text || "").trim();
+      const cleaned = raw.replace(/^```(?:json)?\s*/i, "").replace(/\s*```\s*$/i, "").trim();
+
+      let questions: unknown[];
+      try {
+        questions = JSON.parse(cleaned);
+      } catch {
+        console.error("[headway/generate-questions] JSON parse error. Raw:", cleaned.slice(0, 300));
+        return res.status(500).json({ error: "AI returned invalid JSON. Please try again." });
+      }
+
+      if (!Array.isArray(questions)) {
+        return res.status(500).json({ error: "AI did not return an array." });
+      }
+
+      // Sanitise each question
+      const sanitised = questions
+        .filter((q: any) => q && typeof q.text === "string" && Array.isArray(q.options))
+        .map((q: any, idx: number) => ({
+          order:       idx,
+          type:        q.type === "vocabulary" ? "vocabulary" : "grammar",
+          topic:       String(q.topic || ""),
+          questionText: String(q.text || ""),
+          text:        String(q.text || ""),
+          options:     (q.options as string[]).slice(0, 4),
+          correctIndex: Math.max(0, Math.min(3, Number(q.correct) || 0)),
+          correct_answer: (q.options as string[])[Math.max(0, Math.min(3, Number(q.correct) || 0))],
+          explanation: String(q.explanation || ""),
+          oxfordUrl:   `${OUP}/student/headway/${levelData.slug}/testbuilder${CC}`,
+        }));
+
+      return res.json({ level, unitNum, title: unit.title, questions: sanitised });
+    } catch (e: any) {
+      console.error("POST /api/teacher/headway/generate-questions", e);
       return res.status(500).json({ error: e?.message || "Server error" });
     }
   });
