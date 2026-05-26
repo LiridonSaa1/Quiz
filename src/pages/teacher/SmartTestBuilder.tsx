@@ -46,6 +46,7 @@ export default function SmartTestBuilder() {
   const [passmark, setPassmark] = useState(70);
   const [questionsPerSection, setQuestionsPerSection] = useState(3);
   const [generating, setGenerating] = useState(false);
+  const [sectionFilter, setSectionFilter] = useState<'grammar' | 'vocabulary' | 'both'>('grammar');
 
   useEffect(() => {
     const load = async () => {
@@ -88,9 +89,15 @@ export default function SmartTestBuilder() {
     return result;
   }, [selectedLevel]);
 
-  const halfIdx = Math.ceil(sections.length / 2);
-  const leftCol = sections.slice(0, halfIdx);
-  const rightCol = sections.slice(halfIdx);
+  const visibleSections = useMemo(() => {
+    if (sectionFilter === 'grammar') return sections.filter(s => s.type === 'grammar');
+    if (sectionFilter === 'vocabulary') return sections.filter(s => s.type === 'vocabulary');
+    return sections;
+  }, [sections, sectionFilter]);
+
+  const halfIdx = Math.ceil(visibleSections.length / 2);
+  const leftCol = visibleSections.slice(0, halfIdx);
+  const rightCol = visibleSections.slice(halfIdx);
 
   const toggleSection = (id: string) => {
     setSelectedIds(prev => {
@@ -101,8 +108,12 @@ export default function SmartTestBuilder() {
     });
   };
 
-  const selectAll = () => setSelectedIds(new Set(sections.map(s => s.id)));
-  const clearAll = () => setSelectedIds(new Set());
+  const selectAll = () => setSelectedIds(prev => new Set([...prev, ...visibleSections.map(s => s.id)]));
+  const clearAll = () => setSelectedIds(prev => {
+    const next = new Set(prev);
+    visibleSections.forEach(s => next.delete(s.id));
+    return next;
+  });
 
   const handleLevelSelect = (level: typeof LEVELS[0]) => {
     setSelectedLevel(level);
@@ -274,12 +285,32 @@ export default function SmartTestBuilder() {
                   <div className="bg-white rounded-2xl shadow-lg overflow-hidden border border-slate-200">
                     {/* Card header — orange like OUP Headway */}
                     <div className="px-6 py-4 border-b-4 border-orange-500 bg-slate-50">
-                      <div className="flex items-center justify-between">
+                      <div className="flex items-center justify-between flex-wrap gap-3">
                         <div>
                           <h2 className="text-base font-bold text-orange-600">Headway {selectedLevel.label}</h2>
                           <p className="text-sm font-medium text-slate-700 mt-0.5">Select your sections and make your test</p>
                         </div>
-                        <div className="flex items-center gap-2">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          {/* Grammar / Vocabulary / Both tabs */}
+                          <div className="flex items-center rounded-lg border border-slate-200 bg-white overflow-hidden text-xs font-semibold">
+                            {(['grammar', 'vocabulary', 'both'] as const).map((f, i) => (
+                              <button
+                                key={f}
+                                onClick={() => setSectionFilter(f)}
+                                className={cn(
+                                  "px-3 py-1.5 transition-colors capitalize",
+                                  i > 0 && "border-l border-slate-200",
+                                  sectionFilter === f
+                                    ? f === 'grammar' ? "bg-indigo-600 text-white"
+                                      : f === 'vocabulary' ? "bg-orange-500 text-white"
+                                      : "bg-slate-700 text-white"
+                                    : "text-slate-500 hover:bg-slate-50"
+                                )}
+                              >
+                                {f === 'both' ? 'Both' : f.charAt(0).toUpperCase() + f.slice(1)}
+                              </button>
+                            ))}
+                          </div>
                           <button
                             onClick={selectAll}
                             className="text-xs px-3 py-1.5 rounded-lg bg-teal-50 text-teal-700 hover:bg-teal-100 font-medium transition-colors border border-teal-200"
@@ -322,8 +353,10 @@ export default function SmartTestBuilder() {
                                   )}>
                                     {sec.topic}
                                   </span>
-                                  {sec.type === 'vocabulary' && (
-                                    <span className="text-[10px] text-slate-400">Vocabulary</span>
+                                  {sectionFilter === 'both' && (
+                                    <span className={cn("text-[10px] font-medium", sec.type === 'grammar' ? "text-indigo-400" : "text-orange-400")}>
+                                      {sec.type === 'grammar' ? 'Grammar' : 'Vocabulary'}
+                                    </span>
                                   )}
                                 </div>
                                 <div className={cn(
@@ -361,8 +394,10 @@ export default function SmartTestBuilder() {
                                   )}>
                                     {sec.topic}
                                   </span>
-                                  {sec.type === 'vocabulary' && (
-                                    <span className="text-[10px] text-slate-400">Vocabulary</span>
+                                  {sectionFilter === 'both' && (
+                                    <span className={cn("text-[10px] font-medium", sec.type === 'grammar' ? "text-indigo-400" : "text-orange-400")}>
+                                      {sec.type === 'grammar' ? 'Grammar' : 'Vocabulary'}
+                                    </span>
                                   )}
                                 </div>
                                 <div className={cn(
