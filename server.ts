@@ -867,7 +867,7 @@ export async function createApp(options: CreateAppOptions = {}) {
     // req.originalUrl keeps the full path regardless of mount point.
     skip: (req) => req.originalUrl === '/api/health' || req.path === '/health',
     keyGenerator: resolveClientIp,
-    validate: { trustProxy: false, xForwardedForHeader: false },
+    validate: { trustProxy: false, xForwardedForHeader: false, keyGeneratorIpFallback: false },
   });
   const authLimiter = rateLimit({
     windowMs: 15 * 60 * 1000,
