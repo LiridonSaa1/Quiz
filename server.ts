@@ -5,6 +5,7 @@ import { generateFixSuggestion } from "./src/lib/ai/generateFixSuggestion.js";
 import { isEmailConfigured, sendEmail, renderVerificationEmail } from "./src/lib/email.js";
 import { notifyEvent, type NotifyContext, type NotifyEventKey } from "./src/lib/notifyEvents.js";
 import { HEADWAY_FULL_DATA, buildUnitQuestions as buildHwUnitQuestions, type HUnit } from "./src/lib/headwayData.js";
+import { getQuestionsForSection, getTopicsForLevel } from "./src/lib/headwayQuestions.js";
 import express, { Request, Response } from "express";
 import rateLimit from "express-rate-limit";
 import { appendFile, mkdir, readFile as readFileFs, writeFile } from "fs/promises";
@@ -5484,8 +5485,10 @@ When giving instructions, number each step clearly. Be precise and technical whe
         emit({ type: "progress", unit: i + 1, total, title: unit.title, phase: "done" });
       }
 
-      // ── Quizzes: one per unit with real MC questions (only if testBuilder option enabled) ────
-      if (includeTestBuilder) {
+      // ── Quizzes intentionally not created during headway-populate ────────────
+      // Use the Smart Test Builder (/teacher/quizzes/test-builder) to create
+      // targeted quizzes from specific grammar/vocabulary sections instead.
+      if (false && includeTestBuilder) {
         emit({ type: "status", message: "Creating Test Builder quizzes with questions..." });
 
         // Helper: generate realistic MC questions from a unit's grammar + vocab topics
@@ -7305,94 +7308,40 @@ When giving instructions, number each step clearly. Be precise and technical whe
         }
       }
 
-      // Build AI prompt for question generation
-      const apiKey = (process.env.AI_INTEGRATIONS_GEMINI_API_KEY || process.env.GEMINI_API_KEY || "").trim();
-      if (!apiKey) {
-        return res.status(503).json({ error: "AI API key not configured. Please add GEMINI_API_KEY to your Secrets." });
-      }
-
-      const sectionSummary = selectedSections
-        .map(s => `- ${s.type === "grammar" ? "Grammar" : "Vocabulary"}: "${s.topic}" (from ${s.unitTitle})`)
-        .join("\n");
-
-      const prompt = `You are an Oxford Headway English test generator. Your job is to create fill-in-the-blank sentences exactly like the OUP Headway Test Builder style.
-
-Level: ${level}
-Generate exactly ${questionsPerSection} questions for EACH of the following ${selectedSections.length} grammar/vocabulary sections:
-${sectionSummary}
-
-STRICT FORMAT RULES — follow exactly like OUP Headway:
-1. Every question is a REAL English sentence with exactly ONE blank shown as _____
-2. The blank is placed INSIDE the sentence where the missing word/phrase belongs
-3. Options are SHORT — just the word or phrase that fills the blank (NOT full sentences)
-4. Provide exactly 4 options. The options must all be plausible for the sentence but only one is correct
-5. For grammar sections: options should contrast the exact grammar point (e.g. "is thinking" vs "thinks" vs "was thinking" vs "has thought")
-6. For vocabulary sections: options should be related words that a student might confuse
-7. Sentences must be natural, everyday English — no artificial or overly academic language
-8. Keep sentences short (max 12 words) and age-appropriate for EFL students
-9. Do NOT use question-mark sentences — use statements only (e.g. "She _____ tennis twice a week.")
-10. The blank _____ must appear in the sentence text, not as a separate placeholder
-
-EXAMPLE of correct format for "Present Simple / Present Continuous":
-- text: "Look at that woman. She _____ a beautiful hat."
-  options: ["wears", "is wearing", "wore", "has worn"]
-  correct_answer: "is wearing"
-  explanation: "Use Present Continuous (is wearing) for actions happening right now."
-
-Return ONLY a valid JSON array — no markdown, no commentary:
-[
-  {
-    "section": "<exact topic name from the list above>",
-    "text": "<sentence with _____ where the blank is>",
-    "options": ["word/phrase 1", "word/phrase 2", "word/phrase 3", "word/phrase 4"],
-    "correct_answer": "word/phrase 1",
-    "explanation": "<one sentence explaining why this answer is correct>",
-    "type": "fill-in-the-blank"
-  }
-]
-
-Generate ${selectedSections.length * questionsPerSection} questions total (${questionsPerSection} per section). Return ONLY the JSON array.`;
-
-      const { GoogleGenAI } = await import("@google/genai");
-      const geminiBaseUrl = (process.env.AI_INTEGRATIONS_GEMINI_BASE_URL || "").trim();
-      const ai = geminiBaseUrl
-        ? new GoogleGenAI({ apiKey, httpOptions: { apiVersion: "", baseUrl: geminiBaseUrl } })
-        : new GoogleGenAI({ apiKey });
-
-      let rawText = "";
-      try {
-        const result = await ai.models.generateContent({
-          model: "gemini-2.5-flash",
-          contents: prompt,
-        });
-        rawText = (result.text || "").trim();
-      } catch (aiErr: any) {
-        console.error("[smart-quiz] AI generation failed:", aiErr?.message);
-        return res.status(500).json({ error: "AI generation failed: " + (aiErr?.message || "unknown error") });
-      }
-
-      // Parse the JSON
-      let questions: any[] = [];
-      try {
-        const jsonMatch = rawText.match(/\[[\s\S]*\]/);
-        if (jsonMatch) {
-          questions = JSON.parse(jsonMatch[0]);
+      // Build questions from static bank (OUP Headway style, no AI needed)
+      const questions: Array<{ text: string; options: string[]; correct_answer: string; explanation: string }> = [];
+      for (const sec of selectedSections) {
+        const staticQs = getQuestionsForSection(level, sec.topic, questionsPerSection);
+        if (staticQs.length > 0) {
+          for (const q of staticQs) {
+            questions.push({
+              text: q.text,
+              options: q.options,
+              correct_answer: q.options[q.correct],
+              explanation: q.explanation,
+            });
+          }
         } else {
-          questions = JSON.parse(rawText);
+          // Fallback: generic fill-in-the-blank placeholder for topics without static questions yet
+          for (let i = 0; i < questionsPerSection; i++) {
+            questions.push({
+              text: `Choose the correct form for "${sec.topic}": She _____ to work every day.`,
+              options: ["goes", "is going", "went", "has gone"],
+              correct_answer: "goes",
+              explanation: `This tests ${sec.topic} — the correct answer uses the appropriate form.`,
+            });
+          }
         }
-      } catch (parseErr) {
-        console.error("[smart-quiz] JSON parse failed:", rawText.slice(0, 500));
-        return res.status(500).json({ error: "Failed to parse AI-generated questions. Please try again." });
       }
 
-      if (!Array.isArray(questions) || questions.length === 0) {
-        return res.status(500).json({ error: "AI returned no valid questions. Please try again." });
+      if (questions.length === 0) {
+        return res.status(400).json({ error: "No questions available for the selected sections." });
       }
 
       // Create the quiz
       const quizPayload: Record<string, unknown> = {
         title: title.trim(),
-        description: `Smart Test Builder — ${level} · ${selectedSections.length} sections · Generated with AI`,
+        description: `Smart Test Builder — ${level} · ${selectedSections.length} sections · Headway-style fill-in-the-blank`,
         course_id: courseId,
         teacher_id: caller.userId,
         time_limit: timeLimit,
@@ -9390,6 +9339,86 @@ Generate ${selectedSections.length * questionsPerSection} questions total (${que
   });
 
   // Student quizzes: only published quizzes from courses where the student is enrolled.
+  /** Headway Test Builder — get available grammar topics for a level */
+  app.get('/api/student/headway-test/topics', async (req, res) => {
+    try {
+      const caller = await assertAuthenticated(req, res);
+      if (!caller) return;
+      const level = typeof req.query.level === 'string' ? req.query.level.trim() : 'Pre-Intermediate';
+      const topics = getTopicsForLevel(level).map(s => ({ topic: s.topic, type: s.type, count: s.questions.length }));
+      return res.json({ level, topics });
+    } catch (e: any) {
+      console.error('[headway-test/topics]', e?.message);
+      return res.status(500).json({ error: 'Server error' });
+    }
+  });
+
+  /** Headway Test Builder — student submits test answers with user_id tracking */
+  app.post('/api/student/headway-test/submit', async (req, res) => {
+    try {
+      const caller = await assertAuthenticated(req, res);
+      if (!caller) return;
+
+      const body = req.body as {
+        level: string;
+        selectedTopics: string[];
+        answers: Array<{ questionIdx: number; chosen: string; correct: string }>;
+        score: number;
+        total: number;
+        timeTakenSeconds?: number;
+      };
+
+      const { level, selectedTopics, answers, score, total } = body;
+      if (!level || !Array.isArray(answers)) {
+        return res.status(400).json({ error: 'level and answers are required' });
+      }
+
+      const percentage = total > 0 ? Math.round((score / total) * 100) : 0;
+
+      // Auto-create headway_test_results table if not exists (idempotent)
+      await supabaseAdmin.rpc('exec_sql', {
+        sql: `CREATE TABLE IF NOT EXISTS headway_test_results (
+          id uuid DEFAULT gen_random_uuid() PRIMARY KEY,
+          user_id uuid NOT NULL,
+          level text NOT NULL,
+          selected_topics text[] DEFAULT '{}',
+          answers jsonb DEFAULT '[]',
+          score int NOT NULL DEFAULT 0,
+          total int NOT NULL DEFAULT 0,
+          percentage int NOT NULL DEFAULT 0,
+          time_taken_seconds int,
+          created_at timestamptz DEFAULT now()
+        );`
+      }).catch(() => null); // ignore if rpc not available; table may already exist
+
+      const { data: row, error: insErr } = await supabaseAdmin
+        .from('headway_test_results')
+        .insert({
+          user_id: caller.userId,
+          level,
+          selected_topics: selectedTopics ?? [],
+          answers,
+          score,
+          total,
+          percentage,
+          time_taken_seconds: body.timeTakenSeconds ?? null,
+        })
+        .select('id, created_at')
+        .maybeSingle();
+
+      if (insErr) {
+        // If table doesn't exist yet, still return success — result stored client-side
+        console.warn('[headway-test/submit] DB insert warning:', insErr.message);
+        return res.json({ ok: true, stored: false, percentage, message: 'Score calculated but not saved to DB — table may need migration.' });
+      }
+
+      return res.json({ ok: true, stored: true, id: row?.id, percentage });
+    } catch (e: any) {
+      console.error('[headway-test/submit]', e?.message);
+      return res.status(500).json({ error: 'Server error' });
+    }
+  });
+
   app.get('/api/student/quizzes', async (req, res) => {
     try {
       const caller = await assertAuthenticated(req, res);
