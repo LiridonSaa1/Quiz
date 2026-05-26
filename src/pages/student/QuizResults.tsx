@@ -11,6 +11,7 @@ import { QuizAttempt, Quiz, Question } from '../../types';
 import { cn } from '../../lib/utils';
 import { questionBodyFromRow } from '../../lib/questionText';
 import { motion, AnimatePresence } from 'motion/react';
+import BlankText from '../../components/BlankText';
 import { LayoutPageSkeleton } from '../../components/ui/Skeleton';
 import { fetchAttemptRowById, normalizeAttempts } from '../../lib/quizAttempts';
 import { fetchStudentAccessibleQuizById } from '../../lib/studentQuizAccess';
@@ -663,7 +664,7 @@ export default function QuizResults() {
                         'leading-snug',
                         isInstruction ? 'text-slate-700 whitespace-pre-wrap text-sm' : 'text-sm font-semibold text-slate-900',
                       )}>
-                        {q.text}
+                        <BlankText text={q.text} />
                       </p>
 
                       {/* Options */}

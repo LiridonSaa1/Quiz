@@ -13,6 +13,7 @@ import { supabase } from '../../supabase';
 import { fetchStudentAccessibleQuizById } from '../../lib/studentQuizAccess';
 import { insertAttemptWithFallback } from '../../lib/quizAttempts';
 import { isDirectVideoFileUrl, isLikelyVideoLink, toEmbedVideoUrl } from '../../lib/quizMedia';
+import BlankText from '../../components/BlankText';
 import { questionBodyFromRow } from '../../lib/questionText';
 
 interface QuizSection {
@@ -173,7 +174,7 @@ function QuestionItem({
           'leading-relaxed',
           isInstruction ? 'text-slate-600 text-sm italic' : 'text-slate-800 font-medium',
         )}>
-          {q.text}
+          <BlankText text={q.text} />
         </p>
 
         {/* Answer UI */}

@@ -7315,33 +7315,43 @@ When giving instructions, number each step clearly. Be precise and technical whe
         .map(s => `- ${s.type === "grammar" ? "Grammar" : "Vocabulary"}: "${s.topic}" (from ${s.unitTitle})`)
         .join("\n");
 
-      const prompt = `You are an English language test generator inspired by Oxford Headway.
-Generate exactly ${questionsPerSection} multiple-choice questions for EACH of the following ${selectedSections.length} grammar/vocabulary sections.
-Level: ${level}
+      const prompt = `You are an Oxford Headway English test generator. Your job is to create fill-in-the-blank sentences exactly like the OUP Headway Test Builder style.
 
-Sections to cover:
+Level: ${level}
+Generate exactly ${questionsPerSection} questions for EACH of the following ${selectedSections.length} grammar/vocabulary sections:
 ${sectionSummary}
 
-Rules:
-- Each question must be clearly labeled with which section it belongs to
-- Questions should test practical usage, fill-in-the-blank or choose the correct form
-- Each question must have exactly 4 options (A, B, C, D)
-- Clearly mark the correct answer
-- Keep language appropriate for ${level} level
+STRICT FORMAT RULES — follow exactly like OUP Headway:
+1. Every question is a REAL English sentence with exactly ONE blank shown as _____
+2. The blank is placed INSIDE the sentence where the missing word/phrase belongs
+3. Options are SHORT — just the word or phrase that fills the blank (NOT full sentences)
+4. Provide exactly 4 options. The options must all be plausible for the sentence but only one is correct
+5. For grammar sections: options should contrast the exact grammar point (e.g. "is thinking" vs "thinks" vs "was thinking" vs "has thought")
+6. For vocabulary sections: options should be related words that a student might confuse
+7. Sentences must be natural, everyday English — no artificial or overly academic language
+8. Keep sentences short (max 12 words) and age-appropriate for EFL students
+9. Do NOT use question-mark sentences — use statements only (e.g. "She _____ tennis twice a week.")
+10. The blank _____ must appear in the sentence text, not as a separate placeholder
 
-Return ONLY a valid JSON array with this exact structure:
+EXAMPLE of correct format for "Present Simple / Present Continuous":
+- text: "Look at that woman. She _____ a beautiful hat."
+  options: ["wears", "is wearing", "wore", "has worn"]
+  correct_answer: "is wearing"
+  explanation: "Use Present Continuous (is wearing) for actions happening right now."
+
+Return ONLY a valid JSON array — no markdown, no commentary:
 [
   {
-    "section": "<topic name>",
-    "text": "<question text with blank if fill-in-the-blank>",
-    "options": ["option A", "option B", "option C", "option D"],
-    "correct_answer": "option A",
-    "explanation": "<brief explanation>",
-    "type": "multiple-choice"
+    "section": "<exact topic name from the list above>",
+    "text": "<sentence with _____ where the blank is>",
+    "options": ["word/phrase 1", "word/phrase 2", "word/phrase 3", "word/phrase 4"],
+    "correct_answer": "word/phrase 1",
+    "explanation": "<one sentence explaining why this answer is correct>",
+    "type": "fill-in-the-blank"
   }
 ]
 
-Generate ${selectedSections.length * questionsPerSection} questions total (${questionsPerSection} per section). Return only the JSON array, no other text.`;
+Generate ${selectedSections.length * questionsPerSection} questions total (${questionsPerSection} per section). Return ONLY the JSON array.`;
 
       const { GoogleGenAI } = await import("@google/genai");
       const geminiBaseUrl = (process.env.AI_INTEGRATIONS_GEMINI_BASE_URL || "").trim();
