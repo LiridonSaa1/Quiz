@@ -5,9 +5,20 @@ import { Link, useParams } from 'react-router-dom';
 import StudentLayout from '../../components/layout/StudentLayout';
 import { supabase } from '../../supabase';
 import { authFetch } from '../../lib/apiUrl';
-import { BookOpen, ArrowLeft, Clock, CheckCircle2, Circle, Play, Video, Headphones, FileText, AlignLeft } from 'lucide-react';
+import { BookOpen, ArrowLeft, Clock, CheckCircle2, Circle, Play, Video, Headphones, FileText, AlignLeft, Globe, ExternalLink, ChevronDown, ChevronRight } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import LessonDiscussionBoard from '../../components/discussion/LessonDiscussionBoard';
+
+const OUP_BASE = 'https://elt.oup.com/student/headway';
+const CC = '?cc=global&selLanguage=en';
+const HEADWAY_LEVELS = [
+  { key: 'Beginner', slug: 'beg' },
+  { key: 'Elementary', slug: 'elementary4' },
+  { key: 'Pre-Intermediate', slug: 'preint4' },
+  { key: 'Intermediate', slug: 'int5' },
+  { key: 'Upper-Intermediate', slug: 'upperint5' },
+  { key: 'Advanced', slug: 'adv4' },
+];
 
 type LessonDetailRow = {
   id: string;
@@ -51,6 +62,12 @@ export default function StudentLessonDetail() {
   const [activeTab, setActiveTab] = useState<'video' | 'audio' | 'pdf' | 'text'>('video');
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const lastSyncRef = useRef<number>(0);
+  const [showOupPanel, setShowOupPanel] = useState(false);
+  const [oupLevel, setOupLevel] = useState('preint4');
+  const [oupUnit, setOupUnit] = useState(1);
+  const [oupTab, setOupTab] = useState<'audio' | 'video' | 'links'>('audio');
+  const [oupAudioLoaded, setOupAudioLoaded] = useState(false);
+  const [oupVideoLoaded, setOupVideoLoaded] = useState(false);
 
   useEffect(() => {
     const load = async () => {
@@ -352,6 +369,211 @@ export default function StudentLessonDetail() {
                 {t('student.lessons.noContentAdded')}
               </div>
             )}
+            {/* ── OUP Headway Resources panel ── */}
+            <div className="bg-white rounded-3xl border border-slate-100 overflow-hidden">
+              <button
+                onClick={() => setShowOupPanel(v => !v)}
+                className="w-full flex items-center justify-between px-6 py-4 hover:bg-slate-50 transition-colors"
+              >
+                <div className="flex items-center gap-3">
+                  <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-blue-600 to-indigo-700 flex items-center justify-center shrink-0">
+                    <Globe className="w-4 h-4 text-white" />
+                  </div>
+                  <div className="text-left">
+                    <p className="text-sm font-bold text-slate-800">Headway Audio &amp; Video</p>
+                    <p className="text-xs text-slate-400">OUP online resources — Audio, Video &amp; Links</p>
+                  </div>
+                </div>
+                {showOupPanel
+                  ? <ChevronDown className="w-4 h-4 text-slate-400 shrink-0" />
+                  : <ChevronRight className="w-4 h-4 text-slate-400 shrink-0" />}
+              </button>
+
+              {showOupPanel && (
+                <div className="border-t border-slate-100">
+                  {/* Controls row */}
+                  <div className="flex flex-wrap items-center gap-3 px-6 py-3 bg-slate-50">
+                    <div className="flex items-center gap-2">
+                      <label className="text-xs font-bold text-slate-600 shrink-0">Level:</label>
+                      <select
+                        value={oupLevel}
+                        onChange={e => { setOupLevel(e.target.value); setOupUnit(1); setOupAudioLoaded(false); setOupVideoLoaded(false); }}
+                        className="px-3 py-1.5 rounded-lg border border-slate-200 text-sm bg-white"
+                      >
+                        {HEADWAY_LEVELS.map(l => (
+                          <option key={l.slug} value={l.slug}>{l.key}</option>
+                        ))}
+                      </select>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <label className="text-xs font-bold text-slate-600 shrink-0">Unit:</label>
+                      <select
+                        value={oupUnit}
+                        onChange={e => setOupUnit(Number(e.target.value))}
+                        className="px-3 py-1.5 rounded-lg border border-slate-200 text-sm bg-white"
+                      >
+                        {Array.from({ length: oupLevel === 'beg' ? 14 : 12 }, (_, i) => i + 1).map(n => (
+                          <option key={n} value={n}>Unit {n}</option>
+                        ))}
+                      </select>
+                    </div>
+                    <div className="ml-auto flex items-center gap-1 p-1 rounded-xl bg-white border border-slate-200">
+                      {([
+                        { id: 'audio', icon: '🎧', label: 'Audio' },
+                        { id: 'video', icon: '🎬', label: 'Video' },
+                        { id: 'links', icon: '🔗', label: 'Links' },
+                      ] as const).map(tab => (
+                        <button
+                          key={tab.id}
+                          onClick={() => setOupTab(tab.id)}
+                          className={cn(
+                            'flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all',
+                            oupTab === tab.id ? 'bg-indigo-600 text-white shadow-sm' : 'text-slate-600 hover:bg-slate-100'
+                          )}
+                        >
+                          <span>{tab.icon}</span> {tab.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Audio tab */}
+                  {oupTab === 'audio' && (
+                    <div className="px-6 pb-6 pt-3 space-y-2">
+                      <div className="flex items-center justify-between">
+                        <p className="text-xs text-slate-500">
+                          <strong>Unit {oupUnit}</strong> — Student's Book Audio (OUP player)
+                        </p>
+                        <a
+                          href={`${OUP_BASE}/${oupLevel}/audiodl${CC}`}
+                          target="_blank" rel="noopener noreferrer"
+                          className="inline-flex items-center gap-1 text-xs text-indigo-600 hover:text-indigo-800 font-semibold"
+                        >
+                          <ExternalLink className="w-3 h-3" /> Open in new tab
+                        </a>
+                      </div>
+                      <div className="rounded-xl overflow-hidden border border-slate-200 bg-slate-50" style={{ height: 480 }}>
+                        {oupAudioLoaded ? (
+                          <iframe
+                            key={`oup-audio-${oupLevel}`}
+                            src={`${OUP_BASE}/${oupLevel}/audiodl${CC}`}
+                            className="w-full h-full border-0"
+                            allow="autoplay; fullscreen"
+                            title={`Headway Audio — ${oupLevel}`}
+                            sandbox="allow-scripts allow-same-origin allow-forms allow-popups"
+                          />
+                        ) : (
+                          <div className="w-full h-full flex flex-col items-center justify-center gap-4">
+                            <div className="w-14 h-14 rounded-2xl bg-indigo-100 flex items-center justify-center">
+                              <Headphones className="w-7 h-7 text-indigo-600" />
+                            </div>
+                            <div className="text-center">
+                              <p className="text-sm font-bold text-slate-700">OUP Audio Player</p>
+                              <p className="text-xs text-slate-400 mt-1">Click to load — scroll to Unit {oupUnit} and press ▶</p>
+                            </div>
+                            <button
+                              onClick={() => setOupAudioLoaded(true)}
+                              className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-indigo-600 text-white text-sm font-semibold hover:bg-indigo-700 transition-colors shadow-sm"
+                            >
+                              ▶ Load Audio Player
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                      <p className="text-[10px] text-slate-400">
+                        Scroll to <strong>Unit {oupUnit}</strong> and press ▶ to play audio tracks inline.
+                      </p>
+                    </div>
+                  )}
+
+                  {/* Video tab */}
+                  {oupTab === 'video' && (
+                    <div className="px-6 pb-6 pt-3 space-y-2">
+                      <div className="flex items-center justify-between">
+                        <p className="text-xs text-slate-500">
+                          <strong>Unit {oupUnit}</strong> — Video clips with script &amp; tasks
+                        </p>
+                        <a
+                          href={`${OUP_BASE}/${oupLevel}/video_bandw${CC}`}
+                          target="_blank" rel="noopener noreferrer"
+                          className="inline-flex items-center gap-1 text-xs text-rose-600 hover:text-rose-800 font-semibold"
+                        >
+                          <ExternalLink className="w-3 h-3" /> Open in new tab
+                        </a>
+                      </div>
+                      <div className="rounded-xl overflow-hidden border border-slate-200 bg-slate-50" style={{ height: 480 }}>
+                        {oupVideoLoaded ? (
+                          <iframe
+                            key={`oup-video-${oupLevel}`}
+                            src={`${OUP_BASE}/${oupLevel}/video_bandw${CC}`}
+                            className="w-full h-full border-0"
+                            allow="autoplay; fullscreen"
+                            title={`Headway Video — ${oupLevel}`}
+                            sandbox="allow-scripts allow-same-origin allow-forms allow-popups"
+                          />
+                        ) : (
+                          <div className="w-full h-full flex flex-col items-center justify-center gap-4">
+                            <div className="w-14 h-14 rounded-2xl bg-rose-100 flex items-center justify-center">
+                              <Video className="w-7 h-7 text-rose-600" />
+                            </div>
+                            <div className="text-center">
+                              <p className="text-sm font-bold text-slate-700">OUP Video Player</p>
+                              <p className="text-xs text-slate-400 mt-1">Click to load — find Unit {oupUnit} in the list</p>
+                            </div>
+                            <button
+                              onClick={() => setOupVideoLoaded(true)}
+                              className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-rose-600 text-white text-sm font-semibold hover:bg-rose-700 transition-colors shadow-sm"
+                            >
+                              ▶ Load Video Player
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                      <p className="text-[10px] text-slate-400">
+                        Find <strong>Unit {oupUnit}</strong> video in the list and press ▶ to play inline.
+                      </p>
+                    </div>
+                  )}
+
+                  {/* Links tab */}
+                  {oupTab === 'links' && (
+                    <div className="px-6 pb-6 pt-3 space-y-3">
+                      <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                        <a
+                          href={`${OUP_BASE}/${oupLevel}/audiodl${CC}`}
+                          target="_blank" rel="noopener noreferrer"
+                          className="flex flex-col items-center gap-2 p-4 rounded-xl bg-indigo-50 hover:bg-indigo-100 transition-all group border border-indigo-100 text-center"
+                        >
+                          <Headphones className="w-5 h-5 text-indigo-600" />
+                          <span className="text-xs font-bold text-indigo-700">Audio DL</span>
+                          <ExternalLink className="w-3 h-3 text-indigo-400 group-hover:text-indigo-600" />
+                        </a>
+                        <a
+                          href={`${OUP_BASE}/${oupLevel}/video_bandw${CC}`}
+                          target="_blank" rel="noopener noreferrer"
+                          className="flex flex-col items-center gap-2 p-4 rounded-xl bg-rose-50 hover:bg-rose-100 transition-all group border border-rose-100 text-center"
+                        >
+                          <Video className="w-5 h-5 text-rose-600" />
+                          <span className="text-xs font-bold text-rose-700">Video</span>
+                          <ExternalLink className="w-3 h-3 text-rose-400 group-hover:text-rose-600" />
+                        </a>
+                        <a
+                          href={`${OUP_BASE}/${oupLevel}/testbuilder${CC}`}
+                          target="_blank" rel="noopener noreferrer"
+                          className="flex flex-col items-center gap-2 p-4 rounded-xl bg-emerald-50 hover:bg-emerald-100 transition-all group border border-emerald-100 text-center"
+                        >
+                          <BookOpen className="w-5 h-5 text-emerald-600" />
+                          <span className="text-xs font-bold text-emerald-700">Test Builder</span>
+                          <ExternalLink className="w-3 h-3 text-emerald-400 group-hover:text-emerald-600" />
+                        </a>
+                      </div>
+                      <p className="text-xs text-slate-400">Links open in a new tab. Select your level and unit above first.</p>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+
             <LessonDiscussionBoard lessonId={lesson.id} title={t('student.lessons.questionsAboutLesson')} />
           </div>
         )}

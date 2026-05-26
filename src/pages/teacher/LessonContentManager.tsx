@@ -63,6 +63,8 @@ export default function TeacherLessonContentManager() {
   const [headwayLevel, setHeadwayLevel] = useState('preint4');
   const [headwayTab, setHeadwayTab] = useState<'audio' | 'video' | 'links'>('audio');
   const [headwayUnit, setHeadwayUnit] = useState(1);
+  const [oupAudioLoaded, setOupAudioLoaded] = useState(false);
+  const [oupVideoLoaded, setOupVideoLoaded] = useState(false);
 
   const sorted = useMemo(
     () => [...items].sort((a, b) => (a.position || 0) - (b.position || 0)),
@@ -312,7 +314,7 @@ export default function TeacherLessonContentManager() {
                   <label className="text-xs font-bold text-slate-600 shrink-0">Level:</label>
                   <select
                     value={headwayLevel}
-                    onChange={e => { setHeadwayLevel(e.target.value); setHeadwayUnit(1); }}
+                    onChange={e => { setHeadwayLevel(e.target.value); setHeadwayUnit(1); setOupAudioLoaded(false); setOupVideoLoaded(false); }}
                     className="px-3 py-1.5 rounded-lg border border-slate-200 text-sm bg-white"
                   >
                     {HEADWAY_LEVELS.map(l => (
@@ -354,7 +356,7 @@ export default function TeacherLessonContentManager() {
                 </div>
               </div>
 
-              {/* Audio tab — OUP audio download/player page embedded */}
+              {/* Audio tab — OUP audio download/player page embedded (lazy) */}
               {headwayTab === 'audio' && (
                 <div className="px-5 pb-5 pt-3 space-y-2">
                   <div className="flex items-center justify-between">
@@ -370,14 +372,32 @@ export default function TeacherLessonContentManager() {
                     </a>
                   </div>
                   <div className="rounded-xl overflow-hidden border border-slate-200 bg-slate-50" style={{ height: 520 }}>
-                    <iframe
-                      key={`audio-${headwayLevel}`}
-                      src={`${OUP_BASE}/${headwayLevel}/audiodl${CC}`}
-                      className="w-full h-full border-0"
-                      allow="autoplay; fullscreen"
-                      title={`Headway Audio — ${headwayLevel}`}
-                      sandbox="allow-scripts allow-same-origin allow-forms allow-popups"
-                    />
+                    {oupAudioLoaded ? (
+                      <iframe
+                        key={`audio-${headwayLevel}`}
+                        src={`${OUP_BASE}/${headwayLevel}/audiodl${CC}`}
+                        className="w-full h-full border-0"
+                        allow="autoplay; fullscreen"
+                        title={`Headway Audio — ${headwayLevel}`}
+                        sandbox="allow-scripts allow-same-origin allow-forms allow-popups"
+                      />
+                    ) : (
+                      <div className="w-full h-full flex flex-col items-center justify-center gap-4">
+                        <div className="w-14 h-14 rounded-2xl bg-indigo-100 flex items-center justify-center">
+                          <Headphones className="w-7 h-7 text-indigo-600" />
+                        </div>
+                        <div className="text-center">
+                          <p className="text-sm font-bold text-slate-700">OUP Audio Player</p>
+                          <p className="text-xs text-slate-400 mt-1">Click to load — scroll to Unit {headwayUnit} and press ▶</p>
+                        </div>
+                        <button
+                          onClick={() => setOupAudioLoaded(true)}
+                          className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-indigo-600 text-white text-sm font-semibold hover:bg-indigo-700 transition-colors shadow-sm"
+                        >
+                          ▶ Load Audio Player
+                        </button>
+                      </div>
+                    )}
                   </div>
                   <p className="text-[10px] text-slate-400">
                     Scroll to <strong>Unit {headwayUnit}</strong> and press ▶ to play audio tracks inline. No download needed.
@@ -385,7 +405,7 @@ export default function TeacherLessonContentManager() {
                 </div>
               )}
 
-              {/* Video tab — OUP video page embedded */}
+              {/* Video tab — OUP video page embedded (lazy) */}
               {headwayTab === 'video' && (
                 <div className="px-5 pb-5 pt-3 space-y-2">
                   <div className="flex items-center justify-between">
@@ -401,14 +421,32 @@ export default function TeacherLessonContentManager() {
                     </a>
                   </div>
                   <div className="rounded-xl overflow-hidden border border-slate-200 bg-slate-50" style={{ height: 520 }}>
-                    <iframe
-                      key={`video-${headwayLevel}`}
-                      src={`${OUP_BASE}/${headwayLevel}/video_bandw${CC}`}
-                      className="w-full h-full border-0"
-                      allow="autoplay; fullscreen"
-                      title={`Headway Video — ${headwayLevel}`}
-                      sandbox="allow-scripts allow-same-origin allow-forms allow-popups"
-                    />
+                    {oupVideoLoaded ? (
+                      <iframe
+                        key={`video-${headwayLevel}`}
+                        src={`${OUP_BASE}/${headwayLevel}/video_bandw${CC}`}
+                        className="w-full h-full border-0"
+                        allow="autoplay; fullscreen"
+                        title={`Headway Video — ${headwayLevel}`}
+                        sandbox="allow-scripts allow-same-origin allow-forms allow-popups"
+                      />
+                    ) : (
+                      <div className="w-full h-full flex flex-col items-center justify-center gap-4">
+                        <div className="w-14 h-14 rounded-2xl bg-rose-100 flex items-center justify-center">
+                          <Video className="w-7 h-7 text-rose-600" />
+                        </div>
+                        <div className="text-center">
+                          <p className="text-sm font-bold text-slate-700">OUP Video Player</p>
+                          <p className="text-xs text-slate-400 mt-1">Click to load — find Unit {headwayUnit} in the list</p>
+                        </div>
+                        <button
+                          onClick={() => setOupVideoLoaded(true)}
+                          className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-rose-600 text-white text-sm font-semibold hover:bg-rose-700 transition-colors shadow-sm"
+                        >
+                          ▶ Load Video Player
+                        </button>
+                      </div>
+                    )}
                   </div>
                   <p className="text-[10px] text-slate-400">
                     Find <strong>Unit {headwayUnit}</strong> video in the list and press ▶ to play inline.
