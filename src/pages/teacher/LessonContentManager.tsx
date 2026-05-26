@@ -61,6 +61,8 @@ export default function TeacherLessonContentManager() {
   const [regenerating, setRegenerating] = useState(false);
   const [showHeadway, setShowHeadway] = useState(false);
   const [headwayLevel, setHeadwayLevel] = useState('preint4');
+  const [headwayTab, setHeadwayTab] = useState<'audio' | 'video' | 'links'>('audio');
+  const [headwayUnit, setHeadwayUnit] = useState(1);
 
   const sorted = useMemo(
     () => [...items].sort((a, b) => (a.position || 0) - (b.position || 0)),
@@ -295,7 +297,7 @@ export default function TeacherLessonContentManager() {
               </div>
               <div className="text-left">
                 <p className="text-sm font-bold text-slate-800">Headway Resources</p>
-                <p className="text-xs text-slate-400">Quick links to OUP audio, video, test builder &amp; grammar</p>
+                <p className="text-xs text-slate-400">Audio &amp; Video inline player + OUP links</p>
               </div>
             </div>
             {showHeadway
@@ -303,60 +305,163 @@ export default function TeacherLessonContentManager() {
               : <ChevronRight className="w-4 h-4 text-slate-400" />}
           </button>
           {showHeadway && (
-            <div className="px-5 pb-5 border-t border-slate-100 pt-4 space-y-4">
-              <div className="flex items-center gap-3">
-                <label className="text-xs font-bold text-slate-600 shrink-0">Level:</label>
-                <select
-                  value={headwayLevel}
-                  onChange={e => setHeadwayLevel(e.target.value)}
-                  className="px-3 py-1.5 rounded-lg border border-slate-200 text-sm bg-white"
-                >
-                  {HEADWAY_LEVELS.map(l => (
-                    <option key={l.slug} value={l.slug}>{l.key}</option>
+            <div className="border-t border-slate-100">
+              {/* Controls row */}
+              <div className="flex flex-wrap items-center gap-3 px-5 py-3 bg-slate-50">
+                <div className="flex items-center gap-2">
+                  <label className="text-xs font-bold text-slate-600 shrink-0">Level:</label>
+                  <select
+                    value={headwayLevel}
+                    onChange={e => { setHeadwayLevel(e.target.value); setHeadwayUnit(1); }}
+                    className="px-3 py-1.5 rounded-lg border border-slate-200 text-sm bg-white"
+                  >
+                    {HEADWAY_LEVELS.map(l => (
+                      <option key={l.slug} value={l.slug}>{l.key}</option>
+                    ))}
+                  </select>
+                </div>
+                <div className="flex items-center gap-2">
+                  <label className="text-xs font-bold text-slate-600 shrink-0">Unit:</label>
+                  <select
+                    value={headwayUnit}
+                    onChange={e => setHeadwayUnit(Number(e.target.value))}
+                    className="px-3 py-1.5 rounded-lg border border-slate-200 text-sm bg-white"
+                  >
+                    {Array.from({ length: headwayLevel === 'beg' ? 14 : 12 }, (_, i) => i + 1).map(n => (
+                      <option key={n} value={n}>Unit {n}</option>
+                    ))}
+                  </select>
+                </div>
+                {/* Tab switcher */}
+                <div className="ml-auto flex items-center gap-1 p-1 rounded-xl bg-white border border-slate-200">
+                  {([
+                    { id: 'audio', icon: '🎧', label: 'Audio' },
+                    { id: 'video', icon: '🎬', label: 'Video' },
+                    { id: 'links', icon: '🔗', label: 'Links' },
+                  ] as const).map(tab => (
+                    <button
+                      key={tab.id}
+                      onClick={() => setHeadwayTab(tab.id)}
+                      className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
+                        headwayTab === tab.id
+                          ? 'bg-indigo-600 text-white shadow-sm'
+                          : 'text-slate-600 hover:bg-slate-100'
+                      }`}
+                    >
+                      <span>{tab.icon}</span> {tab.label}
+                    </button>
                   ))}
-                </select>
+                </div>
               </div>
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-                <a
-                  href={`${OUP_BASE}/${headwayLevel}/testbuilder${CC}`}
-                  target="_blank" rel="noopener noreferrer"
-                  className="flex flex-col items-center gap-2 p-3 rounded-xl bg-emerald-50 hover:bg-emerald-100 transition-all group border border-emerald-100 text-center"
-                >
-                  <BookOpen className="w-5 h-5 text-emerald-600" />
-                  <span className="text-xs font-bold text-emerald-700">Test Builder</span>
-                  <ExternalLink className="w-3 h-3 text-emerald-400 group-hover:text-emerald-600 transition-colors" />
-                </a>
-                <a
-                  href={`${OUP_BASE}/${headwayLevel}/audiodl${CC}`}
-                  target="_blank" rel="noopener noreferrer"
-                  className="flex flex-col items-center gap-2 p-3 rounded-xl bg-indigo-50 hover:bg-indigo-100 transition-all group border border-indigo-100 text-center"
-                >
-                  <Headphones className="w-5 h-5 text-indigo-600" />
-                  <span className="text-xs font-bold text-indigo-700">Audio</span>
-                  <ExternalLink className="w-3 h-3 text-indigo-400 group-hover:text-indigo-600 transition-colors" />
-                </a>
-                <a
-                  href={`${OUP_BASE}/${headwayLevel}/video${CC}`}
-                  target="_blank" rel="noopener noreferrer"
-                  className="flex flex-col items-center gap-2 p-3 rounded-xl bg-rose-50 hover:bg-rose-100 transition-all group border border-rose-100 text-center"
-                >
-                  <Video className="w-5 h-5 text-rose-600" />
-                  <span className="text-xs font-bold text-rose-700">Video</span>
-                  <ExternalLink className="w-3 h-3 text-rose-400 group-hover:text-rose-600 transition-colors" />
-                </a>
-                <a
-                  href={`${OUP_BASE}/${headwayLevel}/grammar${CC}`}
-                  target="_blank" rel="noopener noreferrer"
-                  className="flex flex-col items-center gap-2 p-3 rounded-xl bg-amber-50 hover:bg-amber-100 transition-all group border border-amber-100 text-center"
-                >
-                  <BookOpen className="w-5 h-5 text-amber-600" />
-                  <span className="text-xs font-bold text-amber-700">Grammar</span>
-                  <ExternalLink className="w-3 h-3 text-amber-400 group-hover:text-amber-600 transition-colors" />
-                </a>
-              </div>
-              <p className="text-xs text-slate-400">
-                Tip: Use the <strong>Link</strong> content type below to add any OUP URL directly to this lesson for students.
-              </p>
+
+              {/* Audio tab — OUP audio download/player page embedded */}
+              {headwayTab === 'audio' && (
+                <div className="px-5 pb-5 pt-3 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <p className="text-xs text-slate-500">
+                      <strong>Unit {headwayUnit}</strong> — Student's Book Audio (OUP player, inline playback)
+                    </p>
+                    <a
+                      href={`${OUP_BASE}/${headwayLevel}/audiodl${CC}`}
+                      target="_blank" rel="noopener noreferrer"
+                      className="inline-flex items-center gap-1 text-xs text-indigo-600 hover:text-indigo-800 font-semibold"
+                    >
+                      <ExternalLink className="w-3 h-3" /> Open in new tab
+                    </a>
+                  </div>
+                  <div className="rounded-xl overflow-hidden border border-slate-200 bg-slate-50" style={{ height: 520 }}>
+                    <iframe
+                      key={`audio-${headwayLevel}`}
+                      src={`${OUP_BASE}/${headwayLevel}/audiodl${CC}`}
+                      className="w-full h-full border-0"
+                      allow="autoplay; fullscreen"
+                      title={`Headway Audio — ${headwayLevel}`}
+                      sandbox="allow-scripts allow-same-origin allow-forms allow-popups"
+                    />
+                  </div>
+                  <p className="text-[10px] text-slate-400">
+                    Scroll to <strong>Unit {headwayUnit}</strong> and press ▶ to play audio tracks inline. No download needed.
+                  </p>
+                </div>
+              )}
+
+              {/* Video tab — OUP video page embedded */}
+              {headwayTab === 'video' && (
+                <div className="px-5 pb-5 pt-3 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <p className="text-xs text-slate-500">
+                      <strong>Unit {headwayUnit}</strong> — Video clips with script &amp; tasks (OUP player, inline)
+                    </p>
+                    <a
+                      href={`${OUP_BASE}/${headwayLevel}/video_bandw${CC}`}
+                      target="_blank" rel="noopener noreferrer"
+                      className="inline-flex items-center gap-1 text-xs text-rose-600 hover:text-rose-800 font-semibold"
+                    >
+                      <ExternalLink className="w-3 h-3" /> Open in new tab
+                    </a>
+                  </div>
+                  <div className="rounded-xl overflow-hidden border border-slate-200 bg-slate-50" style={{ height: 520 }}>
+                    <iframe
+                      key={`video-${headwayLevel}`}
+                      src={`${OUP_BASE}/${headwayLevel}/video_bandw${CC}`}
+                      className="w-full h-full border-0"
+                      allow="autoplay; fullscreen"
+                      title={`Headway Video — ${headwayLevel}`}
+                      sandbox="allow-scripts allow-same-origin allow-forms allow-popups"
+                    />
+                  </div>
+                  <p className="text-[10px] text-slate-400">
+                    Find <strong>Unit {headwayUnit}</strong> video in the list and press ▶ to play inline.
+                  </p>
+                </div>
+              )}
+
+              {/* Links tab — quick external links */}
+              {headwayTab === 'links' && (
+                <div className="px-5 pb-5 pt-3 space-y-3">
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                    <a
+                      href={`${OUP_BASE}/${headwayLevel}/testbuilder${CC}`}
+                      target="_blank" rel="noopener noreferrer"
+                      className="flex flex-col items-center gap-2 p-3 rounded-xl bg-emerald-50 hover:bg-emerald-100 transition-all group border border-emerald-100 text-center"
+                    >
+                      <BookOpen className="w-5 h-5 text-emerald-600" />
+                      <span className="text-xs font-bold text-emerald-700">Test Builder</span>
+                      <ExternalLink className="w-3 h-3 text-emerald-400 group-hover:text-emerald-600" />
+                    </a>
+                    <a
+                      href={`${OUP_BASE}/${headwayLevel}/audiodl${CC}`}
+                      target="_blank" rel="noopener noreferrer"
+                      className="flex flex-col items-center gap-2 p-3 rounded-xl bg-indigo-50 hover:bg-indigo-100 transition-all group border border-indigo-100 text-center"
+                    >
+                      <Headphones className="w-5 h-5 text-indigo-600" />
+                      <span className="text-xs font-bold text-indigo-700">Audio DL</span>
+                      <ExternalLink className="w-3 h-3 text-indigo-400 group-hover:text-indigo-600" />
+                    </a>
+                    <a
+                      href={`${OUP_BASE}/${headwayLevel}/video_bandw${CC}`}
+                      target="_blank" rel="noopener noreferrer"
+                      className="flex flex-col items-center gap-2 p-3 rounded-xl bg-rose-50 hover:bg-rose-100 transition-all group border border-rose-100 text-center"
+                    >
+                      <Video className="w-5 h-5 text-rose-600" />
+                      <span className="text-xs font-bold text-rose-700">Video</span>
+                      <ExternalLink className="w-3 h-3 text-rose-400 group-hover:text-rose-600" />
+                    </a>
+                    <a
+                      href={`${OUP_BASE}/${headwayLevel}/grammar${CC}`}
+                      target="_blank" rel="noopener noreferrer"
+                      className="flex flex-col items-center gap-2 p-3 rounded-xl bg-amber-50 hover:bg-amber-100 transition-all group border border-amber-100 text-center"
+                    >
+                      <BookOpen className="w-5 h-5 text-amber-600" />
+                      <span className="text-xs font-bold text-amber-700">Grammar</span>
+                      <ExternalLink className="w-3 h-3 text-amber-400 group-hover:text-amber-600" />
+                    </a>
+                  </div>
+                  <p className="text-xs text-slate-400">
+                    Tip: Copy any OUP URL and use the <strong>Link</strong> content type below to add it directly to this lesson for students.
+                  </p>
+                </div>
+              )}
             </div>
           )}
         </div>
