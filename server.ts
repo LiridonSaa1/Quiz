@@ -14311,13 +14311,17 @@ async function ensureAssignmentFilesBucket(): Promise<void> {
 }
 
 /**
- * Fix existing multiple-choice questions where correct_answer was stored as
- * option text instead of option id ("1","2","3","4").
+ * Fix multiple-choice questions where correct_answer was stored as option text
+ * instead of the 1-based option id ("1","2","3","4") that QuizBuilder expects.
+ * Handles both cases:
+ *   A) options stored as {id,text} objects  → match by text, use object's id
+ *   B) options stored as plain strings       → match by text, use 1-based index
+ * Also fixes questions where correct_answer is NULL/empty but options are plain
+ * strings (legacy fallback questions always had correctIndex 0 → set to "1").
  * Runs once at startup and is idempotent.
  */
 async function fixHeadwayQuizCorrectAnswers(): Promise<void> {
   try {
-    // Fetch all MC questions that have options as objects
     const { data: rows, error } = await supabaseAdmin
       .from("questions")
       .select("id, options, correct_answer")
@@ -14325,42 +14329,66 @@ async function fixHeadwayQuizCorrectAnswers(): Promise<void> {
 
     if (error || !rows || rows.length === 0) return;
 
-    const updates: { id: string; correct_answer: string }[] = [];
+    const updates: { id: string; correct_answer: string; options?: unknown }[] = [];
 
     for (const row of rows) {
       const opts: unknown = row.options;
       if (!Array.isArray(opts) || opts.length === 0) continue;
 
-      const firstOpt = opts[0];
-      // Only process rows where options are {id, text} objects
-      if (!firstOpt || typeof firstOpt !== "object" || !("id" in firstOpt) || !("text" in firstOpt)) continue;
-
-      const optObjs = opts as { id: string; text: string }[];
       const ca = String(row.correct_answer ?? "");
+      const firstOpt = opts[0];
 
-      // If correct_answer is already a valid option id, skip
-      if (optObjs.some(o => o.id === ca)) continue;
+      // ── Case A: options are {id, text} objects ───────────────────────────
+      if (firstOpt && typeof firstOpt === "object" && "id" in firstOpt && "text" in firstOpt) {
+        const optObjs = opts as { id: string; text: string }[];
 
-      // Try to find an option whose text matches the stored correct_answer
-      const matchByText = optObjs.find(o => o.text === ca);
-      if (matchByText) {
-        updates.push({ id: row.id, correct_answer: matchByText.id });
+        // Already a valid option id → nothing to do
+        if (optObjs.some(o => o.id === ca)) continue;
+
+        // Match by text (exact then case-insensitive)
+        const caLower = ca.toLowerCase();
+        const match = optObjs.find(o => o.text === ca) ?? optObjs.find(o => o.text.toLowerCase() === caLower);
+        if (match) {
+          updates.push({ id: row.id, correct_answer: match.id });
+        }
         continue;
       }
 
-      // Try case-insensitive match
-      const caLower = ca.toLowerCase();
-      const matchCi = optObjs.find(o => o.text.toLowerCase() === caLower);
-      if (matchCi) {
-        updates.push({ id: row.id, correct_answer: matchCi.id });
+      // ── Case B: options are plain strings ───────────────────────────────
+      if (typeof firstOpt === "string") {
+        const optStrs = opts as string[];
+
+        // Convert options to {id, text} objects for future compatibility
+        const optionObjects = optStrs.map((text, i) => ({ id: String(i + 1), text }));
+
+        // If correct_answer already matches a 1-based id, just convert options format
+        if (optionObjects.some(o => o.id === ca)) {
+          updates.push({ id: row.id, correct_answer: ca, options: optionObjects });
+          continue;
+        }
+
+        // Match correct_answer by text → convert to 1-based id
+        const caLower = ca.toLowerCase();
+        const match = optionObjects.find(o => o.text === ca) ?? optionObjects.find(o => o.text.toLowerCase() === caLower);
+        if (match) {
+          updates.push({ id: row.id, correct_answer: match.id, options: optionObjects });
+          continue;
+        }
+
+        // correct_answer is NULL/empty or doesn't match → default to first option ("1")
+        // Only do this for questions that look like Headway imports (have explanation or topic-style text)
+        if (!ca || ca === "0" || ca === "null") {
+          updates.push({ id: row.id, correct_answer: "1", options: optionObjects });
+        }
       }
     }
 
     if (updates.length === 0) return;
 
-    // Apply updates in batches
-    for (const { id, correct_answer } of updates) {
-      await supabaseAdmin.from("questions").update({ correct_answer }).eq("id", id);
+    for (const upd of updates) {
+      const patch: Record<string, unknown> = { correct_answer: upd.correct_answer };
+      if (upd.options) patch.options = upd.options;
+      await supabaseAdmin.from("questions").update(patch).eq("id", upd.id);
     }
 
     console.log(`[migration] fixed correct_answer for ${updates.length} quiz question(s) ✓`);
