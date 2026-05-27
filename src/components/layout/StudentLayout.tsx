@@ -44,7 +44,6 @@ export default function StudentLayout({ children }: { children: React.ReactNode 
         { icon: HelpCircle,    label: t('nav.quizzes'),      path: '/student/quizzes' },
         { icon: ScrollText,    label: t('nav.exams'),        path: '/student/exams' },
         { icon: ClipboardList, label: t('nav.assignments'),  path: '/student/assignments' },
-        { icon: Presentation,  label: t('nav.presentations'),path: '/student/presentations' },
       ]
     },
     {
@@ -64,9 +63,7 @@ export default function StudentLayout({ children }: { children: React.ReactNode 
     {
       key: 'headway',
       items: [
-        { icon: BookOpen,     label: 'Grammar',        path: '/student/headway-grammar' },
         { icon: FlaskConical, label: 'Test Builder',   path: '/student/test-builder' },
-        { icon: PlayCircle,   label: 'Module Tests',   path: '/student/module-test-builder' },
       ]
     },
     {

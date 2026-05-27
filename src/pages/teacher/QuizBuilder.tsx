@@ -211,6 +211,7 @@ export default function QuizBuilder() {
   const [uploading, setUploading] = useState<null | 'intro' | number>(null);
   const [saving, setSaving] = useState(false);
   const [regenerating, setRegenerating] = useState(false);
+  const [showRegenConfirm, setShowRegenConfirm] = useState(false);
   const [autoPublish, setAutoPublish] = useState(false);
   const [publishAt, setPublishAt] = useState('');
 
@@ -574,7 +575,7 @@ export default function QuizBuilder() {
 
   const handleRegenerate = async () => {
     if (!quizId) return;
-    if (!confirm('This will replace ALL current questions with new AI-generated ones. Continue?')) return;
+    setShowRegenConfirm(false);
     setRegenerating(true);
     try {
       const res = await authFetch(`/api/teacher/quizzes/${encodeURIComponent(quizId)}/regenerate-questions`, {
@@ -797,6 +798,7 @@ export default function QuizBuilder() {
   }
 
   return (
+    <>
     <TeacherLayout>
       <div
         className="min-h-screen -mx-4 sm:-mx-6 lg:-mx-8 -mt-7"
@@ -857,7 +859,7 @@ export default function QuizBuilder() {
                   {quizId && (quizData.settings as any)?.smartTestMeta && (
                     <motion.button
                       type="button"
-                      onClick={() => void handleRegenerate()}
+                      onClick={() => setShowRegenConfirm(true)}
                       disabled={regenerating}
                       whileHover={{ scale: 1.04, y: -1 }}
                       whileTap={{ scale: 0.97 }}
@@ -1602,6 +1604,71 @@ export default function QuizBuilder() {
         </div>
       </div>
     </TeacherLayout>
+
+      {/* ── Regenerate AI Confirmation Modal ── */}
+      <AnimatePresence>
+        {showRegenConfirm && (
+          <motion.div
+            className="fixed inset-0 z-50 flex items-center justify-center p-4"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+          >
+            <motion.div
+              className="absolute inset-0 bg-black/50 backdrop-blur-sm"
+              onClick={() => setShowRegenConfirm(false)}
+            />
+            <motion.div
+              className="relative bg-white rounded-3xl shadow-2xl max-w-md w-full p-8 space-y-5"
+              initial={{ scale: 0.92, opacity: 0, y: 20 }}
+              animate={{ scale: 1, opacity: 1, y: 0 }}
+              exit={{ scale: 0.92, opacity: 0, y: 20 }}
+              transition={{ type: 'spring', stiffness: 300, damping: 25 }}
+            >
+              <div className="flex items-start gap-4">
+                <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-emerald-400 to-teal-500 flex items-center justify-center shrink-0 shadow-lg shadow-emerald-200">
+                  <RefreshCw className="w-6 h-6 text-white" />
+                </div>
+                <div>
+                  <h2 className="text-xl font-extrabold text-slate-900 leading-tight">Regenerate AI Questions?</h2>
+                  <p className="text-sm text-slate-500 mt-1 leading-relaxed">
+                    This will <span className="font-semibold text-slate-700">replace all current questions</span> with freshly generated AI ones. This action cannot be undone.
+                  </p>
+                </div>
+              </div>
+
+              <div className="rounded-2xl bg-amber-50 border border-amber-200 px-4 py-3 flex items-start gap-3">
+                <Sparkles className="w-4 h-4 text-amber-500 mt-0.5 shrink-0" />
+                <p className="text-xs text-amber-700 leading-relaxed">
+                  New questions are shuffled from the original topic bank so each regeneration gives different variations.
+                </p>
+              </div>
+
+              <div className="flex gap-3 pt-1">
+                <button
+                  type="button"
+                  onClick={() => setShowRegenConfirm(false)}
+                  className="flex-1 py-3 rounded-2xl border border-slate-200 text-sm font-semibold text-slate-600 hover:bg-slate-50 transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void handleRegenerate()}
+                  className="flex-1 py-3 rounded-2xl text-sm font-bold text-white transition-all"
+                  style={{
+                    background: 'linear-gradient(135deg, #10b981 0%, #059669 100%)',
+                    boxShadow: '0 4px 16px rgba(16,185,129,0.35)',
+                  }}
+                >
+                  Yes, Regenerate
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </>
   );
 }
 

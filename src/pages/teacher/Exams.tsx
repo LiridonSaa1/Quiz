@@ -252,10 +252,10 @@ export default function Exams() {
       const created = await createRes.json();
       const newId = created?.quiz?.id as string | undefined;
       if (!newId) throw new Error('Exam create returned no id');
-      toast.success('Exam created! Add questions in the builder.');
+      toast.success('Exam created! Add questions with AI or manually.');
       setShowCreate(false);
       setForm({ title: '', description: '', courseId: '', timeLimit: 60, passMark: 70, maxAttempts: 1, shuffleQuestions: true, shuffleAnswers: true });
-      navigate(`/teacher/quizzes/edit/${newId}`);
+      navigate(`/teacher/exams/builder/${newId}`);
     } catch (err: any) {
       toast.error(err.message || 'Failed to create exam');
     } finally {
@@ -616,7 +616,7 @@ export default function Exams() {
                         <div className="flex items-center gap-2 pt-3 sm:opacity-0 sm:group-hover:opacity-100 opacity-100 transition-all duration-200 sm:translate-y-1 sm:group-hover:translate-y-0">
                           <button
                             type="button"
-                            onClick={() => navigate(`/teacher/quizzes/edit/${exam.id}`)}
+                            onClick={() => navigate(`/teacher/exams/builder/${exam.id}`)}
                             className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-xl text-xs font-semibold text-indigo-600 bg-indigo-50 hover:bg-indigo-100 transition-all"
                           >
                             <Edit2 className="w-3.5 h-3.5" /> Edit

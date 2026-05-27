@@ -45,6 +45,8 @@ const TeacherAnnouncements = lazy(() => import('./pages/teacher/Announcements'))
 const TeacherProgress = lazy(() => import('./pages/teacher/Progress'));
 const TeacherExams = lazy(() => import('./pages/teacher/Exams'));
 const TeacherProfilePage = lazy(() => import('./pages/teacher/Profile'));
+const TeacherSettingsPage = lazy(() => import('./pages/teacher/Settings'));
+const TeacherExamBuilder = lazy(() => import('./pages/teacher/ExamBuilder'));
 const AdminModules = lazy(() => import('./pages/admin/Modules'));
 const AdminLessons = lazy(() => import('./pages/admin/Lessons'));
 const AdminQuizzes = lazy(() => import('./pages/admin/Quizzes'));
@@ -460,6 +462,8 @@ function TeacherRoutes({ features }: { features: FeatureFlags }) {
       <Route path="/announcements" element={features.announcementsEnabled ? <TeacherAnnouncements /> : <Navigate to="/not-found" replace />} />
       <Route path="/progress" element={<TeacherProgress />} />
       <Route path="/profile" element={<TeacherProfilePage />} />
+      <Route path="/settings" element={<TeacherSettingsPage />} />
+      <Route path="/exams/builder/:examId" element={<TeacherExamBuilder />} />
       <Route path="*" element={<Navigate to="/not-found" replace />} />
     </Routes>
   );

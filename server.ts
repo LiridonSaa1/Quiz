@@ -6046,6 +6046,96 @@ Rules:
     }
   });
 
+  // ── POST /api/teacher/exams/:id/generate-ai-questions — generate exam questions via Gemini ──
+  app.post("/api/teacher/exams/:id/generate-ai-questions", async (req: Request, res: Response) => {
+    try {
+      const caller = await assertAuthenticated(req, res);
+      if (!caller) return;
+      if (!["admin", "teacher"].includes(caller.role)) {
+        return res.status(403).json({ error: "Forbidden" });
+      }
+
+      const examId = req.params.id?.trim();
+      if (!examId) return res.status(400).json({ error: "examId is required" });
+
+      const topic    = typeof req.body?.topic    === "string" ? req.body.topic.trim()    : "";
+      const level    = typeof req.body?.level    === "string" ? req.body.level.trim()    : "intermediate";
+      const count    = Math.min(30, Math.max(1, parseInt(req.body?.count  ?? "10", 10)));
+      const language = typeof req.body?.language === "string" ? req.body.language.trim() : "English";
+
+      if (!topic) return res.status(400).json({ error: "topic is required" });
+
+      const aiApiKey = (process.env.AI_INTEGRATIONS_GEMINI_API_KEY || process.env.GEMINI_API_KEY || "").trim();
+      if (!aiApiKey) return res.status(503).json({ error: "AI not configured — set GEMINI_API_KEY in Secrets." });
+
+      const prompt = `You are an expert English language exam writer.
+Generate exactly ${count} multiple-choice questions for the following exam topic.
+
+Topic: ${topic}
+Difficulty level: ${level}
+Language for question text and options: ${language}
+
+Rules:
+- Each question must have exactly 4 answer options (A, B, C, D).
+- Exactly one option must be correct.
+- Questions must test real language understanding, vocabulary, or grammar skills.
+- Do NOT number the questions in the text field.
+- Return ONLY valid JSON — no explanation, no markdown fences.
+
+JSON format (array of objects):
+[
+  {
+    "text": "<question text>",
+    "options": ["<option A>", "<option B>", "<option C>", "<option D>"],
+    "correct_answer": "<the correct option text, must exactly match one of the options>",
+    "explanation": "<brief reason why this is correct>"
+  }
+]`;
+
+      const { GoogleGenAI } = await import("@google/genai");
+      const geminiBaseUrl = (process.env.AI_INTEGRATIONS_GEMINI_BASE_URL || "").trim();
+      const ai = geminiBaseUrl
+        ? new GoogleGenAI({ apiKey: aiApiKey, httpOptions: { apiVersion: "", baseUrl: geminiBaseUrl } })
+        : new GoogleGenAI({ apiKey: aiApiKey });
+
+      const response = await ai.models.generateContent({
+        model: "gemini-2.5-flash",
+        contents: [{ role: "user", parts: [{ text: prompt }] }],
+        config: { temperature: 0.7, maxOutputTokens: 8192 },
+      });
+
+      const rawText = response.candidates?.[0]?.content?.parts?.[0]?.text ?? "";
+      const cleaned = rawText.replace(/```json\s*/gi, "").replace(/```\s*/gi, "").trim();
+      let questions: any[] = [];
+      try {
+        questions = JSON.parse(cleaned);
+        if (!Array.isArray(questions)) throw new Error("Not an array");
+      } catch {
+        const match = cleaned.match(/\[[\s\S]*\]/);
+        if (match) questions = JSON.parse(match[0]);
+        else return res.status(502).json({ error: "AI returned invalid JSON", raw: cleaned.slice(0, 500) });
+      }
+
+      // Validate & sanitise
+      const valid = questions
+        .filter(q => q && typeof q.text === "string" && Array.isArray(q.options) && q.options.length >= 2)
+        .slice(0, count)
+        .map((q: any, i: number) => ({
+          text: q.text,
+          options: q.options.slice(0, 4),
+          correct_answer: q.correct_answer || q.options[0],
+          explanation: q.explanation || "",
+          order: i,
+          points: 1,
+        }));
+
+      return res.json({ questions: valid });
+    } catch (e: any) {
+      console.error("POST /api/teacher/exams/:id/generate-ai-questions", e);
+      return res.status(500).json({ error: e?.message || "Failed to generate questions" });
+    }
+  });
+
   // ── POST /api/teacher/headway/regenerate-quiz — replace all questions for a saved Headway quiz with fresh AI ones ──
   app.post("/api/teacher/headway/regenerate-quiz", async (req: Request, res: Response) => {
     try {
@@ -7882,11 +7972,13 @@ Rules:
       }
 
       const quizId = req.params.id;
-      const { data: quiz, error: quizErr } = await supabaseAdmin
+      let quiz: any = null;
+      let quizErr: any = null;
+      ({ data: quiz, error: quizErr } = await supabaseAdmin
         .from("quizzes")
-        .select("id, settings, course_id, teacher_id")
+        .select("id, settings, course_id")
         .eq("id", quizId)
-        .maybeSingle();
+        .maybeSingle());
 
       if (quizErr || !quiz) {
         return res.status(404).json({ error: "Quiz not found" });

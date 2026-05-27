@@ -674,13 +674,6 @@ export default function QuizExperience() {
                   <AudioPlayer url={activeSection.audio_url} />
                 )}
 
-                {/* Instructions */}
-                {activeSection.instructions && (
-                  <div className="rounded-xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-800">
-                    <p className="font-semibold mb-0.5">Instructions</p>
-                    <p className="text-blue-700">{activeSection.instructions}</p>
-                  </div>
-                )}
 
                 {/* Questions */}
                 {activeSection.questions.map((q) => (
