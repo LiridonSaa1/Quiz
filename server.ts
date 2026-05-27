@@ -7787,134 +7787,22 @@ Rules:
         }
       }
 
-      // Build questions — try Gemini AI first (varied each run), fallback to static bank
+      // Build questions from the expanded static bank (shuffled per-call for variety — no API needed)
       type SmartQ = { text: string; options: string[]; correct_answer: string; explanation: string };
       const questions: SmartQ[] = [];
 
-      const aiApiKey = (process.env.AI_INTEGRATIONS_GEMINI_API_KEY || process.env.GEMINI_API_KEY || "").trim();
-      let aiQuestions: SmartQ[] = [];
-
-      if (aiApiKey && selectedSections.length > 0) {
-        try {
-          const cefrMap: Record<string, string> = {
-            "Beginner": "A1", "Elementary": "A2", "Pre-Intermediate": "B1",
-            "Intermediate": "B1+", "Upper-Intermediate": "B2", "Advanced": "C1",
-          };
-          const cefr = cefrMap[level] || "B1";
-
-          const sectionList = selectedSections
-            .map((s, i) => `${i + 1}. [${s.type}] ${s.topic} (unit: ${s.unitTitle})`)
-            .join("\n");
-
-          const prompt = `You are an Oxford Headway English language test generator.
-Level: ${level} (CEFR ${cefr})
-Task: Generate exactly ${questionsPerSection} fill-in-the-blank multiple-choice questions for EACH topic listed below.
-Each question must be a realistic English sentence with _____ (5 underscores) as the blank.
-Provide exactly 4 options where exactly ONE is correct (index 0-3).
-Make questions varied, natural, and suitable for ${level} learners.
-Topics:
-${sectionList}
-
-Return ONLY a valid JSON array — no markdown, no explanation, no code fences:
-[{"topic":"...","type":"grammar","text":"She _____ to work every day.","options":["goes","is going","went","has gone"],"correct":0,"explanation":"Simple present for habits."}]
-Generate ${selectedSections.length * questionsPerSection} questions total (${questionsPerSection} per topic).`;
-
-          const { GoogleGenAI } = await import("@google/genai");
-          const geminiBaseUrl = (process.env.AI_INTEGRATIONS_GEMINI_BASE_URL || "").trim();
-          const ai = geminiBaseUrl
-            ? new GoogleGenAI({ apiKey: aiApiKey, httpOptions: { apiVersion: "", baseUrl: geminiBaseUrl } })
-            : new GoogleGenAI({ apiKey: aiApiKey });
-          const aiResult = await ai.models.generateContent({
-            model: "gemini-2.0-flash",
-            contents: prompt,
-            config: { temperature: 0.85 },
-          });
-
-          const raw = (aiResult.text || "").trim()
-            .replace(/^```(?:json)?\s*/i, "").replace(/\s*```\s*$/i, "").trim();
-
-          // Find JSON array in response
-          const arrStart = raw.indexOf("[");
-          const arrEnd = raw.lastIndexOf("]");
-          const jsonStr = arrStart >= 0 && arrEnd > arrStart ? raw.slice(arrStart, arrEnd + 1) : raw;
-          const parsed = JSON.parse(jsonStr);
-
-          if (Array.isArray(parsed)) {
-            for (const q of parsed) {
-              if (!q || typeof q.text !== "string" || !Array.isArray(q.options) || q.options.length < 2) continue;
-              const opts: string[] = q.options.map(String);
-              const correctIdx = typeof q.correct === "number" ? q.correct : 0;
-              const correctAnswer = opts[Math.min(correctIdx, opts.length - 1)] || opts[0];
-              // Ensure exactly 4 options
-              while (opts.length < 4) opts.push(`Option ${opts.length + 1}`);
-              aiQuestions.push({
-                text: q.text.trim(),
-                options: opts.slice(0, 4),
-                correct_answer: correctAnswer,
-                explanation: typeof q.explanation === "string" ? q.explanation : "",
-              });
-            }
-          }
-          console.log(`[smart-quiz] Gemini generated ${aiQuestions.length} questions for ${selectedSections.length} sections`);
-        } catch (aiErr: any) {
-          console.warn("[smart-quiz] Gemini failed, falling back to static bank:", aiErr?.message);
-          aiQuestions = [];
-        }
-      }
-
-      // Use AI questions if we got enough, otherwise fill missing with static bank per section
-      const aiByTopic = new Map<string, SmartQ[]>();
-      for (const q of aiQuestions) {
-        const topicKey = (q.text + q.correct_answer).toLowerCase();
-        // Group by approximate section — distribute evenly
-        aiByTopic.set(topicKey, [...(aiByTopic.get(topicKey) || []), q]);
-      }
-
-      // Distribute AI questions evenly across sections
-      const perSection = Math.floor(aiQuestions.length / Math.max(selectedSections.length, 1));
-      let aiPool = [...aiQuestions];
-
       for (const sec of selectedSections) {
-        const aiChunk = aiPool.splice(0, Math.max(perSection, questionsPerSection));
-        if (aiChunk.length >= questionsPerSection) {
-          questions.push(...aiChunk.slice(0, questionsPerSection));
-        } else {
-          // Fallback: top up with static bank
-          const staticQs = getQuestionsForSection(level, sec.topic, questionsPerSection);
-          if (staticQs.length > 0) {
-            const needed = questionsPerSection - aiChunk.length;
-            questions.push(...aiChunk);
-            for (const q of staticQs.slice(0, needed)) {
-              questions.push({
-                text: q.text,
-                options: q.options,
-                correct_answer: q.options[q.correct],
-                explanation: q.explanation,
-              });
-            }
-          } else {
-            // Last resort: varied placeholders so questions aren't identical
-            questions.push(...aiChunk);
-            const lastResortTemplates = [
-              { text: `Choose the correct option: She _____ English very well.`, options: ["speaks", "is speaking", "spoke", "has spoken"], correct: "speaks", exp: "Simple present for general abilities." },
-              { text: `Choose the correct form: They _____ football every Saturday.`, options: ["play", "are playing", "played", "have played"], correct: "play", exp: "Simple present for regular activities." },
-              { text: `Select the correct answer: He _____ to the gym three times a week.`, options: ["goes", "is going", "went", "has gone"], correct: "goes", exp: "Simple present for habits." },
-              { text: `Which is correct? We _____ this film before.`, options: ["have seen", "see", "saw", "are seeing"], correct: "have seen", exp: "Present perfect for past experience." },
-              { text: `Choose the right form: The sun _____ in the east.`, options: ["rises", "is rising", "rose", "has risen"], correct: "rises", exp: "Simple present for facts." },
-              { text: `Complete the sentence: She _____ her keys — she can't find them anywhere.`, options: ["has lost", "loses", "lost", "is losing"], correct: "has lost", exp: "Present perfect for recent past." },
-            ];
-            for (let i = aiChunk.length; i < questionsPerSection; i++) {
-              const tmpl = lastResortTemplates[(i + selectedSections.indexOf(sec)) % lastResortTemplates.length];
-              questions.push({
-                text: tmpl.text,
-                options: tmpl.options,
-                correct_answer: tmpl.correct,
-                explanation: `[${sec.topic}] ${tmpl.exp}`,
-              });
-            }
-          }
+        const staticQs = getQuestionsForSection(level, sec.topic, questionsPerSection);
+        for (const q of staticQs) {
+          questions.push({
+            text: q.text,
+            options: q.options,
+            correct_answer: q.options[q.correct],
+            explanation: q.explanation,
+          });
         }
       }
+      console.log(`[smart-quiz] Static bank generated ${questions.length} questions for ${selectedSections.length} sections (level=${level})`);
 
       if (questions.length === 0) {
         return res.status(400).json({ error: "No questions available for the selected sections." });
@@ -8010,98 +7898,18 @@ Generate ${selectedSections.length * questionsPerSection} questions total (${que
       }
 
       const { level, sections: selectedSections, questionsPerSection = 3 } = meta;
-      const aiApiKey = (process.env.AI_INTEGRATIONS_GEMINI_API_KEY || process.env.GEMINI_API_KEY || "").trim();
 
+      // Regenerate from expanded static bank — shuffled differently each call for variety
       type SmartQ = { text: string; options: string[]; correct_answer: string; explanation: string };
       const questions: SmartQ[] = [];
-      let aiQuestions: SmartQ[] = [];
 
-      if (aiApiKey) {
-        try {
-          const cefrMap: Record<string, string> = {
-            "Beginner": "A1", "Elementary": "A2", "Pre-Intermediate": "B1",
-            "Intermediate": "B1+", "Upper-Intermediate": "B2", "Advanced": "C1",
-          };
-          const cefr = cefrMap[level] || "B1";
-          const sectionList = selectedSections
-            .map((s: any, i: number) => `${i + 1}. [${s.type}] ${s.topic} (unit: ${s.unitTitle})`)
-            .join("\n");
-
-          const prompt = `You are an Oxford Headway English language test generator.
-Level: ${level} (CEFR ${cefr})
-Task: Generate exactly ${questionsPerSection} fill-in-the-blank multiple-choice questions for EACH topic listed below.
-Each question must be a realistic English sentence with _____ (5 underscores) as the blank.
-Provide exactly 4 options where exactly ONE is correct (index 0-3).
-Make questions different from previous attempts — use varied sentences and contexts.
-Topics:
-${sectionList}
-
-Return ONLY a valid JSON array — no markdown, no explanation, no code fences:
-[{"topic":"...","type":"grammar","text":"She _____ to work every day.","options":["goes","is going","went","has gone"],"correct":0,"explanation":"Simple present for habits."}]
-Generate ${selectedSections.length * questionsPerSection} questions total (${questionsPerSection} per topic).`;
-
-          const { GoogleGenAI } = await import("@google/genai");
-          const geminiBaseUrl = (process.env.AI_INTEGRATIONS_GEMINI_BASE_URL || "").trim();
-          const ai = geminiBaseUrl
-            ? new GoogleGenAI({ apiKey: aiApiKey, httpOptions: { apiVersion: "", baseUrl: geminiBaseUrl } })
-            : new GoogleGenAI({ apiKey: aiApiKey });
-          const aiResult = await ai.models.generateContent({
-            model: "gemini-2.0-flash",
-            contents: prompt,
-            config: { temperature: 0.9 },
-          });
-
-          const raw = (aiResult.text || "").trim()
-            .replace(/^```(?:json)?\s*/i, "").replace(/\s*```\s*$/i, "").trim();
-          const arrStart = raw.indexOf("[");
-          const arrEnd = raw.lastIndexOf("]");
-          const jsonStr = arrStart >= 0 && arrEnd > arrStart ? raw.slice(arrStart, arrEnd + 1) : raw;
-          const parsed = JSON.parse(jsonStr);
-
-          if (Array.isArray(parsed)) {
-            for (const q of parsed) {
-              if (!q || typeof q.text !== "string" || !Array.isArray(q.options) || q.options.length < 2) continue;
-              const opts: string[] = q.options.map(String);
-              const correctIdx = typeof q.correct === "number" ? q.correct : 0;
-              const correctAnswer = opts[Math.min(correctIdx, opts.length - 1)] || opts[0];
-              while (opts.length < 4) opts.push(`Option ${opts.length + 1}`);
-              aiQuestions.push({ text: q.text.trim(), options: opts.slice(0, 4), correct_answer: correctAnswer, explanation: typeof q.explanation === "string" ? q.explanation : "" });
-            }
-          }
-          console.log(`[regen] Gemini generated ${aiQuestions.length} questions for quiz ${quizId}`);
-        } catch (aiErr: any) {
-          console.warn("[regen] Gemini failed:", aiErr?.message);
-          aiQuestions = [];
-        }
-      }
-
-      // Distribute AI questions, fill gaps with static bank
-      let aiPool = [...aiQuestions];
       for (const sec of selectedSections) {
-        const aiChunk = aiPool.splice(0, questionsPerSection);
-        if (aiChunk.length >= questionsPerSection) {
-          questions.push(...aiChunk.slice(0, questionsPerSection));
-        } else {
-          const staticQs = getQuestionsForSection(level, sec.topic, questionsPerSection);
-          questions.push(...aiChunk);
-          const needed = questionsPerSection - aiChunk.length;
-          if (staticQs.length > 0) {
-            for (const q of staticQs.slice(0, needed)) {
-              questions.push({ text: q.text, options: q.options, correct_answer: q.options[q.correct], explanation: q.explanation });
-            }
-          } else {
-            const fallbacks = [
-              { text: `Choose the correct option: She _____ English very well.`, options: ["speaks","is speaking","spoke","has spoken"], correct: "speaks" },
-              { text: `Choose the correct form: They _____ football every Saturday.`, options: ["play","are playing","played","have played"], correct: "play" },
-              { text: `Select the correct answer: He _____ to the gym three times a week.`, options: ["goes","is going","went","has gone"], correct: "goes" },
-            ];
-            for (let i = aiChunk.length; i < questionsPerSection; i++) {
-              const fb = fallbacks[i % fallbacks.length];
-              questions.push({ text: fb.text, options: fb.options, correct_answer: fb.correct, explanation: `[${sec.topic}]` });
-            }
-          }
+        const staticQs = getQuestionsForSection(level, sec.topic, questionsPerSection);
+        for (const q of staticQs) {
+          questions.push({ text: q.text, options: q.options, correct_answer: q.options[q.correct], explanation: q.explanation });
         }
       }
+      console.log(`[regen] Static bank regenerated ${questions.length} questions for quiz ${quizId} (level=${level})`);
 
       if (questions.length === 0) {
         return res.status(400).json({ error: "Could not generate questions." });
