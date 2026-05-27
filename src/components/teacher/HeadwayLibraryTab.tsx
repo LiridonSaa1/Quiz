@@ -3,7 +3,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import {
   BookOpen, ChevronDown, ChevronRight, ExternalLink, X,
   Headphones, Video, Globe, FlaskConical, FileText,
-  Download, Save, Loader2, Check, AlertCircle,
+  Download, Save, Loader2, Check, AlertCircle, RefreshCw,
 } from 'lucide-react';
 import { HEADWAY_FULL_DATA, OUP, CC, type HUnit } from '../../lib/headwayData';
 import { supabase } from '../../supabase';
@@ -381,7 +381,9 @@ export default function HeadwayLibraryTab() {
   const [levelKey, setLevelKey] = useState('Pre-Intermediate');
   const [expandedUnit, setExpandedUnit] = useState<number | null>(1);
   const [selectedLesson, setSelectedLesson] = useState<OupLesson | null>(null);
-  const [savedQuizzes, setSavedQuizzes] = useState<Set<string>>(new Set());
+  // key = "${level}:${unitNum}", value = quizId
+  const [savedQuizzes, setSavedQuizzes] = useState<Map<string, string>>(new Map());
+  const [regeneratingUnit, setRegeneratingUnit] = useState<string | null>(null);
 
   const activeLevel = HW_LEVELS.find(l => l.key === levelKey) ?? HW_LEVELS[2];
   const levelData = HEADWAY_FULL_DATA[levelKey];
@@ -395,12 +397,33 @@ export default function HeadwayLibraryTab() {
       .then(r => r.ok ? r.json() : null)
       .then((json: any) => {
         if (json?.saved && Array.isArray(json.saved)) {
-          const keys = (json.saved as { level: string; unitNum: number }[]).map(e => `${e.level}:${e.unitNum}`);
-          setSavedQuizzes(new Set(keys));
+          const map = new Map<string, string>();
+          (json.saved as { level: string; unitNum: number; quizId: string }[])
+            .forEach(e => map.set(`${e.level}:${e.unitNum}`, e.quizId));
+          setSavedQuizzes(map);
         }
       })
       .catch(() => {/* non-critical */});
   }, []);
+
+  const handleRegenerate = async (unitKey: string) => {
+    const quizId = savedQuizzes.get(unitKey);
+    if (!quizId || regeneratingUnit) return;
+    setRegeneratingUnit(unitKey);
+    try {
+      const res = await authFetch('/api/teacher/headway/regenerate-quiz', {
+        method: 'POST',
+        body: JSON.stringify({ quizId }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(json?.error || 'Regeneration failed');
+      toast.success(`Quiz regenerated with ${json.questions} new AI questions!`);
+    } catch (e: any) {
+      toast.error(e?.message || 'Failed to regenerate quiz');
+    } finally {
+      setRegeneratingUnit(null);
+    }
+  };
 
   return (
     <div className="space-y-6">
@@ -468,9 +491,11 @@ export default function HeadwayLibraryTab() {
           const grammarCount = unit.grammar.length;
           const vocabCount = unit.vocabulary.length;
 
-          const hasQuiz   = savedQuizzes.has(`${levelKey}:${unit.num}`);
-          const unitAudio = (unit as any).audioZip as string | undefined;
-          const unitVideo = (unit as any).videoZip as string | undefined;
+          const unitKey   = `${levelKey}:${unit.num}`;
+          const hasQuiz   = savedQuizzes.has(unitKey);
+          const hasAudio  = !!(unit as any).audioZip;
+          const hasVideo  = !!(unit as any).videoZip;
+          const isRegen   = regeneratingUnit === unitKey;
 
           return (
             <div key={unit.num} className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
@@ -486,26 +511,43 @@ export default function HeadwayLibraryTab() {
                   <p className="text-xs text-slate-400 mt-0.5 line-clamp-1">{unit.description}</p>
                 </div>
                 <div className="flex items-center gap-2 shrink-0">
-                  {/* Quiz saved badge */}
+                  {/* Quiz saved badge + Regenerate button */}
                   {hasQuiz && (
-                    <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700">
-                      <Check className="w-2.5 h-2.5" /> Quiz
-                    </span>
+                    <>
+                      <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700">
+                        <Check className="w-2.5 h-2.5" /> Quiz
+                      </span>
+                      <button
+                        type="button"
+                        disabled={!!regeneratingUnit}
+                        onClick={e => { e.stopPropagation(); void handleRegenerate(unitKey); }}
+                        title="Regenerate quiz questions with AI"
+                        className={cn(
+                          'inline-flex items-center justify-center w-7 h-7 rounded-lg border transition-colors',
+                          isRegen
+                            ? 'bg-amber-50 border-amber-200 text-amber-600'
+                            : 'bg-slate-50 hover:bg-amber-50 border-slate-200 hover:border-amber-200 text-slate-400 hover:text-amber-600'
+                        )}>
+                        <RefreshCw className={cn('w-3.5 h-3.5', isRegen && 'animate-spin')} />
+                      </button>
+                    </>
                   )}
-                  {/* Per-unit audio download */}
-                  {unitAudio && (
-                    <a href={unitAudio} target="_blank" rel="noopener noreferrer"
+                  {/* Per-unit audio — opens OUP streaming page */}
+                  {hasAudio && (
+                    <a href={`${OUP}/student/headway/${activeLevel.slug}/audiodl${CC}`}
+                      target="_blank" rel="noopener noreferrer"
                       onClick={e => e.stopPropagation()}
-                      title="Download unit audio (ZIP)"
+                      title="Play unit audio on Oxford site"
                       className="inline-flex items-center justify-center w-7 h-7 rounded-lg bg-violet-50 hover:bg-violet-100 text-violet-600 transition-colors border border-violet-100">
                       <Headphones className="w-3.5 h-3.5" />
                     </a>
                   )}
-                  {/* Per-unit video download */}
-                  {unitVideo && (
-                    <a href={unitVideo} target="_blank" rel="noopener noreferrer"
+                  {/* Per-unit video — opens OUP streaming page */}
+                  {hasVideo && (
+                    <a href={`${OUP}/student/headway/${activeLevel.slug}/video_bandw${CC}`}
+                      target="_blank" rel="noopener noreferrer"
                       onClick={e => e.stopPropagation()}
-                      title="Download unit video (ZIP)"
+                      title="Play unit video on Oxford site"
                       className="inline-flex items-center justify-center w-7 h-7 rounded-lg bg-rose-50 hover:bg-rose-100 text-rose-600 transition-colors border border-rose-100">
                       <Video className="w-3.5 h-3.5" />
                     </a>

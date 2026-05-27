@@ -5920,6 +5920,135 @@ Rules:
     }
   });
 
+  // ── POST /api/teacher/headway/regenerate-quiz — replace all questions for a saved Headway quiz with fresh AI ones ──
+  app.post("/api/teacher/headway/regenerate-quiz", async (req: Request, res: Response) => {
+    try {
+      const caller = await assertAuthenticated(req, res);
+      if (!caller) return;
+
+      const quizId = typeof req.body?.quizId === "string" ? req.body.quizId.trim() : "";
+      if (!quizId) return res.status(400).json({ error: "quizId is required" });
+
+      // Load quiz to get level + unitNum from description tag
+      const { data: quiz, error: qErr } = await supabaseAdmin
+        .from("quizzes").select("id, description").eq("id", quizId).maybeSingle();
+      if (qErr || !quiz) return res.status(404).json({ error: "Quiz not found" });
+
+      const match = String(quiz.description || "").match(/headway:([^:\n]+):(\d+)/);
+      if (!match) return res.status(400).json({ error: "Quiz is not a Headway unit quiz" });
+
+      const level   = match[1];
+      const unitNum = parseInt(match[2], 10);
+
+      const levelData = HEADWAY_FULL_DATA[level];
+      if (!levelData) return res.status(400).json({ error: `Unknown level "${level}"` });
+      const unit = levelData.units.find(u => u.num === unitNum);
+      if (!unit)  return res.status(404).json({ error: `Unit ${unitNum} not found` });
+
+      const aiApiKey = (process.env.AI_INTEGRATIONS_GEMINI_API_KEY || process.env.GEMINI_API_KEY || "").trim();
+      if (!aiApiKey) return res.status(503).json({ error: "AI not configured — set GEMINI_API_KEY in Secrets." });
+
+      const cefrMap: Record<string, string> = {
+        "Beginner": "A1", "Elementary": "A2", "Pre-Intermediate": "B1",
+        "Intermediate": "B1+", "Upper-Intermediate": "B2", "Advanced": "C1",
+      };
+      const cefr = cefrMap[level] || "B1";
+      const topics = [
+        ...unit.grammar.map(g => ({ type: "grammar" as const, topic: g.topic })),
+        ...unit.vocabulary.map(v => ({ type: "vocabulary" as const, topic: v.topic })),
+      ];
+      if (topics.length === 0) return res.status(400).json({ error: "Unit has no grammar/vocabulary topics" });
+
+      const prompt = `You are an Oxford Headway English language test generator.
+Level: ${level} (${cefr}) — ${unit.title}
+Unit theme: ${unit.description}
+
+Generate ONE fill-in-the-blank multiple-choice question for each topic below.
+Each question must be a realistic English sentence with _____ (5 underscores) for the blank.
+Provide 4 plausible options where exactly ONE is correct. Use vocabulary and grammar appropriate for ${cefr} learners.
+
+Topics:
+${topics.map((t, i) => `${i + 1}. [${t.type}] ${t.topic}`).join("\n")}
+
+Return ONLY a valid JSON array — no markdown, no code fences, no extra text:
+[
+  {
+    "topic": "exact topic name from the list above",
+    "type": "grammar",
+    "text": "She _____ to work every day.",
+    "options": ["goes", "is going", "went", "has gone"],
+    "correct": 0,
+    "explanation": "Use Present Simple for habits and routines."
+  }
+]
+
+Rules:
+- text must contain exactly one _____ (5 underscores)
+- options must have exactly 4 items
+- correct is the 0-based index of the correct option
+- explanation is one concise sentence`;
+
+      const { GoogleGenAI } = await import("@google/genai");
+      const geminiBaseUrl = (process.env.AI_INTEGRATIONS_GEMINI_BASE_URL || "").trim();
+      const ai = geminiBaseUrl
+        ? new GoogleGenAI({ apiKey: aiApiKey, httpOptions: { apiVersion: "", baseUrl: geminiBaseUrl } })
+        : new GoogleGenAI({ apiKey: aiApiKey });
+
+      const aiResult = await ai.models.generateContent({
+        model: "gemini-2.5-flash",
+        contents: prompt,
+        config: { temperature: 0.5 },
+      });
+
+      const raw = (aiResult.text || "").trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```\s*$/i, "").trim();
+      let parsed: unknown[];
+      try { parsed = JSON.parse(raw); }
+      catch { return res.status(500).json({ error: "AI returned invalid JSON. Please try again." }); }
+      if (!Array.isArray(parsed) || parsed.length === 0) {
+        return res.status(500).json({ error: "AI did not return valid questions." });
+      }
+
+      const newRows = parsed
+        .filter((q: any) => q && typeof q.text === "string" && Array.isArray(q.options))
+        .map((q: any, idx: number) => {
+          const correctIdx = Math.max(0, Math.min(3, Number(q.correct) || 0));
+          const opts = (q.options as string[]).slice(0, 4);
+          const correctText = opts[correctIdx];
+          const shuffled = [...opts].sort(() => Math.random() - 0.5);
+          const newCorrectIdx = shuffled.indexOf(correctText);
+          const optionObjects = shuffled.map((text, i) => ({ id: String(i + 1), text }));
+          return {
+            quiz_id:       quizId,
+            type:          "multiple-choice",
+            text:          String(q.text),
+            question_text: String(q.text),
+            options:       optionObjects,
+            correct_answer: String(newCorrectIdx + 1),
+            explanation:   String(q.explanation || ""),
+            points:        1,
+            order:         idx,
+          };
+        });
+
+      // Delete old questions and insert new ones
+      await supabaseAdmin.from("questions").delete().eq("quiz_id", quizId);
+      let { error: insErr } = await supabaseAdmin.from("questions").insert(newRows);
+      if (insErr && /question_text|null value.*text/i.test(insErr.message + (insErr.details || ""))) {
+        const fallback = newRows.map(r => { const x = { ...r } as Record<string, unknown>; delete x["text"]; return x; });
+        ({ error: insErr } = await supabaseAdmin.from("questions").insert(fallback));
+      }
+      if (insErr) {
+        console.warn("[regenerate-quiz] insert warning:", insErr.message);
+        return res.status(500).json({ error: insErr.message });
+      }
+
+      return res.json({ success: true, quizId, questions: newRows.length, level, unitNum });
+    } catch (e: any) {
+      console.error("POST /api/teacher/headway/regenerate-quiz", e);
+      return res.status(500).json({ error: e?.message || "Server error" });
+    }
+  });
+
   // ── GET /api/teacher/headway/saved-quizzes — list units that already have a saved quiz ──
   app.get("/api/teacher/headway/saved-quizzes", async (req: Request, res: Response) => {
     try {
