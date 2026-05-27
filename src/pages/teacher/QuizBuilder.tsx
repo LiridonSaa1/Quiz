@@ -210,6 +210,7 @@ export default function QuizBuilder() {
   const [questionMediaTab, setQuestionMediaTab] = useState<Record<number, 'url' | 'upload'>>({});
   const [uploading, setUploading] = useState<null | 'intro' | number>(null);
   const [saving, setSaving] = useState(false);
+  const [regenerating, setRegenerating] = useState(false);
   const [autoPublish, setAutoPublish] = useState(false);
   const [publishAt, setPublishAt] = useState('');
 
@@ -571,6 +572,46 @@ export default function QuizBuilder() {
     setQuestionMediaTab({});
   };
 
+  const handleRegenerate = async () => {
+    if (!quizId) return;
+    if (!confirm('This will replace ALL current questions with new AI-generated ones. Continue?')) return;
+    setRegenerating(true);
+    try {
+      const res = await authFetch(`/api/teacher/quizzes/${encodeURIComponent(quizId)}/regenerate-questions`, {
+        method: 'POST',
+      });
+      if (!res.ok) {
+        const err = await readApiError(res);
+        throw new Error(err);
+      }
+      const json = await res.json();
+      toast.success(`Regenerated ${json.questionCount} new AI questions!`);
+      // Reload questions from server
+      const qRes = await authFetch(`/api/teacher/quizzes/${encodeURIComponent(quizId)}/questions`);
+      if (qRes.ok) {
+        const qJson = await qRes.json();
+        const rows: any[] = Array.isArray(qJson) ? qJson : (qJson.questions ?? []);
+        setQuestions(rows.map((q: any) => ({
+          id: q.id,
+          quizId: q.quiz_id,
+          type: (q.type || 'multiple-choice') as QuestionType,
+          text: q.text || q.question_text || '',
+          options: Array.isArray(q.options)
+            ? q.options.map((o: any, idx: number) => typeof o === 'string' ? { id: String(idx + 1), text: o } : o)
+            : [],
+          correctAnswer: q.correct_answer ?? '',
+          explanation: q.explanation ?? '',
+          points: q.points ?? 1,
+          order: q.order ?? 0,
+        })));
+      }
+    } catch (e: unknown) {
+      toast.error(e instanceof Error ? e.message : 'Failed to regenerate questions');
+    } finally {
+      setRegenerating(false);
+    }
+  };
+
   const updateQuestion = (index: number, data: Partial<Question>) => {
     const newQuestions = [...questions];
     newQuestions[index] = { ...newQuestions[index], ...data };
@@ -813,6 +854,27 @@ export default function QuizBuilder() {
                 </div>
                 <div className="flex flex-wrap items-center gap-3 shrink-0">
                   <AITriggerButton onClick={() => setAiOpen(true)} label="AI / Import" />
+                  {quizId && (quizData.settings as any)?.smartTestMeta && (
+                    <motion.button
+                      type="button"
+                      onClick={() => void handleRegenerate()}
+                      disabled={regenerating}
+                      whileHover={{ scale: 1.04, y: -1 }}
+                      whileTap={{ scale: 0.97 }}
+                      className="inline-flex items-center gap-2 px-4 py-2.5 rounded-2xl font-bold text-sm text-white transition-all disabled:opacity-60"
+                      style={{
+                        background: regenerating
+                          ? 'rgba(16,185,129,0.5)'
+                          : 'linear-gradient(135deg, #10b981 0%, #059669 100%)',
+                        boxShadow: '0 4px 16px rgba(16,185,129,0.35)',
+                      }}
+                    >
+                      {regenerating
+                        ? <Loader2 className="w-4 h-4 animate-spin" />
+                        : <RefreshCw className="w-4 h-4" />}
+                      {regenerating ? 'Regenerating…' : 'Regenerate AI'}
+                    </motion.button>
+                  )}
                   <LoadingButton
                     type="button"
                     onClick={() => void handleSave()}
