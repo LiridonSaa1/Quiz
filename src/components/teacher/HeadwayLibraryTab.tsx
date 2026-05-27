@@ -6,6 +6,7 @@ import {
   Download, Save, Loader2, Check, AlertCircle, RefreshCw,
 } from 'lucide-react';
 import { HEADWAY_FULL_DATA, OUP, CC, type HUnit } from '../../lib/headwayData';
+import HeadwayMediaSection from './HeadwayMediaSection';
 import { supabase } from '../../supabase';
 import { authFetch } from '../../lib/apiUrl';
 import { toast } from 'sonner';
@@ -579,7 +580,7 @@ export default function HeadwayLibraryTab() {
                         {(unit as any).videoZip && <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-rose-50 text-rose-600">Video</span>}
                       </div>
 
-                      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5">
+                      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5 mb-2">
                         {lessons.map((lesson, idx) => {
                           const lMeta = TYPE_META[lesson.type];
                           const LIcon = lMeta.icon;
@@ -610,6 +611,14 @@ export default function HeadwayLibraryTab() {
                           );
                         })}
                       </div>
+
+                      {/* In-platform media player / uploader */}
+                      <HeadwayMediaSection
+                        levelSlug={activeLevel.slug}
+                        levelKey={levelKey}
+                        unitNum={unit.num}
+                        accentColor={activeLevel.hex}
+                      />
                     </div>
                   </motion.div>
                 )}

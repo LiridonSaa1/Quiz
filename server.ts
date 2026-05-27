@@ -5920,6 +5920,80 @@ Rules:
     }
   });
 
+  // ── GET /api/teacher/headway/media — list uploaded audio/video files for a unit ──
+  app.get("/api/teacher/headway/media", async (req: Request, res: Response) => {
+    try {
+      const caller = await assertAuthenticated(req, res);
+      if (!caller) return;
+      const levelSlug = typeof req.query.levelSlug === "string" ? req.query.levelSlug.trim() : "";
+      const unitNum   = parseInt(String(req.query.unitNum ?? "0"), 10);
+      if (!levelSlug || !unitNum) return res.status(400).json({ error: "levelSlug and unitNum required" });
+
+      const files: { name: string; path: string; url: string; type: "audio" | "video" }[] = [];
+      for (const mediaType of ["audio", "video"] as const) {
+        const prefix = `${levelSlug}/${unitNum}/${mediaType}`;
+        const { data: list } = await supabaseAdmin.storage.from("headway-media").list(prefix);
+        for (const item of list ?? []) {
+          if (item.name === ".emptyFolderPlaceholder") continue;
+          const filePath = `${prefix}/${item.name}`;
+          const { data: { publicUrl } } = supabaseAdmin.storage.from("headway-media").getPublicUrl(filePath);
+          files.push({ name: item.name, path: filePath, url: publicUrl, type: mediaType });
+        }
+      }
+      return res.json({ files });
+    } catch (e: any) {
+      console.error("GET /api/teacher/headway/media", e);
+      return res.status(500).json({ error: e?.message || "Server error" });
+    }
+  });
+
+  // ── POST /api/teacher/headway/media/upload-url — get signed URL to upload a file ──
+  app.post("/api/teacher/headway/media/upload-url", async (req: Request, res: Response) => {
+    try {
+      const caller = await assertAuthenticated(req, res);
+      if (!caller) return;
+      const levelSlug = typeof req.body?.levelSlug === "string" ? req.body.levelSlug.trim() : "";
+      const unitNum   = Number(req.body?.unitNum ?? 0);
+      const type      = req.body?.type === "video" ? "video" : "audio";
+      const rawName   = typeof req.body?.filename === "string" ? req.body.filename.trim() : "file";
+      if (!levelSlug || !unitNum) return res.status(400).json({ error: "levelSlug and unitNum required" });
+
+      // Sanitise filename
+      const safe = rawName.replace(/[^a-zA-Z0-9._\-() ]/g, "_").replace(/\s+/g, "_");
+      const storagePath = `${levelSlug}/${unitNum}/${type}/${safe}`;
+
+      const { data, error } = await supabaseAdmin.storage
+        .from("headway-media")
+        .createSignedUploadUrl(storagePath);
+      if (error || !data) {
+        return res.status(500).json({ error: error?.message || "Could not create upload URL" });
+      }
+      const { data: { publicUrl } } = supabaseAdmin.storage.from("headway-media").getPublicUrl(storagePath);
+      return res.json({ signedUrl: data.signedUrl, path: storagePath, publicUrl });
+    } catch (e: any) {
+      console.error("POST /api/teacher/headway/media/upload-url", e);
+      return res.status(500).json({ error: e?.message || "Server error" });
+    }
+  });
+
+  // ── DELETE /api/teacher/headway/media — delete an uploaded media file ──
+  app.delete("/api/teacher/headway/media", async (req: Request, res: Response) => {
+    try {
+      const caller = await assertAuthenticated(req, res);
+      if (!caller) return;
+      const path = typeof req.body?.path === "string" ? req.body.path.trim() : "";
+      if (!path) return res.status(400).json({ error: "path required" });
+      // Safety: only allow paths inside headway-media bucket
+      if (path.includes("..")) return res.status(400).json({ error: "Invalid path" });
+      const { error } = await supabaseAdmin.storage.from("headway-media").remove([path]);
+      if (error) return res.status(500).json({ error: error.message });
+      return res.json({ success: true });
+    } catch (e: any) {
+      console.error("DELETE /api/teacher/headway/media", e);
+      return res.status(500).json({ error: e?.message || "Server error" });
+    }
+  });
+
   // ── POST /api/teacher/headway/regenerate-quiz — replace all questions for a saved Headway quiz with fresh AI ones ──
   app.post("/api/teacher/headway/regenerate-quiz", async (req: Request, res: Response) => {
     try {
@@ -14459,6 +14533,24 @@ async function runLiveSessionsRecordingUrlsMigration(): Promise<void> {
   }
 }
 
+async function ensureHeadwayMediaBucket(): Promise<void> {
+  try {
+    // Try creating; if it already exists the error is ignored
+    const { error } = await supabaseAdmin.storage.createBucket('headway-media', { public: true });
+    if (error && !error.message.toLowerCase().includes('already exists')) {
+      // Bucket may already exist under a different plan limit — attempt without options
+      const { error: e2 } = await supabaseAdmin.storage.createBucket('headway-media', {});
+      if (e2 && !e2.message.toLowerCase().includes('already exists')) {
+        console.warn('[storage] headway-media bucket setup:', e2.message);
+        return;
+      }
+    }
+    console.log('[storage] headway-media bucket ready ✓');
+  } catch (e: any) {
+    console.warn('[storage] headway-media bucket failed:', e?.message);
+  }
+}
+
 async function ensureAssignmentFilesBucket(): Promise<void> {
   try {
     const { error } = await supabaseAdmin.storage.createBucket('assignment-files', {
@@ -14581,6 +14673,7 @@ async function startServer() {
   void runLiveSessionsRecordingUrlsMigration();
   void runQuizSectionsMigration();
   void ensureAssignmentFilesBucket();
+  void ensureHeadwayMediaBucket();
   void fixHeadwayQuizCorrectAnswers();
 
   const httpServer = http.createServer();
