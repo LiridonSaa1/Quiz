@@ -27,6 +27,30 @@ const stripProfilesJoin = (sql: string): string =>
       `LEFT JOIN (SELECT NULL::uuid AS id, NULL::text AS display_name, NULL::text AS email) ${alias} ON false`,
   );
 
+/** Deterministic seeded shuffle (Fisher-Yates with xorshift32 PRNG). */
+function seededShuffle<T>(arr: T[], seed: string): T[] {
+  // Hash the seed string into a 32-bit integer
+  let h = 0x12345678;
+  for (let i = 0; i < seed.length; i++) {
+    h ^= seed.charCodeAt(i);
+    h = Math.imul(h, 0x9e3779b9);
+    h ^= h >>> 16;
+  }
+  // xorshift32 PRNG
+  const next = () => {
+    h ^= h << 13;
+    h ^= h >> 17;
+    h ^= h << 5;
+    return (h >>> 0) / 0xffffffff;
+  };
+  const out = [...arr];
+  for (let i = out.length - 1; i > 0; i--) {
+    const j = Math.floor(next() * (i + 1));
+    [out[i], out[j]] = [out[j], out[i]];
+  }
+  return out;
+}
+
 const getPool = async () => {
   const connectionString = process.env.DATABASE_URL?.trim();
   if (!connectionString) return null;
@@ -10031,11 +10055,15 @@ Rules:
 
       const { data: quizRow, error: quizErr } = await supabaseAdmin
         .from('quizzes')
-        .select('id,course_id,lesson_id')
+        .select('id,course_id,lesson_id,settings')
         .eq('id', quizId)
         .maybeSingle();
       if (quizErr) throw quizErr;
       if (!quizRow?.id) return res.status(404).json({ error: 'Quiz not found' });
+
+      const quizSettings = (quizRow as any)?.settings;
+      const doShuffleQuestions = quizSettings?.shuffleQuestions === true;
+      const doShuffleAnswers = quizSettings?.shuffleAnswers === true;
 
       let resolvedCourseId = String((quizRow as any)?.course_id || '').trim();
       if (!resolvedCourseId) {
@@ -10116,7 +10144,28 @@ Rules:
       }
       if (qRes.error) throw qRes.error;
 
-      return res.json({ success: true, questions: qRes.data || [] });
+      let questions: any[] = qRes.data || [];
+
+      if (doShuffleQuestions || doShuffleAnswers) {
+        const seed = `${caller.userId}:${quizId}`;
+        if (doShuffleQuestions) {
+          questions = seededShuffle(questions, seed);
+        }
+        if (doShuffleAnswers) {
+          questions = questions.map((q: any) => ({
+            ...q,
+            options: Array.isArray(q.options) && q.options.length > 1
+              ? seededShuffle(q.options, `${seed}:${String(q.id)}`)
+              : q.options,
+          }));
+        }
+      }
+
+      return res.json({
+        success: true,
+        questions,
+        shuffled: { questions: doShuffleQuestions, answers: doShuffleAnswers },
+      });
     } catch (e: any) {
       return res.status(500).json({ error: e?.message || 'Failed to load quiz questions' });
     }

@@ -249,6 +249,9 @@ export default function QuizTaking() {
         throw new Error(String(questionsJson?.error || 'Failed to load quiz questions'));
       }
 
+      const serverShuffled: { questions?: boolean; answers?: boolean } =
+        (questionsJson as any)?.shuffled ?? {};
+
       const builtQuestions = (((questionsJson as any)?.questions as any[]) || []).map((q) => ({
         id: q.id,
         quizId: q.quiz_id,
@@ -323,18 +326,20 @@ export default function QuizTaking() {
       let formattedQuestions: Question[] = builtQuestions;
 
       if (savedSnapshot?.questionOrder?.length) {
+        // Restore previously-established question order from snapshot
         const restored = savedSnapshot.questionOrder
           .map((id) => questionById.get(String(id)))
           .filter(Boolean) as Question[];
         if (restored.length === builtQuestions.length) {
           formattedQuestions = restored;
         }
-      } else if (formattedQuiz.settings.shuffleQuestions) {
+      } else if (!serverShuffled.questions && formattedQuiz.settings.shuffleQuestions) {
+        // Only shuffle client-side if the server hasn't already done it
         formattedQuestions = [...builtQuestions].sort(() => Math.random() - 0.5);
       }
 
-      // Shuffle answer options if enabled (shuffle once at load, not on every render)
-      if (formattedQuiz.settings.shuffleAnswers) {
+      // Shuffle answer options if enabled — skip if server already shuffled them
+      if (!serverShuffled.answers && formattedQuiz.settings.shuffleAnswers) {
         formattedQuestions = formattedQuestions.map((q) => ({
           ...q,
           options: Array.isArray(q.options) && q.options.length > 1
