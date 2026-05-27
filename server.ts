@@ -3953,6 +3953,89 @@ When giving instructions, number each step clearly. Be precise and technical whe
     }
   });
 
+  // ── GET /api/teacher/peer-teachers — list of other active teachers (for transfer target picker) ──
+  app.get("/api/teacher/peer-teachers", async (req: Request, res: Response) => {
+    try {
+      const caller = await assertAuthenticated(req, res);
+      if (!caller) return;
+      if (caller.role !== "teacher" && caller.role !== "admin") {
+        return res.status(403).json({ error: "Forbidden" });
+      }
+      const { data, error } = await supabaseAdmin
+        .from("profiles")
+        .select("id, display_name, email, status")
+        .eq("role", "teacher")
+        .neq("id", caller.userId)
+        .eq("status", "active")
+        .order("display_name", { ascending: true });
+      if (error) throw error;
+      return res.json({ teachers: data ?? [] });
+    } catch (e: any) {
+      console.error("GET /api/teacher/peer-teachers", e);
+      return res.status(500).json({ error: e?.message || "Failed to load teachers" });
+    }
+  });
+
+  // ── POST /api/teacher/students/:studentId/transfer — reassign a student to a different teacher ──
+  app.post("/api/teacher/students/:studentId/transfer", async (req: Request, res: Response) => {
+    try {
+      const caller = await assertAuthenticated(req, res);
+      if (!caller) return;
+      if (caller.role !== "teacher" && caller.role !== "admin") {
+        return res.status(403).json({ error: "Forbidden" });
+      }
+
+      const studentId = String(req.params.studentId || "").trim();
+      const targetTeacherId = typeof req.body?.targetTeacherId === "string" ? req.body.targetTeacherId.trim() : "";
+      if (!studentId) return res.status(400).json({ error: "studentId is required" });
+      if (!targetTeacherId) return res.status(400).json({ error: "targetTeacherId is required" });
+
+      // Verify student exists and belongs to the caller (teachers) or any (admin)
+      const { data: student, error: sErr } = await supabaseAdmin
+        .from("profiles")
+        .select("id, role, teacher_id, display_name, email")
+        .eq("id", studentId)
+        .maybeSingle();
+      if (sErr) throw sErr;
+      if (!student) return res.status(404).json({ error: "Student not found" });
+      if (student.role !== "student") return res.status(400).json({ error: "Target user is not a student" });
+
+      if (caller.role === "teacher") {
+        const teacherIds = await getTeacherIdCandidates(caller.userId);
+        const scopedIds = teacherIds.length > 0 ? teacherIds : [caller.userId];
+        if (!scopedIds.includes(String(student.teacher_id))) {
+          return res.status(403).json({ error: "Forbidden: student is not linked to your account" });
+        }
+      }
+
+      // Verify target teacher exists and has the teacher role
+      const { data: targetTeacher, error: tErr } = await supabaseAdmin
+        .from("profiles")
+        .select("id, role, display_name")
+        .eq("id", targetTeacherId)
+        .maybeSingle();
+      if (tErr) throw tErr;
+      if (!targetTeacher) return res.status(404).json({ error: "Target teacher not found" });
+      if (targetTeacher.role !== "teacher") return res.status(400).json({ error: "Target user is not a teacher" });
+
+      // Perform the transfer
+      const { error: updErr } = await supabaseAdmin
+        .from("profiles")
+        .update({ teacher_id: targetTeacherId })
+        .eq("id", studentId);
+      if (updErr) throw updErr;
+
+      console.log(`[transfer] Student ${studentId} transferred from teacher ${caller.userId} → ${targetTeacherId}`);
+      return res.json({
+        success: true,
+        message: `${student.display_name || student.email} transferred to ${targetTeacher.display_name}`,
+      });
+    } catch (e: any) {
+      console.error("POST /api/teacher/students/:studentId/transfer", e);
+      return res.status(500).json({ error: e?.message || "Failed to transfer student" });
+    }
+  });
+
   // Teacher quizzes (service role) — same scoping as courses; avoids PostgREST 400s when RLS/schema differ.
   const teacherQuizzesGetHandler = async (req: Request, res: Response) => {
     try {
