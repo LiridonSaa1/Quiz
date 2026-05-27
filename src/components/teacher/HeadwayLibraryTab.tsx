@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import {
   BookOpen, ChevronDown, ChevronRight, ExternalLink, X,
@@ -381,12 +381,26 @@ export default function HeadwayLibraryTab() {
   const [levelKey, setLevelKey] = useState('Pre-Intermediate');
   const [expandedUnit, setExpandedUnit] = useState<number | null>(1);
   const [selectedLesson, setSelectedLesson] = useState<OupLesson | null>(null);
+  const [savedQuizzes, setSavedQuizzes] = useState<Set<string>>(new Set());
 
   const activeLevel = HW_LEVELS.find(l => l.key === levelKey) ?? HW_LEVELS[2];
   const levelData = HEADWAY_FULL_DATA[levelKey];
   const units = levelData?.units ?? [];
 
   const toggleUnit = (num: number) => setExpandedUnit(p => p === num ? null : num);
+
+  // Load saved quizzes once on mount
+  useEffect(() => {
+    authFetch('/api/teacher/headway/saved-quizzes')
+      .then(r => r.ok ? r.json() : null)
+      .then((json: any) => {
+        if (json?.saved && Array.isArray(json.saved)) {
+          const keys = (json.saved as { level: string; unitNum: number }[]).map(e => `${e.level}:${e.unitNum}`);
+          setSavedQuizzes(new Set(keys));
+        }
+      })
+      .catch(() => {/* non-critical */});
+  }, []);
 
   return (
     <div className="space-y-6">
@@ -454,6 +468,10 @@ export default function HeadwayLibraryTab() {
           const grammarCount = unit.grammar.length;
           const vocabCount = unit.vocabulary.length;
 
+          const hasQuiz   = savedQuizzes.has(`${levelKey}:${unit.num}`);
+          const unitAudio = (unit as any).audioZip as string | undefined;
+          const unitVideo = (unit as any).videoZip as string | undefined;
+
           return (
             <div key={unit.num} className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
               {/* Unit header (accordion toggle) */}
@@ -468,6 +486,30 @@ export default function HeadwayLibraryTab() {
                   <p className="text-xs text-slate-400 mt-0.5 line-clamp-1">{unit.description}</p>
                 </div>
                 <div className="flex items-center gap-2 shrink-0">
+                  {/* Quiz saved badge */}
+                  {hasQuiz && (
+                    <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700">
+                      <Check className="w-2.5 h-2.5" /> Quiz
+                    </span>
+                  )}
+                  {/* Per-unit audio download */}
+                  {unitAudio && (
+                    <a href={unitAudio} target="_blank" rel="noopener noreferrer"
+                      onClick={e => e.stopPropagation()}
+                      title="Download unit audio (ZIP)"
+                      className="inline-flex items-center justify-center w-7 h-7 rounded-lg bg-violet-50 hover:bg-violet-100 text-violet-600 transition-colors border border-violet-100">
+                      <Headphones className="w-3.5 h-3.5" />
+                    </a>
+                  )}
+                  {/* Per-unit video download */}
+                  {unitVideo && (
+                    <a href={unitVideo} target="_blank" rel="noopener noreferrer"
+                      onClick={e => e.stopPropagation()}
+                      title="Download unit video (ZIP)"
+                      className="inline-flex items-center justify-center w-7 h-7 rounded-lg bg-rose-50 hover:bg-rose-100 text-rose-600 transition-colors border border-rose-100">
+                      <Video className="w-3.5 h-3.5" />
+                    </a>
+                  )}
                   <span className={cn('text-[10px] font-bold px-2 py-0.5 rounded-full', activeLevel.badge)}>
                     {lessons.length} lessons
                   </span>

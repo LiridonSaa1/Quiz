@@ -5673,7 +5673,7 @@ When giving instructions, number each step clearly. Be precise and technical whe
         course_id:     courseId,
         teacher_id:    userId,
         title:         `${unit.title.replace(/^Unit \d+ — /, "")} — Test Builder`,
-        description:   `Grammar and vocabulary test for ${unit.title}. Also open the Oxford Headway Test Builder: ${tbUrl}`,
+        description:   `Grammar and vocabulary test for ${unit.title}. Also open the Oxford Headway Test Builder: ${tbUrl}\nheadway:${level}:${unitNum}`,
         time_limit:    20,
         passing_score: 70,
         published:     false,
@@ -5732,15 +5732,18 @@ Return ONLY a valid JSON array — no markdown, no code fences:
               .map((q: any, idx: number) => {
                 const correctIdx = Math.max(0, Math.min(3, Number(q.correct) || 0));
                 const opts = (q.options as string[]).slice(0, 4);
-                // Store options as {id, text} objects so QuizBuilder can match correct_answer by id
-                const optionObjects = opts.map((text, i) => ({ id: String(i + 1), text }));
+                const correctText = opts[correctIdx];
+                // Shuffle options so correct answer is not always first
+                const shuffled = [...opts].sort(() => Math.random() - 0.5);
+                const newCorrectIdx = shuffled.indexOf(correctText);
+                const optionObjects = shuffled.map((text, i) => ({ id: String(i + 1), text }));
                 return {
                   quiz_id:       quizData.id,
                   type:          "multiple-choice",
                   text:          String(q.text),
                   question_text: String(q.text),
                   options:       optionObjects,
-                  correct_answer: String(correctIdx + 1), // "1"-based id matching QuizBuilder convention
+                  correct_answer: String(newCorrectIdx + 1),
                   explanation:   String(q.explanation || ""),
                   points:        1,
                   order:         idx,
@@ -5887,25 +5890,58 @@ Rules:
         return res.status(500).json({ error: "AI did not return an array." });
       }
 
-      // Sanitise each question
+      // Sanitise each question — shuffle options so correct answer isn't always position 0
       const sanitised = questions
         .filter((q: any) => q && typeof q.text === "string" && Array.isArray(q.options))
-        .map((q: any, idx: number) => ({
-          order:       idx,
-          type:        q.type === "vocabulary" ? "vocabulary" : "grammar",
-          topic:       String(q.topic || ""),
-          questionText: String(q.text || ""),
-          text:        String(q.text || ""),
-          options:     (q.options as string[]).slice(0, 4),
-          correctIndex: Math.max(0, Math.min(3, Number(q.correct) || 0)),
-          correct_answer: (q.options as string[])[Math.max(0, Math.min(3, Number(q.correct) || 0))],
-          explanation: String(q.explanation || ""),
-          oxfordUrl:   `${OUP}/student/headway/${levelData.slug}/testbuilder${CC}`,
-        }));
+        .map((q: any, idx: number) => {
+          const correctIdx = Math.max(0, Math.min(3, Number(q.correct) || 0));
+          const opts = (q.options as string[]).slice(0, 4);
+          const correctText = opts[correctIdx];
+          const shuffled = [...opts].sort(() => Math.random() - 0.5);
+          const newCorrectIdx = shuffled.indexOf(correctText);
+          return {
+            order:        idx,
+            type:         q.type === "vocabulary" ? "vocabulary" : "grammar",
+            topic:        String(q.topic || ""),
+            questionText: String(q.text || ""),
+            text:         String(q.text || ""),
+            options:      shuffled,
+            correctIndex: newCorrectIdx,
+            correct_answer: correctText,
+            explanation:  String(q.explanation || ""),
+            oxfordUrl:    `${OUP}/student/headway/${levelData.slug}/testbuilder${CC}`,
+          };
+        });
 
       return res.json({ level, unitNum, title: unit.title, questions: sanitised });
     } catch (e: any) {
       console.error("POST /api/teacher/headway/generate-questions", e);
+      return res.status(500).json({ error: e?.message || "Server error" });
+    }
+  });
+
+  // ── GET /api/teacher/headway/saved-quizzes — list units that already have a saved quiz ──
+  app.get("/api/teacher/headway/saved-quizzes", async (req: Request, res: Response) => {
+    try {
+      const caller = await assertAuthenticated(req, res);
+      if (!caller) return;
+
+      // Fetch all quizzes whose description contains the headway tag
+      const { data: quizzes } = await supabaseAdmin
+        .from("quizzes")
+        .select("id, description")
+        .ilike("description", "%headway:%");
+
+      const saved: { level: string; unitNum: number; quizId: string }[] = [];
+      for (const quiz of quizzes ?? []) {
+        const match = String(quiz.description || "").match(/headway:([^:\n]+):(\d+)/);
+        if (match) {
+          saved.push({ level: match[1], unitNum: parseInt(match[2], 10), quizId: quiz.id });
+        }
+      }
+      return res.json({ saved });
+    } catch (e: any) {
+      console.error("GET /api/teacher/headway/saved-quizzes", e);
       return res.status(500).json({ error: e?.message || "Server error" });
     }
   });
