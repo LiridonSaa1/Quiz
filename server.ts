@@ -5733,20 +5733,20 @@ Return ONLY a valid JSON array — no markdown, no code fences:
                 const correctIdx = Math.max(0, Math.min(3, Number(q.correct) || 0));
                 const opts = (q.options as string[]).slice(0, 4);
                 const correctText = opts[correctIdx];
-                // Shuffle options so correct answer is not always first
                 const shuffled = [...opts].sort(() => Math.random() - 0.5);
-                const newCorrectIdx = shuffled.indexOf(correctText);
+                const foundIdx = shuffled.indexOf(correctText);
+                const safeIdx = foundIdx === -1 ? 0 : foundIdx;
                 const optionObjects = shuffled.map((text, i) => ({ id: String(i + 1), text }));
                 return {
-                  quiz_id:       quizData.id,
-                  type:          "multiple-choice",
-                  text:          String(q.text),
-                  question_text: String(q.text),
-                  options:       optionObjects,
-                  correct_answer: String(newCorrectIdx + 1),
-                  explanation:   String(q.explanation || ""),
-                  points:        1,
-                  order:         idx,
+                  quiz_id:        quizData.id,
+                  type:           "multiple-choice",
+                  text:           String(q.text),
+                  question_text:  String(q.text),
+                  options:        optionObjects,
+                  correct_answer: String(safeIdx + 1),
+                  explanation:    String(q.explanation || ""),
+                  points:         1,
+                  order:          idx,
                 };
               });
           }
@@ -5757,7 +5757,30 @@ Return ONLY a valid JSON array — no markdown, no code fences:
 
       // Fall back to static placeholder questions if AI didn't produce anything
       if (questionRows.length === 0) {
-        questionRows = buildHwUnitQuestions(unit, levelData.slug).map(q => ({ ...q, quiz_id: quizData.id }));
+        questionRows = buildHwUnitQuestions(unit, levelData.slug).map((q, idx) => {
+          const correctText = q.options[q.correctIndex];
+          const shuffled = [...q.options].sort(() => Math.random() - 0.5);
+          const foundIdx = shuffled.indexOf(correctText);
+          const safeIdx = foundIdx === -1 ? 0 : foundIdx;
+          const optionObjects = shuffled.map((text, i) => ({ id: String(i + 1), text }));
+          return {
+            quiz_id:        quizData.id,
+            type:           "multiple-choice",
+            text:           q.questionText,
+            question_text:  q.questionText,
+            options:        optionObjects,
+            correct_answer: String(safeIdx + 1),
+            explanation:    q.explanation,
+            points:         1,
+            order:          idx,
+          };
+        });
+      }
+
+      // Set points so total = 100 (e.g. 10 questions → 10 pts each)
+      if (questionRows.length > 0) {
+        const pointsEach = Math.round(100 / questionRows.length);
+        questionRows = questionRows.map(r => ({ ...r, points: pointsEach }));
       }
 
       if (questionRows.length > 0) {
@@ -5898,18 +5921,19 @@ Rules:
           const opts = (q.options as string[]).slice(0, 4);
           const correctText = opts[correctIdx];
           const shuffled = [...opts].sort(() => Math.random() - 0.5);
-          const newCorrectIdx = shuffled.indexOf(correctText);
+          const foundIdx = shuffled.indexOf(correctText);
+          const safeIdx = foundIdx === -1 ? 0 : foundIdx;
           return {
-            order:        idx,
-            type:         q.type === "vocabulary" ? "vocabulary" : "grammar",
-            topic:        String(q.topic || ""),
-            questionText: String(q.text || ""),
-            text:         String(q.text || ""),
-            options:      shuffled,
-            correctIndex: newCorrectIdx,
-            correct_answer: correctText,
-            explanation:  String(q.explanation || ""),
-            oxfordUrl:    `${OUP}/student/headway/${levelData.slug}/testbuilder${CC}`,
+            order:          idx,
+            type:           q.type === "vocabulary" ? "vocabulary" : "grammar",
+            topic:          String(q.topic || ""),
+            questionText:   String(q.text || ""),
+            text:           String(q.text || ""),
+            options:        shuffled,
+            correctIndex:   safeIdx,
+            correct_answer: shuffled[safeIdx],
+            explanation:    String(q.explanation || ""),
+            oxfordUrl:      `${OUP}/student/headway/${levelData.slug}/testbuilder${CC}`,
           };
         });
 
@@ -6082,27 +6106,30 @@ Rules:
         return res.status(500).json({ error: "AI did not return valid questions." });
       }
 
-      const newRows = parsed
+      const rawRows = parsed
         .filter((q: any) => q && typeof q.text === "string" && Array.isArray(q.options))
         .map((q: any, idx: number) => {
           const correctIdx = Math.max(0, Math.min(3, Number(q.correct) || 0));
           const opts = (q.options as string[]).slice(0, 4);
           const correctText = opts[correctIdx];
           const shuffled = [...opts].sort(() => Math.random() - 0.5);
-          const newCorrectIdx = shuffled.indexOf(correctText);
+          const foundIdx = shuffled.indexOf(correctText);
+          const safeIdx = foundIdx === -1 ? 0 : foundIdx;
           const optionObjects = shuffled.map((text, i) => ({ id: String(i + 1), text }));
           return {
-            quiz_id:       quizId,
-            type:          "multiple-choice",
-            text:          String(q.text),
-            question_text: String(q.text),
-            options:       optionObjects,
-            correct_answer: String(newCorrectIdx + 1),
-            explanation:   String(q.explanation || ""),
-            points:        1,
-            order:         idx,
+            quiz_id:        quizId,
+            type:           "multiple-choice",
+            text:           String(q.text),
+            question_text:  String(q.text),
+            options:        optionObjects,
+            correct_answer: String(safeIdx + 1),
+            explanation:    String(q.explanation || ""),
+            points:         1,
+            order:          idx,
           };
         });
+      const pointsEach = rawRows.length > 0 ? Math.round(100 / rawRows.length) : 10;
+      const newRows = rawRows.map(r => ({ ...r, points: pointsEach }));
 
       // Delete old questions and insert new ones
       await supabaseAdmin.from("questions").delete().eq("quiz_id", quizId);
