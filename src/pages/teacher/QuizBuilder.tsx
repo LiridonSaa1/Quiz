@@ -592,19 +592,30 @@ export default function QuizBuilder() {
       if (qRes.ok) {
         const qJson = await qRes.json();
         const rows: any[] = Array.isArray(qJson) ? qJson : (qJson.questions ?? []);
-        setQuestions(rows.map((q: any) => ({
-          id: q.id,
-          quizId: q.quiz_id,
-          type: (q.type || 'multiple-choice') as QuestionType,
-          text: q.text || q.question_text || '',
-          options: Array.isArray(q.options)
-            ? q.options.map((o: any, idx: number) => typeof o === 'string' ? { id: String(idx + 1), text: o } : o)
-            : [],
-          correctAnswer: q.correct_answer ?? '',
-          explanation: q.explanation ?? '',
-          points: q.points ?? 1,
-          order: q.order ?? 0,
-        })));
+        setQuestions(rows.map((q: any) => {
+          const optObjects: Array<{ id: string; text: string }> = Array.isArray(q.options)
+            ? q.options.map((o: any, idx: number) =>
+                typeof o === 'string' ? { id: String(idx + 1), text: o } : o
+              )
+            : [];
+          // Resolve correctAnswer: prefer 1-based index string matching opt.id;
+          // fall back to finding by text (handles old rows stored before this fix).
+          const rawCA = q.correct_answer ?? '';
+          const idMatch = optObjects.find(opt => opt.id === rawCA);
+          const textMatch = !idMatch ? optObjects.find(opt => opt.text === rawCA) : null;
+          const correctAnswer = idMatch ? idMatch.id : (textMatch ? textMatch.id : rawCA);
+          return {
+            id: q.id,
+            quizId: q.quiz_id,
+            type: (q.type || 'multiple-choice') as QuestionType,
+            text: q.text || q.question_text || '',
+            options: optObjects,
+            correctAnswer,
+            explanation: q.explanation ?? '',
+            points: q.points ?? 1,
+            order: q.order ?? 0,
+          };
+        }));
       }
     } catch (e: unknown) {
       toast.error(e instanceof Error ? e.message : 'Failed to regenerate questions');

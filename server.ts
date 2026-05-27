@@ -7887,7 +7887,8 @@ Rules:
           questions.push({
             text: q.text,
             options: q.options,
-            correct_answer: q.options[q.correct],
+            // Store as 1-based index string to match QuizBuilder's opt.id convention ("1","2","3","4")
+            correct_answer: String((q.correct ?? 0) + 1),
             explanation: q.explanation,
           });
         }
@@ -7998,7 +7999,8 @@ Rules:
       for (const sec of selectedSections) {
         const staticQs = getQuestionsForSection(level, sec.topic, questionsPerSection);
         for (const q of staticQs) {
-          questions.push({ text: q.text, options: q.options, correct_answer: q.options[q.correct], explanation: q.explanation });
+          // Store correct_answer as 1-based index string to match QuizBuilder's opt.id convention
+          questions.push({ text: q.text, options: q.options, correct_answer: String((q.correct ?? 0) + 1), explanation: q.explanation });
         }
       }
       console.log(`[regen] Static bank regenerated ${questions.length} questions for quiz ${quizId} (level=${level})`);
