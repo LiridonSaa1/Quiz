@@ -1889,6 +1889,10 @@ When giving instructions, number each step clearly. Be precise and technical whe
     if (/published/i.test(hay) && /schema cache|could not find|does not exist|42703|undefined column/i.test(low)) {
       return true;
     }
+    // Generated/computed column: "column 'published' can only be updated to DEFAULT"
+    if (/published/i.test(hay) && /can only be updated to default/i.test(low)) {
+      return true;
+    }
     return false;
   };
 
@@ -7878,7 +7882,7 @@ Rules:
         if ((e.code === "PGRST204" || /schema cache|could not find|does not exist/i.test(msg)) && msg.includes("settings") && "settings" in payload) {
           const { settings: _s, ...rest } = payload; void _s; payload = rest; continue;
         }
-        if ((e.code === "PGRST204" || /schema cache|could not find|does not exist/i.test(msg)) && msg.includes("published") && "published" in payload) {
+        if (missingQuizzesPublishedColumn(e) && "published" in payload) {
           const { published: _p, ...rest } = payload; void _p; payload = rest; continue;
         }
         if ((e.code === "PGRST204" || e.code === "42703") && msg.includes("publish_at") && "publish_at" in payload) {
