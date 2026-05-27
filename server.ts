@@ -7787,28 +7787,122 @@ Rules:
         }
       }
 
-      // Build questions from static bank (OUP Headway style, no AI needed)
-      const questions: Array<{ text: string; options: string[]; correct_answer: string; explanation: string }> = [];
-      for (const sec of selectedSections) {
-        const staticQs = getQuestionsForSection(level, sec.topic, questionsPerSection);
-        if (staticQs.length > 0) {
-          for (const q of staticQs) {
-            questions.push({
-              text: q.text,
-              options: q.options,
-              correct_answer: q.options[q.correct],
-              explanation: q.explanation,
-            });
+      // Build questions — try Gemini AI first (varied each run), fallback to static bank
+      type SmartQ = { text: string; options: string[]; correct_answer: string; explanation: string };
+      const questions: SmartQ[] = [];
+
+      const aiApiKey = (process.env.AI_INTEGRATIONS_GEMINI_API_KEY || process.env.GEMINI_API_KEY || "").trim();
+      let aiQuestions: SmartQ[] = [];
+
+      if (aiApiKey && selectedSections.length > 0) {
+        try {
+          const cefrMap: Record<string, string> = {
+            "Beginner": "A1", "Elementary": "A2", "Pre-Intermediate": "B1",
+            "Intermediate": "B1+", "Upper-Intermediate": "B2", "Advanced": "C1",
+          };
+          const cefr = cefrMap[level] || "B1";
+
+          const sectionList = selectedSections
+            .map((s, i) => `${i + 1}. [${s.type}] ${s.topic} (unit: ${s.unitTitle})`)
+            .join("\n");
+
+          const prompt = `You are an Oxford Headway English language test generator.
+Level: ${level} (CEFR ${cefr})
+Task: Generate exactly ${questionsPerSection} fill-in-the-blank multiple-choice questions for EACH topic listed below.
+Each question must be a realistic English sentence with _____ (5 underscores) as the blank.
+Provide exactly 4 options where exactly ONE is correct (index 0-3).
+Make questions varied, natural, and suitable for ${level} learners.
+Topics:
+${sectionList}
+
+Return ONLY a valid JSON array — no markdown, no explanation, no code fences:
+[{"topic":"...","type":"grammar","text":"She _____ to work every day.","options":["goes","is going","went","has gone"],"correct":0,"explanation":"Simple present for habits."}]
+Generate ${selectedSections.length * questionsPerSection} questions total (${questionsPerSection} per topic).`;
+
+          const { GoogleGenAI } = await import("@google/genai");
+          const geminiBaseUrl = (process.env.AI_INTEGRATIONS_GEMINI_BASE_URL || "").trim();
+          const ai = geminiBaseUrl
+            ? new GoogleGenAI({ apiKey: aiApiKey, httpOptions: { apiVersion: "", baseUrl: geminiBaseUrl } })
+            : new GoogleGenAI({ apiKey: aiApiKey });
+          const aiResult = await ai.models.generateContent({
+            model: "gemini-2.5-flash",
+            contents: prompt,
+            config: { temperature: 0.85 },
+          });
+
+          const raw = (aiResult.text || "").trim()
+            .replace(/^```(?:json)?\s*/i, "").replace(/\s*```\s*$/i, "").trim();
+
+          // Find JSON array in response
+          const arrStart = raw.indexOf("[");
+          const arrEnd = raw.lastIndexOf("]");
+          const jsonStr = arrStart >= 0 && arrEnd > arrStart ? raw.slice(arrStart, arrEnd + 1) : raw;
+          const parsed = JSON.parse(jsonStr);
+
+          if (Array.isArray(parsed)) {
+            for (const q of parsed) {
+              if (!q || typeof q.text !== "string" || !Array.isArray(q.options) || q.options.length < 2) continue;
+              const opts: string[] = q.options.map(String);
+              const correctIdx = typeof q.correct === "number" ? q.correct : 0;
+              const correctAnswer = opts[Math.min(correctIdx, opts.length - 1)] || opts[0];
+              // Ensure exactly 4 options
+              while (opts.length < 4) opts.push(`Option ${opts.length + 1}`);
+              aiQuestions.push({
+                text: q.text.trim(),
+                options: opts.slice(0, 4),
+                correct_answer: correctAnswer,
+                explanation: typeof q.explanation === "string" ? q.explanation : "",
+              });
+            }
           }
+          console.log(`[smart-quiz] Gemini generated ${aiQuestions.length} questions for ${selectedSections.length} sections`);
+        } catch (aiErr: any) {
+          console.warn("[smart-quiz] Gemini failed, falling back to static bank:", aiErr?.message);
+          aiQuestions = [];
+        }
+      }
+
+      // Use AI questions if we got enough, otherwise fill missing with static bank per section
+      const aiByTopic = new Map<string, SmartQ[]>();
+      for (const q of aiQuestions) {
+        const topicKey = (q.text + q.correct_answer).toLowerCase();
+        // Group by approximate section — distribute evenly
+        aiByTopic.set(topicKey, [...(aiByTopic.get(topicKey) || []), q]);
+      }
+
+      // Distribute AI questions evenly across sections
+      const perSection = Math.floor(aiQuestions.length / Math.max(selectedSections.length, 1));
+      let aiPool = [...aiQuestions];
+
+      for (const sec of selectedSections) {
+        const aiChunk = aiPool.splice(0, Math.max(perSection, questionsPerSection));
+        if (aiChunk.length >= questionsPerSection) {
+          questions.push(...aiChunk.slice(0, questionsPerSection));
         } else {
-          // Fallback: generic fill-in-the-blank placeholder for topics without static questions yet
-          for (let i = 0; i < questionsPerSection; i++) {
-            questions.push({
-              text: `Choose the correct form for "${sec.topic}": She _____ to work every day.`,
-              options: ["goes", "is going", "went", "has gone"],
-              correct_answer: "goes",
-              explanation: `This tests ${sec.topic} — the correct answer uses the appropriate form.`,
-            });
+          // Fallback: top up with static bank
+          const staticQs = getQuestionsForSection(level, sec.topic, questionsPerSection);
+          if (staticQs.length > 0) {
+            const needed = questionsPerSection - aiChunk.length;
+            questions.push(...aiChunk);
+            for (const q of staticQs.slice(0, needed)) {
+              questions.push({
+                text: q.text,
+                options: q.options,
+                correct_answer: q.options[q.correct],
+                explanation: q.explanation,
+              });
+            }
+          } else {
+            // Last resort: generic placeholder
+            questions.push(...aiChunk);
+            for (let i = aiChunk.length; i < questionsPerSection; i++) {
+              questions.push({
+                text: `Choose the correct form for "${sec.topic}": She _____ to work every day.`,
+                options: ["goes", "is going", "went", "has gone"],
+                correct_answer: "goes",
+                explanation: `This tests ${sec.topic} — use simple present for habits.`,
+              });
+            }
           }
         }
       }
