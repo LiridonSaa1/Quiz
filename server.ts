@@ -4025,6 +4025,27 @@ When giving instructions, number each step clearly. Be precise and technical whe
         .eq("id", studentId);
       if (updErr) throw updErr;
 
+      // Get the from-teacher name for the log
+      const { data: fromTeacherProfile } = await supabaseAdmin
+        .from("profiles")
+        .select("display_name, email")
+        .eq("id", caller.userId)
+        .maybeSingle();
+
+      // Log the transfer (fire-and-forget; don't let a logging failure break the transfer)
+      await supabaseAdmin.from("student_transfers").insert({
+        student_id:       studentId,
+        student_name:     student.display_name || "",
+        student_email:    student.email || "",
+        from_teacher_id:  caller.userId,
+        from_teacher_name: fromTeacherProfile?.display_name || fromTeacherProfile?.email || "",
+        to_teacher_id:    targetTeacherId,
+        to_teacher_name:  targetTeacher.display_name || "",
+        transferred_by:   caller.userId,
+      }).then(({ error: logErr }) => {
+        if (logErr) console.warn("[transfer] Failed to log transfer:", logErr.message);
+      });
+
       console.log(`[transfer] Student ${studentId} transferred from teacher ${caller.userId} → ${targetTeacherId}`);
       return res.json({
         success: true,
@@ -4033,6 +4054,82 @@ When giving instructions, number each step clearly. Be precise and technical whe
     } catch (e: any) {
       console.error("POST /api/teacher/students/:studentId/transfer", e);
       return res.status(500).json({ error: e?.message || "Failed to transfer student" });
+    }
+  });
+
+  // ── GET /api/admin/transfer-history — all student transfers (admin only) ──
+  app.get("/api/admin/transfer-history", async (req: Request, res: Response) => {
+    try {
+      const caller = await assertAuthenticated(req, res);
+      if (!caller) return;
+      if (caller.role !== "admin") return res.status(403).json({ error: "Forbidden" });
+
+      const limit  = Math.min(200, Math.max(1, parseInt(String(req.query.limit  ?? "50"), 10)));
+      const offset = Math.max(0,              parseInt(String(req.query.offset ?? "0"),  10));
+
+      const { data, error, count } = await supabaseAdmin
+        .from("student_transfers")
+        .select("*", { count: "exact" })
+        .order("transferred_at", { ascending: false })
+        .range(offset, offset + limit - 1);
+
+      if (error) {
+        if (/does not exist|PGRST/i.test(error.message)) {
+          return res.json({ transfers: [], total: 0 });
+        }
+        throw error;
+      }
+      return res.json({ transfers: data ?? [], total: count ?? 0 });
+    } catch (e: any) {
+      console.error("GET /api/admin/transfer-history", e);
+      return res.status(500).json({ error: e?.message || "Failed to load transfer history" });
+    }
+  });
+
+  // ── GET /api/teacher/transfer-history — transfers involving the calling teacher ──
+  app.get("/api/teacher/transfer-history", async (req: Request, res: Response) => {
+    try {
+      const caller = await assertAuthenticated(req, res);
+      if (!caller) return;
+      if (caller.role !== "teacher" && caller.role !== "admin") {
+        return res.status(403).json({ error: "Forbidden" });
+      }
+
+      const limit  = Math.min(100, Math.max(1, parseInt(String(req.query.limit  ?? "30"), 10)));
+      const offset = Math.max(0,              parseInt(String(req.query.offset ?? "0"),  10));
+
+      // Teachers see transfers they initiated (from) OR received (to)
+      const { data: sent, error: e1 } = await supabaseAdmin
+        .from("student_transfers")
+        .select("*")
+        .eq("from_teacher_id", caller.userId)
+        .order("transferred_at", { ascending: false })
+        .limit(limit);
+
+      const { data: received, error: e2 } = await supabaseAdmin
+        .from("student_transfers")
+        .select("*")
+        .eq("to_teacher_id", caller.userId)
+        .order("transferred_at", { ascending: false })
+        .limit(limit);
+
+      if (e1 && /does not exist|PGRST/i.test(e1.message)) {
+        return res.json({ transfers: [] });
+      }
+      if (e1) throw e1;
+      if (e2) throw e2;
+
+      // Merge, deduplicate, sort by date
+      const allById = new Map<string, any>();
+      [...(sent ?? []), ...(received ?? [])].forEach(t => allById.set(t.id, t));
+      const merged = Array.from(allById.values())
+        .sort((a, b) => new Date(b.transferred_at).getTime() - new Date(a.transferred_at).getTime())
+        .slice(offset, offset + limit);
+
+      return res.json({ transfers: merged });
+    } catch (e: any) {
+      console.error("GET /api/teacher/transfer-history", e);
+      return res.status(500).json({ error: e?.message || "Failed to load transfer history" });
     }
   });
 

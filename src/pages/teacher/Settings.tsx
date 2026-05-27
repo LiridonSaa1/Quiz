@@ -5,11 +5,36 @@ import { motion, AnimatePresence } from 'motion/react';
 import {
   Settings, BookOpen, Loader2, CheckCircle2, Shield,
   ArrowRightLeft, User, Search, X, ChevronRight, AlertTriangle,
-  RefreshCw,
+  RefreshCw, Clock, History,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { cn } from '../../lib/utils';
 import { authFetch, readApiError } from '../../lib/apiUrl';
+
+interface TransferRow {
+  id: string;
+  student_id: string;
+  student_name: string;
+  student_email: string;
+  from_teacher_id: string;
+  from_teacher_name: string;
+  to_teacher_id: string;
+  to_teacher_name: string;
+  transferred_by: string;
+  transferred_at: string;
+}
+
+function timeAgo(iso: string) {
+  const diff = Date.now() - new Date(iso).getTime();
+  const m = Math.floor(diff / 60000);
+  if (m < 1) return 'just now';
+  if (m < 60) return `${m}m ago`;
+  const h = Math.floor(m / 60);
+  if (h < 24) return `${h}h ago`;
+  const d = Math.floor(h / 24);
+  if (d < 30) return `${d}d ago`;
+  return new Date(iso).toLocaleDateString();
+}
 
 interface TeacherSettings {
   headwayImportEnabled: boolean;
@@ -59,6 +84,12 @@ export default function TeacherSettings() {
   // Confirm modal
   const [showConfirm, setShowConfirm] = useState(false);
 
+  // Transfer history
+  const [history, setHistory] = useState<TransferRow[]>([]);
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const [historyLoaded, setHistoryLoaded] = useState(false);
+  const [showHistory, setShowHistory] = useState(false);
+
   useEffect(() => {
     const load = async () => {
       setLoading(true);
@@ -98,6 +129,20 @@ export default function TeacherSettings() {
       console.error('Failed to load students', e);
     }
     setStudentsLoading(false);
+  }, []);
+
+  const loadHistory = useCallback(async () => {
+    setHistoryLoading(true);
+    try {
+      const res = await authFetch('/api/teacher/transfer-history?limit=50');
+      if (!res.ok) throw new Error(await readApiError(res));
+      const json = await res.json();
+      setHistory(json.transfers || []);
+    } catch (e: any) {
+      console.error('Failed to load transfer history', e);
+    }
+    setHistoryLoading(false);
+    setHistoryLoaded(true);
   }, []);
 
   const loadTeachers = useCallback(async () => {
@@ -161,6 +206,8 @@ export default function TeacherSettings() {
       toast.success(json.message || 'Student transferred successfully');
       setStudents(prev => prev.filter(s => s.id !== transferStudent.id));
       closeTransferModal();
+      // Refresh history so the new entry appears immediately
+      if (historyLoaded) loadHistory();
     } catch (e: any) {
       toast.error(e?.message || 'Transfer failed');
     }
@@ -390,6 +437,106 @@ export default function TeacherSettings() {
                     </p>
                   )}
                 </div>
+              </motion.div>
+
+              {/* ── Transfer History ── */}
+              <motion.div
+                initial={{ opacity: 0, y: 12 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: 0.1 }}
+                className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden"
+              >
+                <button
+                  type="button"
+                  onClick={() => {
+                    const next = !showHistory;
+                    setShowHistory(next);
+                    if (next && !historyLoaded) loadHistory();
+                  }}
+                  className="w-full px-6 py-4 flex items-center justify-between gap-3 hover:bg-slate-50/60 transition-colors"
+                >
+                  <div className="flex items-center gap-3">
+                    <div className="w-8 h-8 rounded-xl bg-slate-100 flex items-center justify-center">
+                      <History className="w-4 h-4 text-slate-500" />
+                    </div>
+                    <div className="text-left">
+                      <h2 className="text-sm font-bold text-slate-900">Transfer History</h2>
+                      <p className="text-xs text-slate-500">Your sent and received student transfers</p>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    {history.length > 0 && (
+                      <span className="px-2 py-0.5 rounded-full bg-indigo-100 text-indigo-700 text-[10px] font-bold">
+                        {history.length}
+                      </span>
+                    )}
+                    <ChevronRight className={cn('w-4 h-4 text-slate-400 transition-transform', showHistory && 'rotate-90')} />
+                  </div>
+                </button>
+
+                <AnimatePresence>
+                  {showHistory && (
+                    <motion.div
+                      initial={{ height: 0, opacity: 0 }}
+                      animate={{ height: 'auto', opacity: 1 }}
+                      exit={{ height: 0, opacity: 0 }}
+                      transition={{ duration: 0.2 }}
+                      className="overflow-hidden border-t border-slate-100"
+                    >
+                      {historyLoading ? (
+                        <div className="flex justify-center py-8">
+                          <Loader2 className="w-5 h-5 text-slate-400 animate-spin" />
+                        </div>
+                      ) : history.length === 0 ? (
+                        <div className="py-10 text-center px-6">
+                          <ArrowRightLeft className="w-8 h-8 text-slate-200 mx-auto mb-2" />
+                          <p className="text-sm text-slate-400">No transfers yet</p>
+                          <p className="text-xs text-slate-300 mt-1">Transfers you send or receive will appear here</p>
+                        </div>
+                      ) : (
+                        <div className="divide-y divide-slate-50">
+                          {history.map((tr) => {
+                            const isSent = tr.from_teacher_id === userId;
+                            const initials = (tr.student_name || tr.student_email || '?').trim().split(' ').map(w => w[0]).join('').toUpperCase().slice(0, 2);
+                            const colors = ['from-violet-400 to-indigo-500', 'from-emerald-400 to-teal-500', 'from-rose-400 to-pink-500', 'from-amber-400 to-orange-500', 'from-sky-400 to-blue-500'];
+                            const color = colors[tr.student_id.charCodeAt(0) % colors.length];
+
+                            return (
+                              <div key={tr.id} className="px-5 py-3.5 flex items-center gap-3 hover:bg-slate-50/50 transition-colors">
+                                <div className={cn('w-9 h-9 rounded-xl bg-gradient-to-br flex items-center justify-center text-white text-xs font-bold shrink-0', color)}>
+                                  {initials}
+                                </div>
+                                <div className="flex-1 min-w-0">
+                                  <p className="text-sm font-semibold text-slate-900 truncate">{tr.student_name || tr.student_email}</p>
+                                  <div className="flex items-center gap-1.5 mt-0.5">
+                                    <span className={cn('text-[10px] font-bold px-1.5 py-0.5 rounded-full',
+                                      isSent ? 'bg-amber-50 text-amber-700' : 'bg-emerald-50 text-emerald-700')}>
+                                      {isSent ? '↑ Sent' : '↓ Received'}
+                                    </span>
+                                    <span className="text-xs text-slate-400 truncate">
+                                      {isSent
+                                        ? `→ ${tr.to_teacher_name || 'Unknown'}`
+                                        : `← ${tr.from_teacher_name || 'Unknown'}`}
+                                    </span>
+                                  </div>
+                                </div>
+                                <div className="shrink-0 text-right">
+                                  <div className="inline-flex items-center gap-1 text-xs text-slate-400">
+                                    <Clock className="w-3 h-3" />
+                                    {timeAgo(tr.transferred_at)}
+                                  </div>
+                                </div>
+                              </div>
+                            );
+                          })}
+                          <div className="px-5 py-2.5 bg-slate-50 text-xs text-slate-400 text-center">
+                            {history.length} record{history.length !== 1 ? 's' : ''}
+                          </div>
+                        </div>
+                      )}
+                    </motion.div>
+                  )}
+                </AnimatePresence>
               </motion.div>
             </>
           )}
