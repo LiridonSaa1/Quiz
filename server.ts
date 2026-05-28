@@ -6252,7 +6252,40 @@ Rules:
       if (!topic) return res.status(400).json({ error: "topic is required" });
 
       const aiApiKey = (process.env.AI_INTEGRATIONS_GEMINI_API_KEY || process.env.GEMINI_API_KEY || "").trim();
-      if (!aiApiKey) return res.status(503).json({ error: "AI not configured — set GEMINI_API_KEY in Secrets." });
+
+      // ── No API key → fall back to the same static bank as the Smart Test Builder ──
+      if (!aiApiKey) {
+        // Normalise level to Headway bank casing
+        const levelMap: Record<string, string> = {
+          beginner: "Beginner",
+          elementary: "Elementary",
+          "pre-intermediate": "Pre-Intermediate",
+          intermediate: "Intermediate",
+          "upper-intermediate": "Upper-Intermediate",
+          advanced: "Advanced",
+        };
+        const normLevel = levelMap[level.toLowerCase()] ?? "Intermediate";
+
+        // Pull questions from the static bank — getQuestionsForSection already does
+        // fuzzy topic matching and falls back to template questions if no match.
+        const staticQs = getQuestionsForSection(normLevel, topic, count);
+
+        if (staticQs.length === 0) {
+          return res.status(400).json({ error: "No questions available for this topic. Please add a GEMINI_API_KEY to generate custom questions." });
+        }
+
+        const valid = staticQs.map((q, i) => ({
+          text: q.text,
+          options: q.options,
+          correct_answer: q.options[q.correct] ?? q.options[0],
+          explanation: q.explanation || "",
+          order: i,
+          points: 1,
+        }));
+
+        console.log(`[exam-builder] Static bank fallback: ${valid.length} questions for topic="${topic}" level="${normLevel}"`);
+        return res.json({ questions: valid });
+      }
 
       const prompt = `You are an expert English language exam writer.
 Generate exactly ${count} multiple-choice questions for the following exam topic.
