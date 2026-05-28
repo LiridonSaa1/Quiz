@@ -6413,26 +6413,49 @@ JSON format (array of objects):
 
       if (rows.length === 0) return res.json({ success: true });
 
-      const insertRows = rows.map((r: Record<string, unknown>, idx: number) => ({
-        quiz_id: examId,
-        type: "multiple-choice",
-        text: typeof r.text === "string" && r.text.trim() ? r.text.trim() : " ",
-        options: r.options ?? null,
-        correct_answer: r.correct_answer ?? null,
-        explanation: r.explanation ?? null,
-        points: (() => { const n = Number(r.points); return Number.isFinite(n) ? n : 1; })(),
-        order: typeof r.order === "number" ? r.order : idx,
-      }));
+      const qtext = (r: Record<string, unknown>) => {
+        const raw = r.text ?? r.question_text;
+        if (typeof raw === "string" && raw.trim()) return raw.trim();
+        return " ";
+      };
 
-      const { error: insErr } = await supabaseAdmin.from("questions").insert(insertRows);
-      if (insErr) {
-        // Retry without explanation column in case it doesn't exist
-        const fallback = insertRows.map(({ explanation: _e, ...rest }) => rest);
-        const { error: insErr2 } = await supabaseAdmin.from("questions").insert(fallback);
-        if (insErr2) throw insErr2;
+      const buildRows = (mode: "text" | "question_text" | "both") =>
+        rows.map((r: Record<string, unknown>, idx: number) => {
+          const t = qtext(r);
+          const row: Record<string, unknown> = {
+            quiz_id: examId,
+            type: "multiple-choice",
+            options: r.options ?? null,
+            correct_answer: r.correct_answer ?? null,
+            explanation: r.explanation ?? null,
+            points: (() => { const n = Number(r.points); return Number.isFinite(n) ? n : 1; })(),
+            order: typeof r.order === "number" ? r.order : idx,
+          };
+          if (mode === "both") { row.text = t; row.question_text = t; }
+          else { row[mode] = t; }
+          return row;
+        });
+
+      const errStr = (e: any) => e ? [e.message, e.details, e.hint, e.code].filter(Boolean).join(" — ") : "";
+
+      let { error: insErr } = await supabaseAdmin.from("questions").insert(buildRows("text"));
+
+      // If "text" column doesn't exist, retry with "question_text"
+      if (insErr && (/question_text/i.test(errStr(insErr)) || /null value[^\n]*question_text/i.test(errStr(insErr)) || /column[^\n]*\btext\b.*does not exist/i.test(errStr(insErr)))) {
+        ({ error: insErr } = await supabaseAdmin.from("questions").insert(buildRows("question_text")));
       }
 
-      return res.json({ success: true, count: insertRows.length });
+      // If neither alone works, try both columns
+      if (insErr && (/null value[^\n]*\btext\b/i.test(errStr(insErr)) || /column[^\n]*question_text.*does not exist/i.test(errStr(insErr)))) {
+        ({ error: insErr } = await supabaseAdmin.from("questions").insert(buildRows("both")));
+      }
+
+      if (insErr) {
+        const msg = [insErr.message, insErr.details, insErr.hint].filter(Boolean).join(" — ") || "Insert failed";
+        return res.status(400).json({ error: msg });
+      }
+
+      return res.json({ success: true, count: rows.length });
     } catch (e: any) {
       console.error("POST /api/teacher/exams/:id/save-questions", e);
       return res.status(500).json({ error: e?.message || "Failed to save questions" });
