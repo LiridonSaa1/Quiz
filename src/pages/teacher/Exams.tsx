@@ -18,7 +18,7 @@ import {
   fetchTeacherQuizzesFromSupabase,
   missingQuizzesPublishedColumn,
 } from '../../lib/fetchTeacherQuizzes';
-import { deleteAttemptRowsByQuizId, fetchAttemptRowsByQuizIds, normalizeAttempts } from '../../lib/quizAttempts';
+import { fetchAttemptRowsByQuizIds, normalizeAttempts } from '../../lib/quizAttempts';
 
 interface Exam {
   id: string;
@@ -287,13 +287,12 @@ export default function Exams() {
   };
 
   const deleteExam = async (id: string) => {
+    if (!id) return;
     setConfirmDeleteId(null);
     setDeleting(id);
     try {
-      await deleteAttemptRowsByQuizId(supabase, id);
-      await supabase.from('questions').delete().eq('quiz_id', id);
-      const { error } = await supabase.from('quizzes').delete().eq('id', id);
-      if (error) throw error;
+      const res = await authFetch(`/api/teacher/quizzes/${encodeURIComponent(id)}/delete`, { method: 'POST' });
+      if (!res.ok) throw new Error(await readApiError(res));
       setExams(prev => prev.filter(e => e.id !== id));
       toast.success('Exam deleted');
     } catch (err: any) {
