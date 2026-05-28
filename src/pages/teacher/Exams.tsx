@@ -151,18 +151,25 @@ export default function Exams() {
 
       const examsOnly = (quizRows || []).filter((d: any) => (d.type || 'standard') === 'exam');
 
-      const { data: questionsSnap } = await supabase.from('questions').select('quiz_id');
       const courseMap: Record<string, string> = {};
       (courseRows || []).forEach(c => { courseMap[c.id] = c.title || ''; });
       setCourses((courseRows || []).map(c => ({ id: c.id, title: c.title || '' })));
 
-      const qCount: Record<string, number> = {};
-      (questionsSnap || []).forEach((q: { quiz_id: string }) => {
-        if (!q?.quiz_id) return;
-        qCount[q.quiz_id] = (qCount[q.quiz_id] || 0) + 1;
-      });
-
+      // Fetch question counts via server endpoint (bypasses RLS on questions table)
       const examIds = examsOnly.map((e: any) => e.id).filter(Boolean);
+      const qCount: Record<string, number> = {};
+      try {
+        const qcRes = await authFetch('/api/teacher/exams/question-counts', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ ids: examIds }),
+        });
+        if (qcRes.ok) {
+          const qcJson = await qcRes.json();
+          if (qcJson?.counts) Object.assign(qCount, qcJson.counts);
+        }
+      } catch { /* leave counts at 0 */ }
+
       let attemptRows: any[] = [];
       try {
         attemptRows = await fetchAttemptRowsByQuizIds(supabase, examIds);

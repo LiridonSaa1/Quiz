@@ -6381,6 +6381,31 @@ JSON format (array of objects):
     }
   });
 
+  // ── POST /api/teacher/exams/question-counts — count questions per exam id (bypasses RLS) ──
+  app.post("/api/teacher/exams/question-counts", async (req: Request, res: Response) => {
+    try {
+      const caller = await assertAuthenticated(req, res);
+      if (!caller) return;
+      const ids: string[] = Array.isArray(req.body?.ids) ? req.body.ids.filter((x: unknown) => typeof x === "string") : [];
+      if (ids.length === 0) return res.json({ counts: {} });
+
+      const { data, error } = await supabaseAdmin
+        .from("questions")
+        .select("quiz_id")
+        .in("quiz_id", ids);
+      if (error) throw error;
+
+      const counts: Record<string, number> = {};
+      (data || []).forEach((r: { quiz_id: string }) => {
+        if (r?.quiz_id) counts[r.quiz_id] = (counts[r.quiz_id] || 0) + 1;
+      });
+      return res.json({ counts });
+    } catch (e: any) {
+      console.error("POST /api/teacher/exams/question-counts", e);
+      return res.status(500).json({ error: e?.message || "Failed to count questions" });
+    }
+  });
+
   // ── POST /api/teacher/exams/:id/save-questions — save exam questions via service role (bypasses RLS) ──
   app.post("/api/teacher/exams/:id/save-questions", async (req: Request, res: Response) => {
     try {
