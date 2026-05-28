@@ -70,15 +70,28 @@ export default function ExamBuilder() {
           published: typeof qz.published === 'boolean' ? qz.published : qz.status === 'published',
         });
 
-        setQuestions((json.questions || []).map((q: any, i: number) => ({
-          id: q.id,
-          text: q.text || q.question_text || '',
-          options: Array.isArray(q.options) ? q.options : [],
-          correctAnswer: q.correct_answer || '',
-          explanation: q.explanation || '',
-          points: q.points ?? 1,
-          order: q.order ?? i,
-        })));
+        // Normalize an option value — could be a plain string or a {id,text} object
+        const optStr = (o: any): string => {
+          if (typeof o === 'string') return o;
+          if (o && typeof o === 'object') return String(o.text ?? o.label ?? o.value ?? '');
+          return '';
+        };
+
+        setQuestions((json.questions || []).map((q: any, i: number) => {
+          const rawOpts = Array.isArray(q.options) ? q.options : [];
+          const opts = rawOpts.map(optStr);
+          // correct_answer may also be a {text} object
+          const correct = optStr(q.correct_answer) || '';
+          return {
+            id: q.id,
+            text: q.text || q.question_text || '',
+            options: opts,
+            correctAnswer: correct,
+            explanation: q.explanation || '',
+            points: q.points ?? 1,
+            order: q.order ?? i,
+          };
+        }));
       } catch (e: any) {
         toast.error(e?.message || 'Failed to load exam');
       }
@@ -98,14 +111,23 @@ export default function ExamBuilder() {
       });
       if (!res.ok) throw new Error(await readApiError(res));
       const json = await res.json();
-      const newQs: ExamQuestion[] = (json.questions || []).map((q: any, i: number) => ({
-        text: q.text || q.question_text || '',
-        options: Array.isArray(q.options) ? q.options : [],
-        correctAnswer: q.correct_answer || '',
-        explanation: q.explanation || '',
-        points: 1,
-        order: questions.length + i,
-      }));
+      const optStr = (o: any): string => {
+        if (typeof o === 'string') return o;
+        if (o && typeof o === 'object') return String(o.text ?? o.label ?? o.value ?? '');
+        return '';
+      };
+      const newQs: ExamQuestion[] = (json.questions || []).map((q: any, i: number) => {
+        const rawOpts = Array.isArray(q.options) ? q.options : [];
+        const opts = rawOpts.map(optStr);
+        return {
+          text: q.text || q.question_text || '',
+          options: opts,
+          correctAnswer: optStr(q.correct_answer) || '',
+          explanation: q.explanation || '',
+          points: 1,
+          order: questions.length + i,
+        };
+      });
       setQuestions(prev => [...prev, ...newQs]);
       toast.success(`Added ${newQs.length} AI-generated questions`);
       setAiOpen(false);
