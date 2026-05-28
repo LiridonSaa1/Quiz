@@ -6361,6 +6361,68 @@ JSON format (array of objects):
     }
   });
 
+  // ── POST /api/teacher/exams/:id/save-questions — save exam questions via service role (bypasses RLS) ──
+  app.post("/api/teacher/exams/:id/save-questions", async (req: Request, res: Response) => {
+    try {
+      const caller = await assertAuthenticated(req, res);
+      if (!caller) return;
+      if (caller.role !== "teacher" && caller.role !== "admin") {
+        return res.status(403).json({ error: "Forbidden" });
+      }
+
+      const examId = typeof req.params.id === "string" ? req.params.id.trim() : "";
+      if (!examId) return res.status(400).json({ error: "Exam id is required" });
+
+      const rows = (req.body as { questions?: unknown })?.questions;
+      if (!Array.isArray(rows)) {
+        return res.status(400).json({ error: "Body must include questions: []" });
+      }
+
+      // Verify the exam exists and belongs to the caller
+      const { data: examRow, error: examErr } = await supabaseAdmin
+        .from("quizzes")
+        .select("id, teacher_id")
+        .eq("id", examId)
+        .eq("type", "exam")
+        .maybeSingle();
+      if (examErr) throw examErr;
+      if (!examRow?.id) return res.status(404).json({ error: "Exam not found." });
+      if (caller.role !== "admin" && examRow.teacher_id && examRow.teacher_id !== caller.userId) {
+        return res.status(403).json({ error: "You do not have access to this exam." });
+      }
+
+      // Delete existing questions then insert new ones via service role — bypasses RLS
+      const { error: delErr } = await supabaseAdmin.from("questions").delete().eq("quiz_id", examId);
+      if (delErr) throw delErr;
+
+      if (rows.length === 0) return res.json({ success: true });
+
+      const insertRows = rows.map((r: Record<string, unknown>, idx: number) => ({
+        quiz_id: examId,
+        type: "multiple-choice",
+        text: typeof r.text === "string" && r.text.trim() ? r.text.trim() : " ",
+        options: r.options ?? null,
+        correct_answer: r.correct_answer ?? null,
+        explanation: r.explanation ?? null,
+        points: (() => { const n = Number(r.points); return Number.isFinite(n) ? n : 1; })(),
+        order: typeof r.order === "number" ? r.order : idx,
+      }));
+
+      const { error: insErr } = await supabaseAdmin.from("questions").insert(insertRows);
+      if (insErr) {
+        // Retry without explanation column in case it doesn't exist
+        const fallback = insertRows.map(({ explanation: _e, ...rest }) => rest);
+        const { error: insErr2 } = await supabaseAdmin.from("questions").insert(fallback);
+        if (insErr2) throw insErr2;
+      }
+
+      return res.json({ success: true, count: insertRows.length });
+    } catch (e: any) {
+      console.error("POST /api/teacher/exams/:id/save-questions", e);
+      return res.status(500).json({ error: e?.message || "Failed to save questions" });
+    }
+  });
+
   // ── POST /api/teacher/headway/regenerate-quiz — replace all questions for a saved Headway quiz with fresh AI ones ──
   app.post("/api/teacher/headway/regenerate-quiz", async (req: Request, res: Response) => {
     try {

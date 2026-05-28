@@ -138,20 +138,22 @@ export default function ExamBuilder() {
     if (!examId) return;
     setSaving(true);
     try {
-      await supabase.from('questions').delete().eq('quiz_id', examId);
-      if (questions.length > 0) {
-        const rows = questions.map((q, i) => ({
-          quiz_id: examId,
-          type: 'multiple-choice',
-          text: q.text,
-          options: q.options,
-          correct_answer: q.correctAnswer,
-          explanation: q.explanation || null,
-          points: q.points,
-          order: i,
-        }));
-        const { error } = await supabase.from('questions').insert(rows);
-        if (error) throw error;
+      const rows = questions.map((q, i) => ({
+        text: q.text,
+        options: q.options,
+        correct_answer: q.correctAnswer,
+        explanation: q.explanation || null,
+        points: q.points,
+        order: i,
+      }));
+      const res = await authFetch(`/api/teacher/exams/${encodeURIComponent(examId)}/save-questions`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ questions: rows }),
+      });
+      if (!res.ok) {
+        const err = await readApiError(res);
+        throw new Error(err);
       }
       toast.success('Exam saved successfully!');
       navigate('/teacher/exams');
