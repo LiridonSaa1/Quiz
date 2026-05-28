@@ -5,7 +5,7 @@ import { generateFixSuggestion } from "./src/lib/ai/generateFixSuggestion.js";
 import { isEmailConfigured, sendEmail, renderVerificationEmail } from "./src/lib/email.js";
 import { notifyEvent, type NotifyContext, type NotifyEventKey } from "./src/lib/notifyEvents.js";
 import { HEADWAY_FULL_DATA, buildUnitQuestions as buildHwUnitQuestions, type HUnit } from "./src/lib/headwayData.js";
-import { getQuestionsForSection, getTopicsForLevel } from "./src/lib/headwayQuestions.js";
+import { getQuestionsForSection, getTopicsForLevel, HEADWAY_QUESTIONS } from "./src/lib/headwayQuestions.js";
 import express, { Request, Response } from "express";
 import rateLimit from "express-rate-limit";
 import { appendFile, mkdir, readFile as readFileFs, writeFile } from "fs/promises";
@@ -6266,9 +6266,29 @@ Rules:
         };
         const normLevel = levelMap[level.toLowerCase()] ?? "Intermediate";
 
-        // Pull questions from the static bank — getQuestionsForSection already does
-        // fuzzy topic matching and falls back to template questions if no match.
-        const staticQs = getQuestionsForSection(normLevel, topic, count);
+        // Pull questions from the static bank — getQuestionsForSection does fuzzy
+        // topic matching and falls back to template questions if no match.
+        let staticQs = getQuestionsForSection(normLevel, topic, count);
+
+        // If the matched section has fewer questions than requested, pad from other
+        // sections of the same level (shuffle each section before sampling, deduplicate by text).
+        if (staticQs.length < count) {
+          const usedTexts = new Set(staticQs.map(q => q.text));
+          const levelSections = HEADWAY_QUESTIONS[normLevel] ?? [];
+          // Shuffle the section list so we don't always pick the same padding sections
+          const shuffledSections = [...levelSections].sort(() => Math.random() - 0.5);
+          for (const sec of shuffledSections) {
+            if (staticQs.length >= count) break;
+            const shuffledPool = [...sec.questions].sort(() => Math.random() - 0.5);
+            for (const q of shuffledPool) {
+              if (staticQs.length >= count) break;
+              if (!usedTexts.has(q.text)) {
+                usedTexts.add(q.text);
+                staticQs = [...staticQs, q];
+              }
+            }
+          }
+        }
 
         if (staticQs.length === 0) {
           return res.status(400).json({ error: "No questions available for this topic. Please add a GEMINI_API_KEY to generate custom questions." });
