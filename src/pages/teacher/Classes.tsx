@@ -4,7 +4,7 @@ import { supabase } from '../../supabase';
 import TeacherLayout from '../../components/layout/TeacherLayout';
 import LoadingButton from '../../components/ui/LoadingButton';
 import { toast } from 'sonner';
-import { motion } from 'motion/react';
+import { motion, AnimatePresence } from 'motion/react';
 import {
   AdminListFilterBar,
   AdminListPageShell,
@@ -16,7 +16,7 @@ import {
   School, Plus, Search, Filter, Users, BookOpen, CalendarDays,
   MoreHorizontal, X, Pencil, Trash2, Eye,
   Clock, CheckCircle2, AlertCircle, Archive, TrendingUp,
-  Link2, Copy, Check, Upload,
+  Link2, Copy, Check, Upload, Loader2,
 } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import StyledSelect from '../../components/ui/StyledSelect';
@@ -96,6 +96,9 @@ export default function TeacherClasses() {
   const [csvEmails, setCsvEmails] = useState('');
   const [csvEnrolling, setCsvEnrolling] = useState(false);
   const [csvResult, setCsvResult] = useState<{ enrolled: number; notFound: string[]; notStudents: string[] } | null>(null);
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+  const [deleting, setDeleting] = useState(false);
+  const classToDelete = classes.find(c => c.id === confirmDeleteId);
 
   useEffect(() => {
     const init = async () => {
@@ -253,17 +256,21 @@ export default function TeacherClasses() {
     }
   };
 
-  const handleDelete = async (cls: ClassRecord) => {
-    if (!confirm(`Delete "${cls.name}"? This cannot be undone.`)) return;
+  const handleDelete = async (id: string) => {
+    if (!id) return;
+    setConfirmDeleteId(null);
+    setDeleting(true);
     try {
-      const { error } = await supabase.from('classes').delete().eq('id', cls.id);
+      const { error } = await supabase.from('classes').delete().eq('id', id);
       if (error) throw error;
       toast.success('Class deleted');
       if (teacherId) fetchData(teacherId);
     } catch (err: any) {
       toast.error(err.message);
+    } finally {
+      setDeleting(false);
+      setActiveMenu(null);
     }
-    setActiveMenu(null);
   };
 
   const handleCsvEnroll = async () => {
@@ -497,7 +504,7 @@ export default function TeacherClasses() {
                               <div className="border-t border-slate-100 mt-1 pt-1">
                                 <button
                                   type="button"
-                                  onClick={() => handleDelete(cls)}
+                                  onClick={() => { setConfirmDeleteId(cls.id); setActiveMenu(null); }}
                                   className="w-full text-left px-4 py-2 text-sm text-red-500 hover:bg-red-50 flex items-center gap-2"
                                 >
                                   <Trash2 className="w-4 h-4" />
@@ -795,6 +802,52 @@ export default function TeacherClasses() {
           </div>
         </div>
       )}
+
+      <AnimatePresence>
+        {confirmDeleteId && (
+          <motion.div
+            initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+            className="fixed inset-0 z-50 flex items-center justify-center p-4"
+            style={{ background: 'rgba(15,10,40,0.55)', backdropFilter: 'blur(6px)' }}
+          >
+            <motion.div
+              initial={{ scale: 0.9, opacity: 0, y: 16 }}
+              animate={{ scale: 1, opacity: 1, y: 0 }}
+              exit={{ scale: 0.9, opacity: 0, y: 16 }}
+              transition={{ type: 'spring', stiffness: 340, damping: 28 }}
+              className="bg-white rounded-2xl shadow-2xl p-6 w-full max-w-sm"
+            >
+              <div className="flex flex-col items-center text-center gap-3 mb-5">
+                <div className="w-14 h-14 rounded-2xl flex items-center justify-center shadow-lg shadow-red-500/30"
+                  style={{ background: 'linear-gradient(135deg,#fca5a5,#ef4444)' }}>
+                  <Trash2 className="w-7 h-7 text-white" />
+                </div>
+                <div>
+                  <p className="font-bold text-slate-800 text-lg">Delete class?</p>
+                  <p className="text-slate-500 text-sm mt-1">This action cannot be undone.</p>
+                </div>
+                {classToDelete && (
+                  <span className="px-3 py-1 rounded-full text-sm font-semibold bg-red-50 text-red-700 border border-red-200">
+                    {classToDelete.name}
+                  </span>
+                )}
+              </div>
+              <div className="flex gap-3">
+                <button type="button" onClick={() => setConfirmDeleteId(null)}
+                  className="flex-1 py-2.5 rounded-xl text-sm font-semibold text-slate-600 bg-slate-100 hover:bg-slate-200 transition-all">
+                  Cancel
+                </button>
+                <button type="button" onClick={() => confirmDeleteId && handleDelete(confirmDeleteId)}
+                  disabled={deleting}
+                  className="flex-1 py-2.5 rounded-xl text-sm font-bold text-white shadow-lg shadow-red-500/30 transition-all disabled:opacity-60 active:scale-95"
+                  style={{ background: 'linear-gradient(135deg,#ef4444,#dc2626)' }}>
+                  {deleting ? <Loader2 className="w-4 h-4 animate-spin mx-auto" /> : 'Yes, delete'}
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {activeMenu && (
         <div className="fixed inset-0 z-10" aria-hidden onClick={() => setActiveMenu(null)} />

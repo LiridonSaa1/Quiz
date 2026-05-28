@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import AdminLayout from '../../components/layout/AdminLayout';
 import { Link } from 'react-router-dom';
-import { motion } from 'motion/react';
+import { motion, AnimatePresence } from 'motion/react';
 import {
   AdminListFilterBar,
   AdminListPageShell,
@@ -16,7 +16,7 @@ import { format, formatDistanceToNow, isPast } from 'date-fns';
 import {
   Video, Plus, Search, Trash2, Pencil, X,
   BookOpen, CalendarDays, Radio, CheckCircle2,
-  XCircle, Play
+  XCircle, Play, Loader2,
 } from 'lucide-react';
 import { cn } from '../../lib/utils';
 type SessionStatus = 'scheduled' | 'live' | 'ended' | 'cancelled';
@@ -66,6 +66,8 @@ export default function AdminLiveSessions() {
   const [form, setForm] = useState(emptyForm);
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState<string | null>(null);
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+  const sessionToDelete = sessions.find(s => s.id === confirmDeleteId);
 
   const set = (k: string, v: any) => setForm(p => ({ ...p, [k]: v }));
 
@@ -140,7 +142,8 @@ export default function AdminLiveSessions() {
   };
 
   const handleDelete = async (id: string) => {
-    if (!confirm(t('liveSessions.deleteConfirm'))) return;
+    if (!id) return;
+    setConfirmDeleteId(null);
     setDeleting(id);
     try {
       const res = await fetch(`/api/admin/live-sessions/${id}`, { method: 'DELETE' });
@@ -281,7 +284,7 @@ export default function AdminLiveSessions() {
                       <button type="button" onClick={() => openEdit(s)} className="p-2 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-xl transition-all border border-slate-100">
                         <Pencil className="w-4 h-4" />
                       </button>
-                      <button type="button" onClick={() => handleDelete(s.id)} disabled={deleting === s.id}
+                      <button type="button" onClick={() => setConfirmDeleteId(s.id)} disabled={deleting === s.id}
                         className="p-2 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-xl transition-all border border-slate-100 disabled:opacity-40">
                         <Trash2 className="w-4 h-4" />
                       </button>
@@ -384,6 +387,51 @@ export default function AdminLiveSessions() {
           </div>
         </div>
       )}
+      <AnimatePresence>
+        {confirmDeleteId && (
+          <motion.div
+            initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+            className="fixed inset-0 z-50 flex items-center justify-center p-4"
+            style={{ background: 'rgba(15,10,40,0.55)', backdropFilter: 'blur(6px)' }}
+          >
+            <motion.div
+              initial={{ scale: 0.9, opacity: 0, y: 16 }}
+              animate={{ scale: 1, opacity: 1, y: 0 }}
+              exit={{ scale: 0.9, opacity: 0, y: 16 }}
+              transition={{ type: 'spring', stiffness: 340, damping: 28 }}
+              className="bg-white rounded-2xl shadow-2xl p-6 w-full max-w-sm"
+            >
+              <div className="flex flex-col items-center text-center gap-3 mb-5">
+                <div className="w-14 h-14 rounded-2xl flex items-center justify-center shadow-lg shadow-red-500/30"
+                  style={{ background: 'linear-gradient(135deg,#fca5a5,#ef4444)' }}>
+                  <Trash2 className="w-7 h-7 text-white" />
+                </div>
+                <div>
+                  <p className="font-bold text-slate-800 text-lg">Delete session?</p>
+                  <p className="text-slate-500 text-sm mt-1">This action cannot be undone.</p>
+                </div>
+                {sessionToDelete && (
+                  <span className="px-3 py-1 rounded-full text-sm font-semibold bg-red-50 text-red-700 border border-red-200">
+                    {sessionToDelete.title}
+                  </span>
+                )}
+              </div>
+              <div className="flex gap-3">
+                <button type="button" onClick={() => setConfirmDeleteId(null)}
+                  className="flex-1 py-2.5 rounded-xl text-sm font-semibold text-slate-600 bg-slate-100 hover:bg-slate-200 transition-all">
+                  Cancel
+                </button>
+                <button type="button" onClick={() => confirmDeleteId && handleDelete(confirmDeleteId)}
+                  disabled={!!deleting}
+                  className="flex-1 py-2.5 rounded-xl text-sm font-bold text-white shadow-lg shadow-red-500/30 transition-all disabled:opacity-60 active:scale-95"
+                  style={{ background: 'linear-gradient(135deg,#ef4444,#dc2626)' }}>
+                  {deleting ? <Loader2 className="w-4 h-4 animate-spin mx-auto" /> : 'Yes, delete'}
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </AdminLayout>
   );
 }
