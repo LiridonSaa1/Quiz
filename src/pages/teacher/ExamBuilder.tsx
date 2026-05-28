@@ -53,22 +53,12 @@ export default function ExamBuilder() {
     const load = async () => {
       if (!examId) return;
       setLoading(true);
-      const { data: { session } } = await supabase.auth.getSession();
-      if (!session) { setLoading(false); return; }
       try {
-        const { data: qz } = await supabase
-          .from('quizzes')
-          .select('id, title, description, time_limit, pass_mark, course_id, published, status')
-          .eq('id', examId)
-          .maybeSingle();
-        if (!qz) throw new Error('Exam not found');
+        const res = await authFetch(`/api/teacher/quizzes/${examId}`);
+        const json = await res.json();
+        if (!res.ok || !json.success) throw new Error(json.error || 'Exam not found');
 
-        let courseName = '';
-        if (qz.course_id) {
-          const { data: c } = await supabase.from('courses').select('title').eq('id', qz.course_id).maybeSingle();
-          courseName = c?.title || '';
-        }
-
+        const qz = json.quiz;
         setExam({
           id: qz.id,
           title: qz.title || 'Untitled Exam',
@@ -76,17 +66,11 @@ export default function ExamBuilder() {
           timeLimit: qz.time_limit || 60,
           passMark: qz.pass_mark || 70,
           courseId: qz.course_id || '',
-          courseName,
+          courseName: qz.courseName || '',
           published: typeof qz.published === 'boolean' ? qz.published : qz.status === 'published',
         });
 
-        const { data: qs } = await supabase
-          .from('questions')
-          .select('*')
-          .eq('quiz_id', examId)
-          .order('order', { ascending: true });
-
-        setQuestions((qs || []).map((q: any, i: number) => ({
+        setQuestions((json.questions || []).map((q: any, i: number) => ({
           id: q.id,
           text: q.text || q.question_text || '',
           options: Array.isArray(q.options) ? q.options : [],

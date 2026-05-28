@@ -8222,6 +8222,43 @@ Rules:
   });
 
   /** Update quiz metadata (service role — bypasses RLS for schemas without teacher_id). */
+  /** GET single quiz by id (service role) — used by ExamBuilder to bypass RLS. */
+  app.get("/api/teacher/quizzes/:id", async (req: Request, res: Response) => {
+    try {
+      const caller = await assertAuthenticated(req, res);
+      if (!caller) return;
+      if (caller.role !== "teacher" && caller.role !== "admin") {
+        return res.status(403).json({ error: "Forbidden" });
+      }
+      const quizId = typeof req.params.id === "string" ? req.params.id.trim() : "";
+      if (!quizId) return res.status(400).json({ error: "Quiz id required" });
+
+      const { data: qz, error: qzErr } = await supabaseAdmin
+        .from("quizzes")
+        .select("id, title, description, time_limit, pass_mark, course_id, published, status, type, settings")
+        .eq("id", quizId)
+        .maybeSingle();
+      if (qzErr) return res.status(500).json({ error: qzErr.message });
+      if (!qz) return res.status(404).json({ error: "Exam not found" });
+
+      let courseName = "";
+      if (qz.course_id) {
+        const { data: c } = await supabaseAdmin.from("courses").select("title").eq("id", qz.course_id).maybeSingle();
+        courseName = c?.title || "";
+      }
+
+      const { data: qs } = await supabaseAdmin
+        .from("questions")
+        .select("*")
+        .eq("quiz_id", quizId)
+        .order("order", { ascending: true });
+
+      return res.json({ success: true, quiz: { ...qz, courseName }, questions: qs || [] });
+    } catch (e: any) {
+      res.status(500).json({ error: e?.message || "Failed to load quiz" });
+    }
+  });
+
   app.patch("/api/teacher/quizzes/:id", async (req: Request, res: Response) => {
     try {
       const caller = await assertAuthenticated(req, res);
