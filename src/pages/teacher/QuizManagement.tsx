@@ -544,52 +544,62 @@ export default function QuizManagement() {
 
       <AnimatePresence>
         {quizToDelete && (
-          <div className="fixed inset-0 z-[80] flex items-center justify-center p-4" role="dialog" aria-modal="true">
-            <button
-              type="button"
-              className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm"
-              aria-label="Close"
-              disabled={deleting}
-              onClick={() => !deleting && setQuizToDelete(null)}
-            />
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[80] flex items-center justify-center p-4"
+            style={{ background: 'rgba(15,10,40,0.55)', backdropFilter: 'blur(6px)' }}
+            onClick={() => !deleting && setQuizToDelete(null)}
+          >
             <motion.div
-              initial={{ opacity: 0, scale: 0.95 }}
-              animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0, scale: 0.95 }}
-              className="relative bg-white rounded-2xl shadow-xl max-w-md w-full p-6 border border-slate-100"
+              initial={{ opacity: 0, scale: 0.92, y: 24 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.92, y: 24 }}
+              transition={{ type: 'spring', stiffness: 340, damping: 28 }}
+              className="relative w-full max-w-sm overflow-hidden rounded-2xl shadow-2xl"
+              onClick={e => e.stopPropagation()}
             >
-              <div className="flex gap-4">
-                <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-red-50">
-                  <AlertTriangle className="h-6 w-6 text-red-600" aria-hidden />
+              <div className="absolute inset-0 pointer-events-none" style={{ background: 'linear-gradient(135deg,#fef2f2 0%,#fff5f5 60%,#fff 100%)' }} />
+              <div className="absolute top-0 right-0 w-40 h-40 rounded-full pointer-events-none opacity-30" style={{ background: 'radial-gradient(circle,#fca5a5,transparent 70%)', transform: 'translate(30%,-30%)' }} />
+              <div className="relative px-7 pt-8 pb-7 flex flex-col items-center text-center gap-5">
+                <div className="relative">
+                  <div className="w-16 h-16 rounded-2xl flex items-center justify-center shadow-lg" style={{ background: 'linear-gradient(135deg,#ef4444,#dc2626)' }}>
+                    <Trash2 className="w-7 h-7 text-white" />
+                  </div>
+                  <div className="absolute -inset-1 rounded-2xl opacity-20 blur-md" style={{ background: 'linear-gradient(135deg,#ef4444,#dc2626)' }} />
                 </div>
-                <div className="min-w-0 flex-1">
-                  <h3 className="text-lg font-bold text-slate-900">Delete this quiz?</h3>
-                  <p className="text-slate-600 text-sm mt-2 leading-relaxed">
-                    <span className="font-semibold text-slate-800">&ldquo;{quizToDelete.title}&rdquo;</span>{' '}
-                    and all its questions will be permanently removed. This cannot be undone.
+                <div className="space-y-1.5">
+                  <h2 className="text-[17px] font-bold text-slate-800 leading-snug">Delete this quiz?</h2>
+                  <p className="text-sm font-semibold text-red-600 bg-red-50 border border-red-100 rounded-lg px-3 py-1.5 inline-block max-w-[220px] truncate">
+                    "{quizToDelete.title}"
+                  </p>
+                  <p className="text-sm text-slate-500 leading-relaxed pt-1">
+                    All questions will be <span className="font-semibold text-slate-700">permanently deleted</span>. This action cannot be undone.
                   </p>
                 </div>
-              </div>
-              <div className="flex flex-col-reverse sm:flex-row gap-2 sm:justify-end mt-6">
-                <button
-                  type="button"
-                  disabled={deleting}
-                  onClick={() => setQuizToDelete(null)}
-                  className="px-4 py-2.5 rounded-xl text-sm font-semibold text-slate-700 bg-slate-100 hover:bg-slate-200 transition-colors disabled:opacity-50"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="button"
-                  disabled={deleting}
-                  onClick={() => void confirmDelete()}
-                  className="px-4 py-2.5 rounded-xl text-sm font-semibold text-white bg-red-600 hover:bg-red-700 transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
-                >
-                  {deleting ? 'Deleting…' : 'Delete quiz'}
-                </button>
+                <div className="w-full flex gap-3 pt-1">
+                  <button
+                    type="button"
+                    disabled={deleting}
+                    onClick={() => setQuizToDelete(null)}
+                    className="flex-1 py-2.5 rounded-xl text-sm font-semibold text-slate-600 bg-slate-100 hover:bg-slate-200 transition-all disabled:opacity-50"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    disabled={deleting}
+                    onClick={() => void confirmDelete()}
+                    className="flex-1 py-2.5 rounded-xl text-sm font-bold text-white shadow-lg shadow-red-500/30 transition-all disabled:opacity-60 active:scale-95 flex items-center justify-center"
+                    style={{ background: 'linear-gradient(135deg,#ef4444,#dc2626)' }}
+                  >
+                    {deleting ? <RotateCcw className="w-4 h-4 animate-spin" /> : 'Yes, delete'}
+                  </button>
+                </div>
               </div>
             </motion.div>
-          </div>
+          </motion.div>
         )}
       </AnimatePresence>
     </TeacherLayout>

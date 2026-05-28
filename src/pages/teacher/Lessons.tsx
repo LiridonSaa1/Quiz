@@ -920,37 +920,56 @@ export default function TeacherLessons() {
       <AnimatePresence>
         {deleteTarget && (
           <motion.div
-            initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-            className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[60] flex items-center justify-center p-4"
-            onClick={() => !deleting && setDeleteTarget(null)}>
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[60] flex items-center justify-center p-4"
+            style={{ background: 'rgba(15,10,40,0.55)', backdropFilter: 'blur(6px)' }}
+            onClick={() => !deleting && setDeleteTarget(null)}
+          >
             <motion.div
-              initial={{ opacity: 0, scale: 0.9, y: 24 }} animate={{ opacity: 1, scale: 1, y: 0 }}
-              exit={{ opacity: 0, scale: 0.9, y: 24 }} transition={{ type: 'spring', stiffness: 300, damping: 28 }}
-              className="bg-white rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden"
-              onClick={e => e.stopPropagation()}>
-              <div className="h-1.5 w-full" style={{ background: 'linear-gradient(90deg,#ef4444,#f97316)' }} />
-              <div className="p-6">
-                <div className="flex justify-center mb-4">
-                  <div className="w-16 h-16 rounded-2xl flex items-center justify-center"
-                    style={{ background: 'linear-gradient(135deg,#fee2e2,#fecaca)' }}>
-                    <AlertTriangle className="w-8 h-8 text-red-500" />
+              initial={{ opacity: 0, scale: 0.92, y: 24 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.92, y: 24 }}
+              transition={{ type: 'spring', stiffness: 340, damping: 28 }}
+              className="relative w-full max-w-sm overflow-hidden rounded-2xl shadow-2xl"
+              onClick={e => e.stopPropagation()}
+            >
+              <div className="absolute inset-0 pointer-events-none" style={{ background: 'linear-gradient(135deg,#fef2f2 0%,#fff5f5 60%,#fff 100%)' }} />
+              <div className="absolute top-0 right-0 w-40 h-40 rounded-full pointer-events-none opacity-30" style={{ background: 'radial-gradient(circle,#fca5a5,transparent 70%)', transform: 'translate(30%,-30%)' }} />
+              <div className="relative px-7 pt-8 pb-7 flex flex-col items-center text-center gap-5">
+                <div className="relative">
+                  <div className="w-16 h-16 rounded-2xl flex items-center justify-center shadow-lg" style={{ background: 'linear-gradient(135deg,#ef4444,#dc2626)' }}>
+                    <Trash2 className="w-7 h-7 text-white" />
                   </div>
+                  <div className="absolute -inset-1 rounded-2xl opacity-20 blur-md" style={{ background: 'linear-gradient(135deg,#ef4444,#dc2626)' }} />
                 </div>
-                <h3 className="text-center text-lg font-bold text-slate-900 mb-1">Delete this lesson?</h3>
-                <p className="text-center text-sm text-slate-500 mb-1">
-                  <span className="font-semibold text-slate-700">"{deleteTarget.title}"</span>
-                </p>
-                <p className="text-center text-xs text-red-400 font-medium mb-6">This cannot be undone.</p>
-                <div className="flex gap-3">
-                  <button type="button" disabled={deleting} onClick={() => setDeleteTarget(null)}
-                    className="flex-1 py-2.5 rounded-xl text-sm font-semibold text-slate-600 bg-slate-100 hover:bg-slate-200 transition-all disabled:opacity-50">
+                <div className="space-y-1.5">
+                  <h2 className="text-[17px] font-bold text-slate-800 leading-snug">Delete this lesson?</h2>
+                  <p className="text-sm font-semibold text-red-600 bg-red-50 border border-red-100 rounded-lg px-3 py-1.5 inline-block max-w-[220px] truncate">
+                    "{deleteTarget.title}"
+                  </p>
+                  <p className="text-sm text-slate-500 leading-relaxed pt-1">
+                    This lesson and all its content will be <span className="font-semibold text-slate-700">permanently deleted</span>. This action cannot be undone.
+                  </p>
+                </div>
+                <div className="w-full flex gap-3 pt-1">
+                  <button
+                    type="button"
+                    disabled={deleting}
+                    onClick={() => setDeleteTarget(null)}
+                    className="flex-1 py-2.5 rounded-xl text-sm font-semibold text-slate-600 bg-slate-100 hover:bg-slate-200 transition-all disabled:opacity-50"
+                  >
                     Cancel
                   </button>
-                  <button type="button" disabled={deleting} onClick={() => void confirmDelete()}
-                    className="flex-1 py-2.5 rounded-xl text-sm font-semibold text-white transition-all disabled:opacity-60 flex items-center justify-center gap-2"
-                    style={{ background: 'linear-gradient(135deg,#ef4444,#dc2626)' }}>
-                    <Trash2 className="w-4 h-4" />
-                    {deleting ? 'Deleting...' : 'Delete'}
+                  <button
+                    type="button"
+                    disabled={deleting}
+                    onClick={() => void confirmDelete()}
+                    className="flex-1 py-2.5 rounded-xl text-sm font-bold text-white shadow-lg shadow-red-500/30 transition-all disabled:opacity-60 active:scale-95 flex items-center justify-center"
+                    style={{ background: 'linear-gradient(135deg,#ef4444,#dc2626)' }}
+                  >
+                    {deleting ? <span className="inline-block w-4 h-4 border-2 border-white/40 border-t-white rounded-full animate-spin" /> : 'Yes, delete'}
                   </button>
                 </div>
               </div>
