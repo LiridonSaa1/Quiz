@@ -87,6 +87,8 @@ export default function Exams() {
   const [showCreate, setShowCreate] = useState(false);
   const [deleting, setDeleting] = useState<string | null>(null);
   const [toggling, setToggling] = useState<string | null>(null);
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+  const examToDelete = exams.find(e => e.id === confirmDeleteId);
 
   const [form, setForm] = useState({
     title: '', description: '', courseId: '',
@@ -285,7 +287,7 @@ export default function Exams() {
   };
 
   const deleteExam = async (id: string) => {
-    if (!confirm('Delete this exam? All attempts will also be deleted.')) return;
+    setConfirmDeleteId(null);
     setDeleting(id);
     try {
       await deleteAttemptRowsByQuizId(supabase, id);
@@ -623,7 +625,7 @@ export default function Exams() {
                           </button>
                           <button
                             type="button"
-                            onClick={() => deleteExam(exam.id)}
+                            onClick={() => setConfirmDeleteId(exam.id)}
                             disabled={deleting === exam.id}
                             className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-xl text-xs font-semibold text-red-500 bg-red-50 hover:bg-red-100 transition-all disabled:opacity-60"
                           >
@@ -779,6 +781,80 @@ export default function Exams() {
                   {creating ? <RotateCcw className="w-4 h-4 animate-spin" /> : <ChevronRight className="w-4 h-4" />}
                   {creating ? 'Creating...' : 'Create & add questions'}
                 </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {confirmDeleteId && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[60] flex items-center justify-center p-4"
+            style={{ background: 'rgba(15,10,40,0.55)', backdropFilter: 'blur(6px)' }}
+            onClick={() => setConfirmDeleteId(null)}
+          >
+            <motion.div
+              initial={{ opacity: 0, scale: 0.92, y: 24 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.92, y: 24 }}
+              transition={{ type: 'spring', stiffness: 340, damping: 28 }}
+              className="relative w-full max-w-sm overflow-hidden rounded-2xl shadow-2xl"
+              onClick={e => e.stopPropagation()}
+            >
+              <div className="absolute inset-0 pointer-events-none" style={{ background: 'linear-gradient(135deg,#fef2f2 0%,#fff5f5 60%,#fff 100%)' }} />
+              <div className="absolute top-0 right-0 w-40 h-40 rounded-full pointer-events-none opacity-30" style={{ background: 'radial-gradient(circle,#fca5a5,transparent 70%)', transform: 'translate(30%,-30%)' }} />
+
+              <div className="relative px-7 pt-8 pb-7 flex flex-col items-center text-center gap-5">
+                <div className="relative">
+                  <div className="w-16 h-16 rounded-2xl flex items-center justify-center shadow-lg" style={{ background: 'linear-gradient(135deg,#ef4444,#dc2626)' }}>
+                    <Trash2 className="w-7 h-7 text-white" />
+                  </div>
+                  <div className="absolute -inset-1 rounded-2xl opacity-20 blur-md" style={{ background: 'linear-gradient(135deg,#ef4444,#dc2626)' }} />
+                </div>
+
+                <div className="space-y-1.5">
+                  <h2 className="text-[17px] font-bold text-slate-800 leading-snug">Delete this exam?</h2>
+                  {examToDelete && (
+                    <p className="text-sm font-semibold text-red-600 bg-red-50 border border-red-100 rounded-lg px-3 py-1.5 inline-block max-w-[220px] truncate">
+                      "{examToDelete.title}"
+                    </p>
+                  )}
+                  <p className="text-sm text-slate-500 leading-relaxed pt-1">
+                    All questions and student attempts will be <span className="font-semibold text-slate-700">permanently deleted</span>. This action cannot be undone.
+                  </p>
+                </div>
+
+                {examToDelete && (examToDelete.totalAttempts > 0) && (
+                  <div className="w-full flex items-center gap-2.5 bg-amber-50 border border-amber-200 rounded-xl px-4 py-3">
+                    <Users className="w-4 h-4 text-amber-500 shrink-0" />
+                    <p className="text-xs text-amber-700 font-medium text-left">
+                      <span className="font-bold">{examToDelete.totalAttempts}</span> student attempt{examToDelete.totalAttempts !== 1 ? 's' : ''} will also be deleted.
+                    </p>
+                  </div>
+                )}
+
+                <div className="w-full flex gap-3 pt-1">
+                  <button
+                    type="button"
+                    onClick={() => setConfirmDeleteId(null)}
+                    className="flex-1 py-2.5 rounded-xl text-sm font-semibold text-slate-600 bg-slate-100 hover:bg-slate-200 transition-all"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => deleteExam(confirmDeleteId)}
+                    disabled={!!deleting}
+                    className="flex-1 py-2.5 rounded-xl text-sm font-bold text-white shadow-lg shadow-red-500/30 transition-all disabled:opacity-60 active:scale-95"
+                    style={{ background: 'linear-gradient(135deg,#ef4444,#dc2626)' }}
+                  >
+                    {deleting ? <RotateCcw className="w-4 h-4 animate-spin mx-auto" /> : 'Yes, delete'}
+                  </button>
+                </div>
               </div>
             </motion.div>
           </motion.div>
