@@ -6274,14 +6274,20 @@ Rules:
           return res.status(400).json({ error: "No questions available for this topic. Please add a GEMINI_API_KEY to generate custom questions." });
         }
 
-        const valid = staticQs.map((q, i) => ({
-          text: q.text,
-          options: q.options,
-          correct_answer: q.options[q.correct] ?? q.options[0],
-          explanation: q.explanation || "",
-          order: i,
-          points: 1,
-        }));
+        const valid = staticQs.map((q, i) => {
+          // Save correct answer text before shuffling options
+          const correctText = q.options[q.correct] ?? q.options[0];
+          // Shuffle the answer options so correct isn't always first
+          const shuffledOpts = [...q.options].sort(() => Math.random() - 0.5);
+          return {
+            text: q.text,
+            options: shuffledOpts,
+            correct_answer: correctText,
+            explanation: q.explanation || "",
+            order: i,
+            points: 1,
+          };
+        });
 
         console.log(`[exam-builder] Static bank fallback: ${valid.length} questions for topic="${topic}" level="${normLevel}"`);
         return res.json({ questions: valid });
