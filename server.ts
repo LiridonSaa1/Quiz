@@ -3530,9 +3530,15 @@ When giving instructions, number each step clearly. Be precise and technical whe
           throw new Error('You cannot assign this student to the selected class.');
         }
 
-        const classStudentIds = Array.isArray(cls.student_ids) ? cls.student_ids.map((sid: unknown) => String(sid)) : [];
+        const classStudentIds = [...new Set(
+          (Array.isArray(cls.student_ids) ? cls.student_ids : []).map((sid: unknown) => String(sid)).filter(Boolean)
+        )];
         if (!classStudentIds.includes(userId)) {
-          const nextClassStudentIds = [...new Set([...classStudentIds, userId])];
+          const capacity = cls.capacity != null && cls.capacity !== '' ? Number(cls.capacity) : 30;
+          if (classStudentIds.length >= capacity) {
+            return res.status(400).json({ error: `This class is full (${classStudentIds.length}/${capacity}). No free spots available.` });
+          }
+          const nextClassStudentIds = [...classStudentIds, userId];
           const classUpdate = await supabaseAdmin
             .from('classes')
             .update({ student_ids: nextClassStudentIds })

@@ -56,7 +56,7 @@ export default function AddStudentModal({ onClose, onSuccess, accentColor = 'vio
     currentLevel: '',
     classId: '',
   });
-  const [classes, setClasses] = useState<Array<{ id: string; name: string }>>([]);
+  const [classes, setClasses] = useState<Array<{ id: string; name: string; capacity: number; enrolled: number }>>([]);
 
   const accent = {
     ring: accentColor === 'violet' ? 'focus:ring-violet-500' : 'focus:ring-emerald-500',
@@ -87,18 +87,28 @@ export default function AddStudentModal({ onClose, onSuccess, accentColor = 'vio
       const json = await res.json().catch(() => ({}));
       if (!json?.success || !Array.isArray(json.classes)) return;
       setClasses(
-        json.classes.map((c: any) => ({
-          id: String(c.id),
-          name: String(c.name || 'Untitled class'),
-        }))
+        json.classes.map((c: any) => {
+          const cap = c.capacity != null && c.capacity !== '' ? Number(c.capacity) : 30;
+          const enrolled = Array.isArray(c.student_ids)
+            ? [...new Set(c.student_ids.map((s: unknown) => String(s)).filter(Boolean))].length
+            : (c.enrollment_count ?? 0);
+          return { id: String(c.id), name: String(c.name || 'Untitled class'), capacity: cap, enrolled };
+        })
       );
     };
     void loadClasses();
   }, []);
 
+  const selectedClass = classes.find(c => c.id === form.classId);
+  const selectedClassFull = selectedClass ? selectedClass.enrolled >= selectedClass.capacity : false;
+
   const handleSubmit = async () => {
     if (!form.name || !form.email || !form.password) {
       toast.error(t('modals.addStudent.nameEmailPasswordRequired'));
+      return;
+    }
+    if (form.classId && selectedClassFull) {
+      toast.error(`This class is full (${selectedClass!.enrolled}/${selectedClass!.capacity}). No free spots available.`);
       return;
     }
     setSubmitting(true);
@@ -319,11 +329,28 @@ export default function AddStudentModal({ onClose, onSuccess, accentColor = 'vio
                 <select
                   value={form.classId}
                   onChange={e => set('classId', e.target.value)}
-                  className={inputCls}
+                  className={cn(inputCls, selectedClassFull ? 'border-red-300 focus:ring-red-400' : '')}
                 >
                   <option value="">{classes.length > 0 ? t('modals.addStudent.selectClass') : t('modals.addStudent.noClassAvailable')}</option>
-                  {classes.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                  {classes.map(c => {
+                    const isFull = c.enrolled >= c.capacity;
+                    return (
+                      <option key={c.id} value={c.id}>
+                        {c.name} ({c.enrolled}/{c.capacity}){isFull ? ' — Full' : ''}
+                      </option>
+                    );
+                  })}
                 </select>
+                {selectedClassFull && (
+                  <p className="mt-1.5 text-xs text-red-500 font-medium flex items-center gap-1">
+                    <span>⚠</span> This class is full — no free spots available.
+                  </p>
+                )}
+                {selectedClass && !selectedClassFull && (
+                  <p className="mt-1.5 text-xs text-emerald-600 font-medium">
+                    {selectedClass.capacity - selectedClass.enrolled} spot{selectedClass.capacity - selectedClass.enrolled !== 1 ? 's' : ''} available ({selectedClass.enrolled}/{selectedClass.capacity})
+                  </p>
+                )}
               </div>
 
               {/* Summary preview */}
