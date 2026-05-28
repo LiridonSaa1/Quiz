@@ -103,11 +103,19 @@ export default function StudentExams() {
 
       const quizIds = quizzesData.map((q: any) => q.id);
 
-      const { data: questionsData } = await supabase
-        .from('questions')
-        .select('quiz_id');
+      // Fetch question counts via server endpoint (bypasses RLS on questions table)
       const qCount: Record<string, number> = {};
-      (questionsData || []).forEach((q: any) => { qCount[q.quiz_id] = (qCount[q.quiz_id] || 0) + 1; });
+      try {
+        const qcRes = await authFetch('/api/teacher/exams/question-counts', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ ids: quizIds }),
+        });
+        if (qcRes.ok) {
+          const qcJson = await qcRes.json();
+          if (qcJson?.counts) Object.assign(qCount, qcJson.counts);
+        }
+      } catch { /* leave counts at 0 */ }
 
       const attemptsData = (await fetchAttemptRowsByStudentId(supabase, uid))
         .filter((a: any) => quizIds.includes(a.quiz_id))

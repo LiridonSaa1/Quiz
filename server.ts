@@ -10461,11 +10461,21 @@ Rules:
 
       const requestedCourseId = typeof req.query.courseId === 'string' ? req.query.courseId.trim() : '';
 
-      const { data: enrolledCourses, error: ecErr } = await supabaseAdmin
-        .from('courses')
-        .select('id,title,level')
-        .contains('student_ids', [caller.userId]);
-      if (ecErr) throw ecErr;
+      let enrolledCourses: any[] = [];
+      {
+        const { data: ecData, error: ecErr } = await supabaseAdmin
+          .from('courses')
+          .select('id,title,level')
+          .contains('student_ids', [caller.userId]);
+        if (ecErr) {
+          // courses.student_ids column may not exist in all deployments — fall back gracefully
+          if (!isMissingCoursesStudentIdsError(ecErr)) throw ecErr;
+          // column missing: rely on classes-based enrollment only
+          enrolledCourses = [];
+        } else {
+          enrolledCourses = ecData || [];
+        }
+      }
 
       const { data: enrolledClasses, error: classErr } = await supabaseAdmin
         .from('classes')
