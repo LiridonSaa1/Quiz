@@ -23,8 +23,7 @@ interface QuizItem {
   passMark: number;
   courseTitle: string;
   attempted: boolean;
-  bestScore: number | null;
-  bestTotal: number | null;
+  bestPct: number | null;
   passed: boolean | null;
   latestAttemptId: string | null;
 }
@@ -85,13 +84,18 @@ export default function StudentQuizzes() {
         courseColorMap[courseId] = COURSE_COLORS[i % COURSE_COLORS.length];
       });
 
-      const attemptMap: Record<string, { score: number; total: number; passed: boolean }> = {};
+      const attemptMap: Record<string, { pct: number; passed: boolean }> = {};
       const latestAttemptMap: Record<string, string> = {};
       (attemptsSnap || []).forEach((a: any) => {
         const prev = attemptMap[a.quiz_id];
-        const pct = a.total_points > 0 ? a.score / a.total_points : 0;
-        if (!prev || pct > (prev.score / prev.total)) {
-          attemptMap[a.quiz_id] = { score: a.score, total: a.total_points, passed: a.passed ?? (pct >= 0.5) };
+        // Prefer the stored score_percent; fall back to computing from score/total_points (capped at 100)
+        const storedPct = a.score_percent != null ? Number(a.score_percent) : null;
+        const computedPct = a.total_points > 0
+          ? Math.min(100, (Number(a.score) / Number(a.total_points)) * 100)
+          : 0;
+        const pct = storedPct ?? computedPct;
+        if (!prev || pct > prev.pct) {
+          attemptMap[a.quiz_id] = { pct, passed: a.passed ?? (pct >= 50) };
         }
         if (!latestAttemptMap[a.quiz_id]) {
           latestAttemptMap[a.quiz_id] = String(a.id);
@@ -111,8 +115,7 @@ export default function StudentQuizzes() {
           passMark: q.passMark ?? q.pass_mark ?? 0,
           courseTitle: q.course_title || 'Course',
           attempted: !!att,
-          bestScore: att?.score ?? null,
-          bestTotal: att?.total ?? null,
+          bestPct: att != null ? Math.round(att.pct) : null,
           passed: att?.passed ?? null,
           latestAttemptId: latestAttemptMap[q.id] ?? null,
           courseId: String(q.course_id || ''),
@@ -234,7 +237,7 @@ export default function StudentQuizzes() {
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
             <AnimatePresence>
               {filtered.map((quiz, i) => {
-                const pct = quiz.bestScore != null && quiz.bestTotal ? Math.round((quiz.bestScore / quiz.bestTotal) * 100) : null;
+                const pct = quiz.bestPct;
                 const stateLabel = quiz.passed ? t('student.quizzes.passed') : quiz.attempted ? t('student.quizzes.completed') : t('student.quizzes.new');
                 const actionHref = quiz.attempted && quiz.latestAttemptId
                   ? `/student/results/${quiz.latestAttemptId}`
