@@ -61,12 +61,6 @@ export default function StudentLayout({ children }: { children: React.ReactNode 
       ]
     },
     {
-      key: 'headway',
-      items: [
-        { icon: FlaskConical, label: 'Test Builder',   path: '/student/test-builder' },
-      ]
-    },
-    {
       key: 'compete',
       items: [
         { icon: Trophy, label: t('nav.badges'),   path: '/student/badges' },
