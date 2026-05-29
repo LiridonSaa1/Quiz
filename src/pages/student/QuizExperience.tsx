@@ -332,25 +332,30 @@ export default function QuizExperience() {
 
         const rawQuestions: (Question & { section_id?: string })[] = (qJson?.questions || [])
           .filter((row: any) => row != null)
-          .map((row: Record<string, unknown>) => ({
-            id: String(row.id || ''),
-            quizId: String(row.quiz_id || ''),
-            type: row.type as Question['type'],
-            text: questionBodyFromRow(row),
-            options: Array.isArray(row.options)
-              ? row.options.map((o: any) => typeof o === 'string' ? o : (o?.text ?? o?.label ?? String(o ?? '')))
-              : undefined,
-            correctAnswer: typeof row.correct_answer === 'string'
-              ? row.correct_answer
-              : String((row.correct_answer as any)?.text ?? (row.correct_answer as any)?.label ?? row.correct_answer ?? ''),
-            points: Number(row.points || 1),
-            explanation: row.explanation as string | undefined,
-            mediaUrl: row.media_url as string | undefined,
-            mediaType: row.media_type as string | undefined,
-            readingPassage: row.reading_passage as string | undefined,
-            orderIndex: row.order_index as number | undefined,
-            section_id: row.section_id as string | undefined,
-          }));
+          .map((row: Record<string, unknown>, _rowIdx: number) => {
+            // Normalize options: ensure they are always {id, text} objects for QuestionItem
+            const rawOpts = Array.isArray(row.options) ? row.options : [];
+            const normalizedOpts = rawOpts.map((o: any, i: number) =>
+              typeof o === 'string'
+                ? { id: `opt_${i}`, text: o }
+                : { id: String(o?.id ?? `opt_${i}`), text: String(o?.text ?? o?.label ?? o ?? '') }
+            );
+            return {
+              id: String(row.id || ''),
+              quizId: String(row.quiz_id || ''),
+              type: row.type as Question['type'],
+              text: questionBodyFromRow(row),
+              options: normalizedOpts.length > 0 ? normalizedOpts : undefined,
+              correctAnswer: String(row.correct_answer ?? ''),
+              points: Number(row.points || 1),
+              explanation: row.explanation as string | undefined,
+              mediaUrl: row.media_url as string | undefined,
+              mediaType: row.media_type as string | undefined,
+              readingPassage: row.reading_passage as string | undefined,
+              orderIndex: row.order_index as number | undefined,
+              section_id: row.section_id as string | undefined,
+            };
+          });
 
         if (rawQuestions.length === 0) {
           setLoadError('This quiz has no questions yet.');
