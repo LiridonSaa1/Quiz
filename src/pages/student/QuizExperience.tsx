@@ -446,22 +446,25 @@ export default function QuizExperience() {
           timeSpent: 0,
         }));
 
-      const attemptId = await insertAttemptWithFallback({
-        quizId,
-        studentId: userId,
-        answers: answersArray,
-        score,
-        timeTaken: quiz.timeLimit ? (quiz.timeLimit * 60) - (timeLeft || 0) : 0,
-        startedAt: startedAt || new Date().toISOString(),
-        completedAt: new Date().toISOString(),
-        status: 'completed',
+      const scorePercent = possible > 0 ? Math.round((earned / possible) * 100) : 0;
+      const passed = scorePercent >= 50;
+      const attemptRow = await insertAttemptWithFallback(supabase, {
+        quiz_id: quizId,
+        student_id: userId,
+        score: earned,
+        total_points: possible,
+        passed,
+        started_at: startedAt || new Date().toISOString(),
+        completed_at: new Date().toISOString(),
+        answers: Object.fromEntries(answersArray.map((a) => [a.questionId, a.answer])),
       });
+      const attemptId = attemptRow?.id ?? null;
 
       if (attemptId) {
         toast.success('Quiz submitted!');
         navigate(`/student/results/${attemptId}`);
       } else {
-        toast.success(`Quiz completed! Score: ${score}%`);
+        toast.success(`Quiz completed! Score: ${scorePercent}%`);
         navigate('/student/quizzes');
       }
     } catch (err: unknown) {
