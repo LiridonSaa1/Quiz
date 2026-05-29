@@ -252,19 +252,25 @@ export default function QuizTaking() {
       const serverShuffled: { questions?: boolean; answers?: boolean } =
         (questionsJson as any)?.shuffled ?? {};
 
-      const builtQuestions = (((questionsJson as any)?.questions as any[]) || []).map((q) => ({
-        id: q.id,
-        quizId: q.quiz_id,
-        text: questionBodyFromRow(q as Record<string, unknown>),
-        type: q.type,
-        options: q.options,
-        correctAnswer: q.correct_answer,
-        points: q.points,
-        mediaUrl: q.media_url,
-        mediaType: q.media_type,
-        readingPassage: q.reading_passage,
-        orderIndex: (q as { order?: number; order_index?: number }).order_index ?? (q as { order?: number }).order,
-      } as Question));
+      const builtQuestions = (((questionsJson as any)?.questions as any[]) || [])
+        .filter((q: any) => q != null)
+        .map((q: any) => ({
+          id: q.id,
+          quizId: q.quiz_id,
+          text: questionBodyFromRow(q as Record<string, unknown>),
+          type: q.type,
+          options: Array.isArray(q.options)
+            ? q.options.map((o: any) => typeof o === 'string' ? o : (o?.text ?? o?.label ?? String(o ?? '')))
+            : q.options,
+          correctAnswer: typeof q.correct_answer === 'string'
+            ? q.correct_answer
+            : (q.correct_answer?.text ?? q.correct_answer?.label ?? String(q.correct_answer ?? '')),
+          points: q.points,
+          mediaUrl: q.media_url,
+          mediaType: q.media_type,
+          readingPassage: q.reading_passage,
+          orderIndex: (q as { order?: number; order_index?: number }).order_index ?? (q as { order?: number }).order,
+        } as Question));
 
       let savedSnapshot: QuizProgressSnapshot | null = null;
       let savedTimerSnapshot: QuizTimerSnapshot | null = null;
