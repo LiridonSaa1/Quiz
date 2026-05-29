@@ -330,21 +330,27 @@ export default function QuizExperience() {
         const qJson = await qRes.json().catch(() => ({}));
         if (!qRes.ok) throw new Error(String(qJson?.error || 'Failed to load questions'));
 
-        const rawQuestions: (Question & { section_id?: string })[] = (qJson?.questions || []).map((row: Record<string, unknown>) => ({
-          id: String(row.id || ''),
-          quizId: String(row.quiz_id || ''),
-          type: row.type as Question['type'],
-          text: questionBodyFromRow(row),
-          options: Array.isArray(row.options) ? row.options : undefined,
-          correctAnswer: String(row.correct_answer || ''),
-          points: Number(row.points || 1),
-          explanation: row.explanation as string | undefined,
-          mediaUrl: row.media_url as string | undefined,
-          mediaType: row.media_type as string | undefined,
-          readingPassage: row.reading_passage as string | undefined,
-          orderIndex: row.order_index as number | undefined,
-          section_id: row.section_id as string | undefined,
-        }));
+        const rawQuestions: (Question & { section_id?: string })[] = (qJson?.questions || [])
+          .filter((row: any) => row != null)
+          .map((row: Record<string, unknown>) => ({
+            id: String(row.id || ''),
+            quizId: String(row.quiz_id || ''),
+            type: row.type as Question['type'],
+            text: questionBodyFromRow(row),
+            options: Array.isArray(row.options)
+              ? row.options.map((o: any) => typeof o === 'string' ? o : (o?.text ?? o?.label ?? String(o ?? '')))
+              : undefined,
+            correctAnswer: typeof row.correct_answer === 'string'
+              ? row.correct_answer
+              : String((row.correct_answer as any)?.text ?? (row.correct_answer as any)?.label ?? row.correct_answer ?? ''),
+            points: Number(row.points || 1),
+            explanation: row.explanation as string | undefined,
+            mediaUrl: row.media_url as string | undefined,
+            mediaType: row.media_type as string | undefined,
+            readingPassage: row.reading_passage as string | undefined,
+            orderIndex: row.order_index as number | undefined,
+            section_id: row.section_id as string | undefined,
+          }));
 
         if (rawQuestions.length === 0) {
           setLoadError('This quiz has no questions yet.');
