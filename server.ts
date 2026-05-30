@@ -13854,6 +13854,151 @@ Rules:
     } catch (e: any) { res.status(500).json({ error: e.message }); }
   });
 
+  // ── Teacher Announcement routes (same logic as admin, accessible to teacher or admin) ──
+  app.get('/api/teacher/announcements', async (req: Request, res: Response) => {
+    try {
+      const caller = await assertAuthenticated(req, res);
+      if (!caller) return;
+      if (caller.role !== 'teacher' && caller.role !== 'admin') return res.status(403).json({ error: 'Forbidden' });
+      const { data, error } = await supabaseAdmin
+        .from('announcements')
+        .select('*, author:profiles!author_id(id,display_name,email)')
+        .order('created_at', { ascending: false });
+      if (error) throw error;
+      res.json({ success: true, announcements: data });
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  app.post('/api/teacher/announcements', async (req: Request, res: Response) => {
+    try {
+      const caller = await assertAuthenticated(req, res);
+      if (!caller) return;
+      if (caller.role !== 'teacher' && caller.role !== 'admin') return res.status(403).json({ error: 'Forbidden' });
+      const { class_ids, student_ids, send_email, ...body } = req.body || {};
+      const payload = {
+        ...body,
+        author_id: body.author_id || caller.userId,
+        published_at: body.status === 'published' ? new Date().toISOString() : null,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      };
+      const { data, error } = await annInsert(payload);
+      if (error) throw error;
+      if (body.status === 'published') {
+        const classIds: string[] = Array.isArray(class_ids) ? class_ids.map((x: unknown) => String(x || '').trim()).filter(Boolean) : [];
+        const studentIds: string[] = Array.isArray(student_ids) ? student_ids.map((x: unknown) => String(x || '').trim()).filter(Boolean) : [];
+        await sendAnnouncementNotifications({
+          title: String(body.title || ''), content: String(body.content || ''),
+          priority: String(body.priority || 'normal'), audience: String(body.target_audience || 'all'),
+          classIds, studentIds, sendEmail: Boolean(send_email),
+        });
+      }
+      res.json({ success: true, announcement: data });
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  app.patch('/api/teacher/announcements/:id', async (req: Request, res: Response) => {
+    try {
+      const caller = await assertAuthenticated(req, res);
+      if (!caller) return;
+      if (caller.role !== 'teacher' && caller.role !== 'admin') return res.status(403).json({ error: 'Forbidden' });
+      const { class_ids, student_ids, send_email, ...body } = req.body || {};
+      const payload = {
+        ...body,
+        updated_at: new Date().toISOString(),
+        ...(body.status === 'published' ? { published_at: new Date().toISOString() } : {}),
+      };
+      const { data, error } = await annUpdate(req.params.id, payload);
+      if (error) throw error;
+      if (body.status === 'published') {
+        const classIds: string[] = Array.isArray(class_ids) ? class_ids.map((x: unknown) => String(x || '').trim()).filter(Boolean) : [];
+        const studentIds: string[] = Array.isArray(student_ids) ? student_ids.map((x: unknown) => String(x || '').trim()).filter(Boolean) : [];
+        await sendAnnouncementNotifications({
+          title: String((body.title ?? data?.title) || ''), content: String((body.content ?? data?.content) || ''),
+          priority: String((body.priority ?? data?.priority) || 'normal'), audience: String((body.target_audience ?? data?.target_audience) || 'all'),
+          classIds, studentIds, sendEmail: Boolean(send_email),
+        });
+      }
+      res.json({ success: true, announcement: data });
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  app.delete('/api/teacher/announcements/:id', async (req: Request, res: Response) => {
+    try {
+      const caller = await assertAuthenticated(req, res);
+      if (!caller) return;
+      if (caller.role !== 'teacher' && caller.role !== 'admin') return res.status(403).json({ error: 'Forbidden' });
+      const { error } = await supabaseAdmin.from('announcements').delete().eq('id', req.params.id);
+      if (error) throw error;
+      res.json({ success: true });
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  app.post('/api/teacher/announcements/:id/resend', async (req: Request, res: Response) => {
+    try {
+      const caller = await assertAuthenticated(req, res);
+      if (!caller) return;
+      if (caller.role !== 'teacher' && caller.role !== 'admin') return res.status(403).json({ error: 'Forbidden' });
+      const { data: ann, error } = await supabaseAdmin.from('announcements').select('*').eq('id', req.params.id).maybeSingle();
+      if (error) throw error;
+      if (!ann) return res.status(404).json({ error: 'Announcement not found' });
+      const count = await sendAnnouncementNotifications({
+        title: String(ann.title || ''), content: String(ann.content || ''),
+        priority: String(ann.priority || 'normal'), audience: String(ann.target_audience || 'all'),
+        classIds: [], studentIds: [], sendEmail: false,
+      });
+      res.json({ success: true, count });
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  app.get('/api/teacher/brevo/status', async (_req: Request, res: Response) => {
+    const configured = isEmailConfigured();
+    if (!configured) return res.json({ configured: false, connected: false, reason: 'BREVO_API_KEY, BREVO_SENDER_EMAIL or BREVO_SENDER_NAME is missing.' });
+    try {
+      const apiKey = process.env.BREVO_API_KEY || '';
+      const r = await fetch('https://api.brevo.com/v3/account', { headers: { 'api-key': apiKey, 'accept': 'application/json' } });
+      const json = await r.json() as any;
+      if (!r.ok) return res.json({ configured: true, connected: false, reason: json?.message || `Brevo returned ${r.status}` });
+      res.json({ configured: true, connected: true, email: json?.email, plan: json?.plan?.[0]?.title, senderEmail: process.env.BREVO_SENDER_EMAIL || '', senderName: process.env.BREVO_SENDER_NAME || '' });
+    } catch (e: any) { res.json({ configured: true, connected: false, reason: e.message }); }
+  });
+
+  // ── POST /api/teacher/students/:studentId/reset-password — teacher resets a student's password ──
+  app.post("/api/teacher/students/:studentId/reset-password", async (req: Request, res: Response) => {
+    try {
+      const caller = await assertAuthenticated(req, res);
+      if (!caller) return;
+      if (caller.role !== "teacher" && caller.role !== "admin") return res.status(403).json({ error: "Forbidden" });
+
+      const studentId = String(req.params.studentId || "").trim();
+      const newPassword = typeof req.body?.newPassword === "string" ? req.body.newPassword.trim() : "";
+      if (!studentId) return res.status(400).json({ error: "studentId is required" });
+      if (!newPassword || newPassword.length < 6) return res.status(400).json({ error: "Password must be at least 6 characters" });
+
+      const { data: student, error: sErr } = await supabaseAdmin
+        .from("profiles").select("id, role, teacher_id, display_name, email").eq("id", studentId).maybeSingle();
+      if (sErr) throw sErr;
+      if (!student) return res.status(404).json({ error: "Student not found" });
+      if (student.role !== "student") return res.status(400).json({ error: "Target user is not a student" });
+
+      if (caller.role === "teacher") {
+        const teacherIds = await getTeacherIdCandidates(caller.userId);
+        const scopedIds = teacherIds.length > 0 ? teacherIds : [caller.userId];
+        if (!scopedIds.includes(String(student.teacher_id))) {
+          return res.status(403).json({ error: "Forbidden: student is not linked to your account" });
+        }
+      }
+
+      const { error: updErr } = await supabaseAdmin.auth.admin.updateUserById(studentId, { password: newPassword });
+      if (updErr) throw updErr;
+
+      return res.json({ success: true, message: `Password updated for ${student.display_name || student.email}` });
+    } catch (e: any) {
+      console.error("POST /api/teacher/students/:studentId/reset-password", e);
+      return res.status(500).json({ error: e?.message || "Failed to reset password" });
+    }
+  });
+
   // GET /api/student/assignments — list published assignments visible to this student
   app.get('/api/student/assignments', async (req: Request, res: Response) => {
     try {

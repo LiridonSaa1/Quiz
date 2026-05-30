@@ -1,5 +1,6 @@
 import React, { useEffect, useState, useMemo, useCallback, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
+import { useSearchParams } from 'react-router-dom';
 import * as XLSX from 'xlsx';
 import { supabase } from '../../supabase';
 import TeacherLayout from '../../components/layout/TeacherLayout';
@@ -61,11 +62,12 @@ const avatarColor = (s: string) => {
 
 export default function TeacherResults() {
   const { t } = useTranslation();
+  const [searchParams] = useSearchParams();
   const [attempts, setAttempts] = useState<UiAttempt[]>([]);
   const [quizzes, setQuizzes] = useState<Record<string, string>>({});
   const [students, setStudents] = useState<Record<string, { name: string; email: string }>>({});
   const [loading, setLoading] = useState(true);
-  const [search, setSearch] = useState('');
+  const [search, setSearch] = useState(() => searchParams.get('student') || '');
   const [tab, setTab] = useState<TabFilter>('all');
   const [selectedQuiz, setSelectedQuiz] = useState('all');
   const [sortBy, setSortBy] = useState<SortField>('date');

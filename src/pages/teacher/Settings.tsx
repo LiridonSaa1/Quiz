@@ -5,7 +5,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import {
   Settings, BookOpen, Loader2, CheckCircle2, Shield,
   ArrowRightLeft, User, Search, X, ChevronRight, AlertTriangle,
-  RefreshCw, Clock, History,
+  RefreshCw, Clock, History, KeyRound, Eye, EyeOff,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { cn } from '../../lib/utils';
@@ -90,6 +90,14 @@ export default function TeacherSettings() {
   const [historyLoaded, setHistoryLoaded] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
 
+  // Password reset
+  const [resetStudent, setResetStudent] = useState<StudentRow | null>(null);
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [showNewPw, setShowNewPw] = useState(false);
+  const [showConfirmPw, setShowConfirmPw] = useState(false);
+  const [resetting, setResetting] = useState(false);
+
   useEffect(() => {
     const load = async () => {
       setLoading(true);
@@ -119,8 +127,8 @@ export default function TeacherSettings() {
       if (!res.ok) throw new Error(await readApiError(res));
       const json = await res.json();
       const rows: StudentRow[] = (json.students || []).map((s: any) => ({
-        id: s.id,
-        display_name: s.display_name || s.name || null,
+        id: s.uid || s.id,
+        display_name: s.displayName || s.display_name || s.name || null,
         email: s.email || '',
         status: s.status || 'active',
       }));
@@ -191,6 +199,39 @@ export default function TeacherSettings() {
     setTargetTeacherId('');
     setTeacherSearch('');
     setShowConfirm(false);
+  };
+
+  const openResetModal = (student: StudentRow) => {
+    setResetStudent(student);
+    setNewPassword('');
+    setConfirmPassword('');
+    setShowNewPw(false);
+    setShowConfirmPw(false);
+  };
+
+  const closeResetModal = () => {
+    setResetStudent(null);
+    setNewPassword('');
+    setConfirmPassword('');
+  };
+
+  const handleResetPassword = async () => {
+    if (!resetStudent) return;
+    if (newPassword.length < 6) { toast.error('Password must be at least 6 characters'); return; }
+    if (newPassword !== confirmPassword) { toast.error('Passwords do not match'); return; }
+    setResetting(true);
+    try {
+      const res = await authFetch(`/api/teacher/students/${encodeURIComponent(resetStudent.id)}/reset-password`, {
+        method: 'POST',
+        body: JSON.stringify({ newPassword }),
+      });
+      if (!res.ok) throw new Error(await readApiError(res));
+      toast.success(`Password updated for ${resetStudent.display_name || resetStudent.email}`);
+      closeResetModal();
+    } catch (e: any) {
+      toast.error(e?.message || 'Failed to reset password');
+    }
+    setResetting(false);
   };
 
   const handleTransfer = async () => {
@@ -418,13 +459,22 @@ export default function TeacherSettings() {
                             )}>
                               {s.status}
                             </div>
-                            <button
-                              onClick={() => openTransferModal(s)}
-                              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold text-indigo-600 bg-indigo-50 hover:bg-indigo-100 transition-all shrink-0 opacity-0 group-hover:opacity-100"
-                            >
-                              <ArrowRightLeft className="w-3.5 h-3.5" />
-                              Transfer
-                            </button>
+                            <div className="flex items-center gap-1.5 opacity-0 group-hover:opacity-100">
+                              <button
+                                onClick={() => openResetModal(s)}
+                                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold text-amber-600 bg-amber-50 hover:bg-amber-100 transition-all shrink-0"
+                              >
+                                <KeyRound className="w-3.5 h-3.5" />
+                                Password
+                              </button>
+                              <button
+                                onClick={() => openTransferModal(s)}
+                                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold text-indigo-600 bg-indigo-50 hover:bg-indigo-100 transition-all shrink-0"
+                              >
+                                <ArrowRightLeft className="w-3.5 h-3.5" />
+                                Transfer
+                              </button>
+                            </div>
                           </motion.div>
                         );
                       })}
@@ -732,6 +782,121 @@ export default function TeacherSettings() {
                     </div>
                   </>
                 )}
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* ── Password Reset Modal ── */}
+      <AnimatePresence>
+        {resetStudent && (
+          <motion.div
+            className="fixed inset-0 z-50 flex items-center justify-center p-4"
+            initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+          >
+            <motion.div
+              className="absolute inset-0 bg-black/50 backdrop-blur-sm"
+              onClick={closeResetModal}
+            />
+            <motion.div
+              className="relative bg-white rounded-3xl shadow-2xl max-w-sm w-full overflow-hidden"
+              initial={{ scale: 0.92, opacity: 0, y: 20 }}
+              animate={{ scale: 1, opacity: 1, y: 0 }}
+              exit={{ scale: 0.92, opacity: 0, y: 20 }}
+              transition={{ type: 'spring', stiffness: 300, damping: 25 }}
+            >
+              <div
+                className="px-7 pt-7 pb-5"
+                style={{ background: 'linear-gradient(135deg, #92400e 0%, #d97706 100%)' }}
+              >
+                <div className="flex items-start justify-between gap-3">
+                  <div className="flex items-center gap-3">
+                    <div className="w-11 h-11 rounded-2xl bg-white/15 flex items-center justify-center">
+                      <KeyRound className="w-5 h-5 text-white" />
+                    </div>
+                    <div>
+                      <h2 className="text-lg font-extrabold text-white leading-tight">Reset Password</h2>
+                      <p className="text-amber-200 text-xs mt-0.5">
+                        For <span className="font-bold text-white">{resetStudent.display_name || resetStudent.email}</span>
+                      </p>
+                    </div>
+                  </div>
+                  <button onClick={closeResetModal}
+                    className="p-1.5 text-amber-200 hover:text-white hover:bg-white/10 rounded-xl transition-colors mt-0.5">
+                    <X className="w-5 h-5" />
+                  </button>
+                </div>
+              </div>
+
+              <div className="p-7 space-y-4">
+                <div>
+                  <label className="block text-xs font-bold text-slate-600 uppercase tracking-wider mb-1.5">
+                    New Password
+                  </label>
+                  <div className="relative">
+                    <input
+                      type={showNewPw ? 'text' : 'password'}
+                      value={newPassword}
+                      onChange={e => setNewPassword(e.target.value)}
+                      placeholder="Min 6 characters"
+                      className="w-full pr-10 pl-4 py-2.5 rounded-xl border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-amber-400 focus:border-transparent"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowNewPw(p => !p)}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
+                    >
+                      {showNewPw ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                    </button>
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-slate-600 uppercase tracking-wider mb-1.5">
+                    Confirm Password
+                  </label>
+                  <div className="relative">
+                    <input
+                      type={showConfirmPw ? 'text' : 'password'}
+                      value={confirmPassword}
+                      onChange={e => setConfirmPassword(e.target.value)}
+                      placeholder="Repeat new password"
+                      className="w-full pr-10 pl-4 py-2.5 rounded-xl border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-amber-400 focus:border-transparent"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowConfirmPw(p => !p)}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
+                    >
+                      {showConfirmPw ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                    </button>
+                  </div>
+                  {confirmPassword && newPassword !== confirmPassword && (
+                    <p className="text-xs text-rose-500 mt-1">Passwords do not match</p>
+                  )}
+                </div>
+
+                <div className="flex gap-3 pt-1">
+                  <button
+                    type="button"
+                    onClick={closeResetModal}
+                    className="flex-1 py-3 rounded-2xl border border-slate-200 text-sm font-semibold text-slate-600 hover:bg-slate-50 transition-colors"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    disabled={resetting || newPassword.length < 6 || newPassword !== confirmPassword}
+                    onClick={handleResetPassword}
+                    className="flex-1 py-3 rounded-2xl text-sm font-bold text-white transition-all disabled:opacity-40 disabled:cursor-not-allowed inline-flex items-center justify-center gap-2"
+                    style={{ background: 'linear-gradient(135deg, #d97706 0%, #b45309 100%)', boxShadow: '0 4px 16px rgba(217,119,6,0.3)' }}
+                  >
+                    {resetting
+                      ? <><Loader2 className="w-4 h-4 animate-spin" /> Saving…</>
+                      : <><KeyRound className="w-4 h-4" /> Set Password</>}
+                  </button>
+                </div>
               </div>
             </motion.div>
           </motion.div>
