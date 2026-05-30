@@ -389,7 +389,7 @@ export default function TeacherSettings() {
                           'from-amber-400 to-orange-500',
                           'from-sky-400 to-blue-500',
                         ];
-                        const color = colors[s.id.charCodeAt(0) % colors.length];
+                        const color = colors[(s.id || '').charCodeAt(0) % colors.length];
                         return (
                           <motion.div
                             key={s.id}
@@ -499,7 +499,7 @@ export default function TeacherSettings() {
                             const isSent = tr.from_teacher_id === userId;
                             const initials = (tr.student_name || tr.student_email || '?').trim().split(' ').map(w => w[0]).join('').toUpperCase().slice(0, 2);
                             const colors = ['from-violet-400 to-indigo-500', 'from-emerald-400 to-teal-500', 'from-rose-400 to-pink-500', 'from-amber-400 to-orange-500', 'from-sky-400 to-blue-500'];
-                            const color = colors[tr.student_id.charCodeAt(0) % colors.length];
+                            const color = colors[(tr.student_id || '').charCodeAt(0) % colors.length];
 
                             return (
                               <div key={tr.id} className="px-5 py-3.5 flex items-center gap-3 hover:bg-slate-50/50 transition-colors">
