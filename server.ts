@@ -11956,6 +11956,34 @@ Rules:
     questionStats: RQReportQuestion[];
   }
   const rqCompletedSessions = new Map<string, RQReport>();
+  const RQ_REPORT_SECTION_PREFIX = 'rq_report:';
+
+  const rqPersistReport = async (report: RQReport): Promise<void> => {
+    try {
+      await supabaseAdmin.from('platform_config').upsert(
+        { section: `${RQ_REPORT_SECTION_PREFIX}${report.id}`, value: report as any, updated_at: new Date().toISOString() },
+        { onConflict: 'section' }
+      );
+    } catch (e) { console.warn('[rq] persist report failed:', e); }
+  };
+
+  const rqRestoreReportsFromDB = async (): Promise<void> => {
+    try {
+      const { data } = await supabaseAdmin
+        .from('platform_config')
+        .select('section, value')
+        .like('section', `${RQ_REPORT_SECTION_PREFIX}%`);
+      if (!data) return;
+      let count = 0;
+      for (const row of data) {
+        const r = row.value as any;
+        if (!r?.id) continue;
+        rqCompletedSessions.set(r.id, r as RQReport);
+        count++;
+      }
+      if (count > 0) console.log(`[rq] Restored ${count} completed quiz report(s) from DB`);
+    } catch (e) { console.warn('[rq] restoreReportsFromDB failed:', e); }
+  };
 
   const buildRQReport = (session: RQSession): RQReport => {
     const parts = [...session.participants.values()];
@@ -12127,7 +12155,9 @@ Rules:
       if (nextIndex >= s.questions.length) {
         s.status = 'ended';
         rqPins.delete(s.pin);
-        rqCompletedSessions.set(s.id, buildRQReport(s));
+        const _autoReport1 = buildRQReport(s);
+        rqCompletedSessions.set(s.id, _autoReport1);
+        rqPersistReport(_autoReport1).catch(() => {});
         const board = rqLeaderboard(s);
         await rqBroadcast(sessionId, 'session_ended', { leaderboard: board });
         rqDeleteSessionFromDB(sessionId).catch(() => {});
@@ -12273,8 +12303,9 @@ Rules:
     } catch (e) { console.warn('[rq] restoreSessionsFromDB failed:', e); }
   };
 
-  // Restore sessions immediately (fire-and-forget — server is already serving)
+  // Restore sessions and completed reports immediately (fire-and-forget)
   rqRestoreSessionsFromDB().catch(() => {});
+  rqRestoreReportsFromDB().catch(() => {});
   // ─── END LIVE QUIZ SESSION PERSISTENCE ───────────────────────────────────────
 
   // Teacher: start a live quiz session
@@ -12497,7 +12528,9 @@ Rules:
         if (nextIndex >= session.questions.length) {
           session.status = 'ended';
           rqPins.delete(session.pin);
-          rqCompletedSessions.set(session.id, buildRQReport(session));
+          const _nextReport = buildRQReport(session);
+          rqCompletedSessions.set(session.id, _nextReport);
+          rqPersistReport(_nextReport).catch(() => {});
           const board = rqLeaderboard(session);
           await rqBroadcast(session.id, 'session_ended', { leaderboard: board });
           rqDeleteSessionFromDB(session.id).catch(() => {});
@@ -12536,7 +12569,9 @@ Rules:
       if (session.autoNextTimer) clearTimeout(session.autoNextTimer);
       session.status = 'ended';
       rqPins.delete(session.pin);
-      rqCompletedSessions.set(session.id, buildRQReport(session));
+      const _endReport = buildRQReport(session);
+      rqCompletedSessions.set(session.id, _endReport);
+      rqPersistReport(_endReport).catch(() => {});
       const board = rqLeaderboard(session);
       await rqBroadcast(session.id, 'session_ended', { leaderboard: board });
       rqDeleteSessionFromDB(session.id).catch(() => {});

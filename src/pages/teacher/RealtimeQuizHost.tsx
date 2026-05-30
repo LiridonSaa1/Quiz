@@ -110,9 +110,15 @@ export default function RealtimeQuizHost() {
   useEffect(() => {
     if (!sessionId) return;
     pollSession();
-    pollRef.current = setInterval(pollSession, 20000);
+  }, [sessionId]);
+
+  useEffect(() => {
+    if (!sessionId) return;
+    if (pollRef.current) clearInterval(pollRef.current);
+    const interval = view === 'active' ? 4000 : 20000;
+    pollRef.current = setInterval(pollSession, interval);
     return () => { if (pollRef.current) clearInterval(pollRef.current); };
-  }, [sessionId, pollSession]);
+  }, [sessionId, view, pollSession]);
 
   useEffect(() => {
     if (!sessionId || view === 'setup' || view === 'ended') return;
@@ -172,7 +178,7 @@ export default function RealtimeQuizHost() {
     try {
       const res = await authFetch(`/api/teacher/realtime-quiz/${sessionId}/next`, { method: 'PATCH' });
       const json = await res.json();
-      if (!res.ok || !json.success) { toast.error(json.error || 'Failed.'); return; }
+      if (!res.ok || !json.success) { toast.error(json.error || 'Failed.'); await pollSession(); return; }
       if (json.status === 'active') setView('active');
       if (json.status === 'ended') { setView('ended'); if (json.leaderboard) setLeaderboard(json.leaderboard); }
       await pollSession();
