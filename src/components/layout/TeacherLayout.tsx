@@ -248,14 +248,6 @@ export default function TeacherLayout({ children }: { children: React.ReactNode 
       ],
     },
     {
-      key: 'headway',
-      title: 'Headway Resources',
-      items: [
-        { icon: BookOpen,    label: 'Headway Tests',   path: '/teacher/headway-tests' },
-        { icon: ListChecks,  label: 'Module Tests',    path: '/teacher/module-tests' },
-      ],
-    },
-    {
       key: 'analytics',
       title: t('nav.sections.analytics'),
       items: [
