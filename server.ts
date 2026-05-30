@@ -15408,6 +15408,35 @@ async function runAnnouncementColumnsMigration(): Promise<void> {
   console.log('[migration] announcements columns: will use graceful fallback in API handlers');
 }
 
+// ─── Student Transfers Log Migration ─────────────────────────────────────────
+async function runStudentTransfersMigration() {
+  const dbUrl = process.env.DATABASE_URL?.trim();
+  if (!dbUrl) return;
+  try {
+    await poolQuery(`
+      CREATE TABLE IF NOT EXISTS student_transfers (
+        id              UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+        student_id      UUID        NOT NULL,
+        student_name    TEXT        NOT NULL DEFAULT '',
+        student_email   TEXT        NOT NULL DEFAULT '',
+        from_teacher_id UUID        NOT NULL,
+        from_teacher_name TEXT      NOT NULL DEFAULT '',
+        to_teacher_id   UUID        NOT NULL,
+        to_teacher_name TEXT        NOT NULL DEFAULT '',
+        transferred_by  UUID        NOT NULL,
+        note            TEXT,
+        transferred_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      )
+    `);
+    await poolQuery(`CREATE INDEX IF NOT EXISTS idx_student_transfers_from_teacher ON student_transfers (from_teacher_id)`);
+    await poolQuery(`CREATE INDEX IF NOT EXISTS idx_student_transfers_to_teacher   ON student_transfers (to_teacher_id)`);
+    await poolQuery(`CREATE INDEX IF NOT EXISTS idx_student_transfers_at           ON student_transfers (transferred_at DESC)`);
+    console.log('[migration] student_transfers table ensured ✓');
+  } catch (err: any) {
+    console.warn('[migration] student_transfers table:', err?.message?.split('\n')[0]);
+  }
+}
+
 // ─── Assignment Submissions Migration ────────────────────────────────────────
 async function runAssignmentSubmissionsMigration() {
   const dbUrl = process.env.DATABASE_URL?.trim();
@@ -15816,6 +15845,7 @@ async function startServer() {
   void runNotificationsColumnsMigration();
   void runLiveSessionsRecordingUrlsMigration();
   void runQuizSectionsMigration();
+  void runStudentTransfersMigration();
   void ensureAssignmentFilesBucket();
   void ensureHeadwayMediaBucket();
   void fixHeadwayQuizCorrectAnswers();
