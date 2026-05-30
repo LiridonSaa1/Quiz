@@ -656,7 +656,7 @@ export default function TeacherLiveSessionRoom() {
                   ) : (
                     <p className="text-sm text-white/40 mb-5">{t('liveSessions.sessionHasEnded')}</p>
                   )}
-                  <p className="text-xs text-white/20 font-mono">Room: {jitsiRoomName}</p>
+                  <p className="text-xs text-white/20 font-mono">Room: {jitsiRoomNameRef.current}</p>
                 </div>
                 {session.status !== 'ended' && session.status !== 'cancelled' && (
                   <button
