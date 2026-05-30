@@ -11,6 +11,7 @@ import {
 } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { TableRowsSkeleton } from '../../components/ui/Skeleton';
+import { authFetch } from '../../lib/apiUrl';
 
 type ReportType = 'students' | 'courses' | 'quizzes' | 'roles';
 
@@ -73,7 +74,7 @@ export default function AdminReports() {
     setSearch('');
     setSortKey('');
     try {
-      const res = await fetch(`/api/admin/reports/${type}`);
+      const res = await authFetch(`/api/admin/reports/${type}`);
       const json = await res.json();
       if (!json.success) throw new Error(json.error);
       if (type === 'students') setStudentData(json.report);

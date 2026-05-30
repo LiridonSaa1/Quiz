@@ -4,7 +4,7 @@ import AdminLayout from "../../components/layout/AdminLayout";
 import { cn } from "../../lib/utils";
 import { format } from "date-fns";
 import { toast } from "sonner";
-import { apiUrl, readApiError } from "../../lib/apiUrl";
+import { apiUrl, authFetch, readApiError } from "../../lib/apiUrl";
 import {
   Receipt,
   CheckCircle2,
@@ -561,7 +561,7 @@ export default function AdminInvoices() {
   const fetchInvoices = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await fetch(apiUrl("/api/admin/invoices"));
+      const res = await authFetch("/api/admin/invoices");
       if (!res.ok) throw new Error(await readApiError(res));
       const json = await res.json();
       if (!json.success) throw new Error(json.error || "Failed to load invoices");
@@ -582,8 +582,8 @@ export default function AdminInvoices() {
     (async () => {
       try {
         const [settingsRes, brandingRes] = await Promise.all([
-          fetch(apiUrl("/api/admin/config/settings")),
-          fetch(apiUrl("/api/admin/config/branding")),
+          authFetch("/api/admin/config/settings"),
+          authFetch("/api/admin/config/branding"),
         ]);
         const [settingsJson, brandingJson] = await Promise.all([
           settingsRes.json(),

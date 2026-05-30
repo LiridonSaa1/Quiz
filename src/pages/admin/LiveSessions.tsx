@@ -19,6 +19,7 @@ import {
   XCircle, Play, Loader2,
 } from 'lucide-react';
 import { cn } from '../../lib/utils';
+import { authFetch } from '../../lib/apiUrl';
 type SessionStatus = 'scheduled' | 'live' | 'ended' | 'cancelled';
 
 interface LiveSession {
@@ -80,7 +81,7 @@ export default function AdminLiveSessions() {
   const fetchAll = async () => {
     setLoading(true);
     try {
-      const res = await fetch('/api/admin/live-sessions');
+      const res = await authFetch('/api/admin/live-sessions');
       const json = await res.json();
       if (json.success) setSessions(json.sessions || []);
       else toast.error(json.error || t('liveSessions.saveFailed'));
@@ -90,7 +91,7 @@ export default function AdminLiveSessions() {
 
   const fetchTeachers = async () => {
     try {
-      const res = await fetch('/api/admin/teachers');
+      const res = await authFetch('/api/admin/teachers');
       const json = await res.json();
       if (json.success) setTeachers(json.teachers.map((t: any) => ({ id: t.uid, displayName: t.displayName, email: t.email })));
     } catch {}
@@ -98,7 +99,7 @@ export default function AdminLiveSessions() {
 
   const fetchCourses = async () => {
     try {
-      const res = await fetch('/api/admin/courses-list');
+      const res = await authFetch('/api/admin/courses-list');
       const json = await res.json();
       if (json.success) setCourses(json.courses || []);
     } catch {}
@@ -131,7 +132,7 @@ export default function AdminLiveSessions() {
       };
       const url = editing ? `/api/admin/live-sessions/${editing.id}` : '/api/admin/live-sessions';
       const method = editing ? 'PATCH' : 'POST';
-      const res = await fetch(url, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+      const res = await authFetch(url, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
       const json = await res.json();
       if (!json.success) throw new Error(json.error);
       toast.success(editing ? t('liveSessions.sessionUpdated') : t('liveSessions.sessionCreated'));
@@ -146,7 +147,7 @@ export default function AdminLiveSessions() {
     setConfirmDeleteId(null);
     setDeleting(id);
     try {
-      const res = await fetch(`/api/admin/live-sessions/${id}`, { method: 'DELETE' });
+      const res = await authFetch(`/api/admin/live-sessions/${id}`, { method: 'DELETE' });
       const json = await res.json();
       if (!json.success) throw new Error(json.error);
       toast.success(t('liveSessions.sessionDeleted'));

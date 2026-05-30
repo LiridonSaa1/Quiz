@@ -10,6 +10,7 @@ import { toast } from 'sonner';
 import { Lesson } from '../../types';
 import { cn } from '../../lib/utils';
 import { motion, AnimatePresence, useMotionValue, useSpring, useTransform } from 'motion/react';
+import { authFetch } from '../../lib/apiUrl';
 
 function AnimatedCount({ value }: { value: number }) {
   const motionVal = useMotionValue(0);
@@ -93,7 +94,7 @@ export default function AdminLessons() {
   const fetchData = async () => {
     setLoading(true);
     try {
-      const adminMetaRes = await fetch('/api/admin/modules');
+      const adminMetaRes = await authFetch('/api/admin/modules');
       const adminMeta = await adminMetaRes.json();
       if (!adminMetaRes.ok || !adminMeta.success) {
         throw new Error(adminMeta.error || `Request failed (${adminMetaRes.status})`);
@@ -201,7 +202,7 @@ export default function AdminLessons() {
       };
 
       if (editing) {
-        const res = await fetch(`/api/admin/lessons/${editing.id}`, {
+        const res = await authFetch(`/api/admin/lessons/${editing.id}`, {
           method: 'PATCH',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -213,7 +214,7 @@ export default function AdminLessons() {
         if (!res.ok || !json.success) throw new Error(json.error || 'Failed to update lesson');
         toast.success(t('lessons.lessonUpdated'));
       } else {
-        const res = await fetch('/api/admin/lessons', {
+        const res = await authFetch('/api/admin/lessons', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -240,7 +241,7 @@ export default function AdminLessons() {
     setConfirmDeleteId(null);
     setDeleting(id);
     try {
-      const res = await fetch(`/api/admin/lessons/${id}`, { method: 'DELETE' });
+      const res = await authFetch(`/api/admin/lessons/${id}`, { method: 'DELETE' });
       const json = await res.json();
       if (!res.ok || !json.success) throw new Error(json.error || 'Failed to delete lesson');
       toast.success(t('lessons.lessonDeleted'));
@@ -256,7 +257,7 @@ export default function AdminLessons() {
   const handleToggleStatus = async (lesson: Lesson) => {
     const newStatus = lesson.status === 'published' ? 'draft' : 'published';
     try {
-      const res = await fetch(`/api/admin/lessons/${lesson.id}`, {
+      const res = await authFetch(`/api/admin/lessons/${lesson.id}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ status: newStatus }),
@@ -273,7 +274,7 @@ export default function AdminLessons() {
 
   const handleToggleFreePreview = async (lesson: Lesson) => {
     try {
-      const res = await fetch(`/api/admin/lessons/${lesson.id}`, {
+      const res = await authFetch(`/api/admin/lessons/${lesson.id}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ is_free_preview: !lesson.isFreePreview }),

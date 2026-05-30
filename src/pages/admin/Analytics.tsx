@@ -13,6 +13,7 @@ import {
 } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { LayoutPageSkeleton } from '../../components/ui/Skeleton';
+import { authFetch } from '../../lib/apiUrl';
 
 interface Overview {
   totalStudents: number; activeStudents: number; totalTeachers: number;
@@ -88,7 +89,7 @@ export default function AdminAnalytics() {
   const fetchData = async () => {
     setLoading(true);
     try {
-      const res = await fetch('/api/admin/analytics');
+      const res = await authFetch('/api/admin/analytics');
       const json = await res.json();
       if (json.success) setData(json);
       else toast.error(json.error || t('errors.loadFailed'));

@@ -20,7 +20,7 @@ import {
   ReceiptText,
 } from "lucide-react";
 import { toast } from "sonner";
-import { apiUrl, readApiError } from "../../lib/apiUrl";
+import { apiUrl, authFetch, readApiError } from "../../lib/apiUrl";
 
 type PaymentStatus = "completed" | "pending" | "failed" | "refunded";
 type PaymentMethod = "card" | "bank" | "paypal" | "cash";
@@ -154,7 +154,7 @@ export default function AdminPayments() {
   const fetchData = async () => {
     setLoading(true);
     try {
-      const res = await fetch(apiUrl("/api/admin/payments"));
+      const res = await authFetch("/api/admin/payments");
       if (!res.ok) throw new Error(await readApiError(res));
       const json = await res.json();
       if (!json.success) throw new Error(json.error || "Failed to load payments");
@@ -248,7 +248,7 @@ export default function AdminPayments() {
 
     setSaving(true);
     try {
-      const res = await fetch(apiUrl("/api/admin/payments"), {
+      const res = await authFetch("/api/admin/payments", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({

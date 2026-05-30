@@ -9,6 +9,7 @@ import { toast } from 'sonner';
 import { Module } from '../../types';
 import { cn } from '../../lib/utils';
 import { motion, AnimatePresence, useMotionValue, useSpring, useTransform } from 'motion/react';
+import { authFetch } from '../../lib/apiUrl';
 
 function AnimatedCount({ value }: { value: number }) {
   const motionVal = useMotionValue(0);
@@ -98,7 +99,7 @@ export default function AdminModules() {
   const fetchData = async () => {
     setLoading(true);
     try {
-      const res = await fetch('/api/admin/modules');
+      const res = await authFetch('/api/admin/modules');
       const json = await res.json();
       if (!res.ok || !json.success) throw new Error(json.error || 'Failed to load modules');
 
@@ -202,7 +203,7 @@ export default function AdminModules() {
       };
 
       if (editing) {
-        const res = await fetch(`/api/admin/modules/${encodeURIComponent(editing.id)}`, {
+        const res = await authFetch(`/api/admin/modules/${encodeURIComponent(editing.id)}`, {
           method: 'PATCH',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(payload),
@@ -211,7 +212,7 @@ export default function AdminModules() {
         if (!res.ok || !json.success) throw new Error(json.error || 'Failed to update module');
         toast.success(t('modules.moduleUpdated'));
       } else {
-        const res = await fetch('/api/admin/modules', {
+        const res = await authFetch('/api/admin/modules', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(payload),
@@ -238,7 +239,7 @@ export default function AdminModules() {
     if (!deleteTarget) return;
     setDeleting(true);
     try {
-      const res = await fetch(`/api/admin/modules/${encodeURIComponent(deleteTarget.id)}`, { method: 'DELETE' });
+      const res = await authFetch(`/api/admin/modules/${encodeURIComponent(deleteTarget.id)}`, { method: 'DELETE' });
       const json = await res.json();
       if (!res.ok || !json.success) throw new Error(json.error || 'Failed to delete module');
       toast.success(t('success.deleted'));
@@ -256,7 +257,7 @@ export default function AdminModules() {
     const nextPublished = !isPublishedStatus(mod.status);
     const statusDb = nextPublished ? 'active' : 'inactive';
     try {
-      const res = await fetch(`/api/admin/modules/${encodeURIComponent(mod.id)}`, {
+      const res = await authFetch(`/api/admin/modules/${encodeURIComponent(mod.id)}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ status: statusDb }),

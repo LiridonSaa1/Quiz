@@ -93,7 +93,7 @@ export default function AdminCommunity() {
   const fetchAll = async () => {
     setLoading(true);
     try {
-      const res = await fetch('/api/admin/community');
+      const res = await authFetch('/api/admin/community');
       const json = await res.json();
       if (json.success) setPosts(json.posts || []);
       else toast.error(json.error || t('errors.loadFailed'));
@@ -104,7 +104,7 @@ export default function AdminCommunity() {
   const fetchMembers = async () => {
     try {
       const [tRes, sRes] = await Promise.all([
-        fetch('/api/admin/teachers'),
+        authFetch('/api/admin/teachers'),
         authFetch(apiUrl('/api/admin/students')),
       ]);
       const [t, s] = await Promise.all([tRes.json(), sRes.json()]);
@@ -130,7 +130,7 @@ export default function AdminCommunity() {
       const payload = { ...form, author_id: form.author_id || null, content: form.content || null };
       const url = editing ? `/api/admin/community/${editing.id}` : '/api/admin/community';
       const method = editing ? 'PATCH' : 'POST';
-      const res = await fetch(url, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+      const res = await authFetch(url, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
       const json = await res.json();
       if (!json.success) throw new Error(json.error);
       toast.success(editing ? t('community.postUpdated') : t('community.postCreated'));
@@ -145,7 +145,7 @@ export default function AdminCommunity() {
     setConfirmDeleteId(null);
     setDeleting(id);
     try {
-      const res = await fetch(`/api/admin/community/${id}`, { method: 'DELETE' });
+      const res = await authFetch(`/api/admin/community/${id}`, { method: 'DELETE' });
       const json = await res.json();
       if (!json.success) throw new Error(json.error);
       toast.success(t('community.postDeletedSuccess'));
