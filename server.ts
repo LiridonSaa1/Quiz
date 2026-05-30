@@ -12455,10 +12455,29 @@ Rules:
   });
 
   // Teacher: list completed quiz reports
+  // Merge any DB-persisted reports that are missing from the in-memory map.
+  // Called by the list endpoint so the first page-load after a restart is correct.
+  const rqSyncReportsFromDB = async (): Promise<void> => {
+    try {
+      const { data } = await supabaseAdmin
+        .from('platform_config')
+        .select('section, value')
+        .like('section', `${RQ_REPORT_SECTION_PREFIX}%`);
+      if (!data) return;
+      for (const row of data) {
+        const r = row.value as any;
+        if (!r?.id || rqCompletedSessions.has(r.id)) continue;
+        rqCompletedSessions.set(r.id, r as RQReport);
+      }
+    } catch (_) { /* non-critical */ }
+  };
+
   app.get('/api/teacher/rq-reports', async (req: Request, res: Response) => {
     try {
       const caller = await assertAuthenticated(req, res);
       if (!caller) return;
+      // Always sync from DB so reports aren't lost across server restarts
+      await rqSyncReportsFromDB();
       const reports = [...rqCompletedSessions.values()]
         .filter(r => r.hostId === caller.userId || caller.role === 'admin')
         .sort((a, b) => b.endedAt - a.endedAt)
@@ -12484,7 +12503,21 @@ Rules:
     try {
       const caller = await assertAuthenticated(req, res);
       if (!caller) return;
-      const report = rqCompletedSessions.get(req.params.sessionId);
+      let report = rqCompletedSessions.get(req.params.sessionId);
+      // Fallback: load from DB if not in memory
+      if (!report) {
+        try {
+          const { data } = await supabaseAdmin
+            .from('platform_config')
+            .select('value')
+            .eq('section', `${RQ_REPORT_SECTION_PREFIX}${req.params.sessionId}`)
+            .maybeSingle();
+          if (data?.value) {
+            report = data.value as RQReport;
+            rqCompletedSessions.set(report.id, report);
+          }
+        } catch (_) {}
+      }
       if (!report) return res.status(404).json({ error: 'Report not found.' });
       if (report.hostId !== caller.userId && caller.role !== 'admin') {
         return res.status(403).json({ error: 'Access denied.' });
