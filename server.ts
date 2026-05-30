@@ -1898,6 +1898,37 @@ When giving instructions, number each step clearly. Be precise and technical whe
     return [...candidates];
   };
 
+  /**
+   * Fetch course rows for a teacher, gracefully handling missing columns
+   * (courses.teacher_id or courses.student_ids may not exist in older schemas).
+   * Falls back from most-specific to least-specific query until one succeeds.
+   */
+  const fetchTeacherCourseRows = async (
+    scopedIds: string[],
+    includeStudentIds = false,
+  ): Promise<any[]> => {
+    const buildQ = (filterByTeacher: boolean, withStudentIds: boolean) => {
+      const sel = withStudentIds ? 'id,title,student_ids' : 'id,title';
+      let q = supabaseAdmin.from('courses').select(sel as any);
+      if (filterByTeacher && scopedIds.length > 0) q = q.in('teacher_id' as any, scopedIds);
+      return q;
+    };
+
+    const attempts = [
+      buildQ(true,  includeStudentIds),
+      buildQ(true,  false),
+      buildQ(false, includeStudentIds),
+      buildQ(false, false),
+    ];
+
+    for (const q of attempts) {
+      const { data, error } = await q;
+      if (!error) return data || [];
+      if (!isRecoverableSchemaColumnError(error)) throw error;
+    }
+    return [];
+  };
+
   const missingQuizzesTeacherIdColumn = (error: any) => {
     const hay = `${error?.message || ""} ${error?.details || ""} ${error?.hint || ""}`;
     const low = hay.toLowerCase();
@@ -4178,12 +4209,7 @@ When giving instructions, number each step clearly. Be precise and technical whe
       const teacherIds = await getTeacherIdCandidates(requestedUserId);
       const scopedIds = teacherIds.length > 0 ? teacherIds : [requestedUserId];
 
-      const coursesRes = await supabaseAdmin
-        .from("courses")
-        .select("id,title,student_ids")
-        .in("teacher_id", scopedIds);
-      if (coursesRes.error) throw coursesRes.error;
-      const courseRows = coursesRes.data || [];
+      const courseRows = await fetchTeacherCourseRows(scopedIds, true);
       const coursesCount = courseRows.length;
       const teacherCourseIds = courseRows.map((c: any) => String(c.id || "")).filter(Boolean);
 
@@ -4335,9 +4361,7 @@ When giving instructions, number each step clearly. Be precise and technical whe
       const teacherIds = await getTeacherIdCandidates(requestedUserId);
       const scopedIds = teacherIds.length > 0 ? teacherIds : [requestedUserId];
 
-      const coursesRes = await supabaseAdmin.from("courses").select("id").in("teacher_id", scopedIds);
-      if (coursesRes.error) throw coursesRes.error;
-      const teacherCourseIds = (coursesRes.data || []).map((c: any) => String(c.id || "")).filter(Boolean);
+      const teacherCourseIds = (await fetchTeacherCourseRows(scopedIds)).map((c: any) => String(c.id || "")).filter(Boolean);
 
       let quizRows: any[] = [];
       if (teacherCourseIds.length > 0) {
@@ -4431,9 +4455,7 @@ When giving instructions, number each step clearly. Be precise and technical whe
       const teacherIds = await getTeacherIdCandidates(requestedUserId);
       const scopedIds = teacherIds.length > 0 ? teacherIds : [requestedUserId];
 
-      const coursesRes = await supabaseAdmin.from("courses").select("id").in("teacher_id", scopedIds);
-      if (coursesRes.error) throw coursesRes.error;
-      const courseIds = (coursesRes.data || []).map((c: any) => String(c.id || "")).filter(Boolean);
+      const courseIds = (await fetchTeacherCourseRows(scopedIds)).map((c: any) => String(c.id || "")).filter(Boolean);
 
       const studentsRes = await supabaseAdmin
         .from("profiles")
