@@ -212,7 +212,7 @@ export default function LiveSessionRoom() {
   };
 
   const jitsiRoomName = `quizmaster-session-${id?.slice(0, 8)}`;
-  const jitsiUrl = `https://meet.jit.si/${jitsiRoomName}#config.prejoinPageEnabled=false&config.startWithAudioMuted=false&config.startWithVideoMuted=false&interfaceConfig.SHOW_JITSI_WATERMARK=false&interfaceConfig.SHOW_BRAND_WATERMARK=false&interfaceConfig.DEFAULT_BACKGROUND=0f172a`;
+  const jitsiUrl = `https://meet.ffmuc.net/${jitsiRoomName}#config.prejoinPageEnabled=false&config.startWithAudioMuted=false&config.startWithVideoMuted=false&interfaceConfig.SHOW_JITSI_WATERMARK=false&interfaceConfig.SHOW_BRAND_WATERMARK=false&interfaceConfig.DEFAULT_BACKGROUND=0f172a`;
 
   if (loading) {
     return (

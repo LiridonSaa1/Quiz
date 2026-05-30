@@ -102,7 +102,7 @@ export default function StudentLiveSessionJoin() {
   const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(
     typeof navigator !== 'undefined' ? navigator.userAgent : ''
   );
-  const jitsiMeetUrl = `https://meet.jit.si/${activeRoomName}`;
+  const jitsiMeetUrl = `https://meet.ffmuc.net/${activeRoomName}`;
 
   // Sync activeRoomName when teacher reconnects (jitsi_room_name changes via Realtime)
   useEffect(() => {
@@ -121,7 +121,7 @@ export default function StudentLiveSessionJoin() {
     const init = () => {
       const JitsiAPI = window.JitsiMeetExternalAPI;
       if (!JitsiAPI) { console.error('JitsiMeetExternalAPI not available'); return; }
-      const api = new JitsiAPI('meet.jit.si', {
+      const api = new JitsiAPI('meet.ffmuc.net', {
         roomName: activeRoomName,
         parentNode: container,
         width: '100%',
@@ -133,7 +133,6 @@ export default function StudentLiveSessionJoin() {
           startWithVideoMuted: false,
           disableDeepLinking: true,
           disableThirdPartyRequests: true,
-          p2p: { enabled: false },
           analytics: { disabled: true },
           notifications: [],
           enableNoisyMicDetection: false,
@@ -168,7 +167,7 @@ export default function StudentLiveSessionJoin() {
     } else {
       const script = document.createElement('script');
       script.id = scriptId;
-      script.src = 'https://meet.jit.si/external_api.js';
+      script.src = 'https://meet.ffmuc.net/external_api.js';
       script.async = true;
       script.onload = init;
       document.head.appendChild(script);

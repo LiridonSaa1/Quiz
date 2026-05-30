@@ -9,7 +9,7 @@ import {
   Mic, MicOff, Video, VideoOff, Monitor,
   Circle, StopCircle, Hand, Users, MessageSquare, PhoneOff,
   Smile, ChevronLeft, ChevronRight, Send, Loader2,
-  CheckCircle2, Film, VolumeX, Pin, UserX, Download, X
+  CheckCircle2, Film, VolumeX, Pin, UserX, Download, X, RefreshCw
 } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { format } from 'date-fns';
@@ -93,7 +93,7 @@ function loadJitsiExternalAPI(
   const init = () => {
     const JitsiAPI = window.JitsiMeetExternalAPI;
     if (!JitsiAPI) { console.error('JitsiMeetExternalAPI not available'); return; }
-    const api: JitsiMeetExternalAPIInstance = new JitsiAPI('meet.jit.si', {
+    const api: JitsiMeetExternalAPIInstance = new JitsiAPI('meet.ffmuc.net', {
       roomName,
       parentNode: container,
       width: '100%',
@@ -105,7 +105,6 @@ function loadJitsiExternalAPI(
         startWithVideoMuted: startVideoMuted,
         disableDeepLinking: true,
         disableThirdPartyRequests: true,
-        p2p: { enabled: false },
         analytics: { disabled: true },
         // Suppress all notification banners inside Jitsi
         notifications: [],
@@ -144,7 +143,7 @@ function loadJitsiExternalAPI(
 
   const script = document.createElement('script');
   script.id = scriptId;
-  script.src = 'https://meet.jit.si/external_api.js';
+  script.src = 'https://meet.ffmuc.net/external_api.js';
   script.async = true;
   script.onload = init;
   document.head.appendChild(script);
@@ -394,15 +393,10 @@ export default function TeacherLiveSessionRoom() {
           const event = e as { muted: boolean };
           setCameraOn(!event.muted);
         });
-        // When Jitsi closes the room (e.g. meet.jit.si 5-min free limit),
-        // auto-reconnect if our session still has time remaining.
+        // readyToClose fires only when the session genuinely ends (e.g. last participant left).
+        // meet.ffmuc.net has no time limits, so this is never triggered by a cap.
         api.addListener('readyToClose', () => {
-          const rem = timeRemainingRef.current;
-          if (rem !== null && rem > 0) {
-            void reconnectJitsi();
-          } else {
-            void endMeeting(true);
-          }
+          void endMeeting(true);
         });
       }
     );
@@ -820,6 +814,18 @@ export default function TeacherLiveSessionRoom() {
               />
 
               <div className="w-px h-6 bg-slate-700 mx-1 shrink-0" />
+
+              {/* Reconnect (backup — only shown when meeting is active) */}
+              {meetingActive && (
+                <button
+                  onClick={reconnectJitsi}
+                  className="flex items-center gap-1.5 px-3 py-2.5 bg-slate-700 hover:bg-slate-600 text-slate-300 hover:text-white rounded-xl font-semibold transition-all shrink-0 text-sm"
+                  title="Reconnect to a new room if you experience connection issues"
+                >
+                  <RefreshCw className="w-4 h-4" />
+                  <span className="hidden sm:inline">Reconnect</span>
+                </button>
+              )}
 
               {/* End / Leave */}
               {meetingActive ? (
