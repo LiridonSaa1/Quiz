@@ -227,7 +227,7 @@ export default function AdminLiveSessions() {
           ) : (
             <div className={ADMIN_LIST_CARD_GRID}>
               {filtered.map(s => {
-                const cfg = STATUS_CFG[s.status];
+                const cfg = STATUS_CFG[s.status as SessionStatus] ?? STATUS_CFG.ended;
                 return (
                   <div key={s.id} className={ADMIN_LIST_ITEM_CARD}>
                     <div className="flex items-start gap-3">
@@ -263,8 +263,8 @@ export default function AdminLiveSessions() {
                       <div className="flex justify-between gap-2">
                         <span className="text-slate-400 font-semibold uppercase tracking-wider shrink-0">Scheduled</span>
                         <span className="text-right">
-                          <span className="block font-medium text-slate-800">{format(new Date(s.scheduled_at), 'MMM d, yyyy')}</span>
-                          <span className="block text-slate-400 font-normal text-[11px]">{format(new Date(s.scheduled_at), 'h:mm a')}</span>
+                          <span className="block font-medium text-slate-800">{s.scheduled_at ? format(new Date(s.scheduled_at), 'MMM d, yyyy') : '—'}</span>
+                          <span className="block text-slate-400 font-normal text-[11px]">{s.scheduled_at ? format(new Date(s.scheduled_at), 'h:mm a') : ''}</span>
                           {!isPast(new Date(s.scheduled_at)) && s.status === 'scheduled' && (
                             <span className="block text-indigo-600 text-[11px] mt-0.5">{formatDistanceToNow(new Date(s.scheduled_at), { addSuffix: true })}</span>
                           )}
