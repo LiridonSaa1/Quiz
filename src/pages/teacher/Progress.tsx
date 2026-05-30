@@ -248,7 +248,7 @@ export default function TeacherProgress() {
                         </div>
                         <button
                           type="button"
-                          onClick={() => navigate(`/teacher/results?student=${encodeURIComponent(row.studentName)}`)}
+                          onClick={() => navigate(`/teacher/progress/${encodeURIComponent(row.studentId)}`)}
                           className="ml-auto shrink-0 px-3 py-1.5 rounded-lg text-xs font-semibold text-violet-600 hover:bg-violet-50 hover:text-violet-700 border border-violet-200 transition-colors"
                         >
                           Details

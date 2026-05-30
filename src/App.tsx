@@ -43,6 +43,7 @@ const TeacherLiveSessionRoom = lazy(() => import('./pages/teacher/LiveSessionRoo
 const TeacherCommunity = lazy(() => import('./pages/teacher/Community'));
 const TeacherAnnouncements = lazy(() => import('./pages/teacher/Announcements'));
 const TeacherProgress = lazy(() => import('./pages/teacher/Progress'));
+const StudentProgressDetail = lazy(() => import('./pages/teacher/StudentProgressDetail'));
 const TeacherExams = lazy(() => import('./pages/teacher/Exams'));
 const TeacherProfilePage = lazy(() => import('./pages/teacher/Profile'));
 const TeacherSettingsPage = lazy(() => import('./pages/teacher/Settings'));
@@ -459,6 +460,7 @@ function TeacherRoutes({ features }: { features: FeatureFlags }) {
       <Route path="/community" element={features.communityEnabled ? <TeacherCommunity /> : <Navigate to="/not-found" replace />} />
       <Route path="/announcements" element={features.announcementsEnabled ? <TeacherAnnouncements /> : <Navigate to="/not-found" replace />} />
       <Route path="/progress" element={<TeacherProgress />} />
+      <Route path="/progress/:studentId" element={<StudentProgressDetail />} />
       <Route path="/profile" element={<TeacherProfilePage />} />
       <Route path="/settings" element={<TeacherSettingsPage />} />
       <Route path="/exams/builder/:examId" element={<TeacherExamBuilder />} />

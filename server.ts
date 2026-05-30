@@ -13999,6 +13999,146 @@ Rules:
     }
   });
 
+  // ── GET /api/teacher/students/:studentId/detail — full student detail for progress view ──
+  app.get("/api/teacher/students/:studentId/detail", async (req: Request, res: Response) => {
+    try {
+      const caller = await assertAuthenticated(req, res);
+      if (!caller) return;
+      if (caller.role !== "teacher" && caller.role !== "admin") return res.status(403).json({ error: "Forbidden" });
+
+      const studentId = String(req.params.studentId || "").trim();
+      if (!studentId) return res.status(400).json({ error: "studentId is required" });
+
+      const { data: profile, error: pErr } = await supabaseAdmin
+        .from("profiles")
+        .select("id,display_name,email,role,status,teacher_id,created_at")
+        .eq("id", studentId)
+        .maybeSingle();
+      if (pErr) throw pErr;
+      if (!profile) return res.status(404).json({ error: "Student not found" });
+      if (profile.role !== "student") return res.status(400).json({ error: "Target user is not a student" });
+
+      if (caller.role === "teacher") {
+        const teacherIds = await getTeacherIdCandidates(caller.userId);
+        const scopedIds = teacherIds.length > 0 ? teacherIds : [caller.userId];
+
+        const isLinked = scopedIds.includes(String(profile.teacher_id || ""));
+        if (!isLinked) {
+          // Also allow if student enrolled in teacher's courses or classes
+          const courseRowsCk = await fetchTeacherCourseRows(scopedIds, true);
+          const studentInCourse = courseRowsCk.some((c: any) =>
+            Array.isArray(c.student_ids) && c.student_ids.map(String).includes(studentId)
+          );
+          const classRowsCk = await supabaseAdmin
+            .from("classes").select("student_ids").in("teacher_id", scopedIds);
+          const studentInClass = (classRowsCk.data || []).some((cl: any) =>
+            Array.isArray(cl.student_ids) && cl.student_ids.map(String).includes(studentId)
+          );
+          if (!studentInCourse && !studentInClass) {
+            return res.status(403).json({ error: "Forbidden: student is not linked to your account" });
+          }
+        }
+      }
+
+      // Enrolled courses
+      const courseRowsRes = await supabaseAdmin
+        .from("courses")
+        .select("id,title,student_ids")
+        .not("student_ids", "is", null);
+      const allCourses = (courseRowsRes.data || []);
+      const enrolledCourses = allCourses
+        .filter((c: any) => Array.isArray(c.student_ids) && c.student_ids.map(String).includes(studentId))
+        .map((c: any) => ({ id: String(c.id), title: String(c.title || "Untitled"), role: "student" }));
+
+      // Quiz attempts
+      const teacherIds2 = caller.role === "teacher"
+        ? (await getTeacherIdCandidates(caller.userId).then(ids => ids.length > 0 ? ids : [caller.userId]))
+        : null;
+      const teacherCourseIds = teacherIds2
+        ? (await fetchTeacherCourseRows(teacherIds2)).map((c: any) => String(c.id || "")).filter(Boolean)
+        : [];
+
+      let quizRows: any[] = [];
+      if (teacherCourseIds.length > 0) {
+        const quizzesRes = await supabaseAdmin.from("quizzes").select("id,title,course_id,settings,passing_score,pass_mark").in("course_id", teacherCourseIds);
+        if (!quizzesRes.error) quizRows = quizzesRes.data || [];
+      }
+      const quizIds = new Set<string>(quizRows.map((q: any) => String(q.id || "")).filter(Boolean));
+      const passingScoreByQuiz = quizRows.reduce((acc: Record<string, number>, q: any) => {
+        const raw = q?.settings?.passingScore ?? q?.passing_score ?? q?.pass_mark;
+        acc[String(q.id)] = Number.isFinite(Number(raw)) ? Number(raw) : 50;
+        return acc;
+      }, {});
+
+      const attemptRows = normalizeAttempts(
+        await fetchFilteredAttemptRows({ quizIds, studentIds: new Set([studentId]) }),
+        passingScoreByQuiz
+      ).filter((a: any) => String(a.student_id || "") === studentId && quizIds.has(String(a.quiz_id || "")));
+
+      const attempts = attemptRows.length;
+      const passed = attemptRows.filter((a: any) => a.passed).length;
+      const failed = attempts - passed;
+      const scoreSum = attemptRows.reduce((s: number, a: any) => s + (Number(a.score_percent) || 0), 0);
+      const avgScore = attempts > 0 ? Math.round(scoreSum / attempts) : 0;
+      const passRate = attempts > 0 ? Math.round((passed / attempts) * 100) : 0;
+      const sorted = [...attemptRows].sort((a: any, b: any) =>
+        new Date(b.completed_at || 0).getTime() - new Date(a.completed_at || 0).getTime()
+      );
+      const lastAttemptDate: string | null = sorted[0]?.completed_at || null;
+
+      const quizHistory = sorted.map((a: any) => {
+        const quiz = quizRows.find((q: any) => String(q.id || "") === String(a.quiz_id || ""));
+        return {
+          quizId: String(a.quiz_id || ""),
+          quizTitle: quiz?.title || "Quiz",
+          score: Math.round(Number(a.score_percent) || 0),
+          passed: Boolean(a.passed),
+          completedAt: a.completed_at || null,
+        };
+      });
+
+      // Weekly activity — last 7 days
+      const now = Date.now();
+      const weeklyActivity = Array.from({ length: 7 }).map((_, i) => {
+        const day = new Date(now - (6 - i) * 86400000);
+        const label = day.toLocaleDateString("en-US", { weekday: "short" });
+        const dayStr = day.toISOString().slice(0, 10);
+        const dayAttempts = attemptRows.filter((a: any) => {
+          const d = a.completed_at ? new Date(a.completed_at).toISOString().slice(0, 10) : "";
+          return d === dayStr;
+        });
+        const dayAvg = dayAttempts.length > 0
+          ? Math.round(dayAttempts.reduce((s: number, a: any) => s + (Number(a.score_percent) || 0), 0) / dayAttempts.length)
+          : 0;
+        return { day: label, attempts: dayAttempts.length, avgScore: dayAvg };
+      });
+
+      return res.json({
+        success: true,
+        student: {
+          id: String(profile.id),
+          displayName: String(profile.display_name || "Unknown Student"),
+          email: String(profile.email || ""),
+          status: String(profile.status || "inactive"),
+          createdAt: profile.created_at || null,
+          teacherId: profile.teacher_id || null,
+          enrolledCourses,
+          attempts,
+          passed,
+          failed,
+          avgScore,
+          passRate,
+          lastAttemptDate,
+          quizHistory,
+          weeklyActivity,
+        },
+      });
+    } catch (e: any) {
+      console.error("GET /api/teacher/students/:studentId/detail", e);
+      return res.status(500).json({ error: e?.message || "Failed to load student details" });
+    }
+  });
+
   // GET /api/student/assignments — list published assignments visible to this student
   app.get('/api/student/assignments', async (req: Request, res: Response) => {
     try {
