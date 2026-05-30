@@ -793,6 +793,22 @@ export default function QuizTaking() {
         // Notifications are best-effort — don't fail the submission if dispatch fails.
       }
 
+      // Auto-generate certificate when the student passes — best-effort, never blocks navigation
+      if (passed && attempt.id) {
+        authFetch('/api/student/quiz/auto-certificate', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ attemptId: attempt.id }),
+        })
+          .then(async (r) => {
+            const data = await r.json().catch(() => ({}));
+            if (data.ok && !data.duplicate) {
+              toast.success(t('student.quizTaking.certificateEarned', '🎓 Certificate earned! Check your Certificates page.'));
+            }
+          })
+          .catch(() => { /* best-effort */ });
+      }
+
       toast.success(t('student.quizTaking.submittedSuccessToast'));
       if (quizId) {
         try {

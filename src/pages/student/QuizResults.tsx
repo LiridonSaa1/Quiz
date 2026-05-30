@@ -5,7 +5,7 @@ import { supabase } from '../../supabase';
 import StudentLayout from '../../components/layout/StudentLayout';
 import {
   Trophy, CheckCircle2, XCircle, ChevronLeft, ArrowRight,
-  AlertCircle, HelpCircle, Info, Clock, Target, TrendingUp, BarChart2, Layers,
+  AlertCircle, HelpCircle, Info, Clock, Target, TrendingUp, BarChart2, Layers, Award,
 } from 'lucide-react';
 import { QuizAttempt, Quiz, Question } from '../../types';
 import { cn } from '../../lib/utils';
@@ -382,6 +382,30 @@ export default function QuizResults() {
             </div>
           </div>
         </motion.div>
+
+        {/* Certificate earned banner */}
+        {passed && (
+          <motion.div
+            initial={{ opacity: 0, scale: 0.96 }}
+            animate={{ opacity: 1, scale: 1 }}
+            transition={{ delay: 0.3 }}
+            className="flex items-center gap-4 p-4 bg-gradient-to-r from-amber-50 to-yellow-50 border border-amber-200 rounded-2xl"
+          >
+            <div className="w-11 h-11 rounded-xl bg-gradient-to-br from-amber-400 to-yellow-500 flex items-center justify-center flex-shrink-0 shadow-sm">
+              <Award className="w-6 h-6 text-white" />
+            </div>
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-bold text-amber-900">🎓 Certificate automatically issued!</p>
+              <p className="text-xs text-amber-700 mt-0.5">Your certificate is available in <Link to="/student/certificates" className="underline font-semibold hover:text-amber-900">My Certificates</Link>.</p>
+            </div>
+            <Link
+              to="/student/certificates"
+              className="flex-shrink-0 px-3 py-1.5 rounded-xl bg-amber-500 text-white text-xs font-bold hover:bg-amber-600 transition-colors"
+            >
+              View →
+            </Link>
+          </motion.div>
+        )}
 
         {/* Charts row */}
         {gradable.length > 0 && (

@@ -10371,6 +10371,132 @@ Rules:
   });
 
   // Student quizzes: only published quizzes from courses where the student is enrolled.
+  /**
+   * Auto-certificate: called by the student client immediately after a passed quiz.
+   * Verifies the attempt belongs to the caller, that they passed, then inserts a
+   * certificate row (idempotent — won't double-issue for the same student + course)
+   * and fires a certificateIssued notification.
+   */
+  app.post('/api/student/quiz/auto-certificate', async (req: Request, res: Response) => {
+    try {
+      const caller = await assertAuthenticated(req, res);
+      if (!caller) return;
+      if (caller.role !== 'student' && caller.role !== 'admin') {
+        return res.status(403).json({ error: 'Forbidden' });
+      }
+
+      const { attemptId } = req.body as { attemptId?: string };
+      if (!attemptId) return res.status(400).json({ error: 'attemptId is required' });
+
+      // 1. Fetch the attempt — must belong to this student and be passed
+      const { data: attempt, error: attErr } = await supabaseAdmin
+        .from('quiz_attempts')
+        .select('id, quiz_id, student_id, score, total_points, passed, score_percent')
+        .eq('id', attemptId)
+        .maybeSingle()
+        .catch(() => ({ data: null, error: null }));
+
+      if (attErr) return res.status(500).json({ error: 'Could not fetch attempt' });
+      if (!attempt) return res.status(404).json({ error: 'Attempt not found' });
+      if (attempt.student_id !== caller.userId) return res.status(403).json({ error: 'Forbidden' });
+      if (!attempt.passed) return res.status(400).json({ error: 'Student did not pass this quiz' });
+
+      // 2. Fetch quiz details (title, course_id, teacher_id)
+      const { data: quiz } = await supabaseAdmin
+        .from('quizzes')
+        .select('id, title, course_id, teacher_id')
+        .eq('id', attempt.quiz_id)
+        .maybeSingle()
+        .catch(() => ({ data: null }));
+
+      if (!quiz) return res.status(404).json({ error: 'Quiz not found' });
+
+      const courseId = quiz.course_id ? String(quiz.course_id) : null;
+
+      // 3. Idempotency: don't issue a second certificate for same student + quiz
+      const dupCheck = courseId
+        ? await supabaseAdmin.from('certificates').select('id').eq('student_id', caller.userId).eq('course_id', courseId).limit(1).maybeSingle().catch(() => ({ data: null }))
+        : await supabaseAdmin.from('certificates').select('id').eq('student_id', caller.userId).contains('meta', { quiz_id: quiz.id }).limit(1).maybeSingle().catch(() => ({ data: null }));
+
+      if ((dupCheck as any)?.data?.id) {
+        return res.json({ ok: true, duplicate: true, certificateId: (dupCheck as any).data.id });
+      }
+
+      // 4. Compute grade from score percentage
+      const pct: number = attempt.score_percent != null
+        ? Number(attempt.score_percent)
+        : (attempt.total_points > 0 ? Math.round((attempt.score / attempt.total_points) * 100) : 0);
+
+      const grade =
+        pct >= 97 ? 'A+' :
+        pct >= 93 ? 'A'  :
+        pct >= 90 ? 'A-' :
+        pct >= 87 ? 'B+' :
+        pct >= 83 ? 'B'  :
+        pct >= 80 ? 'B-' :
+        pct >= 77 ? 'C+' :
+        pct >= 73 ? 'C'  :
+        pct >= 70 ? 'C-' :
+        'D';
+
+      // 5. Generate unique certificate number
+      const certYear = new Date().getFullYear();
+      const certRand = Math.random().toString(36).toUpperCase().slice(2, 8);
+      const certNumber = `CERT-${certYear}-${certRand}`;
+
+      // 6. Fetch course title for the certificate title
+      let courseTitle = quiz.title;
+      if (courseId) {
+        const { data: course } = await supabaseAdmin.from('courses').select('title').eq('id', courseId).maybeSingle().catch(() => ({ data: null }));
+        if (course?.title) courseTitle = String(course.title);
+      }
+
+      // 7. Insert certificate
+      const { data: cert, error: certErr } = await supabaseAdmin
+        .from('certificates')
+        .insert({
+          student_id: caller.userId,
+          course_id: courseId,
+          title: courseTitle,
+          issued_at: new Date().toISOString().slice(0, 10),
+          certificate_number: certNumber,
+          grade,
+          score: pct,
+          status: 'issued',
+        })
+        .select('id')
+        .maybeSingle();
+
+      if (certErr || !cert?.id) {
+        console.error('[auto-certificate] insert error:', certErr?.message);
+        return res.status(500).json({ error: certErr?.message || 'Failed to create certificate' });
+      }
+
+      // 8. Fire certificateIssued notification (server-side, best-effort)
+      try {
+        const teacherId = quiz.teacher_id ? String(quiz.teacher_id) : undefined;
+        await notifyEvent(
+          supabaseAdmin,
+          { isEventEnabled: isNotificationEnabled },
+          'certificateIssued',
+          {
+            studentId: caller.userId,
+            teacherId,
+            courseId: courseId ?? undefined,
+            courseTitle,
+            certificateId: cert.id,
+            certificateNumber: certNumber,
+          }
+        );
+      } catch { /* notifications are best-effort */ }
+
+      return res.json({ ok: true, duplicate: false, certificateId: cert.id, certificateNumber: certNumber, grade, score: pct });
+    } catch (e: any) {
+      console.error('[auto-certificate]', e?.message);
+      return res.status(500).json({ error: 'Server error' });
+    }
+  });
+
   /** Headway Test Builder — get available grammar topics for a level */
   app.get('/api/student/headway-test/topics', async (req, res) => {
     try {
