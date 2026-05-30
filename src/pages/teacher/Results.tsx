@@ -60,13 +60,27 @@ const avatarColor = (s: string) => {
   return AVATAR_COLORS[Math.abs(h) % AVATAR_COLORS.length];
 };
 
+type MainTab = 'quizzes' | 'assignments';
+
+interface UiSubmission {
+  id: string;
+  assignmentId: string;
+  studentId: string;
+  grade: number | null;
+  status: string;
+  submittedAt: string | null;
+}
+
 export default function TeacherResults() {
   const { t } = useTranslation();
   const [searchParams] = useSearchParams();
   const [attempts, setAttempts] = useState<UiAttempt[]>([]);
   const [quizzes, setQuizzes] = useState<Record<string, string>>({});
   const [students, setStudents] = useState<Record<string, { name: string; email: string }>>({});
+  const [assignmentSubmissions, setAssignmentSubmissions] = useState<UiSubmission[]>([]);
+  const [assignments, setAssignments] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
+  const [mainTab, setMainTab] = useState<MainTab>('quizzes');
   const [search, setSearch] = useState(() => searchParams.get('student') || '');
   const [tab, setTab] = useState<TabFilter>('all');
   const [selectedQuiz, setSelectedQuiz] = useState('all');
@@ -89,6 +103,14 @@ export default function TeacherResults() {
       setQuizzes((json?.quizzes && typeof json.quizzes === 'object') ? json.quizzes : {});
       setStudents((json?.students && typeof json.students === 'object') ? json.students : {});
       setAttempts(Array.isArray(json?.attempts) ? json.attempts : []);
+      setAssignmentSubmissions(Array.isArray(json?.assignmentSubmissions) ? json.assignmentSubmissions : []);
+      setAssignments((json?.assignments && typeof json.assignments === 'object') ? json.assignments : {});
+      // Auto-switch to assignments tab if no quiz attempts but has submissions
+      if (!Array.isArray(json?.attempts) || json.attempts.length === 0) {
+        if (Array.isArray(json?.assignmentSubmissions) && json.assignmentSubmissions.length > 0) {
+          setMainTab('assignments');
+        }
+      }
     } catch (error: any) {
       toast.error(error?.message || 'Failed to load results');
     } finally {
@@ -543,7 +565,117 @@ export default function TeacherResults() {
           </AdminListFilterBar>
         }
       >
-        {!loading && attempts.length > 0 && (
+        {/* Main tab switcher: Quizzes vs Assignments */}
+        <div className="flex items-center gap-1 mb-6 bg-slate-100 rounded-2xl p-1 w-fit">
+          <button
+            type="button"
+            onClick={() => setMainTab('quizzes')}
+            className={cn(
+              'px-5 py-2 rounded-xl text-sm font-semibold transition-all',
+              mainTab === 'quizzes'
+                ? 'bg-white text-indigo-700 shadow-sm'
+                : 'text-slate-500 hover:text-slate-700',
+            )}
+          >
+            Quizzes {attempts.length > 0 && <span className="ml-1.5 text-xs text-slate-400">({attempts.length})</span>}
+          </button>
+          <button
+            type="button"
+            onClick={() => setMainTab('assignments')}
+            className={cn(
+              'px-5 py-2 rounded-xl text-sm font-semibold transition-all',
+              mainTab === 'assignments'
+                ? 'bg-white text-emerald-700 shadow-sm'
+                : 'text-slate-500 hover:text-slate-700',
+            )}
+          >
+            Assignments {assignmentSubmissions.length > 0 && <span className="ml-1.5 text-xs text-slate-400">({assignmentSubmissions.length})</span>}
+          </button>
+        </div>
+
+        {/* ── Assignments panel ──────────────────────────────────────────── */}
+        {mainTab === 'assignments' && (
+          <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
+            <div className="h-1 bg-gradient-to-r from-emerald-400 to-teal-500" />
+            {loading ? (
+              <div className="p-8 flex items-center justify-center text-slate-400 text-sm">Loading…</div>
+            ) : assignmentSubmissions.length === 0 ? (
+              <div className="flex flex-col items-center justify-center py-20 gap-2 text-slate-400">
+                <ClipboardList className="w-10 h-10 opacity-30" />
+                <p className="text-sm font-medium">No assignment submissions yet</p>
+                <p className="text-xs text-slate-400 max-w-sm text-center">
+                  Assignment submissions from your students will appear here once they submit their work.
+                </p>
+              </div>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b border-slate-100">
+                      <th className="text-left px-5 py-3.5 font-semibold text-slate-500 text-xs uppercase tracking-wide">Student</th>
+                      <th className="text-left px-5 py-3.5 font-semibold text-slate-500 text-xs uppercase tracking-wide">Assignment</th>
+                      <th className="text-left px-5 py-3.5 font-semibold text-slate-500 text-xs uppercase tracking-wide">Status</th>
+                      <th className="text-left px-5 py-3.5 font-semibold text-slate-500 text-xs uppercase tracking-wide">Grade</th>
+                      <th className="text-left px-5 py-3.5 font-semibold text-slate-500 text-xs uppercase tracking-wide">Submitted</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {assignmentSubmissions
+                      .filter((s) => {
+                        if (!search.trim()) return true;
+                        const q = search.trim().toLowerCase();
+                        const student = students[s.studentId];
+                        const asgTitle = assignments[s.assignmentId] || '';
+                        return (
+                          (student?.name || '').toLowerCase().includes(q) ||
+                          (student?.email || '').toLowerCase().includes(q) ||
+                          asgTitle.toLowerCase().includes(q)
+                        );
+                      })
+                      .map((sub) => {
+                        const student = students[sub.studentId];
+                        const asgTitle = assignments[sub.assignmentId] || 'Assignment';
+                        const statusColor =
+                          sub.status === 'graded' ? 'bg-emerald-100 text-emerald-700' :
+                          sub.status === 'submitted' ? 'bg-blue-100 text-blue-700' :
+                          'bg-amber-100 text-amber-700';
+                        return (
+                          <tr key={sub.id} className="border-b border-slate-50 hover:bg-slate-50 transition-colors">
+                            <td className="px-5 py-3.5">
+                              <div className="font-semibold text-slate-800">{student?.name || sub.studentId}</div>
+                              {student?.email && <div className="text-xs text-slate-400">{student.email}</div>}
+                            </td>
+                            <td className="px-5 py-3.5 text-slate-700">{asgTitle}</td>
+                            <td className="px-5 py-3.5">
+                              <span className={cn('px-2 py-0.5 rounded-full text-xs font-semibold capitalize', statusColor)}>
+                                {sub.status}
+                              </span>
+                            </td>
+                            <td className="px-5 py-3.5">
+                              {sub.grade != null
+                                ? <span className="font-bold text-slate-800">{sub.grade}%</span>
+                                : <span className="text-slate-400 text-xs">Not graded</span>
+                              }
+                            </td>
+                            <td className="px-5 py-3.5 text-xs text-slate-500">
+                              {sub.submittedAt
+                                ? format(new Date(sub.submittedAt), 'MMM d, yyyy')
+                                : '—'}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                  </tbody>
+                </table>
+                <div className="px-5 py-3 border-t border-slate-100 text-xs text-slate-400">
+                  {assignmentSubmissions.length} submission{assignmentSubmissions.length !== 1 ? 's' : ''}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {mainTab === 'quizzes' && !loading && attempts.length > 0 && (
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8">
             <div className="lg:col-span-2 bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
               <div
@@ -644,7 +776,7 @@ export default function TeacherResults() {
         )}
 
         {/* ── Section Performance Report ──────────────────────────────────── */}
-        {selectedQuiz !== 'all' && (sectionDataLoading || (sectionReport && sectionReport.length > 0)) && (
+        {mainTab === 'quizzes' && selectedQuiz !== 'all' && (sectionDataLoading || (sectionReport && sectionReport.length > 0)) && (
           <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden mb-6">
             <div
               className="h-1"
@@ -754,7 +886,7 @@ export default function TeacherResults() {
           </div>
         )}
 
-        <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
+        {mainTab === 'quizzes' && <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
           {loading ? (
             <div className={ADMIN_LIST_CARD_GRID}>
               {Array(6).fill(0).map((_, i) => (
@@ -889,7 +1021,7 @@ export default function TeacherResults() {
               </div>
             </>
           )}
-        </div>
+        </div>}
       </AdminListPageShell>
     </TeacherLayout>
   );

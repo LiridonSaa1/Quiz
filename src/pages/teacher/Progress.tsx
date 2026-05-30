@@ -26,15 +26,22 @@ interface StudentProgressRow {
   avgScore: number;
   lastAttemptDate: string | null;
   topCourseName: string | null;
+  submissionsCount: number;
+  assignmentsTotal: number;
+  submissionRate: number;
+  avgGrade: number;
 }
 
 type ProgressStatus = 'at_risk' | 'falling_behind' | 'good' | 'excellent';
 
-function getStatus(avgScore: number, attempts: number): ProgressStatus {
-  if (attempts === 0) return 'at_risk';
-  if (avgScore < 50) return 'at_risk';
-  if (avgScore < 70) return 'falling_behind';
-  if (avgScore < 85) return 'good';
+function getStatus(avgScore: number, attempts: number, submissionRate?: number, submissionsCount?: number): ProgressStatus {
+  const hasQuizData = attempts > 0;
+  const hasAssignmentData = (submissionsCount ?? 0) > 0;
+  if (!hasQuizData && !hasAssignmentData) return 'at_risk';
+  const score = hasQuizData ? avgScore : (submissionRate ?? 0);
+  if (score < 50) return 'at_risk';
+  if (score < 70) return 'falling_behind';
+  if (score < 85) return 'good';
   return 'excellent';
 }
 
@@ -45,9 +52,10 @@ const STATUS_CFG: Record<ProgressStatus, { label: string; bg: string; text: stri
   excellent:      { label: 'Excellent',      bg: 'bg-blue-50',   text: 'text-blue-700',   dot: 'bg-blue-500',   border: '#3b82f6' },
 };
 
-function getGrade(avgScore: number, attempts: number): string {
-  if (attempts === 0) return '—';
-  if (avgScore >= 97) return 'A+';
+function getGrade(avgScore: number, attempts: number, avgGrade?: number, submissionsCount?: number): string {
+  const score = attempts > 0 ? avgScore : ((submissionsCount ?? 0) > 0 && (avgGrade ?? 0) > 0 ? avgGrade! : -1);
+  if (score < 0) return '—';
+  if (score >= 97) return 'A+';
   if (avgScore >= 93) return 'A';
   if (avgScore >= 90) return 'A-';
   if (avgScore >= 87) return 'B+';
@@ -88,6 +96,7 @@ export default function TeacherProgress() {
   const [search, setSearch] = useState('');
   const [coursesCount, setCoursesCount] = useState(0);
   const [quizzesCount, setQuizzesCount] = useState(0);
+  const [assignmentsCount, setAssignmentsCount] = useState(0);
 
   useEffect(() => {
     const fetchData = async () => {
@@ -105,6 +114,7 @@ export default function TeacherProgress() {
         setRows(Array.isArray(progressJson.rows) ? progressJson.rows : []);
         setCoursesCount(Number(progressJson.coursesCount || 0));
         setQuizzesCount(Number(progressJson.quizzesCount || 0));
+        setAssignmentsCount(Number(progressJson.assignmentsCount || 0));
       } catch (error: unknown) {
         toast.error((error as Error)?.message || 'Failed to load student progress');
       } finally {
@@ -135,12 +145,12 @@ export default function TeacherProgress() {
   }), [rows]);
 
   const statItems = [
-    { label: 'Students',    value: overall.students,  gradient: 'from-indigo-500 to-violet-600', shadow: 'shadow-indigo-500/25', icon: Users },
-    { label: 'Attempts',    value: overall.attempts,  gradient: 'from-blue-500 to-cyan-600',     shadow: 'shadow-blue-500/25',   icon: FileText },
-    { label: 'Avg score %', value: overall.avgScore,  gradient: 'from-emerald-500 to-teal-600',  shadow: 'shadow-emerald-500/25',icon: TrendingUp },
-    { label: 'Pass rate %', value: overall.passRate,  gradient: 'from-amber-500 to-orange-600',  shadow: 'shadow-amber-500/25',  icon: CheckCircle2 },
-    { label: 'Courses',     value: coursesCount,       gradient: 'from-violet-500 to-purple-600', shadow: 'shadow-violet-500/25', icon: BookOpen },
-    { label: 'Quizzes',     value: quizzesCount,       gradient: 'from-sky-500 to-indigo-600',    shadow: 'shadow-sky-500/25',    icon: BarChart3 },
+    { label: 'Students',      value: overall.students,  gradient: 'from-indigo-500 to-violet-600', shadow: 'shadow-indigo-500/25', icon: Users },
+    { label: 'Quiz Attempts', value: overall.attempts,  gradient: 'from-blue-500 to-cyan-600',     shadow: 'shadow-blue-500/25',   icon: FileText },
+    { label: 'Avg Score %',   value: overall.avgScore,  gradient: 'from-emerald-500 to-teal-600',  shadow: 'shadow-emerald-500/25',icon: TrendingUp },
+    { label: 'Pass Rate %',   value: overall.passRate,  gradient: 'from-amber-500 to-orange-600',  shadow: 'shadow-amber-500/25',  icon: CheckCircle2 },
+    { label: 'Courses',       value: coursesCount,       gradient: 'from-violet-500 to-purple-600', shadow: 'shadow-violet-500/25', icon: BookOpen },
+    { label: 'Assignments',   value: assignmentsCount,   gradient: 'from-sky-500 to-indigo-600',    shadow: 'shadow-sky-500/25',    icon: BarChart3 },
   ];
 
   return (
@@ -193,11 +203,20 @@ export default function TeacherProgress() {
             <>
               <div className={ADMIN_LIST_CARD_GRID}>
                 {filtered.map((row) => {
-                  const status = getStatus(row.avgScore, row.attempts);
+                  const hasQuiz = row.attempts > 0;
+                  const hasAssignment = (row.submissionsCount ?? 0) > 0;
+                  const status = getStatus(row.avgScore, row.attempts, row.submissionRate, row.submissionsCount);
                   const sc = STATUS_CFG[status];
-                  const grade = getGrade(row.avgScore, row.attempts);
+                  const grade = getGrade(row.avgScore, row.attempts, row.avgGrade, row.submissionsCount);
                   const lastSeen = formatLastSeen(row.lastAttemptDate);
-                  const progressPct = row.attempts > 0 ? row.passRate : 0;
+                  // Use quiz pass rate if available, otherwise assignment submission rate
+                  const progressPct = hasQuiz ? row.passRate : (hasAssignment ? row.submissionRate : 0);
+                  const progressLabel = hasQuiz
+                    ? (row.topCourseName || 'Quiz attempts')
+                    : hasAssignment
+                      ? `${row.submissionsCount}/${row.assignmentsTotal || '?'} assignments submitted`
+                      : 'No activity yet';
+                  const progressBarColor = hasQuiz ? 'bg-slate-800' : hasAssignment ? 'bg-emerald-500' : 'bg-slate-300';
 
                   return (
                     <div
@@ -220,24 +239,39 @@ export default function TeacherProgress() {
                         </div>
                       </div>
 
-                      {/* Course + progress bar */}
+                      {/* Progress bar — quiz pass rate or assignment submission rate */}
                       <div className="mt-4">
                         <div className="flex justify-between items-center mb-1.5">
-                          <span className="text-xs text-slate-500 truncate max-w-[70%]">
-                            {row.topCourseName || (row.attempts > 0 ? 'Quiz attempts' : 'No activity')}
-                          </span>
+                          <span className="text-xs text-slate-500 truncate max-w-[70%]">{progressLabel}</span>
                           <span className="text-xs font-semibold text-slate-700 shrink-0">{progressPct}%</span>
                         </div>
                         <div className="h-1.5 rounded-full bg-slate-200 overflow-hidden">
                           <div
-                            className="h-full rounded-full bg-slate-800 transition-all"
+                            className={cn('h-full rounded-full transition-all', progressBarColor)}
                             style={{ width: `${progressPct}%` }}
                           />
                         </div>
                       </div>
 
+                      {/* Mini stats row */}
+                      <div className="mt-3 flex items-center gap-3 text-[10px] text-slate-400 flex-wrap">
+                        {hasQuiz && (
+                          <span className="flex items-center gap-1">
+                            <span className="font-bold text-slate-600">{row.attempts}</span> quiz attempt{row.attempts !== 1 ? 's' : ''}
+                          </span>
+                        )}
+                        {hasAssignment && (
+                          <span className="flex items-center gap-1">
+                            <span className="font-bold text-emerald-600">{row.submissionsCount}</span> assignment{row.submissionsCount !== 1 ? 's' : ''}
+                          </span>
+                        )}
+                        {!hasQuiz && !hasAssignment && (
+                          <span className="italic">No submissions yet</span>
+                        )}
+                      </div>
+
                       {/* Bottom: Grade + Last Seen + Details */}
-                      <div className="flex items-center gap-4 mt-4 pt-3 border-t border-slate-100">
+                      <div className="flex items-center gap-4 mt-3 pt-3 border-t border-slate-100">
                         <div className="shrink-0">
                           <div className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">Grade</div>
                           <div className="text-sm font-bold text-slate-800 mt-0.5">{grade}</div>

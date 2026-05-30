@@ -4264,8 +4264,8 @@ When giving instructions, number each step clearly. Be precise and technical whe
       let quizRows: any[] = [];
       if (teacherCourseIds.length > 0) {
         const quizzesRes = await supabaseAdmin.from("quizzes").select("*").in("course_id", teacherCourseIds);
-        if (quizzesRes.error) throw quizzesRes.error;
-        quizRows = quizzesRes.data || [];
+        if (quizzesRes.error && !isAnyTableMissingError(quizzesRes.error)) throw quizzesRes.error;
+        quizRows = quizzesRes.error ? [] : (quizzesRes.data || []);
       }
       const quizzesCount = quizRows.length;
       const quizIds = new Set<string>(quizRows.map((q: any) => String(q.id || "")).filter(Boolean));
@@ -4298,6 +4298,43 @@ When giving instructions, number each step clearly. Be precise and technical whe
         attemptsByStudent[sid].scoreSum += toFiniteNumber(a.score_percent, 0);
       });
 
+      // ── Assignment submissions — real activity data even when quiz_attempts is absent ──
+      let teacherAssignmentsCount = 0;
+      const assignmentsByStudent: Record<string, { submitted: number; graded: number; gradeSum: number; lastDate: string | null }> = {};
+      if (teacherCourseIds.length > 0) {
+        const assignmentsRes = await supabaseAdmin
+          .from("assignments")
+          .select("id,title,course_id")
+          .in("course_id", teacherCourseIds);
+        if (!assignmentsRes.error) {
+          const assignmentIds = (assignmentsRes.data || []).map((a: any) => String(a.id)).filter(Boolean);
+          teacherAssignmentsCount = assignmentIds.length;
+          if (assignmentIds.length > 0 && allowedStudentIds.size > 0) {
+            const subsRes = await supabaseAdmin
+              .from("assignment_submissions")
+              .select("id,assignment_id,student_id,grade,status,submitted_at")
+              .in("assignment_id", assignmentIds)
+              .in("student_id", [...allowedStudentIds]);
+            if (!subsRes.error) {
+              (subsRes.data || []).forEach((sub: any) => {
+                const sid = String(sub.student_id || "");
+                if (!sid || !allowedStudentIds.has(sid)) return;
+                if (!assignmentsByStudent[sid]) assignmentsByStudent[sid] = { submitted: 0, graded: 0, gradeSum: 0, lastDate: null };
+                assignmentsByStudent[sid].submitted += 1;
+                if (sub.grade != null && sub.grade !== "") {
+                  assignmentsByStudent[sid].graded += 1;
+                  assignmentsByStudent[sid].gradeSum += Number(sub.grade) || 0;
+                }
+                const d = sub.submitted_at || null;
+                if (d && (!assignmentsByStudent[sid].lastDate || d > assignmentsByStudent[sid].lastDate!)) {
+                  assignmentsByStudent[sid].lastDate = d;
+                }
+              });
+            }
+          }
+        }
+      }
+
       const rows = [...studentById.values()].map((s: any) => {
         const sid = String(s.id);
         const aggr = attemptsByStudent[sid] || { attempts: 0, passed: 0, scoreSum: 0 };
@@ -4321,6 +4358,15 @@ When giving instructions, number each step clearly. Be precise and technical whe
         const topCourseId = Object.entries(courseCount).sort(([, a], [, b]) => (b as number) - (a as number))[0]?.[0];
         const topCourse = courseRows.find((c: any) => String(c.id || "") === topCourseId);
 
+        const subAggr = assignmentsByStudent[sid] || { submitted: 0, graded: 0, gradeSum: 0, lastDate: null };
+        const submissionRate = teacherAssignmentsCount > 0 ? Math.round((subAggr.submitted / teacherAssignmentsCount) * 100) : 0;
+        const avgGrade = subAggr.graded > 0 ? Math.round(subAggr.gradeSum / subAggr.graded) : 0;
+        const lastActivityDate = (() => {
+          const dates = [lastAttemptDate, subAggr.lastDate].filter(Boolean) as string[];
+          if (!dates.length) return null;
+          return dates.sort((a, b) => b.localeCompare(a))[0];
+        })();
+
         return {
           studentId: sid,
           studentName: String(s.display_name || "Unknown Student"),
@@ -4329,12 +4375,16 @@ When giving instructions, number each step clearly. Be precise and technical whe
           passed: aggr.passed,
           passRate,
           avgScore,
-          lastAttemptDate,
+          lastAttemptDate: lastActivityDate,
           topCourseName: topCourse?.title || null,
+          submissionsCount: subAggr.submitted,
+          assignmentsTotal: teacherAssignmentsCount,
+          submissionRate,
+          avgGrade,
         };
       });
 
-      res.json({ success: true, rows, coursesCount, quizzesCount });
+      res.json({ success: true, rows, coursesCount, quizzesCount, assignmentsCount: teacherAssignmentsCount });
     } catch (e: any) {
       res.status(500).json({ error: e?.message || "Failed to load teacher progress" });
     }
@@ -4366,8 +4416,8 @@ When giving instructions, number each step clearly. Be precise and technical whe
       let quizRows: any[] = [];
       if (teacherCourseIds.length > 0) {
         const quizzesRes = await supabaseAdmin.from("quizzes").select("*").in("course_id", teacherCourseIds);
-        if (quizzesRes.error) throw quizzesRes.error;
-        quizRows = quizzesRes.data || [];
+        if (quizzesRes.error && !isAnyTableMissingError(quizzesRes.error)) throw quizzesRes.error;
+        quizRows = quizzesRes.error ? [] : (quizzesRes.data || []);
       }
       const quizIds = new Set<string>(quizRows.map((q: any) => String(q.id || "")).filter(Boolean));
       const quizzes: Record<string, string> = {};
@@ -4423,7 +4473,38 @@ When giving instructions, number each step clearly. Be precise and technical whe
             a.total_questions == null ? null : toFiniteNumber(a.total_questions, 0),
         }));
 
-      res.json({ success: true, attempts, quizzes, students });
+      // Assignment submissions — real activity even when quiz_attempts is absent
+      let assignmentSubmissions: any[] = [];
+      let assignments: Record<string, string> = {};
+      if (teacherCourseIds.length > 0) {
+        const asgRes = await supabaseAdmin
+          .from("assignments")
+          .select("id,title,course_id")
+          .in("course_id", teacherCourseIds);
+        if (!asgRes.error) {
+          (asgRes.data || []).forEach((a: any) => { assignments[String(a.id)] = String(a.title || "Assignment"); });
+          const asgIds = Object.keys(assignments);
+          if (asgIds.length > 0 && allowedStudentIds.size > 0) {
+            const subRes = await supabaseAdmin
+              .from("assignment_submissions")
+              .select("id,assignment_id,student_id,grade,status,submitted_at,content")
+              .in("assignment_id", asgIds)
+              .in("student_id", [...allowedStudentIds]);
+            if (!subRes.error) {
+              assignmentSubmissions = (subRes.data || []).map((s: any) => ({
+                id: String(s.id || ""),
+                assignmentId: String(s.assignment_id || ""),
+                studentId: String(s.student_id || ""),
+                grade: s.grade != null ? Number(s.grade) : null,
+                status: String(s.status || "submitted"),
+                submittedAt: s.submitted_at || null,
+              }));
+            }
+          }
+        }
+      }
+
+      res.json({ success: true, attempts, quizzes, students, assignmentSubmissions, assignments });
     } catch (e: any) {
       res.status(500).json({ error: e?.message || "Failed to load teacher results" });
     }
@@ -4468,8 +4549,8 @@ When giving instructions, number each step clearly. Be precise and technical whe
       let quizRows: any[] = [];
       if (courseIds.length > 0) {
         const quizzesRes = await supabaseAdmin.from("quizzes").select("*").in("course_id", courseIds);
-        if (quizzesRes.error) throw quizzesRes.error;
-        quizRows = quizzesRes.data || [];
+        if (quizzesRes.error && !isAnyTableMissingError(quizzesRes.error)) throw quizzesRes.error;
+        quizRows = quizzesRes.error ? [] : (quizzesRes.data || []);
       }
       const quizIds = new Set<string>(quizRows.map((q: any) => String(q.id || "")).filter(Boolean));
       const passingScoreByQuiz = quizRows.reduce((acc: Record<string, number>, q: any) => {
