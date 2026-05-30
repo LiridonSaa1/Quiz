@@ -69,7 +69,6 @@ const AdminRoles = lazy(() => import('./pages/admin/Roles'));
 const AdminProfile = lazy(() => import('./pages/admin/Profile'));
 const AdminSecurityPage = lazy(() => import('./pages/admin/Security'));
 const AdminPresentations = lazy(() => import('./pages/admin/Presentations'));
-const TeacherPresentations = lazy(() => import('./pages/teacher/Presentations'));
 const StudentPresentations = lazy(() => import('./pages/student/Presentations'));
 const JoinClass = lazy(() => import('./pages/student/JoinClass'));
 const Badges = lazy(() => import('./pages/student/Badges'));
@@ -453,7 +452,6 @@ function TeacherRoutes({ features }: { features: FeatureFlags }) {
       <Route path="/lessons" element={<TeacherLessons />} />
       <Route path="/lessons/:lessonId/content" element={<TeacherLessonContentManager />} />
       <Route path="/assignments" element={<TeacherAssignments />} />
-      <Route path="/presentations" element={<TeacherPresentations />} />
       <Route path="/attendance" element={<TeacherAttendance />} />
       <Route path="/certificates" element={<TeacherCertificates />} />
       <Route path="/live-sessions" element={features.liveSessionsEnabled ? <TeacherLiveSessions /> : <Navigate to="/not-found" replace />} />

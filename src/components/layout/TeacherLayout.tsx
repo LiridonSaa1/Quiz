@@ -7,7 +7,7 @@ import {
   Menu, X, Layers, PlayCircle, School, ClipboardList, CalendarCheck,
   Award, Video, MessageSquare, Megaphone, FileBarChart, User,
   GraduationCap, ScrollText, ChevronRight, PanelLeftClose, PanelLeftOpen,
-  Zap, FileBarChart2, Presentation, ListChecks, Settings
+  Zap, FileBarChart2, ListChecks, Settings
 } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import NotificationCenter from '../NotificationCenter';
@@ -232,7 +232,6 @@ export default function TeacherLayout({ children }: { children: React.ReactNode 
       title: t('nav.sections.learning'),
       items: [
         { icon: ClipboardList, label: t('nav.assignments'),    path: '/teacher/assignments' },
-        { icon: Presentation,  label: t('nav.presentations'), path: '/teacher/presentations' },
         { icon: CalendarCheck, label: t('nav.attendance'),    path: '/teacher/attendance' },
         { icon: Award,         label: t('nav.certificates'),  path: '/teacher/certificates' },
       ],
