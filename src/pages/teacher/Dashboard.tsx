@@ -6,14 +6,14 @@ import { Link } from 'react-router-dom';
 import {
   BookOpen, Users, FileText, TrendingUp,
   ArrowUpRight, Plus, ChevronRight,
-  Target, Clock, Award, BarChart3, Sparkles, Layers, Trophy, Medal
+  Target, Clock, Award, BarChart3, Sparkles, Layers, Trophy, Medal, Euro
 } from 'lucide-react';
 import {
   AreaChart, Area, XAxis, YAxis, CartesianGrid,
   Tooltip, ResponsiveContainer, BarChart, Bar, Cell
 } from 'recharts';
 import { motion } from 'motion/react';
-import { authFetchJsonCached } from '../../lib/apiUrl';
+import { authFetchJsonCached, authFetch, apiUrl } from '../../lib/apiUrl';
 
 const CHART_DATA = [
   { day: 'Mon', attempts: 0 },
@@ -147,6 +147,7 @@ export default function TeacherDashboard() {
   const [chartData, setChartData]         = useState(CHART_DATA);
   const [moduleData, setModuleData]       = useState<ModuleCompletion[]>([]);
   const [topStudents, setTopStudents]     = useState<TopStudent[]>([]);
+  const [earnings, setEarnings]           = useState<{ total_hours: number; total_amount: number; month_year: string } | null>(null);
 
   useEffect(() => {
     let active = true;
@@ -157,6 +158,12 @@ export default function TeacherDashboard() {
       if (active) {
         setDisplayName(session.user.user_metadata?.displayName || session.user.email?.split('@')[0] || 'Teacher');
       }
+      // Load earnings in parallel
+      authFetch(apiUrl('/api/teacher/earnings'))
+        .then(r => r.json())
+        .then(j => { if (j?.success && active) setEarnings({ total_hours: j.total_hours, total_amount: j.total_amount, month_year: j.month_year }); })
+        .catch(() => {});
+
       try {
         const json = await authFetchJsonCached<any>(`/api/teacher/dashboard?userId=${encodeURIComponent(uid)}`, { ttlMs: 30000 });
         if (!json?.success) throw new Error(json?.error || 'Failed to load dashboard');
@@ -238,6 +245,39 @@ export default function TeacherDashboard() {
             <StatCard key={card.label} card={card} index={i} loading={loading} />
           ))}
         </div>
+
+        {/* Earnings Widget */}
+        {earnings !== null && (
+          <motion.div
+            initial={{ opacity: 0, y: 16 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.4, delay: 0.15 }}
+            className="bg-gradient-to-r from-emerald-500 to-teal-600 rounded-2xl p-5 shadow-lg shadow-emerald-100 flex items-center justify-between"
+          >
+            <div className="flex items-center gap-4">
+              <div className="w-12 h-12 rounded-xl bg-white/20 flex items-center justify-center">
+                <Euro className="w-6 h-6 text-white" />
+              </div>
+              <div>
+                <p className="text-emerald-100 text-sm font-medium">Të ardhurat këtë muaj</p>
+                <p className="text-white text-2xl font-bold">€{earnings.total_amount.toFixed(2)}</p>
+                <p className="text-emerald-200 text-xs mt-0.5">
+                  {earnings.total_hours.toFixed(1)} orë pune · {(() => {
+                    const [yr, mo] = earnings.month_year.split('-');
+                    return new Date(Number(yr), Number(mo) - 1, 1).toLocaleString('default', { month: 'long', year: 'numeric' });
+                  })()}
+                </p>
+              </div>
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="relative flex h-2.5 w-2.5">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-white opacity-75" />
+                <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-white" />
+              </span>
+              <span className="text-white/80 text-xs font-medium">Live</span>
+            </div>
+          </motion.div>
+        )}
 
         {/* Main Grid */}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">

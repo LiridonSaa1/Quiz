@@ -161,6 +161,30 @@ export default function Login() {
         return;
       }
 
+      // For students: check if they've paid the current month
+      if (role === 'student') {
+        try {
+          const { data: { session: freshSession } } = await supabase.auth.getSession();
+          const token = freshSession?.access_token;
+          if (token) {
+            const paymentRes = await fetch(apiUrl('/api/auth/check-student-payment'), {
+              headers: { Authorization: `Bearer ${token}` },
+            });
+            const paymentJson = await paymentRes.json().catch(() => ({ required: false, paid: true }));
+            if (paymentJson.required && !paymentJson.paid) {
+              await supabase.auth.signOut();
+              toast.error(
+                'Nuk mund të identifikoheni. Nuk keni bërë pagesën e muajit. Ju lutemi kontaktoni mësuesin tuaj.',
+                { id: 'payment-required', duration: 8000 }
+              );
+              return;
+            }
+          }
+        } catch {
+          // If check fails, allow login (fail open)
+        }
+      }
+
       toast.success(t('login.welcomeBack') + '!');
       // Navigation is handled automatically by App.tsx's onAuthStateChange → fetchProfile → setUser.
       // Calling navigate('/') here races with that async flow and causes a blank page.

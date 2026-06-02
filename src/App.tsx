@@ -63,6 +63,8 @@ const AdminAnalytics = lazy(() => import('./pages/admin/Analytics'));
 const AdminReports = lazy(() => import('./pages/admin/Reports'));
 const AdminPayments = lazy(() => import('./pages/admin/Payments'));
 const AdminInvoices = lazy(() => import('./pages/admin/Invoices'));
+const AdminStudentPayments = lazy(() => import('./pages/admin/StudentPayments'));
+const AdminTeacherHours = lazy(() => import('./pages/admin/TeacherHours'));
 const AdminSettings = lazy(() => import('./pages/admin/Settings'));
 const AdminBranding = lazy(() => import('./pages/admin/Branding'));
 const AdminDomain = lazy(() => import('./pages/admin/Domain'));
@@ -417,6 +419,8 @@ function AdminRoutes({ features }: { features: FeatureFlags }) {
       <Route path="/reports" element={<AdminReports />} />
       <Route path="/payments" element={features.paymentsEnabled ? <AdminPayments /> : <Navigate to="/not-found" replace />} />
       <Route path="/invoices" element={features.paymentsEnabled ? <AdminInvoices /> : <Navigate to="/not-found" replace />} />
+      <Route path="/student-payments" element={<AdminStudentPayments />} />
+      <Route path="/teacher-hours" element={<AdminTeacherHours />} />
       <Route path="/settings" element={<AdminSettings />} />
       <Route path="/branding" element={<AdminBranding />} />
       <Route path="/domain" element={<AdminDomain />} />

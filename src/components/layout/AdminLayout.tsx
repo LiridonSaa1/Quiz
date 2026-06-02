@@ -13,7 +13,7 @@ import {
   LayoutDashboard, BookOpen, Layers, PlayCircle, FileText, Users, ShieldCheck,
   School, ClipboardList, CalendarCheck, Award, Video, MessageSquare, Megaphone,
   BarChart3, FileBarChart, DollarSign, Receipt, Settings, Palette, Lock,
-  User, Shield, LogOut, Menu, X, GraduationCap, Presentation
+  User, Shield, LogOut, Menu, X, GraduationCap, Presentation, CreditCard, Clock
 } from 'lucide-react';
 
 export default function AdminLayout({ children }: { children: React.ReactNode }) {
@@ -72,8 +72,10 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
     {
       key: 'business',
       items: [
-        { icon: DollarSign, label: t('nav.payments'), path: '/admin/payments' },
-        { icon: Receipt,    label: t('nav.invoices'), path: '/admin/invoices' },
+        { icon: DollarSign,  label: t('nav.payments'),        path: '/admin/payments' },
+        { icon: Receipt,     label: t('nav.invoices'),        path: '/admin/invoices' },
+        { icon: CreditCard,  label: 'Pagesat Mujore',         path: '/admin/student-payments' },
+        { icon: Clock,       label: 'Orët e Mësuesve',        path: '/admin/teacher-hours' },
       ]
     },
     {

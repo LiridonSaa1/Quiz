@@ -8140,6 +8140,326 @@ Rules:
     }
   });
 
+  // ─── Student Monthly Payments ────────────────────────────────────────────────
+  app.get('/api/admin/student-payments', async (req, res) => {
+    try {
+      const { month } = req.query as Record<string, string>;
+      const monthYear = month || new Date().toISOString().slice(0, 7); // YYYY-MM
+
+      const [studentsRes, paymentsRes] = await Promise.all([
+        supabaseAdmin.from('profiles').select('id, display_name, email, teacher_id').eq('role', 'student').order('display_name'),
+        supabaseAdmin.from('student_monthly_payments').select('*').eq('month_year', monthYear).order('paid_at', { ascending: false }),
+      ]);
+
+      if (studentsRes.error) throw studentsRes.error;
+
+      let payments: any[] = [];
+      if (paymentsRes.error) {
+        const msg = String(paymentsRes.error?.message || '');
+        if (!msg.includes('does not exist') && paymentsRes.error?.code !== '42P01') throw paymentsRes.error;
+      } else {
+        payments = paymentsRes.data || [];
+      }
+
+      const teachersRes = await supabaseAdmin.from('profiles').select('id, display_name, email').eq('role', 'teacher');
+      const teacherMap: Record<string, string> = {};
+      (teachersRes.data || []).forEach((t: any) => { teacherMap[t.id] = t.display_name || t.email || 'Unknown'; });
+
+      const paidSet = new Set(payments.map((p: any) => p.student_id));
+      const paymentByStudent: Record<string, any> = {};
+      payments.forEach((p: any) => { paymentByStudent[p.student_id] = p; });
+
+      const students = (studentsRes.data || []).map((s: any) => ({
+        id: s.id,
+        name: s.display_name || s.email || 'Unnamed',
+        email: s.email || '',
+        teacher_id: s.teacher_id || null,
+        teacher_name: s.teacher_id ? (teacherMap[s.teacher_id] || '—') : '—',
+        paid: paidSet.has(s.id),
+        payment: paymentByStudent[s.id] || null,
+      }));
+
+      res.json({ success: true, students, month_year: monthYear });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message || 'Failed to load student payments' });
+    }
+  });
+
+  app.post('/api/admin/student-payments', async (req, res) => {
+    try {
+      const { student_id, month_year, amount = 0, notes = '' } = req.body || {};
+      if (!student_id) return res.status(400).json({ error: 'student_id is required' });
+      const monthYear = month_year || new Date().toISOString().slice(0, 7);
+
+      // Get student and their teacher
+      const { data: student, error: sErr } = await supabaseAdmin
+        .from('profiles').select('id, display_name, email, teacher_id').eq('id', student_id).single();
+      if (sErr || !student) return res.status(400).json({ error: 'Student not found' });
+
+      // Upsert payment (one per month per student)
+      const { data: payment, error: pErr } = await supabaseAdmin
+        .from('student_monthly_payments')
+        .upsert({ student_id, month_year: monthYear, amount: Number(amount) || 0, notes, paid_at: new Date().toISOString() },
+          { onConflict: 'student_id,month_year' })
+        .select('id').single();
+      if (pErr) throw pErr;
+
+      const studentName = student.display_name || student.email || 'Student';
+      const [yr, mo] = monthYear.split('-');
+      const monthLabel = new Date(Number(yr), Number(mo) - 1, 1).toLocaleString('default', { month: 'long', year: 'numeric' });
+
+      // Send notification to student
+      const notifs: any[] = [{
+        user_id: student_id,
+        type: 'payment_confirmed',
+        title: 'Pagesa u konfirmua',
+        message: `Pagesa juaj për muajin ${monthLabel} u konfirmua me sukses.`,
+        read: false,
+      }];
+
+      // Send notification to teacher who created the student
+      if (student.teacher_id) {
+        notifs.push({
+          user_id: student.teacher_id,
+          type: 'payment_confirmed',
+          title: 'Pagesa e studentit u konfirmua',
+          message: `Pagesa e ${studentName} për muajin ${monthLabel} u konfirmua.`,
+          read: false,
+        });
+      }
+
+      await supabaseAdmin.from('notifications').insert(notifs).then(() => {});
+
+      res.json({ success: true, id: payment?.id });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message || 'Failed to record payment' });
+    }
+  });
+
+  app.delete('/api/admin/student-payments/:id', async (req, res) => {
+    try {
+      const { id } = req.params;
+      const { error } = await supabaseAdmin.from('student_monthly_payments').delete().eq('id', id);
+      if (error) throw error;
+      res.json({ success: true });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message || 'Failed to delete payment' });
+    }
+  });
+
+  // Called during login to check if student has paid the current month
+  app.get('/api/auth/check-student-payment', async (req, res) => {
+    try {
+      const token = (req.headers.authorization || '').replace('Bearer ', '').trim();
+      if (!token) return res.status(401).json({ error: 'Unauthorized' });
+
+      const { data: { user }, error: authErr } = await supabaseAdmin.auth.getUser(token);
+      if (authErr || !user) return res.status(401).json({ error: 'Unauthorized' });
+
+      const { data: profile } = await supabaseAdmin.from('profiles').select('role').eq('id', user.id).single();
+      if (profile?.role !== 'student') return res.json({ required: false, paid: true });
+
+      const monthYear = new Date().toISOString().slice(0, 7);
+      const { data: payment, error: pErr } = await supabaseAdmin
+        .from('student_monthly_payments').select('id').eq('student_id', user.id).eq('month_year', monthYear).maybeSingle();
+
+      if (pErr) {
+        const msg = String(pErr?.message || '');
+        if (msg.includes('does not exist') || pErr?.code === '42P01') return res.json({ required: false, paid: true });
+        throw pErr;
+      }
+
+      res.json({ required: true, paid: !!payment });
+    } catch (e: any) {
+      // If table missing, don't block login
+      res.json({ required: false, paid: true });
+    }
+  });
+
+  // ─── Teacher Hours ───────────────────────────────────────────────────────────
+  app.get('/api/admin/teacher-hours', async (req, res) => {
+    try {
+      const { teacher_id, month } = req.query as Record<string, string>;
+      const monthYear = month || new Date().toISOString().slice(0, 7);
+      const [yr, mo] = monthYear.split('-');
+      const startDate = `${yr}-${mo}-01`;
+      const endDate = new Date(Number(yr), Number(mo), 0).toISOString().slice(0, 10); // last day of month
+
+      let query = supabaseAdmin
+        .from('teacher_hours')
+        .select('*')
+        .gte('work_date', startDate)
+        .lte('work_date', endDate)
+        .order('work_date', { ascending: false });
+      if (teacher_id) query = query.eq('teacher_id', teacher_id);
+
+      const [hoursRes, teachersRes] = await Promise.all([
+        query,
+        supabaseAdmin.from('profiles').select('id, display_name, email').eq('role', 'teacher').order('display_name'),
+      ]);
+
+      let rows: any[] = [];
+      if (hoursRes.error) {
+        const msg = String(hoursRes.error?.message || '');
+        if (!msg.includes('does not exist') && hoursRes.error?.code !== '42P01') throw hoursRes.error;
+      } else {
+        rows = hoursRes.data || [];
+      }
+
+      const teacherMap: Record<string, string> = {};
+      (teachersRes.data || []).forEach((t: any) => { teacherMap[t.id] = t.display_name || t.email || 'Unknown'; });
+
+      const hours = rows.map((r: any) => ({
+        ...r,
+        teacher_name: teacherMap[r.teacher_id] || '—',
+        total: Number(r.hours) * Number(r.rate_per_hour),
+      }));
+
+      // Summary per teacher for the month
+      const summaryMap: Record<string, { teacher_id: string; teacher_name: string; total_hours: number; total_amount: number }> = {};
+      hours.forEach((r: any) => {
+        if (!summaryMap[r.teacher_id]) {
+          summaryMap[r.teacher_id] = { teacher_id: r.teacher_id, teacher_name: r.teacher_name, total_hours: 0, total_amount: 0 };
+        }
+        summaryMap[r.teacher_id].total_hours += Number(r.hours);
+        summaryMap[r.teacher_id].total_amount += r.total;
+      });
+
+      res.json({
+        success: true,
+        hours,
+        summary: Object.values(summaryMap),
+        teachers: teachersRes.data || [],
+        month_year: monthYear,
+      });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message || 'Failed to load teacher hours' });
+    }
+  });
+
+  app.post('/api/admin/teacher-hours', async (req, res) => {
+    try {
+      const { teacher_id, work_date, hours, rate_per_hour = 40, notes = '' } = req.body || {};
+      if (!teacher_id) return res.status(400).json({ error: 'teacher_id is required' });
+      if (!work_date) return res.status(400).json({ error: 'work_date is required' });
+      const numHours = Number(hours);
+      if (!Number.isFinite(numHours) || numHours <= 0) return res.status(400).json({ error: 'hours must be greater than 0' });
+
+      const { data, error } = await supabaseAdmin
+        .from('teacher_hours')
+        .insert({ teacher_id, work_date, hours: numHours, rate_per_hour: Number(rate_per_hour) || 40, notes })
+        .select('id').single();
+      if (error) throw error;
+      res.json({ success: true, id: data?.id });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message || 'Failed to record hours' });
+    }
+  });
+
+  app.patch('/api/admin/teacher-hours/:id', async (req, res) => {
+    try {
+      const { id } = req.params;
+      const { hours, rate_per_hour, notes, work_date } = req.body || {};
+      const updates: any = {};
+      if (hours !== undefined) updates.hours = Number(hours);
+      if (rate_per_hour !== undefined) updates.rate_per_hour = Number(rate_per_hour);
+      if (notes !== undefined) updates.notes = notes;
+      if (work_date !== undefined) updates.work_date = work_date;
+      const { error } = await supabaseAdmin.from('teacher_hours').update(updates).eq('id', id);
+      if (error) throw error;
+      res.json({ success: true });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message || 'Failed to update hours' });
+    }
+  });
+
+  app.delete('/api/admin/teacher-hours/:id', async (req, res) => {
+    try {
+      const { id } = req.params;
+      const { error } = await supabaseAdmin.from('teacher_hours').delete().eq('id', id);
+      if (error) throw error;
+      res.json({ success: true });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message || 'Failed to delete hours' });
+    }
+  });
+
+  // Invoice data for a teacher/month
+  app.get('/api/admin/teacher-hours/invoice', async (req, res) => {
+    try {
+      const { teacher_id, month } = req.query as Record<string, string>;
+      if (!teacher_id) return res.status(400).json({ error: 'teacher_id is required' });
+      const monthYear = month || new Date().toISOString().slice(0, 7);
+      const [yr, mo] = monthYear.split('-');
+      const startDate = `${yr}-${mo}-01`;
+      const endDate = new Date(Number(yr), Number(mo), 0).toISOString().slice(0, 10);
+
+      const [teacherRes, hoursRes] = await Promise.all([
+        supabaseAdmin.from('profiles').select('id, display_name, email').eq('id', teacher_id).single(),
+        supabaseAdmin.from('teacher_hours').select('*').eq('teacher_id', teacher_id).gte('work_date', startDate).lte('work_date', endDate).order('work_date'),
+      ]);
+
+      if (teacherRes.error) throw teacherRes.error;
+
+      let rows: any[] = [];
+      if (hoursRes.error) {
+        const msg = String(hoursRes.error?.message || '');
+        if (!msg.includes('does not exist') && hoursRes.error?.code !== '42P01') throw hoursRes.error;
+      } else {
+        rows = hoursRes.data || [];
+      }
+
+      const total_hours = rows.reduce((s: number, r: any) => s + Number(r.hours), 0);
+      const total_amount = rows.reduce((s: number, r: any) => s + Number(r.hours) * Number(r.rate_per_hour), 0);
+
+      res.json({
+        success: true,
+        teacher: teacherRes.data,
+        month_year: monthYear,
+        rows: rows.map((r: any) => ({ ...r, total: Number(r.hours) * Number(r.rate_per_hour) })),
+        total_hours,
+        total_amount,
+      });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message || 'Failed to generate invoice' });
+    }
+  });
+
+  // Teacher's own earnings (for dashboard widget)
+  app.get('/api/teacher/earnings', async (req, res) => {
+    try {
+      const token = (req.headers.authorization || '').replace('Bearer ', '').trim();
+      if (!token) return res.status(401).json({ error: 'Unauthorized' });
+      const { data: { user }, error: authErr } = await supabaseAdmin.auth.getUser(token);
+      if (authErr || !user) return res.status(401).json({ error: 'Unauthorized' });
+
+      const monthYear = new Date().toISOString().slice(0, 7);
+      const [yr, mo] = monthYear.split('-');
+      const startDate = `${yr}-${mo}-01`;
+      const endDate = new Date(Number(yr), Number(mo), 0).toISOString().slice(0, 10);
+
+      const { data: rows, error } = await supabaseAdmin
+        .from('teacher_hours')
+        .select('hours, rate_per_hour, work_date')
+        .eq('teacher_id', user.id)
+        .gte('work_date', startDate)
+        .lte('work_date', endDate);
+
+      if (error) {
+        const msg = String(error?.message || '');
+        if (msg.includes('does not exist') || error?.code === '42P01') return res.json({ success: true, total_hours: 0, total_amount: 0, month_year: monthYear });
+        throw error;
+      }
+
+      const total_hours = (rows || []).reduce((s: number, r: any) => s + Number(r.hours), 0);
+      const total_amount = (rows || []).reduce((s: number, r: any) => s + Number(r.hours) * Number(r.rate_per_hour), 0);
+
+      res.json({ success: true, total_hours, total_amount, month_year: monthYear });
+    } catch (e: any) {
+      res.json({ success: true, total_hours: 0, total_amount: 0, month_year: new Date().toISOString().slice(0, 7) });
+    }
+  });
+
   app.get('/api/admin/invoices', async (req, res) => {
     try {
       const invRes = await supabaseAdmin
@@ -15499,6 +15819,57 @@ async function runAnnouncementColumnsMigration(): Promise<void> {
   console.log('[migration] announcements columns: will use graceful fallback in API handlers');
 }
 
+// ─── Student Monthly Payments Migration ──────────────────────────────────────
+async function runStudentMonthlyPaymentsMigration() {
+  const dbUrl = process.env.DATABASE_URL?.trim();
+  if (!dbUrl) return;
+  try {
+    await poolQuery(`
+      CREATE TABLE IF NOT EXISTS student_monthly_payments (
+        id          UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+        student_id  UUID        NOT NULL,
+        month_year  TEXT        NOT NULL,
+        amount      NUMERIC(10,2) NOT NULL DEFAULT 0,
+        notes       TEXT,
+        paid_at     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        paid_by     UUID,
+        created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        UNIQUE(student_id, month_year)
+      )
+    `);
+    await poolQuery(`CREATE INDEX IF NOT EXISTS idx_smp_student ON student_monthly_payments (student_id)`);
+    await poolQuery(`CREATE INDEX IF NOT EXISTS idx_smp_month  ON student_monthly_payments (month_year)`);
+    console.log('[migration] student_monthly_payments table ensured ✓');
+  } catch (err: any) {
+    console.warn('[migration] student_monthly_payments:', err?.message?.split('\n')[0]);
+  }
+}
+
+// ─── Teacher Hours Migration ──────────────────────────────────────────────────
+async function runTeacherHoursMigration() {
+  const dbUrl = process.env.DATABASE_URL?.trim();
+  if (!dbUrl) return;
+  try {
+    await poolQuery(`
+      CREATE TABLE IF NOT EXISTS teacher_hours (
+        id             UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+        teacher_id     UUID        NOT NULL,
+        work_date      DATE        NOT NULL,
+        hours          NUMERIC(5,2) NOT NULL,
+        rate_per_hour  NUMERIC(10,2) NOT NULL DEFAULT 40,
+        notes          TEXT,
+        created_by     UUID,
+        created_at     TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      )
+    `);
+    await poolQuery(`CREATE INDEX IF NOT EXISTS idx_th_teacher ON teacher_hours (teacher_id)`);
+    await poolQuery(`CREATE INDEX IF NOT EXISTS idx_th_date    ON teacher_hours (work_date DESC)`);
+    console.log('[migration] teacher_hours table ensured ✓');
+  } catch (err: any) {
+    console.warn('[migration] teacher_hours:', err?.message?.split('\n')[0]);
+  }
+}
+
 // ─── Student Transfers Log Migration ─────────────────────────────────────────
 async function runStudentTransfersMigration() {
   const dbUrl = process.env.DATABASE_URL?.trim();
@@ -15937,6 +16308,8 @@ async function startServer() {
   void runLiveSessionsRecordingUrlsMigration();
   void runQuizSectionsMigration();
   void runStudentTransfersMigration();
+  void runStudentMonthlyPaymentsMigration();
+  void runTeacherHoursMigration();
   void ensureAssignmentFilesBucket();
   void ensureHeadwayMediaBucket();
   void fixHeadwayQuizCorrectAnswers();
