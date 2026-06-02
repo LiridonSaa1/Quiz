@@ -305,8 +305,17 @@ export default function StudentLiveSessionJoin() {
         const errText = await readApiError(res);
         throw new Error(errText || 'Failed to send message');
       }
+      const json = await res.json();
       setChatInput('');
-      if (!chatRealtimeConnected) {
+      // Optimistically add to UI from API response — dedup guard in Realtime handler prevents duplicates
+      if (json.success && json.message) {
+        const sent = json.message;
+        const sentWithSender = {
+          ...sent,
+          sender: sent.sender || { id: userId, display_name: userDisplayName || 'You', avatar_url: null },
+        };
+        setChatMessages(prev => prev.some(m => m.id === sent.id) ? prev : [...prev, sentWithSender]);
+      } else if (!chatRealtimeConnected) {
         void fetchChat();
       }
     } catch (error: any) {
