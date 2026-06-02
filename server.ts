@@ -15839,6 +15839,7 @@ async function runStudentMonthlyPaymentsMigration() {
     `);
     await poolQuery(`CREATE INDEX IF NOT EXISTS idx_smp_student ON student_monthly_payments (student_id)`);
     await poolQuery(`CREATE INDEX IF NOT EXISTS idx_smp_month  ON student_monthly_payments (month_year)`);
+    await poolQuery(`NOTIFY pgrst, 'reload schema'`).catch(() => {});
     console.log('[migration] student_monthly_payments table ensured ✓');
   } catch (err: any) {
     console.warn('[migration] student_monthly_payments:', err?.message?.split('\n')[0]);
@@ -15864,6 +15865,7 @@ async function runTeacherHoursMigration() {
     `);
     await poolQuery(`CREATE INDEX IF NOT EXISTS idx_th_teacher ON teacher_hours (teacher_id)`);
     await poolQuery(`CREATE INDEX IF NOT EXISTS idx_th_date    ON teacher_hours (work_date DESC)`);
+    await poolQuery(`NOTIFY pgrst, 'reload schema'`).catch(() => {});
     console.log('[migration] teacher_hours table ensured ✓');
   } catch (err: any) {
     console.warn('[migration] teacher_hours:', err?.message?.split('\n')[0]);
