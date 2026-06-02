@@ -8144,26 +8144,19 @@ Rules:
   app.get('/api/admin/student-payments', async (req, res) => {
     try {
       const { month } = req.query as Record<string, string>;
-      const monthYear = month || new Date().toISOString().slice(0, 7); // YYYY-MM
+      const monthYear = month || new Date().toISOString().slice(0, 7);
 
-      const [studentsRes, paymentsRes] = await Promise.all([
+      const [studentsRes, paymentsResult, teachersResult] = await Promise.all([
         supabaseAdmin.from('profiles').select('id, display_name, email, teacher_id').eq('role', 'student').order('display_name'),
-        supabaseAdmin.from('student_monthly_payments').select('*').eq('month_year', monthYear).order('paid_at', { ascending: false }),
+        poolQuery(`SELECT * FROM student_monthly_payments WHERE month_year = $1 ORDER BY paid_at DESC`, [monthYear]).catch(() => null),
+        supabaseAdmin.from('profiles').select('id, display_name, email').eq('role', 'teacher'),
       ]);
 
       if (studentsRes.error) throw studentsRes.error;
 
-      let payments: any[] = [];
-      if (paymentsRes.error) {
-        const msg = String(paymentsRes.error?.message || '');
-        if (!msg.includes('does not exist') && paymentsRes.error?.code !== '42P01') throw paymentsRes.error;
-      } else {
-        payments = paymentsRes.data || [];
-      }
-
-      const teachersRes = await supabaseAdmin.from('profiles').select('id, display_name, email').eq('role', 'teacher');
+      const payments: any[] = paymentsResult?.rows || [];
       const teacherMap: Record<string, string> = {};
-      (teachersRes.data || []).forEach((t: any) => { teacherMap[t.id] = t.display_name || t.email || 'Unknown'; });
+      (teachersResult.data || []).forEach((t: any) => { teacherMap[t.id] = t.display_name || t.email || 'Unknown'; });
 
       const paidSet = new Set(payments.map((p: any) => p.student_id));
       const paymentByStudent: Record<string, any> = {};
@@ -8191,24 +8184,24 @@ Rules:
       if (!student_id) return res.status(400).json({ error: 'student_id is required' });
       const monthYear = month_year || new Date().toISOString().slice(0, 7);
 
-      // Get student and their teacher
       const { data: student, error: sErr } = await supabaseAdmin
         .from('profiles').select('id, display_name, email, teacher_id').eq('id', student_id).single();
       if (sErr || !student) return res.status(400).json({ error: 'Student not found' });
 
-      // Upsert payment (one per month per student)
-      const { data: payment, error: pErr } = await supabaseAdmin
-        .from('student_monthly_payments')
-        .upsert({ student_id, month_year: monthYear, amount: Number(amount) || 0, notes, paid_at: new Date().toISOString() },
-          { onConflict: 'student_id,month_year' })
-        .select('id').single();
-      if (pErr) throw pErr;
+      const result = await poolQuery(
+        `INSERT INTO student_monthly_payments (student_id, month_year, amount, notes, paid_at)
+         VALUES ($1, $2, $3, $4, NOW())
+         ON CONFLICT (student_id, month_year)
+         DO UPDATE SET amount = EXCLUDED.amount, notes = EXCLUDED.notes, paid_at = NOW()
+         RETURNING id`,
+        [student_id, monthYear, Number(amount) || 0, notes || '']
+      );
+      const paymentId = result.rows[0]?.id;
 
       const studentName = student.display_name || student.email || 'Student';
       const [yr, mo] = monthYear.split('-');
       const monthLabel = new Date(Number(yr), Number(mo) - 1, 1).toLocaleString('default', { month: 'long', year: 'numeric' });
 
-      // Send notification to student
       const notifs: any[] = [{
         user_id: student_id,
         type: 'payment_confirmed',
@@ -8216,8 +8209,6 @@ Rules:
         message: `Pagesa juaj për muajin ${monthLabel} u konfirmua me sukses.`,
         read: false,
       }];
-
-      // Send notification to teacher who created the student
       if (student.teacher_id) {
         notifs.push({
           user_id: student.teacher_id,
@@ -8227,10 +8218,9 @@ Rules:
           read: false,
         });
       }
-
       await supabaseAdmin.from('notifications').insert(notifs).then(() => {});
 
-      res.json({ success: true, id: payment?.id });
+      res.json({ success: true, id: paymentId });
     } catch (e: any) {
       res.status(500).json({ error: e.message || 'Failed to record payment' });
     }
@@ -8239,8 +8229,7 @@ Rules:
   app.delete('/api/admin/student-payments/:id', async (req, res) => {
     try {
       const { id } = req.params;
-      const { error } = await supabaseAdmin.from('student_monthly_payments').delete().eq('id', id);
-      if (error) throw error;
+      await poolQuery(`DELETE FROM student_monthly_payments WHERE id = $1`, [id]);
       res.json({ success: true });
     } catch (e: any) {
       res.status(500).json({ error: e.message || 'Failed to delete payment' });
@@ -8260,18 +8249,13 @@ Rules:
       if (profile?.role !== 'student') return res.json({ required: false, paid: true });
 
       const monthYear = new Date().toISOString().slice(0, 7);
-      const { data: payment, error: pErr } = await supabaseAdmin
-        .from('student_monthly_payments').select('id').eq('student_id', user.id).eq('month_year', monthYear).maybeSingle();
+      const result = await poolQuery(
+        `SELECT id FROM student_monthly_payments WHERE student_id = $1 AND month_year = $2 LIMIT 1`,
+        [user.id, monthYear]
+      ).catch(() => null);
 
-      if (pErr) {
-        const msg = String(pErr?.message || '');
-        if (msg.includes('does not exist') || pErr?.code === '42P01') return res.json({ required: false, paid: true });
-        throw pErr;
-      }
-
-      res.json({ required: true, paid: !!payment });
+      res.json({ required: true, paid: (result?.rows?.length || 0) > 0 });
     } catch (e: any) {
-      // If table missing, don't block login
       res.json({ required: false, paid: true });
     }
   });
@@ -8283,29 +8267,19 @@ Rules:
       const monthYear = month || new Date().toISOString().slice(0, 7);
       const [yr, mo] = monthYear.split('-');
       const startDate = `${yr}-${mo}-01`;
-      const endDate = new Date(Number(yr), Number(mo), 0).toISOString().slice(0, 10); // last day of month
+      const endDate = new Date(Number(yr), Number(mo), 0).toISOString().slice(0, 10);
 
-      let query = supabaseAdmin
-        .from('teacher_hours')
-        .select('*')
-        .gte('work_date', startDate)
-        .lte('work_date', endDate)
-        .order('work_date', { ascending: false });
-      if (teacher_id) query = query.eq('teacher_id', teacher_id);
+      const sql = teacher_id
+        ? `SELECT * FROM teacher_hours WHERE work_date >= $1 AND work_date <= $2 AND teacher_id = $3 ORDER BY work_date DESC`
+        : `SELECT * FROM teacher_hours WHERE work_date >= $1 AND work_date <= $2 ORDER BY work_date DESC`;
+      const params = teacher_id ? [startDate, endDate, teacher_id] : [startDate, endDate];
 
-      const [hoursRes, teachersRes] = await Promise.all([
-        query,
+      const [hoursResult, teachersRes] = await Promise.all([
+        poolQuery(sql, params).catch(() => null),
         supabaseAdmin.from('profiles').select('id, display_name, email').eq('role', 'teacher').order('display_name'),
       ]);
 
-      let rows: any[] = [];
-      if (hoursRes.error) {
-        const msg = String(hoursRes.error?.message || '');
-        if (!msg.includes('does not exist') && hoursRes.error?.code !== '42P01') throw hoursRes.error;
-      } else {
-        rows = hoursRes.data || [];
-      }
-
+      const rows: any[] = hoursResult?.rows || [];
       const teacherMap: Record<string, string> = {};
       (teachersRes.data || []).forEach((t: any) => { teacherMap[t.id] = t.display_name || t.email || 'Unknown'; });
 
@@ -8315,7 +8289,6 @@ Rules:
         total: Number(r.hours) * Number(r.rate_per_hour),
       }));
 
-      // Summary per teacher for the month
       const summaryMap: Record<string, { teacher_id: string; teacher_name: string; total_hours: number; total_amount: number }> = {};
       hours.forEach((r: any) => {
         if (!summaryMap[r.teacher_id]) {
@@ -8345,12 +8318,12 @@ Rules:
       const numHours = Number(hours);
       if (!Number.isFinite(numHours) || numHours <= 0) return res.status(400).json({ error: 'hours must be greater than 0' });
 
-      const { data, error } = await supabaseAdmin
-        .from('teacher_hours')
-        .insert({ teacher_id, work_date, hours: numHours, rate_per_hour: Number(rate_per_hour) || 40, notes })
-        .select('id').single();
-      if (error) throw error;
-      res.json({ success: true, id: data?.id });
+      const result = await poolQuery(
+        `INSERT INTO teacher_hours (teacher_id, work_date, hours, rate_per_hour, notes)
+         VALUES ($1, $2, $3, $4, $5) RETURNING id`,
+        [teacher_id, work_date, numHours, Number(rate_per_hour) || 40, notes || '']
+      );
+      res.json({ success: true, id: result.rows[0]?.id });
     } catch (e: any) {
       res.status(500).json({ error: e.message || 'Failed to record hours' });
     }
@@ -8360,13 +8333,15 @@ Rules:
     try {
       const { id } = req.params;
       const { hours, rate_per_hour, notes, work_date } = req.body || {};
-      const updates: any = {};
-      if (hours !== undefined) updates.hours = Number(hours);
-      if (rate_per_hour !== undefined) updates.rate_per_hour = Number(rate_per_hour);
-      if (notes !== undefined) updates.notes = notes;
-      if (work_date !== undefined) updates.work_date = work_date;
-      const { error } = await supabaseAdmin.from('teacher_hours').update(updates).eq('id', id);
-      if (error) throw error;
+      const setClauses: string[] = [];
+      const params: any[] = [];
+      if (hours !== undefined) { params.push(Number(hours)); setClauses.push(`hours = $${params.length}`); }
+      if (rate_per_hour !== undefined) { params.push(Number(rate_per_hour)); setClauses.push(`rate_per_hour = $${params.length}`); }
+      if (notes !== undefined) { params.push(notes); setClauses.push(`notes = $${params.length}`); }
+      if (work_date !== undefined) { params.push(work_date); setClauses.push(`work_date = $${params.length}`); }
+      if (!setClauses.length) return res.json({ success: true });
+      params.push(id);
+      await poolQuery(`UPDATE teacher_hours SET ${setClauses.join(', ')} WHERE id = $${params.length}`, params);
       res.json({ success: true });
     } catch (e: any) {
       res.status(500).json({ error: e.message || 'Failed to update hours' });
@@ -8376,8 +8351,7 @@ Rules:
   app.delete('/api/admin/teacher-hours/:id', async (req, res) => {
     try {
       const { id } = req.params;
-      const { error } = await supabaseAdmin.from('teacher_hours').delete().eq('id', id);
-      if (error) throw error;
+      await poolQuery(`DELETE FROM teacher_hours WHERE id = $1`, [id]);
       res.json({ success: true });
     } catch (e: any) {
       res.status(500).json({ error: e.message || 'Failed to delete hours' });
@@ -8394,21 +8368,17 @@ Rules:
       const startDate = `${yr}-${mo}-01`;
       const endDate = new Date(Number(yr), Number(mo), 0).toISOString().slice(0, 10);
 
-      const [teacherRes, hoursRes] = await Promise.all([
+      const [teacherRes, hoursResult] = await Promise.all([
         supabaseAdmin.from('profiles').select('id, display_name, email').eq('id', teacher_id).single(),
-        supabaseAdmin.from('teacher_hours').select('*').eq('teacher_id', teacher_id).gte('work_date', startDate).lte('work_date', endDate).order('work_date'),
+        poolQuery(
+          `SELECT * FROM teacher_hours WHERE teacher_id = $1 AND work_date >= $2 AND work_date <= $3 ORDER BY work_date`,
+          [teacher_id, startDate, endDate]
+        ).catch(() => null),
       ]);
 
       if (teacherRes.error) throw teacherRes.error;
 
-      let rows: any[] = [];
-      if (hoursRes.error) {
-        const msg = String(hoursRes.error?.message || '');
-        if (!msg.includes('does not exist') && hoursRes.error?.code !== '42P01') throw hoursRes.error;
-      } else {
-        rows = hoursRes.data || [];
-      }
-
+      const rows: any[] = hoursResult?.rows || [];
       const total_hours = rows.reduce((s: number, r: any) => s + Number(r.hours), 0);
       const total_amount = rows.reduce((s: number, r: any) => s + Number(r.hours) * Number(r.rate_per_hour), 0);
 
@@ -8438,21 +8408,15 @@ Rules:
       const startDate = `${yr}-${mo}-01`;
       const endDate = new Date(Number(yr), Number(mo), 0).toISOString().slice(0, 10);
 
-      const { data: rows, error } = await supabaseAdmin
-        .from('teacher_hours')
-        .select('hours, rate_per_hour, work_date')
-        .eq('teacher_id', user.id)
-        .gte('work_date', startDate)
-        .lte('work_date', endDate);
+      const result = await poolQuery(
+        `SELECT hours, rate_per_hour, work_date FROM teacher_hours
+         WHERE teacher_id = $1 AND work_date >= $2 AND work_date <= $3`,
+        [user.id, startDate, endDate]
+      ).catch(() => null);
 
-      if (error) {
-        const msg = String(error?.message || '');
-        if (msg.includes('does not exist') || error?.code === '42P01') return res.json({ success: true, total_hours: 0, total_amount: 0, month_year: monthYear });
-        throw error;
-      }
-
-      const total_hours = (rows || []).reduce((s: number, r: any) => s + Number(r.hours), 0);
-      const total_amount = (rows || []).reduce((s: number, r: any) => s + Number(r.hours) * Number(r.rate_per_hour), 0);
+      const rows = result?.rows || [];
+      const total_hours = rows.reduce((s: number, r: any) => s + Number(r.hours), 0);
+      const total_amount = rows.reduce((s: number, r: any) => s + Number(r.hours) * Number(r.rate_per_hour), 0);
 
       res.json({ success: true, total_hours, total_amount, month_year: monthYear });
     } catch (e: any) {
