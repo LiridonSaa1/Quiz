@@ -336,7 +336,7 @@ export default function AdminCourses() {
         )}
 
         {courseToDelete && (
-          <div className="fixed inset-0 z-[80] flex items-center justify-center p-4" role="dialog" aria-modal="true" aria-labelledby="delete-course-title">
+          <div className="fixed inset-0 lg:left-60 z-[80] flex items-center justify-center p-4" role="dialog" aria-modal="true" aria-labelledby="delete-course-title">
             <button
               type="button"
               className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm"
@@ -480,7 +480,7 @@ function AdminCourseCard({
         <AnimatePresence>
           {menuOpen && (
             <>
-              <div className="fixed inset-0 z-10" onClick={() => setMenuOpen(false)} aria-hidden />
+              <div className="fixed inset-0 lg:left-60 z-10" onClick={() => setMenuOpen(false)} aria-hidden />
               <motion.div
                 initial={{ opacity: 0, scale: 0.92, y: -4 }}
                 animate={{ opacity: 1, scale: 1, y: 0 }}

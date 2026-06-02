@@ -277,7 +277,7 @@ export default function AdminStudentPayments() {
 
       {/* Mark paid modal */}
       {showModal && selectedStudent && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+        <div className="fixed inset-0 lg:left-60 bg-black/50 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md p-6">
             <h2 className="text-lg font-bold text-slate-900 mb-1">Shëno Pagesën</h2>
             <p className="text-sm text-slate-500 mb-5">

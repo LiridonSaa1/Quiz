@@ -493,7 +493,7 @@ export default function AdminClasses() {
 
       {/* Create / Edit Modal */}
       {showModal && (
-        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+        <div className="fixed inset-0 lg:left-60 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-2xl w-full max-w-lg overflow-hidden shadow-2xl border border-slate-100 max-h-[90vh] flex flex-col">
             {/* Modal Header */}
             <div className="px-6 py-5 border-b border-slate-100 flex items-center justify-between shrink-0">
@@ -640,7 +640,7 @@ export default function AdminClasses() {
 
       {/* View Detail Modal */}
       {viewClass && (
-        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+        <div className="fixed inset-0 lg:left-60 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-2xl w-full max-w-md shadow-2xl border border-slate-100 overflow-hidden max-h-[90vh] overflow-y-auto">
             <div className={`bg-gradient-to-br ${getAvatar(viewClass.name)} p-6 relative`}>
               <button
@@ -705,7 +705,7 @@ export default function AdminClasses() {
         {confirmDeleteId && (
           <motion.div
             initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-            className="fixed inset-0 z-50 flex items-center justify-center p-4"
+            className="fixed inset-0 lg:left-60 z-50 flex items-center justify-center p-4"
             style={{ background: 'rgba(15,10,40,0.55)', backdropFilter: 'blur(6px)' }}
           >
             <motion.div
@@ -749,7 +749,7 @@ export default function AdminClasses() {
 
       {/* Close menu on outside click */}
       {activeMenu && (
-        <div className="fixed inset-0 z-10" onClick={() => setActiveMenu(null)} />
+        <div className="fixed inset-0 lg:left-60 z-10" onClick={() => setActiveMenu(null)} />
       )}
     </AdminLayout>
   );

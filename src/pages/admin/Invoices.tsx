@@ -906,7 +906,7 @@ export default function AdminInvoices() {
       {/* Invoice Preview Modal */}
       {selected && (
         <div
-          className="fixed inset-0 bg-black/40 backdrop-blur-sm z-50 flex items-start justify-center p-4 overflow-y-auto"
+          className="fixed inset-0 lg:left-60 bg-black/40 backdrop-blur-sm z-50 flex items-start justify-center p-4 overflow-y-auto"
           onClick={() => setSelected(null)}
         >
           <div

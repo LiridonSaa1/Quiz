@@ -372,7 +372,7 @@ export default function TeacherHours() {
 
       {/* Add hours modal */}
       {showAddModal && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+        <div className="fixed inset-0 lg:left-60 bg-black/50 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md p-6">
             <h2 className="text-lg font-bold text-slate-900 mb-5">Shto Orë Pune</h2>
             <div className="space-y-4">
@@ -431,7 +431,7 @@ export default function TeacherHours() {
 
       {/* Invoice modal */}
       {showInvoice && invoiceData && (
-        <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4 overflow-y-auto">
+        <div className="fixed inset-0 lg:left-60 bg-black/60 flex items-center justify-center z-50 p-4 overflow-y-auto">
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl my-8 overflow-hidden">
 
             {/* Toolbar (hidden on print) */}

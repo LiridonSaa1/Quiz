@@ -537,7 +537,7 @@ export default function AdminPayments() {
       {/* Detail Modal */}
       {selected && (
         <div
-          className="fixed inset-0 bg-black/40 backdrop-blur-sm z-50 flex items-center justify-center p-4"
+          className="fixed inset-0 lg:left-60 bg-black/40 backdrop-blur-sm z-50 flex items-center justify-center p-4"
           onClick={() => setSelected(null)}
         >
           <div
@@ -603,7 +603,7 @@ export default function AdminPayments() {
       {/* Register Payment Modal */}
       {showRegister && (
         <div
-          className="fixed inset-0 bg-black/40 backdrop-blur-sm z-50 flex items-center justify-center p-4"
+          className="fixed inset-0 lg:left-60 bg-black/40 backdrop-blur-sm z-50 flex items-center justify-center p-4"
           onClick={() => setShowRegister(false)}
         >
           <div
