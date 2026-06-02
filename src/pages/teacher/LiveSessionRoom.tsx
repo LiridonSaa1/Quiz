@@ -93,7 +93,7 @@ function loadJitsiExternalAPI(
   const init = () => {
     const JitsiAPI = window.JitsiMeetExternalAPI;
     if (!JitsiAPI) { console.error('JitsiMeetExternalAPI not available'); return; }
-    const api: JitsiMeetExternalAPIInstance = new JitsiAPI('meet.ffmuc.net', {
+    const api: JitsiMeetExternalAPIInstance = new JitsiAPI('meet.jit.si', {
       roomName,
       parentNode: container,
       width: '100%',
@@ -143,7 +143,7 @@ function loadJitsiExternalAPI(
 
   const script = document.createElement('script');
   script.id = scriptId;
-  script.src = 'https://meet.ffmuc.net/external_api.js';
+  script.src = 'https://meet.jit.si/external_api.js';
   script.async = true;
   script.onload = init;
   document.head.appendChild(script);
