@@ -431,72 +431,140 @@ export default function TeacherHours() {
 
       {/* Invoice modal */}
       {showInvoice && invoiceData && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4 overflow-y-auto">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl p-8 my-8">
-            <div className="flex items-center justify-between mb-6">
-              <h2 className="text-xl font-bold text-slate-900">Fatura Mujore</h2>
+        <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4 overflow-y-auto">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl my-8 overflow-hidden">
+
+            {/* Toolbar (hidden on print) */}
+            <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100 print:hidden">
+              <span className="text-sm font-medium text-slate-500">Pamja e Faturës</span>
               <div className="flex gap-2">
                 <button onClick={printInvoice}
-                  className="flex items-center gap-2 px-4 py-2 bg-emerald-600 text-white rounded-xl text-sm font-medium hover:bg-emerald-700 transition">
-                  <Download className="w-4 h-4" /> Printo / Shkarko
+                  className="flex items-center gap-2 px-4 py-2 bg-emerald-600 text-white rounded-xl text-sm font-semibold hover:bg-emerald-700 transition">
+                  <Download className="w-4 h-4" /> Printo / Shkarko PDF
                 </button>
                 <button onClick={() => setShowInvoice(false)}
-                  className="p-2 rounded-xl hover:bg-slate-100 transition">
-                  <X className="w-4 h-4 text-slate-500" />
+                  className="p-2 rounded-xl hover:bg-slate-100 transition text-slate-500">
+                  <X className="w-5 h-5" />
                 </button>
               </div>
             </div>
 
-            <div className="border-b border-slate-200 pb-5 mb-5">
-              <p className="text-sm text-slate-500">Mësuesi</p>
-              <p className="text-lg font-bold text-slate-900">{invoiceData.teacher?.display_name || invoiceData.teacher?.email}</p>
-              <p className="text-sm text-slate-400">{invoiceData.teacher?.email}</p>
-            </div>
+            {/* Invoice body */}
+            <div className="p-8">
 
-            <div className="flex items-center gap-2 mb-5">
-              <Calendar className="w-4 h-4 text-violet-500" />
-              <span className="font-semibold text-slate-700">
-                {(() => {
-                  const [yr, mo] = invoiceData.month_year.split("-");
-                  return new Date(Number(yr), Number(mo) - 1, 1).toLocaleString("default", { month: "long", year: "numeric" });
-                })()}
-              </span>
-            </div>
-
-            {invoiceData.rows?.length === 0 ? (
-              <p className="text-slate-400 text-center py-8">Nuk ka regjistrime për këtë muaj</p>
-            ) : (
-              <>
-                <table className="w-full mb-5">
-                  <thead>
-                    <tr className="border-b border-slate-200 bg-slate-50 rounded-xl">
-                      <th className="text-left px-3 py-2 text-xs font-semibold text-slate-500">Data</th>
-                      <th className="text-right px-3 py-2 text-xs font-semibold text-slate-500">Orë</th>
-                      <th className="text-right px-3 py-2 text-xs font-semibold text-slate-500">€/Orë</th>
-                      <th className="text-right px-3 py-2 text-xs font-semibold text-slate-500">Totali</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-100">
-                    {(invoiceData.rows || []).map((r: any) => (
-                      <tr key={r.id}>
-                        <td className="px-3 py-2 text-sm text-slate-700">{format(new Date(r.work_date), "dd/MM/yyyy")}</td>
-                        <td className="px-3 py-2 text-sm text-slate-700 text-right">{r.hours}h</td>
-                        <td className="px-3 py-2 text-sm text-slate-700 text-right">€{r.rate_per_hour}</td>
-                        <td className="px-3 py-2 text-sm font-semibold text-emerald-600 text-right">€{Number(r.total).toFixed(2)}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-
-                <div className="bg-slate-50 rounded-xl p-4 flex items-center justify-between">
-                  <div className="flex items-center gap-2 text-slate-600">
-                    <Clock className="w-4 h-4" />
-                    <span className="text-sm font-medium">Gjithsej: <strong>{Number(invoiceData.total_hours).toFixed(1)} orë</strong></span>
+              {/* Header row: brand left, badge right */}
+              <div className="flex items-start justify-between mb-8">
+                <div>
+                  <div className="flex items-center gap-2 mb-1">
+                    <div className="w-9 h-9 rounded-xl bg-violet-600 flex items-center justify-center">
+                      <FileText className="w-5 h-5 text-white" />
+                    </div>
+                    <span className="text-lg font-bold text-slate-900">QuizMaster</span>
                   </div>
-                  <div className="text-xl font-bold text-emerald-600">€{Number(invoiceData.total_amount).toFixed(2)}</div>
+                  <p className="text-xs text-slate-400 ml-11">Platform Edukative</p>
                 </div>
-              </>
-            )}
+                <div className="text-right">
+                  <span className="inline-block px-3 py-1 bg-violet-100 text-violet-700 text-xs font-bold rounded-full uppercase tracking-wider mb-2">
+                    Faturë
+                  </span>
+                  <p className="text-xs text-slate-400">
+                    Nr. <span className="font-semibold text-slate-700">#{invoiceData.rows?.[0]?.id?.slice(0,8).toUpperCase() ?? "—"}</span>
+                  </p>
+                  <p className="text-xs text-slate-400 mt-0.5">
+                    Gjeneruar: <span className="font-medium text-slate-600">{format(new Date(), "dd/MM/yyyy")}</span>
+                  </p>
+                </div>
+              </div>
+
+              {/* From / To */}
+              <div className="grid grid-cols-2 gap-6 mb-8">
+                <div className="bg-slate-50 rounded-2xl p-4">
+                  <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">Nga</p>
+                  <p className="font-bold text-slate-800">QuizMaster Academy</p>
+                  <p className="text-sm text-slate-500 mt-0.5">platform@quizmaster.edu</p>
+                  <p className="text-sm text-slate-500">Tiranë, Shqipëri</p>
+                </div>
+                <div className="bg-violet-50 border border-violet-100 rounded-2xl p-4">
+                  <p className="text-xs font-semibold text-violet-400 uppercase tracking-wider mb-2">Për</p>
+                  <p className="font-bold text-slate-800">{invoiceData.teacher?.display_name || invoiceData.teacher?.email}</p>
+                  <p className="text-sm text-slate-500 mt-0.5">{invoiceData.teacher?.email}</p>
+                  <p className="text-sm text-slate-500">Mësues</p>
+                </div>
+              </div>
+
+              {/* Period */}
+              <div className="flex items-center gap-2 mb-5">
+                <div className="flex items-center gap-2 px-4 py-2 bg-emerald-50 border border-emerald-100 rounded-xl">
+                  <Calendar className="w-4 h-4 text-emerald-600" />
+                  <span className="text-sm font-semibold text-emerald-700">
+                    Periudha: {(() => {
+                      const [yr, mo] = invoiceData.month_year.split("-");
+                      return new Date(Number(yr), Number(mo) - 1, 1).toLocaleString("sq-AL", { month: "long", year: "numeric" });
+                    })()}
+                  </span>
+                </div>
+              </div>
+
+              {/* Table or empty */}
+              {invoiceData.rows?.length === 0 ? (
+                <div className="text-center py-12 text-slate-400 bg-slate-50 rounded-2xl">
+                  <FileText className="w-8 h-8 mx-auto mb-2 text-slate-300" />
+                  <p>Nuk ka regjistrime për këtë muaj</p>
+                </div>
+              ) : (
+                <>
+                  <div className="rounded-2xl overflow-hidden border border-slate-200 mb-6">
+                    <table className="w-full">
+                      <thead>
+                        <tr className="bg-slate-800 text-white">
+                          <th className="text-left px-4 py-3 text-xs font-semibold uppercase tracking-wider">Data</th>
+                          <th className="text-left px-4 py-3 text-xs font-semibold uppercase tracking-wider">Shënime</th>
+                          <th className="text-right px-4 py-3 text-xs font-semibold uppercase tracking-wider">Orë</th>
+                          <th className="text-right px-4 py-3 text-xs font-semibold uppercase tracking-wider">€/Orë</th>
+                          <th className="text-right px-4 py-3 text-xs font-semibold uppercase tracking-wider">Totali</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {(invoiceData.rows || []).map((r: any, i: number) => (
+                          <tr key={r.id} className={i % 2 === 0 ? "bg-white" : "bg-slate-50"}>
+                            <td className="px-4 py-3 text-sm text-slate-700 font-medium">{format(new Date(r.work_date), "dd/MM/yyyy")}</td>
+                            <td className="px-4 py-3 text-sm text-slate-500">{r.notes || "—"}</td>
+                            <td className="px-4 py-3 text-sm text-slate-700 text-right font-medium">{Number(r.hours).toFixed(1)}h</td>
+                            <td className="px-4 py-3 text-sm text-slate-500 text-right">€{Number(r.rate_per_hour).toFixed(2)}</td>
+                            <td className="px-4 py-3 text-sm font-bold text-emerald-600 text-right">€{Number(r.total).toFixed(2)}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+
+                  {/* Totals block */}
+                  <div className="flex justify-end">
+                    <div className="w-72 space-y-2">
+                      <div className="flex justify-between text-sm text-slate-600">
+                        <span>Orë totale</span>
+                        <span className="font-semibold">{Number(invoiceData.total_hours).toFixed(1)} orë</span>
+                      </div>
+                      <div className="flex justify-between text-sm text-slate-600">
+                        <span>Numri i regjistrimeve</span>
+                        <span className="font-semibold">{invoiceData.rows?.length}</span>
+                      </div>
+                      <div className="border-t border-slate-200 pt-3 mt-2 flex justify-between items-center">
+                        <span className="text-base font-bold text-slate-900">Shuma Totale</span>
+                        <span className="text-2xl font-bold text-emerald-600">€{Number(invoiceData.total_amount).toFixed(2)}</span>
+                      </div>
+                    </div>
+                  </div>
+                </>
+              )}
+
+              {/* Footer */}
+              <div className="mt-10 pt-6 border-t border-dashed border-slate-200 text-center">
+                <p className="text-xs text-slate-400">Faleminderit për punën tuaj të dedikuar.</p>
+                <p className="text-xs text-slate-300 mt-1">QuizMaster Platform Edukative · {format(new Date(), "yyyy")}</p>
+              </div>
+
+            </div>
           </div>
         </div>
       )}
