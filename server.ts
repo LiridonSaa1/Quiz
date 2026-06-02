@@ -8286,6 +8286,8 @@ Rules:
       const hours = rows.map((r: any) => ({
         ...r,
         teacher_name: teacherMap[r.teacher_id] || '—',
+        hours: Number(r.hours),
+        rate_per_hour: Number(r.rate_per_hour),
         total: Number(r.hours) * Number(r.rate_per_hour),
       }));
 
@@ -8386,7 +8388,7 @@ Rules:
         success: true,
         teacher: teacherRes.data,
         month_year: monthYear,
-        rows: rows.map((r: any) => ({ ...r, total: Number(r.hours) * Number(r.rate_per_hour) })),
+        rows: rows.map((r: any) => ({ ...r, hours: Number(r.hours), rate_per_hour: Number(r.rate_per_hour), total: Number(r.hours) * Number(r.rate_per_hour) })),
         total_hours,
         total_amount,
       });
