@@ -156,6 +156,7 @@ export default function TeacherLiveSessionRoom() {
 
   const [session, setSession] = useState<LiveSession | null>(null);
   const [loading, setLoading] = useState(true);
+  const [fetchError, setFetchError] = useState<string | null>(null);
   const [userId, setUserId] = useState('');
   const [userDisplayName, setUserDisplayName] = useState('');
 
@@ -306,6 +307,7 @@ export default function TeacherLiveSessionRoom() {
 
   const fetchSession = async () => {
     setLoading(true);
+    setFetchError(null);
     try {
       const res = await authFetch(`/api/teacher/live-sessions/${id}`);
       const json = await res.json();
@@ -317,11 +319,14 @@ export default function TeacherLiveSessionRoom() {
         if (urls.length > 0) setSavedRecordings(urls);
         if (json.session.status === 'live') setMeetingActive(true);
       } else {
-        toast.error(t('liveSessions.sessionNotFound'));
-        navigate('/teacher/live-sessions');
+        const msg = json.error || t('liveSessions.sessionNotFound');
+        setFetchError(msg);
+        toast.error(msg);
       }
-    } catch {
-      toast.error(t('liveSessions.failedToLoadSession'));
+    } catch (e: unknown) {
+      const msg = (e as Error)?.message || t('liveSessions.failedToLoadSession');
+      setFetchError(msg);
+      toast.error(msg);
     } finally {
       setLoading(false);
     }
@@ -581,7 +586,37 @@ export default function TeacherLiveSessionRoom() {
     );
   }
 
-  if (!session) return null;
+  if (!session) {
+    return (
+      <div className="min-h-screen bg-slate-950 flex items-center justify-center p-6">
+        <div className="text-center max-w-md">
+          <div className="w-16 h-16 rounded-full bg-rose-500/10 border border-rose-500/20 flex items-center justify-center mx-auto mb-4">
+            <Video className="w-8 h-8 text-rose-400" />
+          </div>
+          <h2 className="text-white font-semibold text-lg mb-2">
+            {fetchError ? 'Could not load session' : t('liveSessions.sessionNotFound')}
+          </h2>
+          {fetchError && (
+            <p className="text-slate-400 text-sm mb-5 font-mono bg-slate-900 rounded-lg px-3 py-2 border border-slate-800">{fetchError}</p>
+          )}
+          <div className="flex items-center justify-center gap-3">
+            <button
+              onClick={() => fetchSession()}
+              className="flex items-center gap-2 px-4 py-2 bg-violet-600 text-white rounded-lg text-sm font-semibold hover:bg-violet-700 transition-all"
+            >
+              <Loader2 className="w-4 h-4" /> Retry
+            </button>
+            <button
+              onClick={() => navigate('/teacher/live-sessions')}
+              className="flex items-center gap-2 px-4 py-2 bg-slate-800 text-slate-300 rounded-lg text-sm font-semibold hover:bg-slate-700 transition-all"
+            >
+              <ChevronLeft className="w-4 h-4" /> Back
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="h-screen bg-slate-950 flex flex-col overflow-hidden">

@@ -9446,13 +9446,23 @@ Rules:
   // Single session fetch — accessible by host or invited participants only (not enrolled-only students)
   app.get('/api/teacher/live-sessions/:id', async (req, res) => {
     try {
-      const userId = await assertSessionParticipantAccess(req, res, req.params.id);
-      if (!userId) return;
+      const caller = await getAuthUser(req);
+      if (!caller) { res.status(401).json({ error: 'Unauthorized' }); return; }
       const { data, error } = await supabaseAdmin
         .from('live_sessions')
         .select('*, host:profiles!host_id(id,display_name,email), course:courses!course_id(id,title)')
         .eq('id', req.params.id).single();
       if (error) throw error;
+      if (!data) { res.status(404).json({ error: 'Session not found' }); return; }
+      // Allow: admin, the host, or an invited participant
+      if (caller.role !== 'admin' && data.host_id !== caller.userId) {
+        const { data: part } = await supabaseAdmin
+          .from('session_participants').select('id,is_removed')
+          .eq('session_id', req.params.id).eq('user_id', caller.userId).limit(1).maybeSingle();
+        if (!part || (part as { is_removed?: boolean }).is_removed) {
+          res.status(403).json({ error: 'Forbidden: you are not the host or an invited participant' }); return;
+        }
+      }
       res.json({ success: true, session: data });
     } catch (e: unknown) { res.status(500).json({ error: (e as Error).message }); }
   });
