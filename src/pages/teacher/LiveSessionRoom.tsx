@@ -183,17 +183,25 @@ export default function TeacherLiveSessionRoom() {
   const [uploadProgress, setUploadProgress] = useState(0);
   const [savedRecordings, setSavedRecordings] = useState<string[]>([]);
 
+  const [showPreJoin, setShowPreJoin] = useState(false);
+  const [preJoinMicOn, setPreJoinMicOn] = useState(true);
+  const [preJoinCameraOn, setPreJoinCameraOn] = useState(true);
+  const [preJoinReady, setPreJoinReady] = useState(false);
+
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<BlobPart[]>([]);
   const streamRef = useRef<MediaStream | null>(null);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const chatEndRef = useRef<HTMLDivElement | null>(null);
+  const preJoinVideoRef = useRef<HTMLVideoElement | null>(null);
+  const preJoinStreamRef = useRef<MediaStream | null>(null);
 
   const defaultJitsiRoomName = `quizmaster-session-${id?.slice(0, 8)}`;
   const jitsiRoomNameRef = useRef(defaultJitsiRoomName);
   const jitsiApiRef = useRef<JitsiMeetExternalAPIInstance | null>(null);
   const jitsiContainerRef = useRef<HTMLDivElement | null>(null);
   const timeRemainingRef = useRef<number | null>(null);
+  const initMuteRef = useRef<{ audio: boolean; video: boolean }>({ audio: false, video: false });
 
   // Track mobile breakpoint
   useEffect(() => {
@@ -246,7 +254,7 @@ export default function TeacherLiveSessionRoom() {
 
   useEffect(() => {
     if (!meetingActive || !userDisplayName) return;
-    const timer = setTimeout(() => initJitsi(), 200);
+    const timer = setTimeout(() => initJitsi(undefined, initMuteRef.current.audio, initMuteRef.current.video), 200);
     return () => {
       clearTimeout(timer);
       if (!meetingActive && jitsiApiRef.current) {
@@ -355,7 +363,68 @@ export default function TeacherLiveSessionRoom() {
     });
   };
 
-  const startMeeting = async () => {
+  // ── Pre-join helpers ──────────────────────────────────────────────────────
+  const openPreJoin = () => {
+    setPreJoinMicOn(micOn);
+    setPreJoinCameraOn(cameraOn);
+    setPreJoinReady(false);
+    setShowPreJoin(true);
+  };
+
+  const stopPreJoinStream = () => {
+    if (preJoinStreamRef.current) {
+      preJoinStreamRef.current.getTracks().forEach(t => t.stop());
+      preJoinStreamRef.current = null;
+    }
+  };
+
+  const joinFromPreJoin = async () => {
+    setMicOn(preJoinMicOn);
+    setCameraOn(preJoinCameraOn);
+    stopPreJoinStream();
+    setShowPreJoin(false);
+    await startMeeting(!preJoinMicOn, !preJoinCameraOn);
+  };
+
+  // Start the camera preview when pre-join screen opens
+  useEffect(() => {
+    if (!showPreJoin) { stopPreJoinStream(); return; }
+    (async () => {
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ video: preJoinCameraOn, audio: preJoinMicOn });
+        preJoinStreamRef.current = stream;
+        if (preJoinVideoRef.current) {
+          preJoinVideoRef.current.srcObject = stream;
+        }
+        setPreJoinReady(true);
+      } catch {
+        setPreJoinReady(true); // allow joining even if camera denied
+      }
+    })();
+    return () => stopPreJoinStream();
+  }, [showPreJoin]);
+
+  // Toggle camera track live inside the pre-join preview
+  const togglePreJoinCamera = () => {
+    const next = !preJoinCameraOn;
+    setPreJoinCameraOn(next);
+    if (preJoinStreamRef.current) {
+      preJoinStreamRef.current.getVideoTracks().forEach(t => { t.enabled = next; });
+      if (preJoinVideoRef.current) preJoinVideoRef.current.srcObject = next ? preJoinStreamRef.current : null;
+    }
+  };
+
+  const togglePreJoinMic = () => {
+    const next = !preJoinMicOn;
+    setPreJoinMicOn(next);
+    if (preJoinStreamRef.current) {
+      preJoinStreamRef.current.getAudioTracks().forEach(t => { t.enabled = next; });
+    }
+  };
+  // ─────────────────────────────────────────────────────────────────────────
+
+  const startMeeting = async (startAudioMuted = !micOn, startVideoMuted = !cameraOn) => {
+    initMuteRef.current = { audio: startAudioMuted, video: startVideoMuted };
     const started_at = new Date().toISOString();
     await patchSession({ status: 'live', started_at });
     setSession(prev => prev ? { ...prev, status: 'live', started_at } : prev);
@@ -379,15 +448,15 @@ export default function TeacherLiveSessionRoom() {
     setTimeout(() => initJitsi(newRoomName), 800);
   };
 
-  const initJitsi = (roomName?: string) => {
+  const initJitsi = (roomName?: string, startAudioMuted?: boolean, startVideoMuted?: boolean) => {
     if (!jitsiContainerRef.current || jitsiApiRef.current) return;
     const name = roomName ?? jitsiRoomNameRef.current;
     loadJitsiExternalAPI(
       name,
       jitsiContainerRef.current,
       userDisplayName,
-      !micOn,
-      !cameraOn,
+      startAudioMuted ?? !micOn,
+      startVideoMuted ?? !cameraOn,
       (api) => {
         jitsiApiRef.current = api;
         api.addListener('audioMuteStatusChanged', (e: unknown) => {
@@ -398,10 +467,12 @@ export default function TeacherLiveSessionRoom() {
           const event = e as { muted: boolean };
           setCameraOn(!event.muted);
         });
-        // readyToClose fires only when the session genuinely ends (e.g. last participant left).
-        // meet.ffmuc.net has no time limits, so this is never triggered by a cap.
+        // readyToClose fires on connection drops / room closure — we do NOT auto-end
+        // the DB session here because it triggers on network glitches too.
+        // The teacher must explicitly click "End Session" to mark the session as ended.
         api.addListener('readyToClose', () => {
-          void endMeeting(true);
+          if (jitsiApiRef.current) { jitsiApiRef.current.dispose(); jitsiApiRef.current = null; }
+          setMeetingActive(false);
         });
       }
     );
@@ -689,7 +760,7 @@ export default function TeacherLiveSessionRoom() {
                 </div>
                 {session.status !== 'ended' && session.status !== 'cancelled' && (
                   <button
-                    onClick={startMeeting}
+                    onClick={openPreJoin}
                     className="flex items-center gap-2 px-6 py-3 bg-violet-600 text-white rounded-xl font-semibold hover:bg-violet-700 transition-all shadow-lg shadow-violet-900/50"
                   >
                     <Video className="w-5 h-5" /> {t('liveSessions.startMeeting')}
@@ -874,7 +945,7 @@ export default function TeacherLiveSessionRoom() {
                 </button>
               ) : session.status !== 'ended' && session.status !== 'cancelled' ? (
                 <button
-                  onClick={startMeeting}
+                  onClick={openPreJoin}
                   className="flex items-center gap-1.5 px-3 sm:px-4 py-2.5 bg-violet-600 text-white rounded-xl font-semibold hover:bg-violet-700 transition-all shrink-0 text-sm"
                 >
                   <Video className="w-4 h-4" />
@@ -1060,6 +1131,123 @@ export default function TeacherLiveSessionRoom() {
           </button>
         )}
       </div>
+
+      {/* ── Pre-join device check overlay ──────────────────────────────── */}
+      <AnimatePresence>
+        {showPreJoin && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="absolute inset-0 z-50 bg-slate-950/95 backdrop-blur-sm flex items-center justify-center p-4"
+          >
+            <motion.div
+              initial={{ scale: 0.95, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.95, opacity: 0 }}
+              transition={{ type: 'spring', stiffness: 300, damping: 25 }}
+              className="bg-slate-900 border border-slate-700 rounded-2xl w-full max-w-lg overflow-hidden shadow-2xl"
+            >
+              {/* Header */}
+              <div className="px-6 py-4 border-b border-slate-800 flex items-center justify-between">
+                <div>
+                  <h2 className="text-white font-semibold text-base">Ready to go live?</h2>
+                  <p className="text-slate-400 text-xs mt-0.5">Check your camera and mic before students join</p>
+                </div>
+                <button
+                  onClick={() => { stopPreJoinStream(); setShowPreJoin(false); }}
+                  className="p-1.5 rounded-lg text-slate-500 hover:text-white hover:bg-slate-800 transition-colors"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+
+              {/* Camera preview */}
+              <div className="relative bg-slate-950 aspect-video flex items-center justify-center overflow-hidden">
+                {preJoinCameraOn ? (
+                  <video
+                    ref={preJoinVideoRef}
+                    autoPlay
+                    muted
+                    playsInline
+                    className="w-full h-full object-cover scale-x-[-1]"
+                  />
+                ) : (
+                  <div className="flex flex-col items-center gap-3 text-slate-500">
+                    <div className="w-16 h-16 rounded-full bg-slate-800 flex items-center justify-center">
+                      <VideoOff className="w-7 h-7 text-slate-500" />
+                    </div>
+                    <span className="text-sm">Camera is off</span>
+                  </div>
+                )}
+
+                {/* Name badge */}
+                <div className="absolute bottom-3 left-3 px-3 py-1 bg-black/60 rounded-lg text-white text-xs font-medium backdrop-blur-sm">
+                  {userDisplayName || 'You'}
+                </div>
+
+                {/* Mic indicator */}
+                <div className={cn(
+                  'absolute top-3 right-3 p-1.5 rounded-full backdrop-blur-sm',
+                  preJoinMicOn ? 'bg-black/60' : 'bg-rose-500/90'
+                )}>
+                  {preJoinMicOn
+                    ? <Mic className="w-3.5 h-3.5 text-white" />
+                    : <MicOff className="w-3.5 h-3.5 text-white" />}
+                </div>
+              </div>
+
+              {/* Controls */}
+              <div className="px-6 py-4 space-y-4">
+                {/* Device toggles */}
+                <div className="flex items-center justify-center gap-4">
+                  <button
+                    onClick={togglePreJoinMic}
+                    className={cn(
+                      'flex flex-col items-center gap-1.5 px-5 py-3 rounded-xl transition-all text-xs font-semibold',
+                      preJoinMicOn
+                        ? 'bg-slate-800 text-white hover:bg-slate-700'
+                        : 'bg-rose-500/20 text-rose-400 border border-rose-500/30 hover:bg-rose-500/30'
+                    )}
+                  >
+                    {preJoinMicOn ? <Mic className="w-5 h-5" /> : <MicOff className="w-5 h-5" />}
+                    {preJoinMicOn ? 'Mic on' : 'Mic off'}
+                  </button>
+                  <button
+                    onClick={togglePreJoinCamera}
+                    className={cn(
+                      'flex flex-col items-center gap-1.5 px-5 py-3 rounded-xl transition-all text-xs font-semibold',
+                      preJoinCameraOn
+                        ? 'bg-slate-800 text-white hover:bg-slate-700'
+                        : 'bg-rose-500/20 text-rose-400 border border-rose-500/30 hover:bg-rose-500/30'
+                    )}
+                  >
+                    {preJoinCameraOn ? <Video className="w-5 h-5" /> : <VideoOff className="w-5 h-5" />}
+                    {preJoinCameraOn ? 'Camera on' : 'Camera off'}
+                  </button>
+                </div>
+
+                {/* Session info */}
+                <div className="bg-slate-800/50 rounded-xl px-4 py-3 text-xs text-slate-400 flex items-center justify-between">
+                  <span className="truncate font-medium text-slate-300">{session.title}</span>
+                  <span className="shrink-0 ml-2 text-violet-400">{session.duration_minutes} min</span>
+                </div>
+
+                {/* Join button */}
+                <button
+                  onClick={joinFromPreJoin}
+                  disabled={!preJoinReady}
+                  className="w-full flex items-center justify-center gap-2 py-3 bg-violet-600 hover:bg-violet-700 disabled:opacity-50 text-white font-semibold rounded-xl transition-all text-sm shadow-lg shadow-violet-900/40"
+                >
+                  {!preJoinReady
+                    ? <><Loader2 className="w-4 h-4 animate-spin" /> Checking devices…</>
+                    : <><Video className="w-4 h-4" /> Go Live</>}
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }
