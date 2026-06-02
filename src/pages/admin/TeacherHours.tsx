@@ -171,8 +171,8 @@ export default function TeacherHours() {
 
   const printInvoice = () => { window.print(); };
 
-  const totalHours = rows.reduce((s, r) => s + r.hours, 0);
-  const totalAmount = rows.reduce((s, r) => s + r.total, 0);
+  const totalHours = rows.reduce((s, r) => s + Number(r.hours), 0);
+  const totalAmount = rows.reduce((s, r) => s + Number(r.total), 0);
 
   return (
     <AdminLayout>
@@ -257,10 +257,10 @@ export default function TeacherHours() {
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-1.5 text-slate-500">
                     <Clock className="w-4 h-4" />
-                    <span className="text-sm">{s.total_hours.toFixed(1)} orë</span>
+                    <span className="text-sm">{Number(s.total_hours).toFixed(1)} orë</span>
                   </div>
                   <div className="flex items-center gap-1 font-bold text-emerald-600">
-                    <span className="text-lg">€{s.total_amount.toFixed(2)}</span>
+                    <span className="text-lg">€{Number(s.total_amount).toFixed(2)}</span>
                   </div>
                 </div>
               </div>
@@ -327,7 +327,7 @@ export default function TeacherHours() {
                           <span className="text-sm text-slate-600">€{r.rate_per_hour}/h</span>
                         )}
                       </td>
-                      <td className="px-5 py-3 font-semibold text-emerald-600 text-sm">€{r.total.toFixed(2)}</td>
+                      <td className="px-5 py-3 font-semibold text-emerald-600 text-sm">€{Number(r.total).toFixed(2)}</td>
                       <td className="px-5 py-3">
                         {editingId === r.id ? (
                           <input value={editNotes} onChange={(e) => setEditNotes(e.target.value)}
@@ -482,7 +482,7 @@ export default function TeacherHours() {
                         <td className="px-3 py-2 text-sm text-slate-700">{format(new Date(r.work_date), "dd/MM/yyyy")}</td>
                         <td className="px-3 py-2 text-sm text-slate-700 text-right">{r.hours}h</td>
                         <td className="px-3 py-2 text-sm text-slate-700 text-right">€{r.rate_per_hour}</td>
-                        <td className="px-3 py-2 text-sm font-semibold text-emerald-600 text-right">€{r.total.toFixed(2)}</td>
+                        <td className="px-3 py-2 text-sm font-semibold text-emerald-600 text-right">€{Number(r.total).toFixed(2)}</td>
                       </tr>
                     ))}
                   </tbody>
@@ -491,9 +491,9 @@ export default function TeacherHours() {
                 <div className="bg-slate-50 rounded-xl p-4 flex items-center justify-between">
                   <div className="flex items-center gap-2 text-slate-600">
                     <Clock className="w-4 h-4" />
-                    <span className="text-sm font-medium">Gjithsej: <strong>{invoiceData.total_hours?.toFixed(1)} orë</strong></span>
+                    <span className="text-sm font-medium">Gjithsej: <strong>{Number(invoiceData.total_hours).toFixed(1)} orë</strong></span>
                   </div>
-                  <div className="text-xl font-bold text-emerald-600">€{invoiceData.total_amount?.toFixed(2)}</div>
+                  <div className="text-xl font-bold text-emerald-600">€{Number(invoiceData.total_amount).toFixed(2)}</div>
                 </div>
               </>
             )}
