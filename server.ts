@@ -8320,6 +8320,14 @@ Rules:
       const numHours = Number(hours);
       if (!Number.isFinite(numHours) || numHours <= 0) return res.status(400).json({ error: 'hours must be greater than 0' });
 
+      // Validate work_date belongs to the month implied by the date itself
+      const [wd_yr, wd_mo] = work_date.split('-');
+      const monthStart = `${wd_yr}-${wd_mo}-01`;
+      const monthEnd = new Date(Number(wd_yr), Number(wd_mo), 0).toISOString().slice(0, 10);
+      if (work_date < monthStart || work_date > monthEnd) {
+        return res.status(400).json({ error: 'Data e punës nuk është e vlefshme' });
+      }
+
       const result = await poolQuery(
         `INSERT INTO teacher_hours (teacher_id, work_date, hours, rate_per_hour, notes)
          VALUES ($1, $2, $3, $4, $5) RETURNING id`,

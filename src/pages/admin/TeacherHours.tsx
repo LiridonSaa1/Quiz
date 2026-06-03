@@ -63,6 +63,15 @@ export default function TeacherHours() {
     return new Date(Number(yr), Number(mo) - 1, 1).toLocaleString("default", { month: "long", year: "numeric" });
   })();
 
+  const monthStart = (() => {
+    const [yr, mo] = currentMonth.split("-");
+    return `${yr}-${mo}-01`;
+  })();
+  const monthEnd = (() => {
+    const [yr, mo] = currentMonth.split("-");
+    return new Date(Number(yr), Number(mo), 0).toISOString().slice(0, 10);
+  })();
+
   const load = useCallback(async () => {
     setLoading(true);
     try {
@@ -91,6 +100,8 @@ export default function TeacherHours() {
   const handleAdd = async () => {
     if (!addTeacher) return toast.error("Zgjidh mësuesin");
     if (!addDate) return toast.error("Zgjidh datën");
+    if (addDate < monthStart || addDate > monthEnd)
+      return toast.error(`Data duhet të jetë brenda ${displayMonth}`);
     if (!Number(addHours)) return toast.error("Ore duhet të jetë > 0");
     setSubmitting(true);
     try {
@@ -185,7 +196,7 @@ export default function TeacherHours() {
           </div>
           <div className="flex items-center gap-2">
             <button
-              onClick={() => setShowAddModal(true)}
+              onClick={() => { setAddDate(monthStart); setShowAddModal(true); }}
               className="flex items-center gap-2 px-4 py-2 bg-violet-600 text-white rounded-xl text-sm font-medium hover:bg-violet-700 transition"
             >
               <Plus className="w-4 h-4" /> Shto Orë
@@ -387,8 +398,11 @@ export default function TeacherHours() {
                 </select>
               </div>
               <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">Data</label>
+                <label className="block text-sm font-medium text-slate-700 mb-1">
+                  Data <span className="text-xs text-violet-500 font-normal">({displayMonth})</span>
+                </label>
                 <input type="date" value={addDate} onChange={(e) => setAddDate(e.target.value)}
+                  min={monthStart} max={monthEnd}
                   className="w-full px-3 py-2.5 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-violet-400" />
               </div>
               <div className="grid grid-cols-2 gap-3">
