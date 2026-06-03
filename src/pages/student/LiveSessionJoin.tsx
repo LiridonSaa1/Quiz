@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams, useNavigate, useBlocker } from 'react-router-dom';
 import { supabase } from '../../supabase';
 import { authFetch, readApiError } from '../../lib/apiUrl';
 import { toast } from 'sonner';
@@ -54,6 +54,23 @@ export default function StudentLiveSessionJoin() {
   const { t } = useTranslation();
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
+
+  // Block in-app navigation while joined
+  const blocker = useBlocker(({ currentLocation, nextLocation }) =>
+    joined && currentLocation.pathname !== nextLocation.pathname
+  );
+
+  // Block browser tab close / refresh while joined
+  useEffect(() => {
+    const handler = (e: BeforeUnloadEvent) => {
+      if (joined) {
+        e.preventDefault();
+        e.returnValue = '';
+      }
+    };
+    window.addEventListener('beforeunload', handler);
+    return () => window.removeEventListener('beforeunload', handler);
+  }, [joined]);
 
   const [session, setSession] = useState<LiveSession | null>(null);
   const [loading, setLoading] = useState(true);
@@ -667,6 +684,35 @@ export default function StudentLiveSessionJoin() {
           </div>
         )}
       </div>
+
+      {/* Navigation blocker confirmation */}
+      {blocker.state === 'blocked' && (
+        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-[200] p-4">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm p-6 text-center">
+            <div className="w-14 h-14 rounded-full bg-red-100 flex items-center justify-center mx-auto mb-4">
+              <Video className="w-7 h-7 text-red-500" />
+            </div>
+            <h3 className="text-lg font-bold text-slate-900 mb-2">Po largohesh nga sesioni?</h3>
+            <p className="text-slate-500 text-sm mb-6">
+              Nëse largohesh, do të shkëputesh nga sesioni live. A je i sigurt?
+            </p>
+            <div className="flex gap-3">
+              <button
+                onClick={() => blocker.reset?.()}
+                className="flex-1 px-4 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-sm font-semibold transition"
+              >
+                Qëndro
+              </button>
+              <button
+                onClick={() => blocker.proceed?.()}
+                className="flex-1 px-4 py-2.5 bg-red-600 hover:bg-red-700 text-white rounded-xl text-sm font-semibold transition"
+              >
+                Largohu
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </StudentLayout>
   );
 }

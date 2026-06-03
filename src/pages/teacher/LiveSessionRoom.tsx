@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams, useNavigate, useBlocker } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { supabase } from '../../supabase';
 import { authFetch, readApiError } from '../../lib/apiUrl';
@@ -153,6 +153,23 @@ export default function TeacherLiveSessionRoom() {
   const { t } = useTranslation();
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
+
+  // Block in-app navigation while meeting is active
+  const blocker = useBlocker(({ currentLocation, nextLocation }) =>
+    meetingActive && currentLocation.pathname !== nextLocation.pathname
+  );
+
+  // Block browser tab close / refresh while meeting is active
+  useEffect(() => {
+    const handler = (e: BeforeUnloadEvent) => {
+      if (meetingActive) {
+        e.preventDefault();
+        e.returnValue = '';
+      }
+    };
+    window.addEventListener('beforeunload', handler);
+    return () => window.removeEventListener('beforeunload', handler);
+  }, [meetingActive]);
 
   const [session, setSession] = useState<LiveSession | null>(null);
   const [loading, setLoading] = useState(true);
@@ -701,6 +718,7 @@ export default function TeacherLiveSessionRoom() {
   }
 
   return (
+    <>
     <div className="h-screen bg-slate-950 flex flex-col overflow-hidden">
       {/* Top Bar */}
       <div className="bg-slate-900 border-b border-slate-800 px-3 py-2.5 flex items-center gap-3 shrink-0">
@@ -1260,6 +1278,36 @@ export default function TeacherLiveSessionRoom() {
         )}
       </AnimatePresence>
     </div>
+
+    {/* Navigation blocker confirmation */}
+    {blocker.state === 'blocked' && (
+      <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-[200] p-4">
+        <div className="bg-slate-900 border border-slate-700 rounded-2xl shadow-2xl w-full max-w-sm p-6 text-center">
+          <div className="w-14 h-14 rounded-full bg-red-500/20 border border-red-500/30 flex items-center justify-center mx-auto mb-4">
+            <PhoneOff className="w-7 h-7 text-red-400" />
+          </div>
+          <h3 className="text-lg font-bold text-white mb-2">Po largohet nga sesioni?</h3>
+          <p className="text-slate-400 text-sm mb-6">
+            Nëse largohesh, do të shkëputesh nga sesioni live dhe të gjithë pjesëmarrësit do ta kenë vështirë të vazhdojnë.
+          </p>
+          <div className="flex gap-3">
+            <button
+              onClick={() => blocker.reset?.()}
+              className="flex-1 px-4 py-2.5 bg-slate-700 hover:bg-slate-600 text-white rounded-xl text-sm font-semibold transition"
+            >
+              Qëndro
+            </button>
+            <button
+              onClick={() => blocker.proceed?.()}
+              className="flex-1 px-4 py-2.5 bg-red-600 hover:bg-red-700 text-white rounded-xl text-sm font-semibold transition"
+            >
+              Largohu
+            </button>
+          </div>
+        </div>
+      </div>
+    )}
+    </>
   );
 }
 
