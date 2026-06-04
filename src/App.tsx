@@ -96,6 +96,7 @@ const HeadwayAudio = lazy(() => import('./pages/student/HeadwayAudio'));
 const TestBuilder = lazy(() => import('./pages/student/TestBuilder'));
 const ModuleTestBuilder = lazy(() => import('./pages/student/ModuleTestBuilder'));
 const HeadwayGrammar = lazy(() => import('./pages/student/HeadwayGrammar'));
+const StudentModules = lazy(() => import('./pages/student/Modules'));
 const NotFound = lazy(() => import('./pages/NotFound'));
 import { apiUrl } from './lib/apiUrl';
 import { isProfileAccessAllowed } from './lib/profileAccess';
@@ -480,6 +481,7 @@ function StudentRoutes({ features }: { features: FeatureFlags }) {
       <Route path="/courses" element={<StudentCourses />} />
       <Route path="/courses/:courseId" element={<StudentCourseDetail />} />
       <Route path="/continue" element={<ContinueLearning />} />
+      <Route path="/modules" element={<StudentModules />} />
       <Route path="/lessons" element={<StudentLessons />} />
       <Route path="/lessons/:lessonId" element={<StudentLessonDetail />} />
       <Route path="/quizzes" element={<StudentQuizzes />} />

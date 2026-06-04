@@ -12,7 +12,7 @@ import { useBranding } from '../../lib/useBranding';
 import {
   LayoutDashboard, BookOpen, PlayCircle, HelpCircle, ClipboardList, BarChart3,
   FileBarChart, Award, MessageSquare, Video, Radio, User, LogOut, Menu, X,
-  GraduationCap, ScrollText, Zap, Trophy, Megaphone, Presentation, Headphones, FlaskConical,
+  GraduationCap, ScrollText, Zap, Trophy, Megaphone, Presentation, Headphones, FlaskConical, Layers,
 } from 'lucide-react';
 
 interface NavItemDef { icon: React.ElementType; label: string; path: string; }
@@ -40,6 +40,7 @@ export default function StudentLayout({ children }: { children: React.ReactNode 
     {
       key: 'learning',
       items: [
+        { icon: Layers,        label: t('nav.modules'),      path: '/student/modules' },
         { icon: BookOpen,      label: t('nav.lessons'),      path: '/student/lessons' },
         { icon: HelpCircle,    label: t('nav.quizzes'),      path: '/student/quizzes' },
         { icon: ScrollText,    label: t('nav.exams'),        path: '/student/exams' },
