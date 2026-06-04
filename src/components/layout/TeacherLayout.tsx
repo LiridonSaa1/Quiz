@@ -198,7 +198,14 @@ function SidebarContent({
 export default function TeacherLayout({ children }: { children: React.ReactNode }) {
   const { t } = useTranslation();
   const [sidebarOpen, setSidebarOpen] = useState(false);
-  const [collapsed, setCollapsed] = useState(false);
+  const [collapsed, setCollapsed] = useState(() => {
+    if (typeof window !== 'undefined') {
+      const saved = localStorage.getItem('teacher_sidebar_collapsed');
+      if (saved !== null) return saved === 'true';
+      return window.innerWidth < 1280;
+    }
+    return false;
+  });
   const [features, setFeatures] = useState<FeatureFlags>(defaultFeatureFlags);
   const branding = useBranding();
   const { can } = useTeacherPermissions();
@@ -329,9 +336,9 @@ export default function TeacherLayout({ children }: { children: React.ReactNode 
   const currentPagePermission = getTeacherPagePermission(location.pathname);
   const canAccessCurrentPage = !currentPagePermission || can(currentPagePermission, true);
 
-  const sidebarW = collapsed ? 'w-16' : 'w-60';
-  const mainML  = collapsed ? 'lg:ml-16' : 'lg:ml-60';
-  const headerL = collapsed ? 'lg:left-16' : 'lg:left-60';
+  const sidebarW = collapsed ? 'w-16' : 'w-52 xl:w-60';
+  const mainML  = collapsed ? 'lg:ml-16' : 'lg:ml-52 xl:ml-60';
+  const headerL = collapsed ? 'lg:left-16' : 'lg:left-52 xl:left-60';
 
   return (
     <div className="min-h-screen bg-slate-50 flex overflow-x-hidden">
@@ -344,7 +351,11 @@ export default function TeacherLayout({ children }: { children: React.ReactNode 
         <SidebarContent
           activePath={location.pathname}
           collapsed={collapsed}
-          onCollapse={() => setCollapsed((c) => !c)}
+          onCollapse={() => setCollapsed((c) => {
+            const next = !c;
+            localStorage.setItem('teacher_sidebar_collapsed', String(next));
+            return next;
+          })}
           onLogout={handleLogout}
           sections={visibleSections}
         />
@@ -440,7 +451,7 @@ export default function TeacherLayout({ children }: { children: React.ReactNode 
       >
         {/* Desktop top offset */}
         <div className="hidden lg:block" style={{ height: '3.5rem' }} />
-        <div className="px-4 sm:px-6 lg:px-8 py-6">
+        <div className="px-4 lg:px-5 xl:px-7 py-4 lg:py-5 xl:py-6">
           {canAccessCurrentPage ? (
             children
           ) : (

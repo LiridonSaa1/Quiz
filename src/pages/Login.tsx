@@ -214,7 +214,7 @@ export default function Login() {
 
       {/* ═══════════════════ LEFT ═══════════════════ */}
       <div
-        className="hidden lg:flex lg:w-[55%] flex-col relative overflow-hidden"
+        className="hidden lg:flex lg:w-[50%] xl:w-[55%] flex-col relative overflow-hidden"
         style={{ background: 'linear-gradient(135deg,#0d0f1e 0%,#110d2a 50%,#0a0d1e 100%)' }}
       >
         <Noise />
@@ -229,7 +229,7 @@ export default function Login() {
         />
         <div className="absolute top-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-violet-500/30 to-transparent" />
 
-        <div className="relative z-10 flex flex-col h-full px-14 py-12">
+        <div className="relative z-10 flex flex-col h-full px-8 xl:px-14 py-8 xl:py-12">
           {/* Logo */}
           <div className="flex items-center gap-3 mb-auto">
             <div className="relative">
@@ -257,7 +257,7 @@ export default function Login() {
               const line2 = words.slice(2, -1).join(' ');
               const lastWord = words[words.length - 1];
               return (
-                <h1 className="text-[3.5rem] font-extrabold leading-[1.05] tracking-tight text-white">
+                <h1 className="text-[2.6rem] xl:text-[3.5rem] font-extrabold leading-[1.05] tracking-tight text-white">
                   {line1}<br />
                   {line2 && <>{line2}{' '}</>}
                   <span
