@@ -6866,7 +6866,7 @@ Rules:
   const normalizeLessonContentRow = (row: any, index: number) => {
     const rawType = String(row?.type || row?.content_type || '').toLowerCase();
     const type =
-      rawType === 'video' || rawType === 'audio' || rawType === 'pdf' || rawType === 'text'
+      rawType === 'video' || rawType === 'audio' || rawType === 'pdf' || rawType === 'text' || rawType === 'link'
         ? rawType
         : 'text';
 

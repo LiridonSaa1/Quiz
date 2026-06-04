@@ -35,7 +35,7 @@ type LessonDetailRow = {
 
 type LessonContentRow = {
   id: string;
-  type: 'video' | 'audio' | 'pdf' | 'text';
+  type: 'video' | 'audio' | 'pdf' | 'text' | 'link';
   title: string | null;
   description: string | null;
   text_content: string | null;
@@ -152,7 +152,7 @@ export default function StudentLessonDetail() {
   }, [lesson, completed, t]);
 
   const sections = useMemo(() => {
-    const byType: Record<string, LessonContentRow[]> = { video: [], audio: [], pdf: [], text: [] };
+    const byType: Record<string, LessonContentRow[]> = { video: [], audio: [], pdf: [], text: [], link: [] };
     contents.forEach((c) => {
       if (!byType[c.type]) byType[c.type] = [];
       byType[c.type].push(c);
@@ -308,6 +308,57 @@ export default function StudentLessonDetail() {
                     <audio src={item.signed_url ?? undefined} controls className="w-full" style={{ borderRadius: '12px' }} />
                   </div>
                 ))}
+              </div>
+            )}
+
+            {/* ── OUP Headway link cards (added by teacher via Headway Resources panel) ── */}
+            {sections.link.length > 0 && (
+              <div className="bg-white rounded-3xl border border-slate-100 p-5 space-y-3">
+                <div className="flex items-center gap-2 mb-1">
+                  <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-blue-600 to-indigo-700 flex items-center justify-center shrink-0">
+                    <Globe className="w-4 h-4 text-white" />
+                  </div>
+                  <span className="text-sm font-bold text-slate-800">Headway Resources</span>
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  {sections.link.map((item) => {
+                    const url = item.text_content || '';
+                    const isAudio = url.includes('/audiodl') || (item.title || '').toLowerCase().includes('audio');
+                    const isVideo = url.includes('/video_bandw') || (item.title || '').toLowerCase().includes('video');
+                    return (
+                      <a
+                        key={item.id}
+                        href={url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className={`flex items-center gap-4 p-4 rounded-2xl border transition-all hover:shadow-md group ${
+                          isAudio
+                            ? 'bg-gradient-to-r from-indigo-50 to-violet-50 border-indigo-100 hover:border-indigo-300'
+                            : isVideo
+                            ? 'bg-gradient-to-r from-rose-50 to-orange-50 border-rose-100 hover:border-rose-300'
+                            : 'bg-slate-50 border-slate-100 hover:border-slate-300'
+                        }`}
+                      >
+                        <div className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 shadow-sm ${
+                          isAudio ? 'bg-gradient-to-br from-indigo-500 to-violet-600' :
+                          isVideo ? 'bg-gradient-to-br from-rose-500 to-orange-500' :
+                          'bg-gradient-to-br from-slate-500 to-slate-700'
+                        }`}>
+                          {isAudio ? <Headphones className="w-5 h-5 text-white" /> :
+                           isVideo ? <Video className="w-5 h-5 text-white" /> :
+                           <ExternalLink className="w-5 h-5 text-white" />}
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          <p className="text-sm font-bold text-slate-800 truncate">{item.title || 'OUP Resource'}</p>
+                          {item.description && <p className="text-xs text-slate-500 mt-0.5 truncate">{item.description}</p>}
+                          <p className="text-xs text-indigo-600 mt-1 flex items-center gap-1">
+                            <ExternalLink className="w-3 h-3" /> Open on OUP
+                          </p>
+                        </div>
+                      </a>
+                    );
+                  })}
+                </div>
               </div>
             )}
 

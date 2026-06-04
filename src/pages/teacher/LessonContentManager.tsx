@@ -63,6 +63,7 @@ export default function TeacherLessonContentManager() {
   const [headwayLevel, setHeadwayLevel] = useState('preint4');
   const [headwayTab, setHeadwayTab] = useState<'audio' | 'video' | 'links'>('audio');
   const [headwayUnit, setHeadwayUnit] = useState(1);
+  const [addingHeadway, setAddingHeadway] = useState<'audio' | 'video' | null>(null);
 
   const sorted = useMemo(
     () => [...items].sort((a, b) => (a.position || 0) - (b.position || 0)),
@@ -163,6 +164,39 @@ export default function TeacherLessonContentManager() {
     setItems(next);
     await saveOrder(next);
     toast.success(t('lessons.deleted'));
+  };
+
+  const addHeadwayLink = async (mediaType: 'audio' | 'video') => {
+    if (!userId) return;
+    setAddingHeadway(mediaType);
+    const level = HEADWAY_LEVELS.find(l => l.slug === headwayLevel);
+    const levelName = level?.key || headwayLevel;
+    const url = mediaType === 'audio'
+      ? `${OUP_BASE}/${headwayLevel}/audiodl${CC}`
+      : `${OUP_BASE}/${headwayLevel}/video_bandw${CC}`;
+    const title = mediaType === 'audio'
+      ? `Headway Audio — ${levelName} · Unit ${headwayUnit}`
+      : `Headway Video — ${levelName} · Unit ${headwayUnit}`;
+    const nextPosition = sorted.length + 1;
+    const res = await authFetch(`/api/teacher/lessons/${encodeURIComponent(lessonId)}/contents`, {
+      method: 'POST',
+      body: JSON.stringify({
+        userId,
+        type: 'link',
+        title,
+        text_content: url,
+        description: `OUP Headway ${mediaType} · ${levelName} · Unit ${headwayUnit}`,
+        position: nextPosition,
+      }),
+    });
+    const json = await res.json().catch(() => ({}));
+    setAddingHeadway(null);
+    if (!res.ok || !json?.success) {
+      toast.error(json?.error || 'Failed to add to lesson');
+      return;
+    }
+    setItems(prev => [...prev, json.content]);
+    toast.success(`Headway ${mediaType} added to lesson!`);
   };
 
   const saveOrder = async (current: LessonContentRow[]) => {
@@ -372,15 +406,25 @@ export default function TeacherLessonContentManager() {
                         Opens the OUP audio player in a new tab. Scroll to Unit {headwayUnit} and press ▶ to listen.
                       </p>
                     </div>
-                    <a
-                      href={`${OUP_BASE}/${headwayLevel}/audiodl${CC}`}
-                      target="_blank" rel="noopener noreferrer"
-                      className="inline-flex items-center gap-2.5 px-6 py-3 rounded-xl bg-indigo-600 text-white text-sm font-bold hover:bg-indigo-700 transition-colors shadow-md shadow-indigo-200"
-                    >
-                      <Headphones className="w-4 h-4" /> Open Audio Player
-                    </a>
+                    <div className="flex flex-wrap gap-3 justify-center">
+                      <a
+                        href={`${OUP_BASE}/${headwayLevel}/audiodl${CC}`}
+                        target="_blank" rel="noopener noreferrer"
+                        className="inline-flex items-center gap-2.5 px-5 py-2.5 rounded-xl bg-indigo-600 text-white text-sm font-bold hover:bg-indigo-700 transition-colors shadow-md shadow-indigo-200"
+                      >
+                        <ExternalLink className="w-4 h-4" /> Open on OUP
+                      </a>
+                      <button
+                        onClick={() => void addHeadwayLink('audio')}
+                        disabled={addingHeadway === 'audio'}
+                        className="inline-flex items-center gap-2.5 px-5 py-2.5 rounded-xl bg-emerald-600 text-white text-sm font-bold hover:bg-emerald-700 disabled:opacity-60 transition-colors shadow-md shadow-emerald-200"
+                      >
+                        <Plus className="w-4 h-4" />
+                        {addingHeadway === 'audio' ? 'Adding…' : 'Add to Lesson'}
+                      </button>
+                    </div>
                     <p className="text-[10px] text-slate-400">
-                      OUP blocks embedded playback — the player works only when opened directly in a tab.
+                      "Add to Lesson" creates a shortcut card students see directly in this lesson.
                     </p>
                   </div>
                 </div>
@@ -404,15 +448,25 @@ export default function TeacherLessonContentManager() {
                         Opens the OUP video page in a new tab. Find Unit {headwayUnit} and press ▶ to watch.
                       </p>
                     </div>
-                    <a
-                      href={`${OUP_BASE}/${headwayLevel}/video_bandw${CC}`}
-                      target="_blank" rel="noopener noreferrer"
-                      className="inline-flex items-center gap-2.5 px-6 py-3 rounded-xl bg-rose-600 text-white text-sm font-bold hover:bg-rose-700 transition-colors shadow-md shadow-rose-200"
-                    >
-                      <Video className="w-4 h-4" /> Open Video Player
-                    </a>
+                    <div className="flex flex-wrap gap-3 justify-center">
+                      <a
+                        href={`${OUP_BASE}/${headwayLevel}/video_bandw${CC}`}
+                        target="_blank" rel="noopener noreferrer"
+                        className="inline-flex items-center gap-2.5 px-5 py-2.5 rounded-xl bg-rose-600 text-white text-sm font-bold hover:bg-rose-700 transition-colors shadow-md shadow-rose-200"
+                      >
+                        <ExternalLink className="w-4 h-4" /> Open on OUP
+                      </a>
+                      <button
+                        onClick={() => void addHeadwayLink('video')}
+                        disabled={addingHeadway === 'video'}
+                        className="inline-flex items-center gap-2.5 px-5 py-2.5 rounded-xl bg-emerald-600 text-white text-sm font-bold hover:bg-emerald-700 disabled:opacity-60 transition-colors shadow-md shadow-emerald-200"
+                      >
+                        <Plus className="w-4 h-4" />
+                        {addingHeadway === 'video' ? 'Adding…' : 'Add to Lesson'}
+                      </button>
+                    </div>
                     <p className="text-[10px] text-slate-400">
-                      OUP blocks embedded playback — the player works only when opened directly in a tab.
+                      "Add to Lesson" creates a shortcut card students see directly in this lesson.
                     </p>
                   </div>
                 </div>
