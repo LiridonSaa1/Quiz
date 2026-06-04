@@ -10138,6 +10138,48 @@ Rules:
     } catch (e: unknown) { res.status(500).json({ error: (e as Error).message }); }
   });
 
+  // Push quiz to all session students (host only)
+  app.post('/api/teacher/live-sessions/:id/push-quiz', async (req, res) => {
+    try {
+      const hostId = await assertSessionHost(req, res, req.params.id);
+      if (!hostId) return;
+      const { quizId, quizTitle } = req.body;
+      if (!quizId || !quizTitle) return res.status(400).json({ error: 'quizId and quizTitle required' });
+
+      // Update live_sessions row with live_quiz_id + live_quiz_title so Realtime pushes to students
+      const { error: patchErr } = await supabaseAdmin
+        .from('live_sessions')
+        .update({ live_quiz_id: quizId, live_quiz_title: quizTitle } as any)
+        .eq('id', req.params.id);
+      if (patchErr) {
+        // Column may not exist yet — still send notifications, just skip the update
+        console.warn('[push-quiz] live_sessions update skipped (column missing?):', patchErr.message);
+      }
+
+      // Also send in-app notifications to all session participants
+      const { data: participants } = await supabaseAdmin
+        .from('session_participants')
+        .select('user_id')
+        .eq('session_id', req.params.id)
+        .is('left_at', null);
+
+      if (participants && participants.length > 0) {
+        const notifs = participants.map((p: any) => ({
+          user_id: p.user_id,
+          title: '📝 Kuiz i ri',
+          message: `Mësuesi ka nisur kuizin: ${quizTitle}`,
+          type: 'quiz',
+          action_url: `/student/realtime-quiz/${quizId}`,
+          read: false,
+          created_at: new Date().toISOString(),
+        }));
+        await supabaseAdmin.from('notifications').insert(notifs).catch(() => {});
+      }
+
+      res.json({ success: true });
+    } catch (e: unknown) { res.status(500).json({ error: (e as Error).message }); }
+  });
+
   // Recording upload URL (host only)
   app.post('/api/teacher/live-sessions/:id/upload-url', async (req, res) => {
     try {

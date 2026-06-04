@@ -9,7 +9,8 @@ import {
   Mic, MicOff, Video, VideoOff, Monitor,
   Circle, StopCircle, Hand, Users, MessageSquare, PhoneOff,
   Smile, ChevronLeft, ChevronRight, Send, Loader2,
-  CheckCircle2, Film, VolumeX, Pin, UserX, Download, X, RefreshCw
+  CheckCircle2, Film, VolumeX, Pin, UserX, Download, X, RefreshCw,
+  Copy, ClipboardCheck, BookOpen, PlayCircle, Wifi, WifiOff
 } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { format } from 'date-fns';
@@ -222,6 +223,12 @@ export default function TeacherLiveSessionRoom() {
   const [recordingTime, setRecordingTime] = useState(0);
   const [uploadProgress, setUploadProgress] = useState(0);
   const [savedRecordings, setSavedRecordings] = useState<string[]>([]);
+  const [networkQuality, setNetworkQuality] = useState<'good' | 'fair' | 'poor' | null>(null);
+  const [linkCopied, setLinkCopied] = useState(false);
+  const [showQuizPicker, setShowQuizPicker] = useState(false);
+  const [quizPickerList, setQuizPickerList] = useState<{ id: string; title: string }[]>([]);
+  const [quizPickerLoading, setQuizPickerLoading] = useState(false);
+  const [pushingQuiz, setPushingQuiz] = useState(false);
 
   const [showPreJoin, setShowPreJoin] = useState(false);
   const [preJoinMicOn, setPreJoinMicOn] = useState(true);
@@ -525,6 +532,13 @@ export default function TeacherLiveSessionRoom() {
           const event = e as { muted: boolean };
           setCameraOn(!event.muted);
         });
+        (api as any).addListener('connectionQualityChanged', (e: unknown) => {
+          const ev = e as { quality?: number };
+          const q = ev.quality ?? 100;
+          if (q >= 60) setNetworkQuality('good');
+          else if (q >= 30) setNetworkQuality('fair');
+          else setNetworkQuality('poor');
+        });
         // readyToClose fires on connection drops / room closure — we do NOT auto-end
         // the DB session here because it triggers on network glitches too.
         // The teacher must explicitly click "End Session" to mark the session as ended.
@@ -716,6 +730,41 @@ export default function TeacherLiveSessionRoom() {
   const openSidebar = (tab: SidebarTab) => {
     setSidebarTab(tab);
     setSidebarOpen(prev => sidebarTab === tab ? !prev : true);
+  };
+
+  const copyInviteLink = () => {
+    const url = `${window.location.origin}/student/live-sessions/${id}`;
+    navigator.clipboard.writeText(url).then(() => {
+      setLinkCopied(true);
+      toast.success('Linku u kopjua!');
+      setTimeout(() => setLinkCopied(false), 3000);
+    }).catch(() => toast.error('Nuk u kopjua'));
+  };
+
+  const openQuizPicker = async () => {
+    setShowQuizPicker(true);
+    if (quizPickerList.length > 0) return;
+    setQuizPickerLoading(true);
+    try {
+      const res = await authFetch('/api/teacher/quizzes');
+      const json = await res.json();
+      const quizzes = (json.quizzes || json.data || []) as { id: string; title: string }[];
+      setQuizPickerList(quizzes.map((q: any) => ({ id: q.id, title: q.title })));
+    } catch { toast.error('Nuk u ngarkuan kuizet'); }
+    finally { setQuizPickerLoading(false); }
+  };
+
+  const pushQuizToStudents = async (quizId: string, quizTitle: string) => {
+    setPushingQuiz(true);
+    try {
+      await authFetch(`/api/teacher/live-sessions/${id}/push-quiz`, {
+        method: 'POST',
+        body: JSON.stringify({ quizId, quizTitle }),
+      });
+      toast.success(`📝 Kuizi "${quizTitle}" u dërgua te studentët!`);
+      setShowQuizPicker(false);
+    } catch { toast.error('Nuk u dërgua kuizi'); }
+    finally { setPushingQuiz(false); }
   };
 
   if (loading) {
@@ -993,6 +1042,43 @@ export default function TeacherLiveSessionRoom() {
               />
 
               <div className="w-px h-6 bg-slate-700 mx-1 shrink-0" />
+
+              {/* Network quality badge */}
+              {meetingActive && networkQuality && (
+                <div className={cn(
+                  'flex items-center gap-1.5 px-2.5 py-2 rounded-xl text-xs font-semibold shrink-0',
+                  networkQuality === 'good' ? 'bg-emerald-600/20 text-emerald-400' :
+                  networkQuality === 'fair' ? 'bg-amber-500/20 text-amber-400' :
+                  'bg-rose-600/20 text-rose-400'
+                )}>
+                  {networkQuality === 'poor' ? <WifiOff className="w-3.5 h-3.5" /> : <Wifi className="w-3.5 h-3.5" />}
+                  <span className="hidden sm:inline">{networkQuality === 'good' ? 'Good' : networkQuality === 'fair' ? 'Fair' : 'Poor'}</span>
+                </div>
+              )}
+
+              {/* Copy invite link */}
+              <button
+                onClick={copyInviteLink}
+                className="flex items-center gap-1.5 px-3 py-2.5 bg-slate-700 hover:bg-slate-600 text-slate-300 hover:text-white rounded-xl font-semibold transition-all shrink-0 text-sm"
+                title="Copy student join link"
+              >
+                {linkCopied ? <ClipboardCheck className="w-4 h-4 text-emerald-400" /> : <Copy className="w-4 h-4" />}
+                <span className="hidden sm:inline">{linkCopied ? 'Kopjuar!' : 'Link'}</span>
+              </button>
+
+              {/* Push Quiz */}
+              {meetingActive && (
+                <div className="relative shrink-0">
+                  <button
+                    onClick={openQuizPicker}
+                    className="flex items-center gap-1.5 px-3 py-2.5 bg-violet-600 hover:bg-violet-700 text-white rounded-xl font-semibold transition-all text-sm"
+                    title="Push a quiz to all students"
+                  >
+                    <BookOpen className="w-4 h-4" />
+                    <span className="hidden sm:inline">Quiz</span>
+                  </button>
+                </div>
+              )}
 
               {/* Reconnect (backup — only shown when meeting is active) */}
               {meetingActive && (
@@ -1322,6 +1408,69 @@ export default function TeacherLiveSessionRoom() {
         )}
       </AnimatePresence>
     </div>
+
+    {/* Quiz Picker Modal */}
+    <AnimatePresence>
+      {showQuizPicker && (
+        <motion.div
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+          className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-[200] p-4"
+          onClick={e => { if (e.target === e.currentTarget) setShowQuizPicker(false); }}
+        >
+          <motion.div
+            initial={{ scale: 0.95, y: 10 }}
+            animate={{ scale: 1, y: 0 }}
+            exit={{ scale: 0.95, y: 10 }}
+            className="bg-slate-900 border border-slate-700 rounded-2xl shadow-2xl w-full max-w-md overflow-hidden"
+          >
+            <div className="px-5 py-4 border-b border-slate-800 flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <BookOpen className="w-5 h-5 text-violet-400" />
+                <h2 className="text-white font-semibold">Dërgo kuiz te studentët</h2>
+              </div>
+              <button onClick={() => setShowQuizPicker(false)} className="text-slate-500 hover:text-white transition-colors">
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            <div className="p-4 max-h-80 overflow-y-auto">
+              {quizPickerLoading ? (
+                <div className="flex items-center justify-center py-8 gap-2 text-slate-400">
+                  <Loader2 className="w-5 h-5 animate-spin" /> Duke ngarkuar kuizet…
+                </div>
+              ) : quizPickerList.length === 0 ? (
+                <div className="text-center py-8 text-slate-500">
+                  <BookOpen className="w-8 h-8 mx-auto mb-2 opacity-30" />
+                  <p className="text-sm">Nuk ka kuize të disponueshme</p>
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  {quizPickerList.map(q => (
+                    <button
+                      key={q.id}
+                      onClick={() => pushQuizToStudents(q.id, q.title)}
+                      disabled={pushingQuiz}
+                      className="w-full flex items-center justify-between px-4 py-3 bg-slate-800 hover:bg-violet-600/20 border border-slate-700 hover:border-violet-500/50 rounded-xl text-left transition-all disabled:opacity-50 group"
+                    >
+                      <span className="text-slate-200 text-sm font-medium group-hover:text-white truncate pr-3">{q.title}</span>
+                      {pushingQuiz ? (
+                        <Loader2 className="w-4 h-4 text-violet-400 animate-spin shrink-0" />
+                      ) : (
+                        <PlayCircle className="w-4 h-4 text-slate-500 group-hover:text-violet-400 shrink-0 transition-colors" />
+                      )}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+            <div className="px-5 py-3 border-t border-slate-800 text-xs text-slate-500 text-center">
+              Studenti do të marrë një njoftim me link direkt te kuizi
+            </div>
+          </motion.div>
+        </motion.div>
+      )}
+    </AnimatePresence>
 
     {/* Navigation warning confirmation */}
     {showNavWarning && (

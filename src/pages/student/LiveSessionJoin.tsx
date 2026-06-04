@@ -8,7 +8,8 @@ import { motion, AnimatePresence } from 'motion/react';
 import {
   Video, Hand, MessageSquare, Smile, ChevronLeft, ChevronRight,
   Send, Loader2, Users, Clock, BookOpen, Radio, CheckCircle2,
-  CalendarDays
+  CalendarDays, Copy, ExternalLink, ClipboardCheck, PlayCircle,
+  Wifi, WifiOff, WifiZero
 } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { format } from 'date-fns';
@@ -92,6 +93,8 @@ export default function StudentLiveSessionJoin() {
   const [sendingChat, setSendingChat] = useState(false);
   const [chatRealtimeConnected, setChatRealtimeConnected] = useState(false);
   const [timeRemaining, setTimeRemaining] = useState<number | null>(null);
+  const [networkQuality, setNetworkQuality] = useState<'good' | 'fair' | 'poor' | null>(null);
+  const [linkCopied, setLinkCopied] = useState(false);
   const chatEndRef = useRef<HTMLDivElement | null>(null);
   const jitsiContainerRef = useRef<HTMLDivElement | null>(null);
   const jitsiApiRef = useRef<ReturnType<typeof window.JitsiMeetExternalAPI> | null>(null);
@@ -121,10 +124,17 @@ export default function StudentLiveSessionJoin() {
 
   const defaultJitsiRoomName = `quizmaster-session-${id?.slice(0, 8)}`;
   const [activeRoomName, setActiveRoomName] = useState(defaultJitsiRoomName);
+  const [jaasDomain, setJaasDomain] = useState<string | null>(null);
+  const [jaasAppId, setJaasAppId] = useState<string | null>(null);
   const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(
     typeof navigator !== 'undefined' ? navigator.userAgent : ''
   );
-  const jitsiMeetUrl = `https://meet.jit.si/${activeRoomName}`;
+  const jitsiMeetUrl = (jaasDomain === '8x8.vc' && jaasAppId)
+    ? `https://8x8.vc/${jaasAppId}/${activeRoomName}`
+    : `https://meet.jit.si/${activeRoomName}`;
+
+  // Push-quiz state
+  const [liveQuizPush, setLiveQuizPush] = useState<{ quizId: string; quizTitle: string; sessionId: string } | null>(null);
 
   // Sync activeRoomName when teacher reconnects (jitsi_room_name changes via Realtime)
   useEffect(() => {
@@ -156,6 +166,9 @@ export default function StudentLiveSessionJoin() {
           jwtToken  = tokenJson.token  ?? null;
           domain    = tokenJson.domain ?? 'meet.jit.si';
           jaasAppId = tokenJson.appId  ?? null;
+          // Store domain/appId so jitsiMeetUrl (mobile link) uses correct domain
+          setJaasDomain(domain);
+          setJaasAppId(jaasAppId);
         }
       } catch { /* fall back to meet.jit.si */ }
 
@@ -208,6 +221,14 @@ export default function StudentLiveSessionJoin() {
             iframe.setAttribute('allow', 'camera *; microphone *; fullscreen *; display-capture *; autoplay *; clipboard-write *');
           }
         }, 1500);
+        // Network quality listener
+        (api as any).addListener('connectionQualityChanged', (e: unknown) => {
+          const ev = e as { quality?: number };
+          const q = ev.quality ?? 100;
+          if (q >= 60) setNetworkQuality('good');
+          else if (q >= 30) setNetworkQuality('fair');
+          else setNetworkQuality('poor');
+        });
         jitsiApiRef.current = api;
       };
 
@@ -280,6 +301,12 @@ export default function StudentLiveSessionJoin() {
       }, (payload) => {
         const updated = payload.new as LiveSession;
         setSession(prev => prev ? { ...prev, ...updated } : prev);
+        // Check for pushed quiz (live_quiz_id set on session)
+        const u = payload.new as any;
+        if (u.live_quiz_id && u.live_quiz_title) {
+          setLiveQuizPush({ quizId: u.live_quiz_id, quizTitle: u.live_quiz_title, sessionId: id! });
+          toast.info(`📝 Mësuesi nisi kuizin: ${u.live_quiz_title}`);
+        }
       })
       .subscribe((status) => {
         if (status === 'SUBSCRIBED') {
@@ -551,6 +578,20 @@ export default function StudentLiveSessionJoin() {
                     /* Desktop: embed Jitsi External API */
                     <div ref={jitsiContainerRef} className="w-full h-full" />
                   )}
+                  {/* Network quality badge (desktop, when joined) */}
+                  {!isMobile && networkQuality && (
+                    <div className={cn(
+                      'absolute top-3 left-3 flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold z-10 backdrop-blur-sm',
+                      networkQuality === 'good' ? 'bg-emerald-600/80 text-white' :
+                      networkQuality === 'fair' ? 'bg-amber-500/80 text-white' :
+                      'bg-rose-600/80 text-white'
+                    )}>
+                      {networkQuality === 'good' ? <Wifi className="w-3 h-3" /> :
+                       networkQuality === 'fair' ? <Wifi className="w-3 h-3" /> :
+                       <WifiOff className="w-3 h-3" />}
+                      {networkQuality === 'good' ? 'Good' : networkQuality === 'fair' ? 'Fair' : 'Poor'}
+                    </div>
+                  )}
                   {/* Floating Reactions */}
                   <div className="absolute bottom-20 right-4 pointer-events-none z-10">
                     <AnimatePresence>
@@ -710,6 +751,22 @@ export default function StudentLiveSessionJoin() {
                 <span className="px-1.5 py-0.5 text-[10px] bg-emerald-500 text-white rounded-full">{chatMessages.length}</span>
               )}
             </button>
+
+            {/* Copy invite link */}
+            <button
+              onClick={() => {
+                const url = `${window.location.origin}/student/live-sessions/${id}`;
+                navigator.clipboard.writeText(url).then(() => {
+                  setLinkCopied(true);
+                  toast.success('Linku u kopjua!');
+                  setTimeout(() => setLinkCopied(false), 3000);
+                }).catch(() => toast.error('Nuk u kopjua'));
+              }}
+              className="flex items-center gap-2 px-4 py-2.5 bg-slate-100 text-slate-600 hover:bg-slate-200 rounded-xl text-sm font-semibold transition-all"
+            >
+              {linkCopied ? <ClipboardCheck className="w-4 h-4 text-emerald-600" /> : <Copy className="w-4 h-4" />}
+              {linkCopied ? 'U kopjua!' : 'Kopjo linkun'}
+            </button>
           </div>
         )}
 
@@ -724,6 +781,48 @@ export default function StudentLiveSessionJoin() {
           </div>
         )}
       </div>
+
+      {/* Push-quiz modal */}
+      <AnimatePresence>
+        {liveQuizPush && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-[200] p-4"
+          >
+            <motion.div
+              initial={{ scale: 0.9, y: 20 }}
+              animate={{ scale: 1, y: 0 }}
+              exit={{ scale: 0.9, y: 20 }}
+              className="bg-white rounded-2xl shadow-2xl w-full max-w-sm p-6 text-center"
+            >
+              <div className="w-14 h-14 rounded-full bg-violet-100 flex items-center justify-center mx-auto mb-4">
+                <PlayCircle className="w-7 h-7 text-violet-600" />
+              </div>
+              <h3 className="text-lg font-bold text-slate-900 mb-1">Kuiz i ri nga mësuesi!</h3>
+              <p className="text-slate-500 text-sm mb-5">
+                <span className="font-semibold text-slate-700">{liveQuizPush.quizTitle}</span> — mësuesi ka nisur këtë kuiz gjatë sesionit live.
+              </p>
+              <div className="flex gap-3">
+                <button
+                  onClick={() => setLiveQuizPush(null)}
+                  className="flex-1 px-4 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-sm font-semibold transition"
+                >
+                  Më vonë
+                </button>
+                <a
+                  href={`/student/realtime-quiz/${liveQuizPush.quizId}`}
+                  className="flex-1 flex items-center justify-center gap-2 px-4 py-2.5 bg-violet-600 hover:bg-violet-700 text-white rounded-xl text-sm font-semibold transition"
+                  onClick={() => setLiveQuizPush(null)}
+                >
+                  <ExternalLink className="w-4 h-4" /> Hap kuizin
+                </a>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* Navigation warning confirmation */}
       {showNavWarning && (
