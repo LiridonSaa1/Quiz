@@ -133,10 +133,15 @@ export default function AdminStudents() {
     try {
       const res = await authFetch(apiUrl('/api/admin/transfer-history?limit=200'));
       const json = await res.json();
-      if (!res.ok) throw new Error(json.error || 'Failed to fetch transfers');
-      setTransfers(json.transfers || []);
+      if (!res.ok) {
+        console.warn('Transfer history unavailable:', json.error);
+        setTransfers([]);
+      } else {
+        setTransfers(json.transfers || []);
+      }
     } catch (e: any) {
-      toast.error(e?.message || 'Failed to load transfer history');
+      console.warn('Failed to load transfer history:', e?.message);
+      setTransfers([]);
     } finally {
       setTransfersLoading(false);
       setTransfersLoaded(true);

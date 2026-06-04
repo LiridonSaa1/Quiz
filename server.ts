@@ -4112,7 +4112,7 @@ When giving instructions, number each step clearly. Be precise and technical whe
         .range(offset, offset + limit - 1);
 
       if (error) {
-        if (/does not exist|PGRST/i.test(error.message)) {
+        if (/does not exist|PGRST|schema cache|Could not find/i.test(error.message)) {
           return res.json({ transfers: [], total: 0 });
         }
         throw error;
@@ -4151,7 +4151,10 @@ When giving instructions, number each step clearly. Be precise and technical whe
         .order("transferred_at", { ascending: false })
         .limit(limit);
 
-      if (e1 && /does not exist|PGRST/i.test(e1.message)) {
+      if (e1 && /does not exist|PGRST|schema cache|Could not find/i.test(e1.message)) {
+        return res.json({ transfers: [] });
+      }
+      if (e2 && /does not exist|PGRST|schema cache|Could not find/i.test(e2?.message || '')) {
         return res.json({ transfers: [] });
       }
       if (e1) throw e1;
