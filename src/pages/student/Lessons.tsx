@@ -191,9 +191,9 @@ export default function StudentLessons() {
             <motion.div className="grid grid-cols-2 lg:grid-cols-4 gap-4" initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
               {[
                 { label: t('student.lessons.totalLessons'), value: lessons.length, gradient: 'from-indigo-500 to-indigo-600' },
-                { label: 'Video', value: lessons.filter(l => l.type === 'video').length, gradient: 'from-blue-500 to-blue-600' },
-                { label: 'Text', value: lessons.filter(l => l.type === 'text').length, gradient: 'from-amber-500 to-amber-600' },
-                { label: 'Quiz', value: lessons.filter(l => l.type === 'quiz').length, gradient: 'from-violet-500 to-violet-600' },
+                { label: t('common.video'), value: lessons.filter(l => l.type === 'video').length, gradient: 'from-blue-500 to-blue-600' },
+                { label: t('common.text'), value: lessons.filter(l => l.type === 'text').length, gradient: 'from-amber-500 to-amber-600' },
+                { label: t('common.quiz'), value: lessons.filter(l => l.type === 'quiz').length, gradient: 'from-violet-500 to-violet-600' },
               ].map((stat) => (
                 <div key={stat.label} className={cn('relative overflow-hidden rounded-2xl p-5 text-white shadow-lg', `bg-gradient-to-br ${stat.gradient}`)}>
                   <div className="text-3xl font-extrabold tracking-tight">{stat.value}</div>
@@ -231,7 +231,7 @@ export default function StudentLessons() {
                     onChange={e => { setCourseFilter(e.target.value); setModuleFilter('all'); }}
                     className="appearance-none pl-3 pr-8 py-2.5 rounded-full text-xs font-semibold border border-slate-100 bg-white/80 text-slate-600 focus:outline-none focus:ring-2 focus:ring-violet-400 focus:border-transparent transition-all shadow-sm cursor-pointer"
                   >
-                    <option value="all">All Courses</option>
+                    <option value="all">{t('student.lessons.allCourses')}</option>
                     {availableCourses.map(c => (
                       <option key={c.title} value={c.title}>{c.title}</option>
                     ))}
@@ -248,7 +248,7 @@ export default function StudentLessons() {
                     onChange={e => setModuleFilter(e.target.value)}
                     className="appearance-none pl-3 pr-8 py-2.5 rounded-full text-xs font-semibold border border-slate-100 bg-white/80 text-slate-600 focus:outline-none focus:ring-2 focus:ring-violet-400 focus:border-transparent transition-all shadow-sm cursor-pointer"
                   >
-                    <option value="all">All Modules</option>
+                    <option value="all">{t('student.lessons.allModules')}</option>
                     {availableModules.map(m => (
                       <option key={m.title} value={m.title}>{m.title}</option>
                     ))}
