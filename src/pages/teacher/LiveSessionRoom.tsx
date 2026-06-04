@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { useParams, useNavigate, useBlocker } from 'react-router-dom';
+import { useParams, useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { supabase } from '../../supabase';
 import { authFetch, readApiError } from '../../lib/apiUrl';
@@ -154,11 +154,6 @@ export default function TeacherLiveSessionRoom() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
 
-  // Block in-app navigation while meeting is active
-  const blocker = useBlocker(({ currentLocation, nextLocation }) =>
-    meetingActive && currentLocation.pathname !== nextLocation.pathname
-  );
-
   // Block browser tab close / refresh while meeting is active
   useEffect(() => {
     const handler = (e: BeforeUnloadEvent) => {
@@ -178,6 +173,17 @@ export default function TeacherLiveSessionRoom() {
   const [userDisplayName, setUserDisplayName] = useState('');
 
   const [meetingActive, setMeetingActive] = useState(false);
+  const [showNavWarning, setShowNavWarning] = useState(false);
+
+  // Intercept browser back button while meeting is active
+  useEffect(() => {
+    if (!meetingActive) return;
+    const handler = () => { setShowNavWarning(true); window.history.pushState(null, '', window.location.href); };
+    window.history.pushState(null, '', window.location.href);
+    window.addEventListener('popstate', handler);
+    return () => window.removeEventListener('popstate', handler);
+  }, [meetingActive]);
+
   const [micOn, setMicOn] = useState(true);
   const [cameraOn, setCameraOn] = useState(true);
   const [handRaised, setHandRaised] = useState(false);
@@ -1279,8 +1285,8 @@ export default function TeacherLiveSessionRoom() {
       </AnimatePresence>
     </div>
 
-    {/* Navigation blocker confirmation */}
-    {blocker.state === 'blocked' && (
+    {/* Navigation warning confirmation */}
+    {showNavWarning && (
       <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-[200] p-4">
         <div className="bg-slate-900 border border-slate-700 rounded-2xl shadow-2xl w-full max-w-sm p-6 text-center">
           <div className="w-14 h-14 rounded-full bg-red-500/20 border border-red-500/30 flex items-center justify-center mx-auto mb-4">
@@ -1292,13 +1298,13 @@ export default function TeacherLiveSessionRoom() {
           </p>
           <div className="flex gap-3">
             <button
-              onClick={() => blocker.reset?.()}
+              onClick={() => setShowNavWarning(false)}
               className="flex-1 px-4 py-2.5 bg-slate-700 hover:bg-slate-600 text-white rounded-xl text-sm font-semibold transition"
             >
               Qëndro
             </button>
             <button
-              onClick={() => blocker.proceed?.()}
+              onClick={() => { setShowNavWarning(false); navigate('/teacher/live-sessions'); }}
               className="flex-1 px-4 py-2.5 bg-red-600 hover:bg-red-700 text-white rounded-xl text-sm font-semibold transition"
             >
               Largohu
