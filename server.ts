@@ -2336,39 +2336,39 @@ When giving instructions, number each step clearly. Be precise and technical whe
   };
 
   // API routes FIRST
-  app.get("/api/health", async (req, res) => {
+  // Health check responds instantly — no DB round-trip.
+  // Supabase connectivity is checked in the background every 30s so the
+  // status stays fresh without blocking Replit's liveness probe.
+  let _cachedHealth: { status: string; error: string | null; checkedAt: number } = {
+    status: 'unknown', error: null, checkedAt: 0,
+  };
+  const _refreshHealthCache = async () => {
+    try {
+      const { error } = await supabaseAdmin.from('profiles').select('count').limit(1);
+      _cachedHealth = { status: error ? 'error' : 'connected', error: error?.message ?? null, checkedAt: Date.now() };
+    } catch (err: any) {
+      _cachedHealth = { status: 'failed', error: err.message, checkedAt: Date.now() };
+    }
+  };
+  // Kick off first check immediately, then every 30 s
+  void _refreshHealthCache();
+  setInterval(() => { void _refreshHealthCache(); }, 30_000);
+
+  app.get("/api/health", (_req, res) => {
     const supabaseUrl = process.env.VITE_SUPABASE_URL;
     const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-    
-    let supabaseStatus = 'unknown';
-    let supabaseError = null;
-
-    if (supabaseUrl && supabaseServiceKey) {
-      try {
-        const { error } = await supabaseAdmin.from('profiles').select('count').limit(1);
-        if (error) {
-          supabaseStatus = 'error';
-          supabaseError = error.message;
-        } else {
-          supabaseStatus = 'connected';
-        }
-      } catch (err: any) {
-        supabaseStatus = 'failed';
-        supabaseError = err.message;
-      }
-    }
-
-    res.json({ 
+    res.json({
       status: "ok",
       config: {
         hasUrl: !!supabaseUrl,
         hasServiceKey: !!supabaseServiceKey,
-        urlPrefix: supabaseUrl ? supabaseUrl.substring(0, 15) + '...' : null
+        urlPrefix: supabaseUrl ? supabaseUrl.substring(0, 15) + '...' : null,
       },
       supabase: {
-        status: supabaseStatus,
-        error: supabaseError
-      }
+        status: _cachedHealth.status,
+        error: _cachedHealth.error,
+        cachedAgoMs: _cachedHealth.checkedAt ? Date.now() - _cachedHealth.checkedAt : null,
+      },
     });
   });
 
