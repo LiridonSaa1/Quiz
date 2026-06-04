@@ -48,7 +48,8 @@ function AudioRow({ m }: { m: DriveMedia }) {
   const [progress, setProgress] = useState(0);
   const [duration, setDuration] = useState(0);
   const ref = useRef<HTMLAudioElement>(null);
-  const streamUrl = `/api/teacher/headway/drive-stream/${encodeURIComponent(m.drive_file_id)}`;
+  // Use Supabase Storage public URL when available, fall back to stream proxy
+  const streamUrl = m.url || `/api/teacher/headway/drive-stream/${encodeURIComponent(m.drive_file_id)}`;
   const fmt = (s: number) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
   const toggle = () => {
     if (!ref.current) return;
@@ -82,7 +83,8 @@ function AudioRow({ m }: { m: DriveMedia }) {
 }
 
 function VideoRow({ m }: { m: DriveMedia }) {
-  const streamUrl = `/api/teacher/headway/drive-stream/${encodeURIComponent(m.drive_file_id)}`;
+  // Use Supabase Storage public URL when available, fall back to stream proxy
+  const streamUrl = m.url || `/api/teacher/headway/drive-stream/${encodeURIComponent(m.drive_file_id)}`;
   return (
     <div className="rounded-xl overflow-hidden border border-rose-100 bg-rose-50">
       <div className="px-3 py-2 flex items-center gap-2 border-b border-rose-100">

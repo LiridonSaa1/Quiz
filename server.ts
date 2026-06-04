@@ -1,4 +1,5 @@
 import "dotenv/config";
+import AdmZip from "adm-zip";
 import jwt from "jsonwebtoken";
 import { isMissingCoursesStudentIdsError } from "./src/lib/schemaErrors.js";
 import { canAccessTeacherCourses, isAdmin, isAdminSeedAllowed } from "./src/lib/routeAuth.js";
@@ -105,6 +106,108 @@ async function listDriveFolder(folderId: string, apiKey: string): Promise<any[]>
     pageToken = data.nextPageToken ?? '';
   } while (pageToken);
   return files;
+}
+
+async function downloadDriveFileBuffer(fileId: string, apiKey: string): Promise<Buffer> {
+  const url = `${DRIVE_API_BASE}/files/${encodeURIComponent(fileId)}?alt=media&key=${apiKey}`;
+  const resp = await fetch(url, { headers: { 'User-Agent': 'Mozilla/5.0' } });
+  if (!resp.ok) {
+    const txt = await resp.text();
+    throw new Error(`Drive download ${resp.status}: ${txt.slice(0, 200)}`);
+  }
+  const arrBuf = await resp.arrayBuffer();
+  return Buffer.from(arrBuf);
+}
+
+const AUDIO_EXTS = new Set(['mp3', 'wav', 'm4a', 'ogg', 'aac', 'flac']);
+const VIDEO_EXTS = new Set(['mp4', 'webm', 'mov', 'avi', 'mkv']);
+const MEDIA_EXTS = new Set([...AUDIO_EXTS, ...VIDEO_EXTS]);
+
+function mimeForExt(ext: string): string {
+  const map: Record<string, string> = {
+    mp3: 'audio/mpeg', wav: 'audio/wav', m4a: 'audio/mp4',
+    ogg: 'audio/ogg', aac: 'audio/aac', flac: 'audio/flac',
+    mp4: 'video/mp4', webm: 'video/webm', mov: 'video/quicktime',
+    avi: 'video/x-msvideo', mkv: 'video/x-matroska',
+  };
+  return map[ext] || 'application/octet-stream';
+}
+
+async function processZipEntries(
+  zipBuffer: Buffer,
+  zipName: string,
+  zipDriveId: string,
+  type: string,
+  level: string,
+  job: DriveImportJob
+): Promise<void> {
+  const unitNum = detectUnitNumber(zipName);
+  let zip: InstanceType<typeof AdmZip>;
+  try {
+    zip = new AdmZip(zipBuffer);
+  } catch (e: any) {
+    throw new Error(`Invalid ZIP "${zipName}": ${e?.message}`);
+  }
+
+  const entries = zip.getEntries().filter(e => {
+    if (e.isDirectory) return false;
+    const baseName = e.entryName.split('/').pop() || '';
+    if (baseName.startsWith('__MACOSX') || baseName.startsWith('.')) return false;
+    const ext = baseName.split('.').pop()?.toLowerCase() || '';
+    return MEDIA_EXTS.has(ext);
+  });
+
+  if (entries.length === 0) {
+    job.logs.push(`   ↳ No audio/video files inside "${zipName}"`);
+    return;
+  }
+
+  job.total += entries.length;
+  job.logs.push(`   ↳ ${entries.length} media files inside "${zipName}"`);
+
+  for (const entry of entries) {
+    const baseName = (entry.entryName.split('/').pop() || entry.entryName).replace(/\s+/g, '_');
+    const ext = baseName.split('.').pop()?.toLowerCase() || '';
+    const compositeId = `${zipDriveId}::${entry.entryName}`;
+
+    try {
+      const { data: existing } = await supabaseAdmin
+        .from('headway_media').select('id').eq('drive_file_id', compositeId).maybeSingle();
+      if (existing) {
+        job.skipped++;
+        job.logs.push(`↷ Skip (exists): ${baseName}`);
+        continue;
+      }
+
+      const fileData = entry.getData();
+      const storagePath = `headway/${level}/${type}/unit${unitNum ?? 0}/${baseName}`;
+      const mime = mimeForExt(ext);
+
+      const { error: uploadErr } = await supabaseAdmin.storage
+        .from('headway-media')
+        .upload(storagePath, fileData, { contentType: mime, upsert: true });
+      if (uploadErr) throw new Error(`Storage upload failed: ${uploadErr.message}`);
+
+      const { data: { publicUrl } } = supabaseAdmin.storage.from('headway-media').getPublicUrl(storagePath);
+      const title = baseName.replace(/\.[^.]+$/, '').replace(/[_-]/g, ' ').trim();
+
+      const { error: insErr } = await supabaseAdmin.from('headway_media').insert({
+        level, unit_number: unitNum, type, title,
+        file_name: baseName, drive_file_id: compositeId,
+        url: publicUrl, mime_type: mime, size_bytes: fileData.length,
+      });
+      if (insErr) {
+        if (insErr.code === '42P01') throw new Error('headway_media table not found — run migration 014');
+        throw new Error(insErr.message);
+      }
+
+      job.done++;
+      job.logs.push(`✓ ${baseName}${unitNum ? ` → Unit ${unitNum}` : ''}`);
+    } catch (err: any) {
+      job.errors.push(`${baseName}: ${err?.message}`);
+      job.logs.push(`✗ ${baseName}: ${err?.message}`);
+    }
+  }
 }
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -6513,69 +6616,85 @@ Rules:
 
       // Run import in background (fire-and-forget)
       (async () => {
-        const BATCH = 20;
-        const allFiles: Array<{ driveFile: any; type: string }> = [];
-
         for (const [type, folderId] of Object.entries(BEGINNER_DRIVE_FOLDERS)) {
           try {
             job.logs.push(`📂 Listing ${type} folder…`);
-            const driveFiles = await listDriveFolder(folderId, apiKey);
-            const mediaFiles = driveFiles.filter((f: any) => f.mimeType !== "application/vnd.google-apps.folder");
-            job.logs.push(`   ↳ ${mediaFiles.length} files found`);
-            for (const f of mediaFiles) allFiles.push({ driveFile: f, type });
+            const allEntries = await listDriveFolder(folderId, apiKey);
+
+            // Separate ZIPs from plain media files
+            const zipFiles   = allEntries.filter((f: any) => /\.zip$/i.test(f.name));
+            const plainMedia = allEntries.filter((f: any) =>
+              !f.name.toLowerCase().endsWith('.zip') &&
+              f.mimeType !== 'application/vnd.google-apps.folder' &&
+              MEDIA_EXTS.has((f.name.split('.').pop() || '').toLowerCase())
+            );
+
+            job.logs.push(`   ↳ ${zipFiles.length} ZIP(s), ${plainMedia.length} plain media file(s)`);
+
+            // ── Process ZIP files ──────────────────────────────────────────
+            for (const zipFile of zipFiles) {
+              try {
+                job.logs.push(`📦 Downloading ZIP: ${zipFile.name}…`);
+                const zipBuf = await downloadDriveFileBuffer(zipFile.id, apiKey);
+                job.logs.push(`   ↳ ${(zipBuf.length / 1024 / 1024).toFixed(1)} MB — extracting…`);
+                await processZipEntries(zipBuf, zipFile.name, zipFile.id, type, level, job);
+              } catch (err: any) {
+                job.errors.push(`${zipFile.name}: ${err?.message}`);
+                job.logs.push(`✗ ${zipFile.name}: ${err?.message}`);
+              }
+              await new Promise(r => setTimeout(r, 200));
+            }
+
+            // ── Process plain media files (non-ZIP) ────────────────────────
+            for (const driveFile of plainMedia) {
+              try {
+                const compositeId = driveFile.id;
+                const { data: existing } = await supabaseAdmin
+                  .from('headway_media').select('id').eq('drive_file_id', compositeId).maybeSingle();
+                if (existing) {
+                  job.skipped++;
+                  job.logs.push(`↷ Skip (exists): ${driveFile.name}`);
+                  continue;
+                }
+
+                const unitNum = detectUnitNumber(driveFile.name);
+                const ext = (driveFile.name.split('.').pop() || '').toLowerCase();
+                const mime = mimeForExt(ext);
+
+                // Download and re-upload to Supabase Storage
+                const fileBuf = await downloadDriveFileBuffer(driveFile.id, apiKey);
+                const safeName = driveFile.name.replace(/\s+/g, '_');
+                const storagePath = `headway/${level}/${type}/unit${unitNum ?? 0}/${safeName}`;
+                const { error: uploadErr } = await supabaseAdmin.storage
+                  .from('headway-media')
+                  .upload(storagePath, fileBuf, { contentType: mime, upsert: true });
+                if (uploadErr) throw new Error(`Storage: ${uploadErr.message}`);
+
+                const { data: { publicUrl } } = supabaseAdmin.storage.from('headway-media').getPublicUrl(storagePath);
+                const title = safeName.replace(/\.[^.]+$/, '').replace(/[_-]/g, ' ').trim();
+
+                const { error: insErr } = await supabaseAdmin.from('headway_media').insert({
+                  level, unit_number: unitNum, type, title,
+                  file_name: safeName, drive_file_id: compositeId,
+                  url: publicUrl, mime_type: mime,
+                  size_bytes: fileBuf.length,
+                });
+                if (insErr) {
+                  if (insErr.code === '42P01') throw new Error('headway_media table not found — run migration 014');
+                  throw new Error(insErr.message);
+                }
+                job.done++;
+                job.total++;
+                job.logs.push(`✓ ${driveFile.name}${unitNum ? ` → Unit ${unitNum}` : ''}`);
+              } catch (err: any) {
+                job.errors.push(`${driveFile.name}: ${err?.message}`);
+                job.logs.push(`✗ ${driveFile.name}: ${err?.message}`);
+              }
+            }
           } catch (err: any) {
             job.errors.push(`${type}: ${err?.message}`);
-            job.logs.push(`✗ ${type}: ${err?.message}`);
+            job.logs.push(`✗ Folder ${type}: ${err?.message}`);
           }
-        }
-
-        job.total = allFiles.length;
-        job.logs.push(`📊 Total: ${allFiles.length} files to process (batch=${BATCH})`);
-
-        for (let i = 0; i < allFiles.length; i += BATCH) {
-          const batch = allFiles.slice(i, i + BATCH);
-          for (const { driveFile, type } of batch) {
-            try {
-              const { data: existing } = await supabaseAdmin
-                .from("headway_media")
-                .select("id")
-                .eq("drive_file_id", driveFile.id)
-                .maybeSingle();
-
-              if (existing) {
-                job.skipped++;
-                job.logs.push(`↷ Skip (exists): ${driveFile.name}`);
-                continue;
-              }
-
-              const unitNum = detectUnitNumber(driveFile.name);
-              const url = `https://drive.google.com/uc?export=download&id=${driveFile.id}`;
-              const title = driveFile.name.replace(/\.[^.]+$/, "");
-
-              const { error: insErr } = await supabaseAdmin.from("headway_media").insert({
-                level,
-                unit_number: unitNum,
-                type,
-                title,
-                file_name: driveFile.name,
-                drive_file_id: driveFile.id,
-                url,
-                mime_type: driveFile.mimeType,
-                size_bytes: driveFile.size ? parseInt(String(driveFile.size), 10) : null,
-              });
-
-              if (insErr) {
-                if (insErr.code === "42P01") throw new Error("headway_media table not found — run migration 014");
-                throw new Error(insErr.message);
-              }
-              job.done++;
-              job.logs.push(`✓ ${driveFile.name}${unitNum ? ` → Unit ${unitNum}` : ""}`);
-            } catch (err: any) {
-              job.errors.push(`${driveFile.name}: ${err?.message}`);
-              job.logs.push(`✗ ${driveFile.name}: ${err?.message}`);
-            }
-          }
-          await new Promise(r => setTimeout(r, 100));
         }
 
         job.status = job.done === 0 && job.errors.length > 0 ? "error" : "done";
