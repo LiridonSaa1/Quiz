@@ -253,15 +253,27 @@ export default function TeacherModuleDetail() {
       const { data: { session } } = await supabase.auth.getSession();
       if (!session) return;
 
+      let resolvedMod: any = null;
       const { data: mod, error: modErr } = await supabase
-        .from('modules').select('*').eq('id', moduleId).single();
-      if (modErr) throw modErr;
-      setModuleInfo(mod);
+        .from('modules').select('*').eq('id', moduleId).maybeSingle();
+      if (modErr && modErr.code !== 'PGRST116') throw modErr;
+      if (mod) {
+        resolvedMod = mod;
+      } else {
+        // Fallback: fetch via API (uses service role, bypasses RLS)
+        const modRes = await authFetch(`/api/teacher/modules?userId=${encodeURIComponent(session.user.id)}`);
+        if (modRes.ok) {
+          const modJson = await modRes.json();
+          resolvedMod = (modJson.modules || modJson.data || []).find((m: any) => m.id === moduleId) ?? null;
+        }
+        if (!resolvedMod) throw new Error('Module not found or access denied');
+      }
+      setModuleInfo(resolvedMod);
 
-      if (mod?.course_id) {
+      if (resolvedMod?.course_id) {
         const { data: courseData } = await supabase
-          .from('courses').select('id, title, level, language').eq('id', mod.course_id).single();
-        setCourse(courseData);
+          .from('courses').select('id, title, level, language').eq('id', resolvedMod.course_id).maybeSingle();
+        setCourse(courseData ?? null);
       }
 
       let lessonsData: any[] = [];
