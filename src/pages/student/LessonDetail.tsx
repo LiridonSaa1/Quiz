@@ -137,6 +137,17 @@ export default function StudentLessonDetail() {
             } else {
               setOupTab('links');
             }
+            // Load storage media immediately — don't wait for panel interaction
+            setUnitMediaLoading(true);
+            try {
+              const mRes = await authFetch(`/api/teacher/headway/media?levelSlug=${encodeURIComponent(levelObj.slug)}&unitNum=${unitNum}`);
+              if (mRes.ok) {
+                const mJson = await mRes.json();
+                setUnitMedia(mJson.files ?? []);
+              }
+            } catch { /* ignore */ } finally {
+              setUnitMediaLoading(false);
+            }
           }
         }
 
