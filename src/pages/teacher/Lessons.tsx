@@ -17,7 +17,7 @@ import { Lesson } from '../../types';
 import { cn } from '../../lib/utils';
 import { motion, AnimatePresence, useMotionValue, useSpring, useTransform } from 'motion/react';
 import { useTeacherPermissions } from '../../lib/teacherPermissions';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 
 function AnimatedCount({ value }: { value: number }) {
   const motionVal = useMotionValue(0);
@@ -76,6 +76,7 @@ const emptyForm = {
 
 export default function TeacherLessons() {
   const { t } = useTranslation();
+  const navigate = useNavigate();
   const [lessons, setLessons] = useState<Lesson[]>([]);
   const [courses, setCourses] = useState<any[]>([]);
   const [modules, setModules] = useState<any[]>([]);
@@ -463,20 +464,13 @@ export default function TeacherLessons() {
                 My Lessons
               </button>
               <button
-                onClick={() => setActiveTab('headway')}
-                className={cn(
-                  'inline-flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-bold transition-all',
-                  activeTab === 'headway'
-                    ? 'bg-gradient-to-r from-indigo-500 to-violet-600 text-white shadow-md'
-                    : 'text-slate-500 hover:text-slate-700 hover:bg-slate-50'
-                )}>
+                onClick={() => navigate('/teacher/headway-tests')}
+                className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-bold transition-all text-slate-500 hover:text-slate-700 hover:bg-slate-50">
                 <Library className="w-4 h-4" />
-                OUP Headway Library
+                Drive Library
               </button>
             </div>
 
-            {/* Headway OUP Library Tab */}
-            {activeTab === 'headway' && <HeadwayLibraryTab />}
 
             {activeTab === 'myLessons' && !loading && courses.length === 0 && (
               <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className="bg-amber-50 border border-amber-200 rounded-2xl p-5 flex items-start gap-3">
