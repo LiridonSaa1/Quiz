@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next';
 import { Link, useSearchParams } from 'react-router-dom';
 import { supabase } from '../../supabase';
 import StudentLayout from '../../components/layout/StudentLayout';
+import { isMissingCoursesStudentIdsError } from '../../lib/schemaErrors';
 import { motion, AnimatePresence, useMotionValue, useSpring, useTransform } from 'motion/react';
 import {
   Layers, BookOpen, Search, ChevronRight, ChevronLeft,
@@ -78,24 +79,48 @@ export default function StudentModules() {
         if (!session) { setLoading(false); return; }
         const uid = session.user.id;
 
-        // Fetch enrolled published courses (handle missing student_ids gracefully)
+        // Step 1 — get enrolled courses the same way Courses.tsx does:
+        // (a) direct student_ids enrollment, (b) class-based enrollment, (c) available via teacher
+        const [enrolledRes, classesRes, availableRes] = await Promise.all([
+          supabase.from('courses').select('id,title,level,status').contains('student_ids', [uid]),
+          supabase.from('classes').select('course_id').contains('student_ids', [uid]),
+          authFetch('/api/student/courses/available').then((r) => r.json()).catch(() => ({ courses: [] })),
+        ]);
+
         let courseRows: any[] = [];
-        try {
-          const { data } = await supabase
-            .from('courses')
-            .select('id,title,level,status')
-            .eq('status', 'published')
-            .contains('student_ids', [uid]);
-          courseRows = data || [];
-        } catch {
-          try {
-            const { data } = await supabase
+
+        // Direct enrollment (ignore schema-missing errors silently)
+        if (!enrolledRes.error || isMissingCoursesStudentIdsError(enrolledRes.error)) {
+          courseRows = Array.isArray(enrolledRes.data) ? enrolledRes.data : [];
+        }
+
+        // Class-based enrollment — add courses linked via class membership
+        if (!classesRes.error || isMissingCoursesStudentIdsError(classesRes.error)) {
+          const classCourseIds = (Array.isArray(classesRes.data) ? classesRes.data : [])
+            .map((r: any) => String(r.course_id || ''))
+            .filter(Boolean);
+          const missingIds = classCourseIds.filter((cid) => !courseRows.some((c: any) => c.id === cid));
+          if (missingIds.length > 0) {
+            const { data: extra } = await supabase
               .from('courses')
               .select('id,title,level,status')
-              .eq('status', 'published');
-            courseRows = data || [];
-          } catch { courseRows = []; }
+              .in('id', missingIds);
+            if (extra) courseRows = [...courseRows, ...extra];
+          }
         }
+
+        // Available via teacher (covers the no-student_ids fallback path)
+        const available: any[] = Array.isArray(availableRes?.courses) ? availableRes.courses : [];
+        const enrolledIds = new Set(courseRows.map((c: any) => String(c.id)));
+        for (const ac of available) {
+          if (ac?.id && !enrolledIds.has(String(ac.id))) {
+            courseRows.push(ac);
+            enrolledIds.add(String(ac.id));
+          }
+        }
+
+        // Keep only published courses
+        courseRows = courseRows.filter((c: any) => String(c.status || '').toLowerCase() === 'published');
 
         if (!courseRows.length) { setLoading(false); return; }
 
