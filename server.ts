@@ -8141,6 +8141,66 @@ Rules:
     }
   });
 
+  // ─── Update Payment ───────────────────────────────────────────────────────────
+  app.patch('/api/admin/payments/:id', async (req, res) => {
+    try {
+      const { id } = req.params;
+      if (!id) return res.status(400).json({ error: 'Payment ID is required' });
+
+      const {
+        amount,
+        currency,
+        status,
+        method,
+        payment_date,
+        description,
+        reference,
+      } = req.body || {};
+
+      const updates: Record<string, any> = {};
+      if (amount !== undefined) {
+        const numericAmount = Number(amount);
+        if (!Number.isFinite(numericAmount) || numericAmount <= 0)
+          return res.status(400).json({ error: 'Amount must be greater than zero' });
+        updates.amount = numericAmount;
+      }
+      if (currency !== undefined) updates.currency = currency;
+      if (status !== undefined) updates.status = status;
+      if (method !== undefined) updates.method = method;
+      if (payment_date !== undefined) updates.payment_date = payment_date;
+      if (description !== undefined) updates.description = description;
+      if (reference !== undefined) updates.reference = reference;
+
+      const { error } = await supabaseAdmin
+        .from('payments')
+        .update(updates)
+        .eq('id', id);
+      if (error) throw error;
+
+      res.json({ success: true });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message || 'Failed to update payment' });
+    }
+  });
+
+  // ─── Delete Payment ───────────────────────────────────────────────────────────
+  app.delete('/api/admin/payments/:id', async (req, res) => {
+    try {
+      const { id } = req.params;
+      if (!id) return res.status(400).json({ error: 'Payment ID is required' });
+
+      const { error } = await supabaseAdmin
+        .from('payments')
+        .delete()
+        .eq('id', id);
+      if (error) throw error;
+
+      res.json({ success: true });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message || 'Failed to delete payment' });
+    }
+  });
+
   // ─── Student Monthly Payments ────────────────────────────────────────────────
   app.get('/api/admin/student-payments', async (req, res) => {
     try {
