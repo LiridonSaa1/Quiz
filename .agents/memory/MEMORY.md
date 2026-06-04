@@ -1,3 +1,0 @@
-- [Supabase Auth kept](supabase-auth.md) — intentional decision to keep Supabase Auth instead of Replit Auth for this project.
-- [Missing jsonwebtoken](jsonwebtoken.md) — server.ts imports jsonwebtoken; must be installed or server crashes with ERR_MODULE_NOT_FOUND.
-- [Sidebar responsive breakpoints](sidebar-responsive.md) — sidebar uses lg:w-52 xl:w-60 pattern; content uses lg:px-5 xl:px-7; Teacher auto-collapses at <1280px with localStorage persistence.

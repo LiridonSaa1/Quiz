@@ -255,12 +255,12 @@ export default function StudentLayout({ children }: { children: React.ReactNode 
     <div className="min-h-screen bg-slate-50 flex overflow-x-hidden">
 
       {/* ── Desktop Sidebar ── */}
-      <aside className="hidden lg:flex flex-col w-52 xl:w-60 bg-slate-800 fixed h-full z-30 overflow-hidden">
+      <aside className="hidden lg:flex flex-col w-60 bg-slate-800 fixed h-full z-30 overflow-hidden">
         <SidebarContent />
       </aside>
 
       {/* ── Desktop Top Bar ── */}
-      <header className="hidden lg:flex fixed top-0 right-0 lg:left-52 xl:left-60 h-14 bg-white border-b border-slate-200 items-center justify-between px-4 xl:px-6 z-20">
+      <header className="hidden lg:flex fixed top-0 right-0 left-60 h-14 bg-white border-b border-slate-200 items-center justify-between px-6 z-20">
         <span className="text-sm font-semibold text-slate-500 truncate">{currentLabel}</span>
         <div className="flex items-center gap-2 shrink-0">
           <BackendStatus />
@@ -326,7 +326,7 @@ export default function StudentLayout({ children }: { children: React.ReactNode 
 
       {/* ── Main Content ── */}
       <main
-        className="flex-1 lg:ml-52 xl:ml-60 min-h-screen overflow-x-hidden"
+        className="flex-1 lg:ml-60 min-h-screen overflow-x-hidden"
         style={{
           paddingTop: 'var(--header-h)',
           paddingLeft: 'env(safe-area-inset-left)',
@@ -336,7 +336,7 @@ export default function StudentLayout({ children }: { children: React.ReactNode 
       >
         {/* Desktop top offset */}
         <div className="hidden lg:block" style={{ height: '3.5rem' }} />
-        <div className="px-3 sm:px-4 lg:px-5 xl:px-7 py-4 lg:py-5 xl:py-6">
+        <div className="px-3 sm:px-4 md:px-6 lg:px-8 py-6">
           {children}
         </div>
       </main>
