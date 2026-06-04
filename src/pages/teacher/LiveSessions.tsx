@@ -234,7 +234,7 @@ export default function TeacherLiveSessions() {
       const json = await res.json();
       if (!json.success) throw new Error(json.error);
       toast.success(t('liveSessions.sessionStarted'));
-      navigate(`/teacher/live-sessions/${id}/room`);
+      window.open(`/teacher/live-sessions/${id}/room`, '_blank');
       fetchAll();
     } catch (e: unknown) {
       toast.error((e as Error)?.message || t('liveSessions.failedStartSession'));
@@ -380,12 +380,14 @@ export default function TeacherLiveSessions() {
                           <Play className="w-3.5 h-3.5" /> {t('common.play')}
                         </button>
                       )}
-                      <Link
-                        to={`/teacher/live-sessions/${s.id}/room`}
+                      <a
+                        href={`/teacher/live-sessions/${s.id}/room`}
+                        target="_blank"
+                        rel="noopener noreferrer"
                         className="inline-flex flex-1 min-w-[120px] items-center justify-center gap-1.5 px-3 py-2 bg-indigo-600 text-white rounded-xl text-xs font-semibold hover:bg-indigo-700 transition-all shadow-sm"
                       >
                         <Play className="w-3.5 h-3.5" /> {t('liveSessions.enterRoom')}
-                      </Link>
+                      </a>
                       {s.status === 'ended' && s.recording_url && (
                         <a
                           href={s.recording_url}

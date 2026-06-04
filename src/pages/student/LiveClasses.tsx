@@ -214,7 +214,7 @@ export default function StudentLiveClasses() {
                       </div>
                       {isLive && (
                         <button
-                          onClick={() => navigate(`/student/live-sessions/${s.id}`)}
+                          onClick={() => window.open(`/student/live-sessions/${s.id}`, '_blank')}
                           className="shrink-0 flex items-center gap-2 bg-gradient-to-r from-rose-500 to-pink-500 text-white text-xs font-bold px-4 py-2 rounded-xl hover:opacity-90 transition-all shadow-lg shadow-rose-200/60 active:scale-95">
                           <Play className="w-3.5 h-3.5" /> {t('liveClasses.enterRoom')}
                         </button>

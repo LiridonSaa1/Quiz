@@ -276,12 +276,14 @@ export default function AdminLiveSessions() {
                       </div>
                     </div>
                     <div className="mt-4 flex flex-wrap gap-2">
-                      <Link
-                        to={`/admin/live-sessions/${s.id}/room`}
+                      <a
+                        href={`/admin/live-sessions/${s.id}/room`}
+                        target="_blank"
+                        rel="noopener noreferrer"
                         className="inline-flex flex-1 min-w-[120px] items-center justify-center gap-1.5 px-3 py-2 bg-indigo-600 text-white rounded-xl text-xs font-semibold hover:bg-indigo-700 transition-all shadow-sm"
                       >
                         <Play className="w-3.5 h-3.5" /> {t('liveSessions.enterRoom')}
-                      </Link>
+                      </a>
                       <button type="button" onClick={() => openEdit(s)} className="p-2 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-xl transition-all border border-slate-100">
                         <Pencil className="w-4 h-4" />
                       </button>
