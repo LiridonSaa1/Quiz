@@ -6340,6 +6340,99 @@ Rules:
     }
   });
 
+  // ── POST /api/teacher/headway/import-unit-audio — download OUP ZIP, extract & store files ──
+  app.post("/api/teacher/headway/import-unit-audio", async (req: Request, res: Response) => {
+    try {
+      const caller = await assertAuthenticated(req, res);
+      if (!caller) return;
+
+      const level     = typeof req.body?.level     === "string" ? req.body.level.trim()     : "";
+      const levelSlug = typeof req.body?.levelSlug === "string" ? req.body.levelSlug.trim() : "";
+      const unitNum   = Number(req.body?.unitNum ?? 0);
+      const mediaType: "audio" | "video" = req.body?.type === "video" ? "video" : "audio";
+
+      if (!level || !levelSlug || !unitNum) {
+        return res.status(400).json({ error: "level, levelSlug, and unitNum are required" });
+      }
+
+      const levelData = HEADWAY_FULL_DATA[level];
+      if (!levelData) return res.status(400).json({ error: `Unknown level: ${level}` });
+
+      const unit = levelData.units.find((u: HUnit) => u.num === unitNum);
+      if (!unit) return res.status(400).json({ error: `Unit ${unitNum} not found in level ${level}` });
+
+      const zipUrl: string | undefined = mediaType === "video" ? (unit as any).videoZip : (unit as any).audioZip;
+      if (!zipUrl) return res.status(400).json({ error: `No ${mediaType} ZIP available for ${level} Unit ${unitNum}` });
+
+      // Download the ZIP from OUP (publicly accessible, no auth)
+      const zipRes = await fetch(zipUrl, {
+        headers: { "User-Agent": "Mozilla/5.0 (compatible; Headway-Importer/1.0)" },
+        signal: AbortSignal.timeout(60_000),
+      });
+      if (!zipRes.ok) {
+        return res.status(502).json({ error: `OUP server returned ${zipRes.status}: ${zipRes.statusText}` });
+      }
+
+      const zipBuffer = Buffer.from(await zipRes.arrayBuffer());
+
+      // Extract files using unzipper
+      const unzipper = _require("unzipper");
+      const directory = await unzipper.Open.buffer(zipBuffer);
+
+      const allowedExts = mediaType === "video"
+        ? [".mp4", ".webm", ".mov", ".avi", ".mkv", ".m4v"]
+        : [".mp3", ".wav", ".ogg", ".m4a", ".aac", ".flac"];
+
+      const mediaFiles: any[] = (directory.files as any[]).filter((f: any) => {
+        if (f.type !== "File") return false;
+        const ext = f.path.toLowerCase().match(/\.[^.]+$/)?.[0] ?? "";
+        return allowedExts.includes(ext);
+      });
+
+      if (mediaFiles.length === 0) {
+        return res.status(422).json({ error: "No audio/video files found in the ZIP" });
+      }
+
+      const prefix = `${levelSlug}/${unitNum}/${mediaType}`;
+
+      // Get already-uploaded files to skip re-uploading
+      const { data: existing } = await supabaseAdmin.storage.from("headway-media").list(prefix);
+      const existingNames = new Set((existing ?? []).map((f: any) => f.name));
+
+      const results: { name: string; path: string; url: string; type: "audio" | "video" }[] = [];
+
+      for (const file of mediaFiles) {
+        const rawName = (file.path as string).split("/").pop() ?? file.path;
+        const safe = rawName.replace(/[^a-zA-Z0-9._\-() ]/g, "_").replace(/\s+/g, "_");
+        const storagePath = `${prefix}/${safe}`;
+
+        if (existingNames.has(safe)) {
+          // Already stored — just return public URL
+          const { data: { publicUrl } } = supabaseAdmin.storage.from("headway-media").getPublicUrl(storagePath);
+          results.push({ name: safe, path: storagePath, url: publicUrl, type: mediaType });
+          continue;
+        }
+
+        const content: Buffer = await file.buffer();
+        const mimeType = mediaType === "video" ? "video/mp4" : "audio/mpeg";
+
+        const { error: uploadErr } = await supabaseAdmin.storage
+          .from("headway-media")
+          .upload(storagePath, content, { contentType: mimeType, upsert: false });
+
+        if (!uploadErr) {
+          const { data: { publicUrl } } = supabaseAdmin.storage.from("headway-media").getPublicUrl(storagePath);
+          results.push({ name: safe, path: storagePath, url: publicUrl, type: mediaType });
+        }
+      }
+
+      return res.json({ files: results, imported: results.length });
+    } catch (e: any) {
+      console.error("POST /api/teacher/headway/import-unit-audio", e);
+      return res.status(500).json({ error: e?.message || "Server error" });
+    }
+  });
+
   // ── POST /api/teacher/exams/:id/generate-ai-questions — generate exam questions via Gemini ──
   app.post("/api/teacher/exams/:id/generate-ai-questions", async (req: Request, res: Response) => {
     try {

@@ -74,6 +74,7 @@ export default function StudentLessonDetail() {
   const [unitMediaLoading, setUnitMediaLoading] = useState(false);
   const [mediaUploading, setMediaUploading] = useState(false);
   const [attachingPath, setAttachingPath] = useState<string | null>(null);
+  const [importingMedia, setImportingMedia] = useState(false);
   const audioUploadRef = useRef<HTMLInputElement>(null);
   const videoUploadRef = useRef<HTMLInputElement>(null);
 
@@ -193,6 +194,32 @@ export default function StudentLessonDetail() {
       setUnitMediaLoading(false);
     }
   };
+
+  const importUnitMedia = async (mediaType: 'audio' | 'video') => {
+    setImportingMedia(true);
+    try {
+      const res = await authFetch('/api/teacher/headway/import-unit-audio', {
+        method: 'POST',
+        body: JSON.stringify({ level: oupLevelKey, levelSlug: oupLevel, unitNum: oupUnit, type: mediaType }),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json?.error || 'Import failed');
+      toast.success(`${json.imported ?? 0} ${mediaType} track${json.imported !== 1 ? 's' : ''} imported!`);
+      await loadUnitMedia(oupLevel, oupUnit);
+    } catch (err: any) {
+      toast.error(`Import failed: ${err?.message}`);
+    } finally {
+      setImportingMedia(false);
+    }
+  };
+
+  // Auto-load unit media when OUP panel opens or level/unit/tab changes
+  useEffect(() => {
+    if (showOupPanel && (oupTab === 'audio' || oupTab === 'video' || oupTab === 'upload')) {
+      void loadUnitMedia(oupLevel, oupUnit);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [showOupPanel, oupLevel, oupUnit, oupTab]);
 
   const handleMediaUpload = async (e: React.ChangeEvent<HTMLInputElement>, mediaType: 'audio' | 'video') => {
     const fileList = e.target.files;
@@ -632,94 +659,147 @@ export default function StudentLessonDetail() {
                         {/* Audio tab */}
                         {oupTab === 'audio' && (
                           <div className="px-6 pb-6 pt-3 space-y-3">
-                            <div className="rounded-2xl bg-gradient-to-br from-indigo-50 to-violet-50 border border-indigo-100 p-5 flex flex-col sm:flex-row items-center gap-5">
-                              <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-indigo-500 to-violet-600 flex items-center justify-center shadow-lg shadow-indigo-200 shrink-0">
-                                <Headphones className="w-7 h-7 text-white" />
+                            {/* Inline audio players — files already imported/uploaded */}
+                            {unitMediaLoading ? (
+                              <div className="flex items-center gap-2 text-xs text-slate-400 py-2">
+                                <Loader2 className="w-3.5 h-3.5 animate-spin" /> Loading audio tracks…
                               </div>
-                              <div className="flex-1 text-center sm:text-left">
-                                <p className="text-base font-bold text-slate-800">
-                                  {oupLevelKey} — Unit {oupUnit} Audio
-                                </p>
-                                <p className="text-xs text-slate-500 mt-0.5">Student's Book audio. OUP blocks embedding — opens in a new tab.</p>
+                            ) : unitMedia.filter(f => f.type === 'audio').length > 0 ? (
+                              <div className="rounded-2xl bg-gradient-to-br from-indigo-50 to-violet-50 border border-indigo-100 p-4 space-y-3">
+                                <div className="flex items-center gap-2">
+                                  <Headphones className="w-4 h-4 text-indigo-600" />
+                                  <span className="text-sm font-bold text-indigo-800">
+                                    {oupLevelKey} — Unit {oupUnit} ({unitMedia.filter(f => f.type === 'audio').length} tracks)
+                                  </span>
+                                </div>
+                                {unitMedia.filter(f => f.type === 'audio').sort((a, b) => a.name.localeCompare(b.name)).map(f => (
+                                  <div key={f.path} className="space-y-1">
+                                    <p className="text-xs font-semibold text-slate-600 truncate">{f.name.replace(/\.[^.]+$/, '')}</p>
+                                    <audio
+                                      controls
+                                      src={f.url}
+                                      className="w-full"
+                                      style={{ borderRadius: '10px', height: '40px' }}
+                                    />
+                                  </div>
+                                ))}
                               </div>
+                            ) : null}
+
+                            {/* Import from OUP button — teachers only */}
+                            {isTeacher && audioZip && (
+                              <button
+                                onClick={() => void importUnitMedia('audio')}
+                                disabled={importingMedia || unitMediaLoading}
+                                className="w-full flex items-center justify-center gap-2 px-4 py-3 rounded-2xl border-2 border-dashed border-indigo-300 bg-indigo-50 hover:bg-indigo-100 transition-colors text-sm font-bold text-indigo-700 disabled:opacity-60"
+                              >
+                                {importingMedia
+                                  ? <><Loader2 className="w-4 h-4 animate-spin" /> Importing from OUP…</>
+                                  : <><Download className="w-4 h-4" /> Import Audio from OUP</>}
+                              </button>
+                            )}
+
+                            {/* External fallback links */}
+                            <div className="flex flex-col gap-2">
                               <a
                                 href={`${OUP_BASE}/${oupLevel}/audiodl${CC}`}
                                 target="_blank" rel="noopener noreferrer"
-                                className="shrink-0 inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-indigo-600 text-white text-sm font-bold hover:bg-indigo-700 transition-colors shadow-md shadow-indigo-200"
+                                className="flex items-center gap-3 p-3 rounded-xl border border-indigo-100 bg-white hover:bg-indigo-50 transition-all group"
                               >
-                                <Headphones className="w-4 h-4" /> Open Player
+                                <Headphones className="w-4 h-4 text-indigo-500 shrink-0" />
+                                <span className="text-xs font-semibold text-slate-700 flex-1">Open OUP Audio Player</span>
+                                <ExternalLink className="w-3.5 h-3.5 text-slate-300 group-hover:text-indigo-500 shrink-0" />
                               </a>
+                              {audioZip && (
+                                <a
+                                  href={audioZip}
+                                  target="_blank" rel="noopener noreferrer"
+                                  className="flex items-center gap-3 p-3 rounded-xl border border-indigo-100 bg-white hover:bg-indigo-50 transition-all group"
+                                >
+                                  <Download className="w-4 h-4 text-indigo-400 shrink-0" />
+                                  <span className="text-xs font-semibold text-slate-700 flex-1">Download Unit {oupUnit} Audio (ZIP)</span>
+                                  <ExternalLink className="w-3.5 h-3.5 text-slate-300 group-hover:text-indigo-500 shrink-0" />
+                                </a>
+                              )}
                             </div>
-                            {audioZip && (
-                              <a
-                                href={audioZip}
-                                target="_blank" rel="noopener noreferrer"
-                                className="flex items-center gap-3 p-4 rounded-2xl border border-indigo-200 bg-white hover:bg-indigo-50 transition-all group"
-                              >
-                                <div className="w-10 h-10 rounded-xl bg-indigo-100 flex items-center justify-center shrink-0">
-                                  <Download className="w-5 h-5 text-indigo-600" />
-                                </div>
-                                <div className="flex-1 min-w-0">
-                                  <p className="text-sm font-bold text-slate-800">Download Unit {oupUnit} Audio (ZIP)</p>
-                                  <p className="text-xs text-slate-500 mt-0.5 truncate">{audioZip}</p>
-                                </div>
-                                <ExternalLink className="w-4 h-4 text-indigo-400 group-hover:text-indigo-600 shrink-0" />
-                              </a>
-                            )}
                           </div>
                         )}
 
                         {/* Video tab */}
                         {oupTab === 'video' && (
                           <div className="px-6 pb-6 pt-3 space-y-3">
-                            <div className="rounded-2xl bg-gradient-to-br from-rose-50 to-orange-50 border border-rose-100 p-5 flex flex-col sm:flex-row items-center gap-5">
-                              <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-rose-500 to-orange-500 flex items-center justify-center shadow-lg shadow-rose-200 shrink-0">
-                                <Video className="w-7 h-7 text-white" />
+                            {/* Inline video players — files already imported/uploaded */}
+                            {unitMediaLoading ? (
+                              <div className="flex items-center gap-2 text-xs text-slate-400 py-2">
+                                <Loader2 className="w-3.5 h-3.5 animate-spin" /> Loading video files…
                               </div>
-                              <div className="flex-1 text-center sm:text-left">
-                                <p className="text-base font-bold text-slate-800">
-                                  {oupLevelKey} — Unit {oupUnit} Video
-                                </p>
-                                <p className="text-xs text-slate-500 mt-0.5">Video clips with script &amp; tasks. OUP blocks embedding — opens in a new tab.</p>
+                            ) : unitMedia.filter(f => f.type === 'video').length > 0 ? (
+                              <div className="rounded-2xl bg-gradient-to-br from-rose-50 to-orange-50 border border-rose-100 p-4 space-y-3">
+                                <div className="flex items-center gap-2">
+                                  <Video className="w-4 h-4 text-rose-600" />
+                                  <span className="text-sm font-bold text-rose-800">
+                                    {oupLevelKey} — Unit {oupUnit} ({unitMedia.filter(f => f.type === 'video').length} clips)
+                                  </span>
+                                </div>
+                                {unitMedia.filter(f => f.type === 'video').sort((a, b) => a.name.localeCompare(b.name)).map(f => (
+                                  <div key={f.path} className="space-y-1">
+                                    <p className="text-xs font-semibold text-slate-600 truncate">{f.name.replace(/\.[^.]+$/, '')}</p>
+                                    <video
+                                      controls
+                                      src={f.url}
+                                      className="w-full rounded-xl"
+                                      style={{ background: '#1e1e2e', maxHeight: '320px' }}
+                                    />
+                                  </div>
+                                ))}
                               </div>
+                            ) : null}
+
+                            {/* Import from OUP button — teachers only */}
+                            {isTeacher && videoZip && (
+                              <button
+                                onClick={() => void importUnitMedia('video')}
+                                disabled={importingMedia || unitMediaLoading}
+                                className="w-full flex items-center justify-center gap-2 px-4 py-3 rounded-2xl border-2 border-dashed border-rose-300 bg-rose-50 hover:bg-rose-100 transition-colors text-sm font-bold text-rose-700 disabled:opacity-60"
+                              >
+                                {importingMedia
+                                  ? <><Loader2 className="w-4 h-4 animate-spin" /> Importing from OUP…</>
+                                  : <><Download className="w-4 h-4" /> Import Video from OUP</>}
+                              </button>
+                            )}
+
+                            {/* External fallback links */}
+                            <div className="flex flex-col gap-2">
+                              <a
+                                href={eeUrl}
+                                target="_blank" rel="noopener noreferrer"
+                                className="flex items-center gap-3 p-3 rounded-xl border border-teal-100 bg-white hover:bg-teal-50 transition-all group"
+                              >
+                                <Globe className="w-4 h-4 text-teal-500 shrink-0" />
+                                <span className="text-xs font-semibold text-slate-700 flex-1">Everyday English — Unit {oupUnit}</span>
+                                <ExternalLink className="w-3.5 h-3.5 text-slate-300 group-hover:text-teal-500 shrink-0" />
+                              </a>
                               <a
                                 href={`${OUP_BASE}/${oupLevel}/video_bandw${CC}`}
                                 target="_blank" rel="noopener noreferrer"
-                                className="shrink-0 inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-rose-600 text-white text-sm font-bold hover:bg-rose-700 transition-colors shadow-md shadow-rose-200"
+                                className="flex items-center gap-3 p-3 rounded-xl border border-rose-100 bg-white hover:bg-rose-50 transition-all group"
                               >
-                                <Video className="w-4 h-4" /> Open Player
+                                <Video className="w-4 h-4 text-rose-400 shrink-0" />
+                                <span className="text-xs font-semibold text-slate-700 flex-1">Open OUP Video Player</span>
+                                <ExternalLink className="w-3.5 h-3.5 text-slate-300 group-hover:text-rose-500 shrink-0" />
                               </a>
+                              {videoZip && (
+                                <a
+                                  href={videoZip}
+                                  target="_blank" rel="noopener noreferrer"
+                                  className="flex items-center gap-3 p-3 rounded-xl border border-rose-100 bg-white hover:bg-rose-50 transition-all group"
+                                >
+                                  <Download className="w-4 h-4 text-rose-400 shrink-0" />
+                                  <span className="text-xs font-semibold text-slate-700 flex-1">Download Unit {oupUnit} Video (ZIP)</span>
+                                  <ExternalLink className="w-3.5 h-3.5 text-slate-300 group-hover:text-rose-500 shrink-0" />
+                                </a>
+                              )}
                             </div>
-                            <a
-                              href={eeUrl}
-                              target="_blank" rel="noopener noreferrer"
-                              className="flex items-center gap-3 p-4 rounded-2xl border border-teal-200 bg-white hover:bg-teal-50 transition-all group"
-                            >
-                              <div className="w-10 h-10 rounded-xl bg-teal-100 flex items-center justify-center shrink-0">
-                                <Globe className="w-5 h-5 text-teal-600" />
-                              </div>
-                              <div className="flex-1">
-                                <p className="text-sm font-bold text-slate-800">Everyday English — Unit {oupUnit}</p>
-                                <p className="text-xs text-slate-500 mt-0.5">Listen &amp; practise dialogues for this unit</p>
-                              </div>
-                              <ExternalLink className="w-4 h-4 text-teal-400 group-hover:text-teal-600 shrink-0" />
-                            </a>
-                            {videoZip && (
-                              <a
-                                href={videoZip}
-                                target="_blank" rel="noopener noreferrer"
-                                className="flex items-center gap-3 p-4 rounded-2xl border border-rose-200 bg-white hover:bg-rose-50 transition-all group"
-                              >
-                                <div className="w-10 h-10 rounded-xl bg-rose-100 flex items-center justify-center shrink-0">
-                                  <Download className="w-5 h-5 text-rose-600" />
-                                </div>
-                                <div className="flex-1 min-w-0">
-                                  <p className="text-sm font-bold text-slate-800">Download Unit {oupUnit} Video (ZIP)</p>
-                                  <p className="text-xs text-slate-500 mt-0.5 truncate">{videoZip}</p>
-                                </div>
-                                <ExternalLink className="w-4 h-4 text-rose-400 group-hover:text-rose-600 shrink-0" />
-                              </a>
-                            )}
                           </div>
                         )}
 
