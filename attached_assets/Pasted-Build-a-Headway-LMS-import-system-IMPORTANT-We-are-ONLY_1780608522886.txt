@@ -1,0 +1,86 @@
+Build a Headway LMS import system.
+
+IMPORTANT:
+We are ONLY working with ONE level for now:
+LEVEL = Beginner
+
+The structure (modules, lessons, media) is the same for all future levels, but currently ONLY import Beginner data.
+
+GOAL:
+Import Google Drive resources and map them into existing or auto-created modules and lessons.
+
+GOOGLE DRIVE SOURCES (BEGINNER ONLY):
+
+1. Student's Book Audio:
+https://drive.google.com/drive/folders/12Mmg0fjHxRhglHgKag9bP5QGGo7sNkx-?usp=sharing
+
+2. Workbook Audio:
+https://drive.google.com/drive/folders/1jX0bv2qQDRyhedO7qfvu5yjb97qDazQu?usp=sharing
+
+3. Video:
+https://drive.google.com/drive/folders/15HmRs-8kRI4C1Uzp5iwz-TE4c02lEuCc?usp=sharing
+
+SYSTEM RULES:
+
+1. LEVEL HANDLING:
+- All imported data MUST be assigned to:
+  level = "Beginner"
+
+2. STRUCTURE:
+Modules → Lessons → Media
+
+- Modules are auto-created if not existing
+- Lessons are auto-created based on Unit detection
+- Media is attached to lessons or modules
+
+3. MEDIA TYPES:
+- student_audio
+- workbook_audio
+- video
+
+4. AUTO MAPPING:
+- Detect "Unit X" from filename
+- Assign:
+  - module = Beginner
+  - lesson = Unit X
+
+5. DATABASE TABLE:
+headway_media:
+- id
+- level (Beginner)
+- module_id
+- lesson_id (nullable)
+- type
+- title
+- file_name
+- drive_file_id
+- url (streamable)
+- created_at
+
+6. MODULE PAGE:
+- Show ALL media grouped by type
+
+7. LESSON PAGE:
+- Show ONLY lesson-specific media
+- If no lesson media exists → fallback to module media
+
+8. QUIZ INTEGRATION:
+- When a quiz is created for a lesson/module:
+  automatically attach related media by unit_number
+
+9. STREAMING:
+- All media must be playable inside platform using:
+  HTML5 audio/video player
+
+10. IMPORT SYSTEM:
+- Use queue jobs
+- Batch size: 20 files
+- Show progress logs
+
+11. DUPLICATES:
+- Prevent duplicates using drive_file_id
+
+12. IMPORTANT:
+- Do NOT create separate logic per level
+- System must be scalable for future levels (Pre-Intermediate, Intermediate, etc.)
+- But currently ONLY import Beginner

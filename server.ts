@@ -52,6 +52,62 @@ function seededShuffle<T>(arr: T[], seed: string): T[] {
   return out;
 }
 
+// ── Google Drive Import — module-level job store + helpers ────────────────
+interface DriveImportJob {
+  status: 'running' | 'done' | 'error';
+  total: number;
+  done: number;
+  skipped: number;
+  errors: string[];
+  logs: string[];
+}
+const driveImportJobs = new Map<string, DriveImportJob>();
+
+const DRIVE_API_BASE = 'https://www.googleapis.com/drive/v3';
+const BEGINNER_DRIVE_FOLDERS: Record<string, string> = {
+  student_audio: '12Mmg0fjHxRhglHgKag9bP5QGGo7sNkx-',
+  workbook_audio: '1jX0bv2qQDRyhedO7qfvu5yjb97qDazQu',
+  video: '15HmRs-8kRI4C1Uzp5iwz-TE4c02lEuCc',
+};
+
+function detectUnitNumber(filename: string): number | null {
+  const patterns = [
+    /unit[\s_\-.]*0?(\d{1,2})/i,
+    /\bu0?(\d{1,2})\b/i,
+    /_0?(\d{1,2})[_\s]/,
+    /^0?(\d{1,2})[_\s\-.]/,
+  ];
+  for (const pat of patterns) {
+    const m = filename.match(pat);
+    if (m) {
+      const n = parseInt(m[1], 10);
+      if (n >= 1 && n <= 20) return n;
+    }
+  }
+  return null;
+}
+
+async function listDriveFolder(folderId: string, apiKey: string): Promise<any[]> {
+  const files: any[] = [];
+  let pageToken = '';
+  do {
+    const q = encodeURIComponent(`'${folderId}' in parents and trashed = false`);
+    const fields = encodeURIComponent('nextPageToken,files(id,name,size,mimeType,modifiedTime)');
+    let url = `${DRIVE_API_BASE}/files?q=${q}&key=${apiKey}&fields=${fields}&pageSize=200`;
+    if (pageToken) url += `&pageToken=${encodeURIComponent(pageToken)}`;
+    const resp = await fetch(url);
+    if (!resp.ok) {
+      const txt = await resp.text();
+      throw new Error(`Drive API ${resp.status}: ${txt.slice(0, 200)}`);
+    }
+    const data = await resp.json() as any;
+    files.push(...(data.files ?? []));
+    pageToken = data.nextPageToken ?? '';
+  } while (pageToken);
+  return files;
+}
+// ─────────────────────────────────────────────────────────────────────────────
+
 const getPool = async () => {
   const connectionString = process.env.DATABASE_URL?.trim();
   if (!connectionString) return null;
@@ -6430,6 +6486,217 @@ Rules:
     } catch (e: any) {
       console.error("POST /api/teacher/headway/import-unit-audio", e);
       return res.status(500).json({ error: e?.message || "Server error" });
+    }
+  });
+
+  // ── GET /api/teacher/headway/drive-config ────────────────────────────────
+  app.get("/api/teacher/headway/drive-config", (_req: Request, res: Response) => {
+    return res.json({ configured: Boolean(process.env.GOOGLE_API_KEY?.trim()) });
+  });
+
+  // ── POST /api/teacher/headway/drive-import/start ─────────────────────────
+  app.post("/api/teacher/headway/drive-import/start", async (req: Request, res: Response) => {
+    try {
+      const caller = await assertAuthenticated(req, res);
+      if (!caller) return;
+      if (!["admin", "teacher"].includes(caller.role)) return res.status(403).json({ error: "Forbidden" });
+
+      const apiKey = process.env.GOOGLE_API_KEY?.trim();
+      if (!apiKey) return res.status(503).json({ error: "GOOGLE_API_KEY not configured in Replit Secrets" });
+
+      const level = String(req.body?.level || "Beginner").trim();
+      const jobId = `hw-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+      const job: DriveImportJob = { status: "running", total: 0, done: 0, skipped: 0, errors: [], logs: [] };
+      driveImportJobs.set(jobId, job);
+
+      res.json({ jobId });
+
+      // Run import in background (fire-and-forget)
+      (async () => {
+        const BATCH = 20;
+        const allFiles: Array<{ driveFile: any; type: string }> = [];
+
+        for (const [type, folderId] of Object.entries(BEGINNER_DRIVE_FOLDERS)) {
+          try {
+            job.logs.push(`📂 Listing ${type} folder…`);
+            const driveFiles = await listDriveFolder(folderId, apiKey);
+            const mediaFiles = driveFiles.filter((f: any) => f.mimeType !== "application/vnd.google-apps.folder");
+            job.logs.push(`   ↳ ${mediaFiles.length} files found`);
+            for (const f of mediaFiles) allFiles.push({ driveFile: f, type });
+          } catch (err: any) {
+            job.errors.push(`${type}: ${err?.message}`);
+            job.logs.push(`✗ ${type}: ${err?.message}`);
+          }
+        }
+
+        job.total = allFiles.length;
+        job.logs.push(`📊 Total: ${allFiles.length} files to process (batch=${BATCH})`);
+
+        for (let i = 0; i < allFiles.length; i += BATCH) {
+          const batch = allFiles.slice(i, i + BATCH);
+          for (const { driveFile, type } of batch) {
+            try {
+              const { data: existing } = await supabaseAdmin
+                .from("headway_media")
+                .select("id")
+                .eq("drive_file_id", driveFile.id)
+                .maybeSingle();
+
+              if (existing) {
+                job.skipped++;
+                job.logs.push(`↷ Skip (exists): ${driveFile.name}`);
+                continue;
+              }
+
+              const unitNum = detectUnitNumber(driveFile.name);
+              const url = `https://drive.google.com/uc?export=download&id=${driveFile.id}`;
+              const title = driveFile.name.replace(/\.[^.]+$/, "");
+
+              const { error: insErr } = await supabaseAdmin.from("headway_media").insert({
+                level,
+                unit_number: unitNum,
+                type,
+                title,
+                file_name: driveFile.name,
+                drive_file_id: driveFile.id,
+                url,
+                mime_type: driveFile.mimeType,
+                size_bytes: driveFile.size ? parseInt(String(driveFile.size), 10) : null,
+              });
+
+              if (insErr) {
+                if (insErr.code === "42P01") throw new Error("headway_media table not found — run migration 014");
+                throw new Error(insErr.message);
+              }
+              job.done++;
+              job.logs.push(`✓ ${driveFile.name}${unitNum ? ` → Unit ${unitNum}` : ""}`);
+            } catch (err: any) {
+              job.errors.push(`${driveFile.name}: ${err?.message}`);
+              job.logs.push(`✗ ${driveFile.name}: ${err?.message}`);
+            }
+          }
+          await new Promise(r => setTimeout(r, 100));
+        }
+
+        job.status = job.done === 0 && job.errors.length > 0 ? "error" : "done";
+        job.logs.push(`🏁 Done — ${job.done} imported, ${job.skipped} skipped, ${job.errors.length} errors`);
+      })().catch(err => {
+        job.status = "error";
+        job.errors.push(String(err?.message || err));
+        job.logs.push(`✗ Fatal: ${err?.message}`);
+      });
+    } catch (e: any) {
+      console.error("POST /api/teacher/headway/drive-import/start", e);
+      return res.status(500).json({ error: e?.message || "Server error" });
+    }
+  });
+
+  // ── GET /api/teacher/headway/drive-import/:jobId — poll progress ──────────
+  app.get("/api/teacher/headway/drive-import/:jobId", async (req: Request, res: Response) => {
+    try {
+      const caller = await assertAuthenticated(req, res);
+      if (!caller) return;
+      const job = driveImportJobs.get(req.params.jobId);
+      if (!job) return res.status(404).json({ error: "Job not found" });
+      return res.json(job);
+    } catch (e: any) {
+      return res.status(500).json({ error: e?.message });
+    }
+  });
+
+  // ── GET /api/teacher/headway/drive-media — list imported Drive media ──────
+  app.get("/api/teacher/headway/drive-media", async (req: Request, res: Response) => {
+    try {
+      const caller = await assertAuthenticated(req, res);
+      if (!caller) return;
+      const level   = typeof req.query.level === "string" ? req.query.level : "Beginner";
+      const unitNum = req.query.unit ? parseInt(String(req.query.unit), 10) : undefined;
+      const type    = typeof req.query.type === "string" ? req.query.type : undefined;
+
+      let q = supabaseAdmin
+        .from("headway_media")
+        .select("*")
+        .eq("level", level)
+        .order("unit_number", { ascending: true, nullsFirst: false })
+        .order("file_name",   { ascending: true });
+
+      if (unitNum) q = (q as any).eq("unit_number", unitNum);
+      if (type)    q = (q as any).eq("type", type);
+
+      const { data, error } = await q;
+      if (error) {
+        if (error.code === "42P01") return res.json({ media: [] }); // table not yet created
+        throw error;
+      }
+      return res.json({ media: data ?? [] });
+    } catch (e: any) {
+      console.error("GET /api/teacher/headway/drive-media", e);
+      return res.status(500).json({ error: e?.message });
+    }
+  });
+
+  // ── DELETE /api/teacher/headway/drive-media/:id ────────────────────────────
+  app.delete("/api/teacher/headway/drive-media/:id", async (req: Request, res: Response) => {
+    try {
+      const caller = await assertAuthenticated(req, res);
+      if (!caller) return;
+      if (!["admin", "teacher"].includes(caller.role)) return res.status(403).json({ error: "Forbidden" });
+      const { error } = await supabaseAdmin.from("headway_media").delete().eq("id", req.params.id);
+      if (error) throw error;
+      return res.json({ success: true });
+    } catch (e: any) {
+      return res.status(500).json({ error: e?.message });
+    }
+  });
+
+  // ── GET /api/teacher/headway/drive-stream/:fileId — proxy Drive file ───────
+  app.get("/api/teacher/headway/drive-stream/:fileId", async (req: Request, res: Response) => {
+    try {
+      const caller = await assertAuthenticated(req, res);
+      if (!caller) return;
+      const fileId = String(req.params.fileId || "").trim();
+      if (!fileId) return res.status(400).json({ error: "fileId required" });
+
+      const apiKey = process.env.GOOGLE_API_KEY?.trim();
+      const downloadUrl = apiKey
+        ? `${DRIVE_API_BASE}/files/${encodeURIComponent(fileId)}?alt=media&key=${apiKey}`
+        : `https://drive.google.com/uc?export=download&id=${encodeURIComponent(fileId)}`;
+
+      const reqHeaders: Record<string, string> = { "User-Agent": "Mozilla/5.0" };
+      if (req.headers.range) reqHeaders["Range"] = req.headers.range;
+
+      const driveRes = await fetch(downloadUrl, { headers: reqHeaders, redirect: "follow" });
+
+      if (!driveRes.ok && driveRes.status !== 206) {
+        return res.status(driveRes.status).json({ error: `Drive returned ${driveRes.status}` });
+      }
+
+      const ct = driveRes.headers.get("content-type") || "application/octet-stream";
+      const cl = driveRes.headers.get("content-length");
+      const cr = driveRes.headers.get("content-range");
+
+      res.setHeader("Content-Type", ct);
+      res.setHeader("Accept-Ranges", "bytes");
+      res.setHeader("Cache-Control", "public, max-age=3600");
+      if (cl) res.setHeader("Content-Length", cl);
+      if (cr) res.setHeader("Content-Range", cr);
+      if (req.headers.range) res.status(206);
+
+      if (!driveRes.body) return res.status(500).json({ error: "No body from Drive" });
+
+      // Stream response body to client
+      const reader = driveRes.body.getReader();
+      const pump = (): void => {
+        reader.read().then(({ done, value }) => {
+          if (done) { res.end(); return; }
+          res.write(Buffer.from(value));
+          pump();
+        }).catch(() => { try { res.end(); } catch { /**/ } });
+      };
+      pump();
+    } catch (e: any) {
+      console.error("GET /api/teacher/headway/drive-stream", e);
+      if (!res.headersSent) res.status(500).json({ error: e?.message });
     }
   });
 

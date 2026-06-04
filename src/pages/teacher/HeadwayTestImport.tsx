@@ -4,12 +4,13 @@ import {
   FlaskConical, ExternalLink, Globe, ChevronRight, ArrowLeft,
   BookOpen, Headphones, Video, Play, Layers, Download, CheckCircle2,
   Loader2, ChevronDown, X, Import, Eye, ChevronLeft, ChevronRight as ChevronRightIcon,
-  RefreshCw,
+  RefreshCw, HardDrive,
 } from 'lucide-react';
 import TeacherLayout from '../../components/layout/TeacherLayout';
 import { motion, AnimatePresence } from 'motion/react';
 import { supabase } from '../../supabase';
 import { authFetch } from '../../lib/apiUrl';
+import HeadwayDriveImport from '../../components/teacher/HeadwayDriveImport';
 import { toast } from 'sonner';
 import {
   HEADWAY_FULL_DATA,
@@ -49,6 +50,7 @@ interface ImportProgress {
 export default function HeadwayTestImport() {
   const navigate = useNavigate();
   const [activeLevel, setActiveLevel] = useState(LEVELS[2]);
+  const [mainTab, setMainTab] = useState<'oup' | 'drive'>('oup');
 
   // Import-to-course state
   const [showImportPanel, setShowImportPanel] = useState(false);
@@ -258,6 +260,34 @@ export default function HeadwayTestImport() {
         </div>
 
         <div className="px-6 sm:px-8 lg:px-10 py-8 bg-slate-50 space-y-6">
+
+          {/* Main tab switcher */}
+          <div className="flex items-center gap-2 p-1 rounded-2xl bg-white border border-slate-200 w-fit shadow-sm">
+            <button
+              onClick={() => setMainTab('oup')}
+              className={`inline-flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-bold transition-all ${
+                mainTab === 'oup' ? 'bg-gradient-to-r from-blue-600 to-indigo-700 text-white shadow-sm' : 'text-slate-500 hover:bg-slate-50'
+              }`}>
+              <BookOpen className="w-4 h-4" /> OUP Resources
+            </button>
+            <button
+              onClick={() => setMainTab('drive')}
+              className={`inline-flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-bold transition-all ${
+                mainTab === 'drive' ? 'bg-gradient-to-r from-sky-500 to-indigo-600 text-white shadow-sm' : 'text-slate-500 hover:bg-slate-50'
+              }`}>
+              <HardDrive className="w-4 h-4" /> Drive Library
+            </button>
+          </div>
+
+          {/* Drive Library tab */}
+          {mainTab === 'drive' && (
+            <div className="rounded-3xl">
+              <HeadwayDriveImport />
+            </div>
+          )}
+
+          {/* OUP content — all in one fragment so sections stay as siblings */}
+          {mainTab === 'oup' && <>
 
           {/* Level Selector */}
           <div>
@@ -564,6 +594,8 @@ export default function HeadwayTestImport() {
               </div>
             </div>
           </div>
+
+          </>}
 
         </div>
       </div>
