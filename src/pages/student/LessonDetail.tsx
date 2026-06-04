@@ -5,19 +5,20 @@ import { Link, useParams } from 'react-router-dom';
 import StudentLayout from '../../components/layout/StudentLayout';
 import { supabase } from '../../supabase';
 import { authFetch } from '../../lib/apiUrl';
-import { BookOpen, ArrowLeft, Clock, CheckCircle2, Circle, Play, Video, Headphones, FileText, AlignLeft, Globe, ExternalLink, ChevronDown, ChevronRight } from 'lucide-react';
+import { BookOpen, ArrowLeft, Clock, CheckCircle2, Circle, Play, Video, Headphones, FileText, AlignLeft, Globe, ExternalLink, ChevronDown, ChevronRight, Download } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import LessonDiscussionBoard from '../../components/discussion/LessonDiscussionBoard';
+import { HEADWAY_FULL_DATA } from '../../lib/headwayData';
 
 const OUP_BASE = 'https://elt.oup.com/student/headway';
 const CC = '?cc=global&selLanguage=en';
 const HEADWAY_LEVELS = [
-  { key: 'Beginner', slug: 'beg' },
-  { key: 'Elementary', slug: 'elementary4' },
-  { key: 'Pre-Intermediate', slug: 'preint4' },
-  { key: 'Intermediate', slug: 'int5' },
+  { key: 'Beginner',           slug: 'beg' },
+  { key: 'Elementary',         slug: 'elementary4' },
+  { key: 'Pre-Intermediate',   slug: 'preint4' },
+  { key: 'Intermediate',       slug: 'int5' },
   { key: 'Upper-Intermediate', slug: 'upperint5' },
-  { key: 'Advanced', slug: 'adv4' },
+  { key: 'Advanced',           slug: 'adv4' },
 ];
 
 type LessonDetailRow = {
@@ -64,6 +65,7 @@ export default function StudentLessonDetail() {
   const lastSyncRef = useRef<number>(0);
   const [showOupPanel, setShowOupPanel] = useState(false);
   const [oupLevel, setOupLevel] = useState('preint4');
+  const [oupLevelKey, setOupLevelKey] = useState('Pre-Intermediate');
   const [oupUnit, setOupUnit] = useState(1);
   const [oupTab, setOupTab] = useState<'audio' | 'video' | 'links'>('audio');
 
@@ -102,6 +104,28 @@ export default function StudentLessonDetail() {
         setContents(contentRows);
         setCompleted(Boolean(progress?.completed));
         setLastVideoPosition(Number(progress?.last_video_position || 0));
+
+        // Auto-detect Headway lesson tag and pre-fill OUP panel
+        const hwMatch = (found.short_description || '').match(/headway:([^:\n]+):(\d+)/);
+        if (hwMatch) {
+          const levelKey = hwMatch[1].trim();
+          const unitNum = Number(hwMatch[2]);
+          const levelObj = HEADWAY_LEVELS.find(l => l.key === levelKey);
+          if (levelObj) {
+            setOupLevel(levelObj.slug);
+            setOupLevelKey(levelKey);
+            setOupUnit(unitNum);
+            setShowOupPanel(true);
+            const lTitle = String(found.title || '').toLowerCase();
+            if (lTitle.includes('audio') || lTitle.includes("student's book audio")) {
+              setOupTab('audio');
+            } else if (lTitle.includes('video') || lTitle.includes('everyday english')) {
+              setOupTab('video');
+            } else {
+              setOupTab('links');
+            }
+          }
+        }
 
         const availableTabs = new Set(contentRows.map((c: LessonContentRow) => c.type));
         if (availableTabs.has('video')) setActiveTab('video');
@@ -441,142 +465,231 @@ export default function StudentLessonDetail() {
               {showOupPanel && (
                 <div className="border-t border-slate-100">
                   {/* Controls row */}
-                  <div className="flex flex-wrap items-center gap-3 px-6 py-3 bg-slate-50">
-                    <div className="flex items-center gap-2">
-                      <label className="text-xs font-bold text-slate-600 shrink-0">Level:</label>
-                      <select
-                        value={oupLevel}
-                        onChange={e => { setOupLevel(e.target.value); setOupUnit(1); }}
-                        className="px-3 py-1.5 rounded-lg border border-slate-200 text-sm bg-white"
-                      >
-                        {HEADWAY_LEVELS.map(l => (
-                          <option key={l.slug} value={l.slug}>{l.key}</option>
-                        ))}
-                      </select>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <label className="text-xs font-bold text-slate-600 shrink-0">Unit:</label>
-                      <select
-                        value={oupUnit}
-                        onChange={e => setOupUnit(Number(e.target.value))}
-                        className="px-3 py-1.5 rounded-lg border border-slate-200 text-sm bg-white"
-                      >
-                        {Array.from({ length: oupLevel === 'beg' ? 14 : 12 }, (_, i) => i + 1).map(n => (
-                          <option key={n} value={n}>Unit {n}</option>
-                        ))}
-                      </select>
-                    </div>
-                    <div className="ml-auto flex items-center gap-1 p-1 rounded-xl bg-white border border-slate-200">
-                      {([
-                        { id: 'audio', icon: '🎧', label: 'Audio' },
-                        { id: 'video', icon: '🎬', label: 'Video' },
-                        { id: 'links', icon: '🔗', label: 'Links' },
-                      ] as const).map(tab => (
-                        <button
-                          key={tab.id}
-                          onClick={() => setOupTab(tab.id)}
-                          className={cn(
-                            'flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all',
-                            oupTab === tab.id ? 'bg-indigo-600 text-white shadow-sm' : 'text-slate-600 hover:bg-slate-100'
-                          )}
-                        >
-                          <span>{tab.icon}</span> {tab.label}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
+                  {(() => {
+                    const hwLevelData = HEADWAY_FULL_DATA[oupLevelKey];
+                    const hwUnit = hwLevelData?.units.find(u => u.num === oupUnit);
+                    const unitSlug = String(oupUnit).padStart(2, '0');
+                    const eeUrl = hwUnit
+                      ? `${OUP_BASE}/${hwLevelData.slug}/everydayenglish/${hwUnit.eeSlug}/${CC}`
+                      : `${OUP_BASE}/${oupLevel}/everydayenglish/unit${unitSlug}/${CC}`;
+                    const audioZip: string | undefined = (hwUnit as any)?.audioZip;
+                    const videoZip: string | undefined = (hwUnit as any)?.videoZip;
+                    return (
+                      <>
+                        <div className="flex flex-wrap items-center gap-3 px-6 py-3 bg-slate-50">
+                          <div className="flex items-center gap-2">
+                            <label className="text-xs font-bold text-slate-600 shrink-0">Level:</label>
+                            <select
+                              value={oupLevel}
+                              onChange={e => {
+                                const slug = e.target.value;
+                                const lObj = HEADWAY_LEVELS.find(l => l.slug === slug);
+                                setOupLevel(slug);
+                                setOupLevelKey(lObj?.key ?? slug);
+                                setOupUnit(1);
+                              }}
+                              className="px-3 py-1.5 rounded-lg border border-slate-200 text-sm bg-white"
+                            >
+                              {HEADWAY_LEVELS.map(l => (
+                                <option key={l.slug} value={l.slug}>{l.key}</option>
+                              ))}
+                            </select>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <label className="text-xs font-bold text-slate-600 shrink-0">Unit:</label>
+                            <select
+                              value={oupUnit}
+                              onChange={e => setOupUnit(Number(e.target.value))}
+                              className="px-3 py-1.5 rounded-lg border border-slate-200 text-sm bg-white"
+                            >
+                              {Array.from({ length: oupLevel === 'beg' ? 14 : 12 }, (_, i) => i + 1).map(n => (
+                                <option key={n} value={n}>Unit {n}</option>
+                              ))}
+                            </select>
+                          </div>
+                          <div className="ml-auto flex items-center gap-1 p-1 rounded-xl bg-white border border-slate-200">
+                            {([
+                              { id: 'audio', icon: '🎧', label: 'Audio' },
+                              { id: 'video', icon: '🎬', label: 'Video' },
+                              { id: 'links', icon: '🔗', label: 'Links' },
+                            ] as const).map(tab => (
+                              <button
+                                key={tab.id}
+                                onClick={() => setOupTab(tab.id)}
+                                className={cn(
+                                  'flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all',
+                                  oupTab === tab.id ? 'bg-indigo-600 text-white shadow-sm' : 'text-slate-600 hover:bg-slate-100'
+                                )}
+                              >
+                                <span>{tab.icon}</span> {tab.label}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
 
-                  {/* Audio tab */}
-                  {oupTab === 'audio' && (
-                    <div className="px-6 pb-6 pt-3">
-                      <div className="rounded-2xl border-2 border-dashed border-indigo-200 bg-gradient-to-br from-indigo-50 to-violet-50 flex flex-col items-center justify-center gap-5 py-10 px-6 text-center">
-                        <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-indigo-500 to-violet-600 flex items-center justify-center shadow-lg shadow-indigo-200">
-                          <Headphones className="w-8 h-8 text-white" />
-                        </div>
-                        <div>
-                          <p className="text-base font-bold text-slate-800">OUP Headway Audio</p>
-                          <p className="text-sm text-slate-500 mt-1">
-                            Unit <strong>{oupUnit}</strong> — Student's Book Audio Player
-                          </p>
-                          <p className="text-xs text-slate-400 mt-2">
-                            Opens in a new tab. Scroll to Unit {oupUnit} and press ▶ to listen.
-                          </p>
-                        </div>
-                        <a
-                          href={`${OUP_BASE}/${oupLevel}/audiodl${CC}`}
-                          target="_blank" rel="noopener noreferrer"
-                          className="inline-flex items-center gap-2.5 px-6 py-3 rounded-xl bg-indigo-600 text-white text-sm font-bold hover:bg-indigo-700 transition-colors shadow-md shadow-indigo-200"
-                        >
-                          <Headphones className="w-4 h-4" /> Open Audio Player
-                        </a>
-                        <p className="text-[10px] text-slate-400">OUP blocks embedded playback — the player works only when opened directly in a tab.</p>
-                      </div>
-                    </div>
-                  )}
+                        {/* Audio tab */}
+                        {oupTab === 'audio' && (
+                          <div className="px-6 pb-6 pt-3 space-y-3">
+                            <div className="rounded-2xl bg-gradient-to-br from-indigo-50 to-violet-50 border border-indigo-100 p-5 flex flex-col sm:flex-row items-center gap-5">
+                              <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-indigo-500 to-violet-600 flex items-center justify-center shadow-lg shadow-indigo-200 shrink-0">
+                                <Headphones className="w-7 h-7 text-white" />
+                              </div>
+                              <div className="flex-1 text-center sm:text-left">
+                                <p className="text-base font-bold text-slate-800">
+                                  {oupLevelKey} — Unit {oupUnit} Audio
+                                </p>
+                                <p className="text-xs text-slate-500 mt-0.5">Student's Book audio. OUP blocks embedding — opens in a new tab.</p>
+                              </div>
+                              <a
+                                href={`${OUP_BASE}/${oupLevel}/audiodl${CC}`}
+                                target="_blank" rel="noopener noreferrer"
+                                className="shrink-0 inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-indigo-600 text-white text-sm font-bold hover:bg-indigo-700 transition-colors shadow-md shadow-indigo-200"
+                              >
+                                <Headphones className="w-4 h-4" /> Open Player
+                              </a>
+                            </div>
+                            {audioZip && (
+                              <a
+                                href={audioZip}
+                                target="_blank" rel="noopener noreferrer"
+                                className="flex items-center gap-3 p-4 rounded-2xl border border-indigo-200 bg-white hover:bg-indigo-50 transition-all group"
+                              >
+                                <div className="w-10 h-10 rounded-xl bg-indigo-100 flex items-center justify-center shrink-0">
+                                  <Download className="w-5 h-5 text-indigo-600" />
+                                </div>
+                                <div className="flex-1 min-w-0">
+                                  <p className="text-sm font-bold text-slate-800">Download Unit {oupUnit} Audio (ZIP)</p>
+                                  <p className="text-xs text-slate-500 mt-0.5 truncate">{audioZip}</p>
+                                </div>
+                                <ExternalLink className="w-4 h-4 text-indigo-400 group-hover:text-indigo-600 shrink-0" />
+                              </a>
+                            )}
+                          </div>
+                        )}
 
-                  {/* Video tab */}
-                  {oupTab === 'video' && (
-                    <div className="px-6 pb-6 pt-3">
-                      <div className="rounded-2xl border-2 border-dashed border-rose-200 bg-gradient-to-br from-rose-50 to-orange-50 flex flex-col items-center justify-center gap-5 py-10 px-6 text-center">
-                        <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-rose-500 to-orange-500 flex items-center justify-center shadow-lg shadow-rose-200">
-                          <Video className="w-8 h-8 text-white" />
-                        </div>
-                        <div>
-                          <p className="text-base font-bold text-slate-800">OUP Headway Video</p>
-                          <p className="text-sm text-slate-500 mt-1">
-                            Unit <strong>{oupUnit}</strong> — Video clips with script &amp; tasks
-                          </p>
-                          <p className="text-xs text-slate-400 mt-2">
-                            Opens in a new tab. Find Unit {oupUnit} and press ▶ to watch.
-                          </p>
-                        </div>
-                        <a
-                          href={`${OUP_BASE}/${oupLevel}/video_bandw${CC}`}
-                          target="_blank" rel="noopener noreferrer"
-                          className="inline-flex items-center gap-2.5 px-6 py-3 rounded-xl bg-rose-600 text-white text-sm font-bold hover:bg-rose-700 transition-colors shadow-md shadow-rose-200"
-                        >
-                          <Video className="w-4 h-4" /> Open Video Player
-                        </a>
-                        <p className="text-[10px] text-slate-400">OUP blocks embedded playback — the player works only when opened directly in a tab.</p>
-                      </div>
-                    </div>
-                  )}
+                        {/* Video tab */}
+                        {oupTab === 'video' && (
+                          <div className="px-6 pb-6 pt-3 space-y-3">
+                            <div className="rounded-2xl bg-gradient-to-br from-rose-50 to-orange-50 border border-rose-100 p-5 flex flex-col sm:flex-row items-center gap-5">
+                              <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-rose-500 to-orange-500 flex items-center justify-center shadow-lg shadow-rose-200 shrink-0">
+                                <Video className="w-7 h-7 text-white" />
+                              </div>
+                              <div className="flex-1 text-center sm:text-left">
+                                <p className="text-base font-bold text-slate-800">
+                                  {oupLevelKey} — Unit {oupUnit} Video
+                                </p>
+                                <p className="text-xs text-slate-500 mt-0.5">Video clips with script &amp; tasks. OUP blocks embedding — opens in a new tab.</p>
+                              </div>
+                              <a
+                                href={`${OUP_BASE}/${oupLevel}/video_bandw${CC}`}
+                                target="_blank" rel="noopener noreferrer"
+                                className="shrink-0 inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-rose-600 text-white text-sm font-bold hover:bg-rose-700 transition-colors shadow-md shadow-rose-200"
+                              >
+                                <Video className="w-4 h-4" /> Open Player
+                              </a>
+                            </div>
+                            <a
+                              href={eeUrl}
+                              target="_blank" rel="noopener noreferrer"
+                              className="flex items-center gap-3 p-4 rounded-2xl border border-teal-200 bg-white hover:bg-teal-50 transition-all group"
+                            >
+                              <div className="w-10 h-10 rounded-xl bg-teal-100 flex items-center justify-center shrink-0">
+                                <Globe className="w-5 h-5 text-teal-600" />
+                              </div>
+                              <div className="flex-1">
+                                <p className="text-sm font-bold text-slate-800">Everyday English — Unit {oupUnit}</p>
+                                <p className="text-xs text-slate-500 mt-0.5">Listen &amp; practise dialogues for this unit</p>
+                              </div>
+                              <ExternalLink className="w-4 h-4 text-teal-400 group-hover:text-teal-600 shrink-0" />
+                            </a>
+                            {videoZip && (
+                              <a
+                                href={videoZip}
+                                target="_blank" rel="noopener noreferrer"
+                                className="flex items-center gap-3 p-4 rounded-2xl border border-rose-200 bg-white hover:bg-rose-50 transition-all group"
+                              >
+                                <div className="w-10 h-10 rounded-xl bg-rose-100 flex items-center justify-center shrink-0">
+                                  <Download className="w-5 h-5 text-rose-600" />
+                                </div>
+                                <div className="flex-1 min-w-0">
+                                  <p className="text-sm font-bold text-slate-800">Download Unit {oupUnit} Video (ZIP)</p>
+                                  <p className="text-xs text-slate-500 mt-0.5 truncate">{videoZip}</p>
+                                </div>
+                                <ExternalLink className="w-4 h-4 text-rose-400 group-hover:text-rose-600 shrink-0" />
+                              </a>
+                            )}
+                          </div>
+                        )}
 
-                  {/* Links tab */}
-                  {oupTab === 'links' && (
-                    <div className="px-6 pb-6 pt-3 space-y-3">
-                      <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-                        <a
-                          href={`${OUP_BASE}/${oupLevel}/audiodl${CC}`}
-                          target="_blank" rel="noopener noreferrer"
-                          className="flex flex-col items-center gap-2 p-4 rounded-xl bg-indigo-50 hover:bg-indigo-100 transition-all group border border-indigo-100 text-center"
-                        >
-                          <Headphones className="w-5 h-5 text-indigo-600" />
-                          <span className="text-xs font-bold text-indigo-700">Audio DL</span>
-                          <ExternalLink className="w-3 h-3 text-indigo-400 group-hover:text-indigo-600" />
-                        </a>
-                        <a
-                          href={`${OUP_BASE}/${oupLevel}/video_bandw${CC}`}
-                          target="_blank" rel="noopener noreferrer"
-                          className="flex flex-col items-center gap-2 p-4 rounded-xl bg-rose-50 hover:bg-rose-100 transition-all group border border-rose-100 text-center"
-                        >
-                          <Video className="w-5 h-5 text-rose-600" />
-                          <span className="text-xs font-bold text-rose-700">Video</span>
-                          <ExternalLink className="w-3 h-3 text-rose-400 group-hover:text-rose-600" />
-                        </a>
-                        <a
-                          href={`${OUP_BASE}/${oupLevel}/testbuilder${CC}`}
-                          target="_blank" rel="noopener noreferrer"
-                          className="flex flex-col items-center gap-2 p-4 rounded-xl bg-emerald-50 hover:bg-emerald-100 transition-all group border border-emerald-100 text-center"
-                        >
-                          <BookOpen className="w-5 h-5 text-emerald-600" />
-                          <span className="text-xs font-bold text-emerald-700">Test Builder</span>
-                          <ExternalLink className="w-3 h-3 text-emerald-400 group-hover:text-emerald-600" />
-                        </a>
-                      </div>
-                      <p className="text-xs text-slate-400">Links open in a new tab. Select your level and unit above first.</p>
-                    </div>
-                  )}
+                        {/* Links tab */}
+                        {oupTab === 'links' && (
+                          <div className="px-6 pb-6 pt-3 space-y-3">
+                            <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                              <a
+                                href={`${OUP_BASE}/${oupLevel}/audiodl${CC}`}
+                                target="_blank" rel="noopener noreferrer"
+                                className="flex flex-col items-center gap-2 p-4 rounded-xl bg-indigo-50 hover:bg-indigo-100 transition-all group border border-indigo-100 text-center"
+                              >
+                                <Headphones className="w-5 h-5 text-indigo-600" />
+                                <span className="text-xs font-bold text-indigo-700">Audio Player</span>
+                                <ExternalLink className="w-3 h-3 text-indigo-400 group-hover:text-indigo-600" />
+                              </a>
+                              <a
+                                href={eeUrl}
+                                target="_blank" rel="noopener noreferrer"
+                                className="flex flex-col items-center gap-2 p-4 rounded-xl bg-teal-50 hover:bg-teal-100 transition-all group border border-teal-100 text-center"
+                              >
+                                <Globe className="w-5 h-5 text-teal-600" />
+                                <span className="text-xs font-bold text-teal-700">Everyday English</span>
+                                <ExternalLink className="w-3 h-3 text-teal-400 group-hover:text-teal-600" />
+                              </a>
+                              <a
+                                href={`${OUP_BASE}/${oupLevel}/video_bandw${CC}`}
+                                target="_blank" rel="noopener noreferrer"
+                                className="flex flex-col items-center gap-2 p-4 rounded-xl bg-rose-50 hover:bg-rose-100 transition-all group border border-rose-100 text-center"
+                              >
+                                <Video className="w-5 h-5 text-rose-600" />
+                                <span className="text-xs font-bold text-rose-700">Video</span>
+                                <ExternalLink className="w-3 h-3 text-rose-400 group-hover:text-rose-600" />
+                              </a>
+                              <a
+                                href={`${OUP_BASE}/${oupLevel}/testbuilder${CC}`}
+                                target="_blank" rel="noopener noreferrer"
+                                className="flex flex-col items-center gap-2 p-4 rounded-xl bg-emerald-50 hover:bg-emerald-100 transition-all group border border-emerald-100 text-center"
+                              >
+                                <BookOpen className="w-5 h-5 text-emerald-600" />
+                                <span className="text-xs font-bold text-emerald-700">Test Builder</span>
+                                <ExternalLink className="w-3 h-3 text-emerald-400 group-hover:text-emerald-600" />
+                              </a>
+                              {audioZip && (
+                                <a
+                                  href={audioZip}
+                                  target="_blank" rel="noopener noreferrer"
+                                  className="flex flex-col items-center gap-2 p-4 rounded-xl bg-violet-50 hover:bg-violet-100 transition-all group border border-violet-100 text-center"
+                                >
+                                  <Download className="w-5 h-5 text-violet-600" />
+                                  <span className="text-xs font-bold text-violet-700">Audio ZIP</span>
+                                  <ExternalLink className="w-3 h-3 text-violet-400 group-hover:text-violet-600" />
+                                </a>
+                              )}
+                              {videoZip && (
+                                <a
+                                  href={videoZip}
+                                  target="_blank" rel="noopener noreferrer"
+                                  className="flex flex-col items-center gap-2 p-4 rounded-xl bg-orange-50 hover:bg-orange-100 transition-all group border border-orange-100 text-center"
+                                >
+                                  <Download className="w-5 h-5 text-orange-600" />
+                                  <span className="text-xs font-bold text-orange-700">Video ZIP</span>
+                                  <ExternalLink className="w-3 h-3 text-orange-400 group-hover:text-orange-600" />
+                                </a>
+                              )}
+                            </div>
+                            <p className="text-xs text-slate-400">All links open on the Oxford University Press website in a new tab.</p>
+                          </div>
+                        )}
+                      </>
+                    );
+                  })()}
                 </div>
               )}
             </div>

@@ -5631,31 +5631,32 @@ When giving instructions, number each step clearly. Be precise and technical whe
         const lessonUrls: string[] = [];
         let ord = 0;
 
+        const hwTag = `\nheadway:${level}:${unit.num}`;
         if (includeGrammar) {
           for (const gr of unit.grammar) {
             const url = `${OUP}${gr.path}${CC}`;
-            lessonRows.push({ course_id: courseId, module_id: mod.id, title: `Grammar: ${gr.topic}`, slug: slugify(`u${unit.num}-gr-${gr.topic}`), type: "text", short_description: `Oxford Headway exercise — ${gr.topic}\n${url}`, order: ++ord, status: "published", duration_minutes: 20, is_free_preview: ord === 1 });
+            lessonRows.push({ course_id: courseId, module_id: mod.id, title: `Grammar: ${gr.topic}`, slug: slugify(`u${unit.num}-gr-${gr.topic}`), type: "text", short_description: `Oxford Headway exercise — ${gr.topic}\n${url}${hwTag}`, order: ++ord, status: "published", duration_minutes: 20, is_free_preview: ord === 1 });
             lessonUrls.push(url);
           }
         }
         if (includeVocabulary) {
           for (const vc of unit.vocabulary) {
             const url = `${OUP}${vc.path}${CC}`;
-            lessonRows.push({ course_id: courseId, module_id: mod.id, title: `Vocabulary: ${vc.topic}`, slug: slugify(`u${unit.num}-vc-${vc.topic}`), type: "text", short_description: `Oxford Headway vocabulary — ${vc.topic}\n${url}`, order: ++ord, status: "published", duration_minutes: 15, is_free_preview: false });
+            lessonRows.push({ course_id: courseId, module_id: mod.id, title: `Vocabulary: ${vc.topic}`, slug: slugify(`u${unit.num}-vc-${vc.topic}`), type: "text", short_description: `Oxford Headway vocabulary — ${vc.topic}\n${url}${hwTag}`, order: ++ord, status: "published", duration_minutes: 15, is_free_preview: false });
             lessonUrls.push(url);
           }
         }
         if (includeEverydayEnglish) {
           const eeUrl = `${OUP}/student/headway/${levelData.slug}/everydayenglish/${unit.eeSlug}/${CC}`;
-          lessonRows.push({ course_id: courseId, module_id: mod.id, title: "Everyday English", slug: slugify(`u${unit.num}-everyday-english`), type: "video", short_description: `Listen and practise dialogues from Unit ${unit.num}.\n${eeUrl}`, order: ++ord, status: "published", duration_minutes: 20, is_free_preview: false });
+          lessonRows.push({ course_id: courseId, module_id: mod.id, title: "Everyday English", slug: slugify(`u${unit.num}-everyday-english`), type: "video", short_description: `Listen and practise dialogues from Unit ${unit.num}.\n${eeUrl}${hwTag}`, order: ++ord, status: "published", duration_minutes: 20, is_free_preview: false });
           lessonUrls.push(eeUrl);
         }
         if (includeAudioDownload && (unit as any).audioZip) {
-          lessonRows.push({ course_id: courseId, module_id: mod.id, title: "Student's Book Audio — Download", slug: slugify(`u${unit.num}-audio`), type: "text", short_description: `Download Student's Book audio for Unit ${unit.num}.\n${(unit as any).audioZip}`, order: ++ord, status: "published", duration_minutes: 0, is_free_preview: false });
+          lessonRows.push({ course_id: courseId, module_id: mod.id, title: "Student's Book Audio — Download", slug: slugify(`u${unit.num}-audio`), type: "text", short_description: `Download Student's Book audio for Unit ${unit.num}.\n${(unit as any).audioZip}${hwTag}`, order: ++ord, status: "published", duration_minutes: 0, is_free_preview: false });
           lessonUrls.push((unit as any).audioZip);
         }
         if (includeVideoDownload && (unit as any).videoZip) {
-          lessonRows.push({ course_id: courseId, module_id: mod.id, title: "Video — Download", slug: slugify(`u${unit.num}-video`), type: "video", short_description: `Download video for Unit ${unit.num}.\n${(unit as any).videoZip}`, order: ++ord, status: "published", duration_minutes: 0, is_free_preview: false });
+          lessonRows.push({ course_id: courseId, module_id: mod.id, title: "Video — Download", slug: slugify(`u${unit.num}-video`), type: "video", short_description: `Download video for Unit ${unit.num}.\n${(unit as any).videoZip}${hwTag}`, order: ++ord, status: "published", duration_minutes: 0, is_free_preview: false });
           lessonUrls.push((unit as any).videoZip);
         }
 
