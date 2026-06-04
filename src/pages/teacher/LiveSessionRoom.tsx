@@ -154,6 +154,15 @@ export default function TeacherLiveSessionRoom() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
 
+  const [session, setSession] = useState<LiveSession | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [fetchError, setFetchError] = useState<string | null>(null);
+  const [userId, setUserId] = useState('');
+  const [userDisplayName, setUserDisplayName] = useState('');
+
+  const [meetingActive, setMeetingActive] = useState(false);
+  const [showNavWarning, setShowNavWarning] = useState(false);
+
   // Block browser tab close / refresh while meeting is active
   useEffect(() => {
     const handler = (e: BeforeUnloadEvent) => {
@@ -165,15 +174,6 @@ export default function TeacherLiveSessionRoom() {
     window.addEventListener('beforeunload', handler);
     return () => window.removeEventListener('beforeunload', handler);
   }, [meetingActive]);
-
-  const [session, setSession] = useState<LiveSession | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [fetchError, setFetchError] = useState<string | null>(null);
-  const [userId, setUserId] = useState('');
-  const [userDisplayName, setUserDisplayName] = useState('');
-
-  const [meetingActive, setMeetingActive] = useState(false);
-  const [showNavWarning, setShowNavWarning] = useState(false);
 
   // Intercept browser back button while meeting is active
   useEffect(() => {
