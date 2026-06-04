@@ -3,7 +3,7 @@ import { useTranslation } from 'react-i18next';
 import { supabase } from '../../supabase';
 import StudentLayout from '../../components/layout/StudentLayout';
 import { motion, AnimatePresence } from 'motion/react';
-import { BookOpen, Search, Video, FileText, HelpCircle, Clock, Lock, Unlock } from 'lucide-react';
+import { BookOpen, Search, Video, FileText, HelpCircle, Clock, Lock, Unlock, ChevronDown } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { useSearchParams } from 'react-router-dom';
 import { authFetch } from '../../lib/apiUrl';
@@ -49,6 +49,8 @@ export default function StudentLessons() {
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [typeFilter, setTypeFilter] = useState('all');
+  const [courseFilter, setCourseFilter] = useState('all');
+  const [moduleFilter, setModuleFilter] = useState('all');
   const [searchParams] = useSearchParams();
   const selectedCourseId = (searchParams.get('courseId') || '').trim();
 
@@ -98,17 +100,43 @@ export default function StudentLessons() {
     load();
   }, [selectedCourseId]);
 
+  const availableCourses = useMemo(() => {
+    const seen = new Set<string>();
+    return lessons.reduce<{ title: string }[]>((acc, l) => {
+      if (!seen.has(l.courseTitle)) { seen.add(l.courseTitle); acc.push({ title: l.courseTitle }); }
+      return acc;
+    }, []);
+  }, [lessons]);
+
+  const availableModules = useMemo(() => {
+    const base = courseFilter === 'all' ? lessons : lessons.filter(l => l.courseTitle === courseFilter);
+    const seen = new Set<string>();
+    return base.reduce<{ title: string }[]>((acc, l) => {
+      if (l.moduleTitle && !seen.has(l.moduleTitle)) { seen.add(l.moduleTitle); acc.push({ title: l.moduleTitle }); }
+      return acc;
+    }, []);
+  }, [lessons, courseFilter]);
+
+  // Reset module filter when course changes and the module no longer exists
+  useEffect(() => {
+    if (moduleFilter !== 'all' && !availableModules.some(m => m.title === moduleFilter)) {
+      setModuleFilter('all');
+    }
+  }, [availableModules, moduleFilter]);
+
   const filtered = useMemo(() => {
     let list = lessons;
     if (search) list = list.filter(l => l.title.toLowerCase().includes(search.toLowerCase()) || l.courseTitle.toLowerCase().includes(search.toLowerCase()));
+    if (courseFilter !== 'all') list = list.filter(l => l.courseTitle === courseFilter);
+    if (moduleFilter !== 'all') list = list.filter(l => l.moduleTitle === moduleFilter);
     if (typeFilter !== 'all') list = list.filter(l => l.type === typeFilter);
     return list;
-  }, [lessons, search, typeFilter]);
+  }, [lessons, search, courseFilter, moduleFilter, typeFilter]);
 
   const totalMinutes = lessons.reduce((s, l) => s + l.durationMinutes, 0);
   const hours = Math.floor(totalMinutes / 60);
   const mins = totalMinutes % 60;
-  const hasActiveFilters = search.trim() !== '' || typeFilter !== 'all';
+  const hasActiveFilters = search.trim() !== '' || typeFilter !== 'all' || courseFilter !== 'all' || moduleFilter !== 'all';
   const lessonProgressById = useMemo(() => {
     const out: Record<string, LessonProgress> = {};
     lessons.forEach((lesson) => {
@@ -183,6 +211,8 @@ export default function StudentLessons() {
               style={{ background: 'rgba(255,255,255,0.75)', backdropFilter: 'blur(12px)' }}
             >
               <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mr-1">{t('common.filter')}</p>
+
+              {/* Search */}
               <div className="relative flex-1 min-w-[180px]">
                 <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-indigo-400" />
                 <input
@@ -192,6 +222,42 @@ export default function StudentLessons() {
                   className="w-full pl-11 pr-4 py-2.5 rounded-full text-sm border border-indigo-100 bg-white/80 focus:outline-none focus:ring-2 focus:ring-violet-400 focus:border-transparent transition-all shadow-sm placeholder-slate-400"
                 />
               </div>
+
+              {/* Course dropdown */}
+              {availableCourses.length > 1 && (
+                <div className="relative">
+                  <select
+                    value={courseFilter}
+                    onChange={e => { setCourseFilter(e.target.value); setModuleFilter('all'); }}
+                    className="appearance-none pl-3 pr-8 py-2.5 rounded-full text-xs font-semibold border border-slate-100 bg-white/80 text-slate-600 focus:outline-none focus:ring-2 focus:ring-violet-400 focus:border-transparent transition-all shadow-sm cursor-pointer"
+                  >
+                    <option value="all">All Courses</option>
+                    {availableCourses.map(c => (
+                      <option key={c.title} value={c.title}>{c.title}</option>
+                    ))}
+                  </select>
+                  <ChevronDown className="absolute right-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-400 pointer-events-none" />
+                </div>
+              )}
+
+              {/* Module dropdown */}
+              {availableModules.length > 1 && (
+                <div className="relative">
+                  <select
+                    value={moduleFilter}
+                    onChange={e => setModuleFilter(e.target.value)}
+                    className="appearance-none pl-3 pr-8 py-2.5 rounded-full text-xs font-semibold border border-slate-100 bg-white/80 text-slate-600 focus:outline-none focus:ring-2 focus:ring-violet-400 focus:border-transparent transition-all shadow-sm cursor-pointer"
+                  >
+                    <option value="all">All Modules</option>
+                    {availableModules.map(m => (
+                      <option key={m.title} value={m.title}>{m.title}</option>
+                    ))}
+                  </select>
+                  <ChevronDown className="absolute right-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-400 pointer-events-none" />
+                </div>
+              )}
+
+              {/* Type pill buttons */}
               {['all', 'video', 'text', 'quiz'].map(t_key => (
                 <button
                   key={t_key}
@@ -206,9 +272,10 @@ export default function StudentLessons() {
                   {t_key === 'all' ? t('common.all') : t(`common.${t_key}`)}
                 </button>
               ))}
+
               {hasActiveFilters && (
                 <button
-                  onClick={() => { setSearch(''); setTypeFilter('all'); }}
+                  onClick={() => { setSearch(''); setTypeFilter('all'); setCourseFilter('all'); setModuleFilter('all'); }}
                   className="px-3 py-2 rounded-full text-xs font-semibold text-slate-500 hover:text-slate-800 hover:bg-slate-100 transition-all"
                 >
                   {t('common.clearFilters')}
