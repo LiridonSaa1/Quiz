@@ -5,7 +5,8 @@ import { Link, useParams } from 'react-router-dom';
 import StudentLayout from '../../components/layout/StudentLayout';
 import { supabase } from '../../supabase';
 import { authFetch } from '../../lib/apiUrl';
-import { BookOpen, ArrowLeft, Clock, CheckCircle2, Circle, Play, Video, Headphones, FileText, AlignLeft, Globe, ExternalLink, ChevronDown, ChevronRight, Download } from 'lucide-react';
+import { BookOpen, ArrowLeft, Clock, CheckCircle2, Circle, Play, Video, Headphones, FileText, AlignLeft, Globe, ExternalLink, ChevronDown, ChevronRight, Download, Upload, Loader2, Plus, Music, Film, Trash2 } from 'lucide-react';
+import { toast } from 'sonner';
 import { cn } from '../../lib/utils';
 import LessonDiscussionBoard from '../../components/discussion/LessonDiscussionBoard';
 import { HEADWAY_FULL_DATA } from '../../lib/headwayData';
@@ -67,7 +68,14 @@ export default function StudentLessonDetail() {
   const [oupLevel, setOupLevel] = useState('preint4');
   const [oupLevelKey, setOupLevelKey] = useState('Pre-Intermediate');
   const [oupUnit, setOupUnit] = useState(1);
-  const [oupTab, setOupTab] = useState<'audio' | 'video' | 'links'>('audio');
+  const [oupTab, setOupTab] = useState<'audio' | 'video' | 'links' | 'upload'>('audio');
+  const [isTeacher, setIsTeacher] = useState(false);
+  const [unitMedia, setUnitMedia] = useState<{ name: string; path: string; url: string; type: 'audio' | 'video' }[]>([]);
+  const [unitMediaLoading, setUnitMediaLoading] = useState(false);
+  const [mediaUploading, setMediaUploading] = useState(false);
+  const [attachingPath, setAttachingPath] = useState<string | null>(null);
+  const audioUploadRef = useRef<HTMLInputElement>(null);
+  const videoUploadRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     const load = async () => {
@@ -77,6 +85,10 @@ export default function StudentLessonDetail() {
           setLoading(false);
           return;
         }
+
+        // Detect teacher role
+        const profileRes = await supabase.from('profiles').select('role').eq('id', session.user.id).maybeSingle();
+        if (profileRes.data?.role === 'teacher') setIsTeacher(true);
 
         const detailRes = await authFetch(`/api/student/lessons/${encodeURIComponent(lessonId)}/detail`);
         const detailJson = detailRes.ok ? await detailRes.json() : {};
@@ -168,6 +180,95 @@ export default function StudentLessonDetail() {
     setCompleted(next);
     await persistProgress(next, lastVideoPosition);
   };
+
+  const loadUnitMedia = async (levelSlug: string, unitNum: number) => {
+    setUnitMediaLoading(true);
+    try {
+      const res = await authFetch(`/api/teacher/headway/media?levelSlug=${encodeURIComponent(levelSlug)}&unitNum=${unitNum}`);
+      if (res.ok) {
+        const json = await res.json();
+        setUnitMedia(json.files ?? []);
+      }
+    } catch { /* ignore */ } finally {
+      setUnitMediaLoading(false);
+    }
+  };
+
+  const handleMediaUpload = async (e: React.ChangeEvent<HTMLInputElement>, mediaType: 'audio' | 'video') => {
+    const fileList = e.target.files;
+    if (!fileList || fileList.length === 0) return;
+    e.target.value = '';
+    setMediaUploading(true);
+    let uploaded = 0;
+    const levelSlugForUpload = HEADWAY_LEVELS.find(l => l.slug === oupLevel)?.slug ?? oupLevel;
+    for (const file of Array.from(fileList)) {
+      try {
+        const urlRes = await authFetch('/api/teacher/headway/media/upload-url', {
+          method: 'POST',
+          body: JSON.stringify({ levelSlug: levelSlugForUpload, unitNum: oupUnit, type: mediaType, filename: file.name }),
+        });
+        const urlJson = await urlRes.json();
+        if (!urlRes.ok) throw new Error(urlJson?.error || 'Failed to get upload URL');
+        const putRes = await fetch(urlJson.signedUrl, {
+          method: 'PUT',
+          headers: { 'Content-Type': file.type || (mediaType === 'audio' ? 'audio/mpeg' : 'video/mp4') },
+          body: file,
+        });
+        if (!putRes.ok) throw new Error('Upload failed');
+        uploaded++;
+      } catch (err: any) {
+        toast.error(`Failed to upload ${file.name}: ${err?.message}`);
+      }
+    }
+    if (uploaded > 0) {
+      toast.success(`${uploaded} file${uploaded > 1 ? 's' : ''} uploaded ✓`);
+      await loadUnitMedia(oupLevel, oupUnit);
+    }
+    setMediaUploading(false);
+  };
+
+  const handleAttachToLesson = async (file: { name: string; path: string; url: string; type: 'audio' | 'video' }) => {
+    if (!lesson?.id) return;
+    setAttachingPath(file.path);
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const res = await authFetch(`/api/teacher/lessons/${encodeURIComponent(lesson.id)}/contents`, {
+        method: 'POST',
+        body: JSON.stringify({
+          userId: session?.user?.id,
+          type: file.type,
+          title: file.name.replace(/\.[^.]+$/, ''),
+          file_url: file.url,
+          storage_path: file.url,
+          mime_type: file.type === 'video' ? 'video/mp4' : 'audio/mpeg',
+        }),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json?.error || 'Failed to attach');
+      toast.success(`"${file.name.replace(/\.[^.]+$/, '')}" u shtua tek ky lesson ✓`);
+      // Reload contents so the player appears immediately
+      const detailRes = await authFetch(`/api/student/lessons/${encodeURIComponent(lesson.id)}/detail`);
+      if (detailRes.ok) {
+        const detailJson = await detailRes.json();
+        setContents(Array.isArray(detailJson.contents) ? detailJson.contents : []);
+        const availableTabs = new Set((detailJson.contents || []).map((c: any) => c.type));
+        if (availableTabs.has('video')) setActiveTab('video');
+        else if (availableTabs.has('audio')) setActiveTab('audio');
+      }
+    } catch (err: any) {
+      toast.error(err?.message || 'Gabim gjatë bashkëngjitjes');
+    } finally {
+      setAttachingPath(null);
+    }
+  };
+
+  // Load unit media whenever teacher opens the Upload tab
+  useEffect(() => {
+    if (isTeacher && oupTab === 'upload') {
+      void loadUnitMedia(oupLevel, oupUnit);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isTeacher, oupTab, oupLevel, oupUnit]);
 
   const statusLabel = useMemo(() => {
     if (!lesson) return t('common.lesson');
@@ -512,10 +613,11 @@ export default function StudentLessonDetail() {
                               { id: 'audio', icon: '🎧', label: 'Audio' },
                               { id: 'video', icon: '🎬', label: 'Video' },
                               { id: 'links', icon: '🔗', label: 'Links' },
+                              ...(isTeacher ? [{ id: 'upload' as const, icon: '📤', label: 'Upload' }] : []),
                             ] as const).map(tab => (
                               <button
                                 key={tab.id}
-                                onClick={() => setOupTab(tab.id)}
+                                onClick={() => setOupTab(tab.id as typeof oupTab)}
                                 className={cn(
                                   'flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all',
                                   oupTab === tab.id ? 'bg-indigo-600 text-white shadow-sm' : 'text-slate-600 hover:bg-slate-100'
@@ -685,6 +787,74 @@ export default function StudentLessonDetail() {
                               )}
                             </div>
                             <p className="text-xs text-slate-400">All links open on the Oxford University Press website in a new tab.</p>
+                          </div>
+                        )}
+
+                        {/* Upload tab — teachers only */}
+                        {oupTab === 'upload' && isTeacher && (
+                          <div className="px-6 pb-6 pt-3 space-y-4">
+                            <input ref={audioUploadRef} type="file" accept="audio/*,.mp3,.wav,.ogg,.m4a,.aac" multiple className="hidden" onChange={e => void handleMediaUpload(e, 'audio')} />
+                            <input ref={videoUploadRef} type="file" accept="video/*,.mp4,.webm,.mov,.avi,.mkv" multiple className="hidden" onChange={e => void handleMediaUpload(e, 'video')} />
+
+                            <div className="flex items-center justify-between flex-wrap gap-2">
+                              <p className="text-xs font-bold text-slate-700">
+                                Ngarko skedarë për Level <span className="text-indigo-600">{oupLevelKey}</span> — Unit <span className="text-indigo-600">{oupUnit}</span>
+                              </p>
+                              <div className="flex items-center gap-2">
+                                <button
+                                  onClick={() => audioUploadRef.current?.click()}
+                                  disabled={mediaUploading}
+                                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold text-violet-700 bg-violet-50 hover:bg-violet-100 border border-violet-200 transition-colors disabled:opacity-50"
+                                >
+                                  {mediaUploading ? <Loader2 className="w-3 h-3 animate-spin" /> : <Music className="w-3 h-3" />}
+                                  Audio
+                                </button>
+                                <button
+                                  onClick={() => videoUploadRef.current?.click()}
+                                  disabled={mediaUploading}
+                                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold text-rose-700 bg-rose-50 hover:bg-rose-100 border border-rose-200 transition-colors disabled:opacity-50"
+                                >
+                                  {mediaUploading ? <Loader2 className="w-3 h-3 animate-spin" /> : <Film className="w-3 h-3" />}
+                                  Video
+                                </button>
+                              </div>
+                            </div>
+
+                            {unitMediaLoading ? (
+                              <div className="flex items-center gap-2 text-xs text-slate-400 py-3">
+                                <Loader2 className="w-3.5 h-3.5 animate-spin" /> Duke ngarkuar skedarët…
+                              </div>
+                            ) : unitMedia.length === 0 ? (
+                              <div className="flex items-center gap-3 bg-slate-50 border border-dashed border-slate-200 rounded-xl px-4 py-5 text-center flex-col">
+                                <Upload className="w-5 h-5 text-slate-300" />
+                                <p className="text-xs text-slate-400">Nuk ka skedarë për këtë unit. Ngarko audio (MP3) ose video (MP4) me butonat lart.</p>
+                              </div>
+                            ) : (
+                              <div className="space-y-2">
+                                {unitMedia.map(f => (
+                                  <div key={f.path} className="flex items-center gap-3 p-3 rounded-xl border border-slate-100 bg-slate-50 hover:bg-white transition-colors group">
+                                    <div className={cn('w-8 h-8 rounded-lg flex items-center justify-center shrink-0', f.type === 'video' ? 'bg-rose-100' : 'bg-violet-100')}>
+                                      {f.type === 'video' ? <Film className="w-4 h-4 text-rose-600" /> : <Music className="w-4 h-4 text-violet-600" />}
+                                    </div>
+                                    <p className="text-xs font-semibold text-slate-700 truncate flex-1">{f.name.replace(/\.[^.]+$/, '')}</p>
+                                    <span className={cn('text-[10px] font-bold px-2 py-0.5 rounded-full shrink-0', f.type === 'video' ? 'bg-rose-50 text-rose-600' : 'bg-violet-50 text-violet-600')}>
+                                      {f.type}
+                                    </span>
+                                    <button
+                                      onClick={() => void handleAttachToLesson(f)}
+                                      disabled={attachingPath === f.path}
+                                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold text-emerald-700 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 transition-colors disabled:opacity-50 shrink-0"
+                                    >
+                                      {attachingPath === f.path
+                                        ? <Loader2 className="w-3 h-3 animate-spin" />
+                                        : <Plus className="w-3 h-3" />}
+                                      Shto tek lesson
+                                    </button>
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+                            <p className="text-[10px] text-slate-400">Skedarët ngarkohen në bibliotekën e platformës dhe mund të bashkëngjiten tek çdo lesson.</p>
                           </div>
                         )}
                       </>
