@@ -1,4 +1,5 @@
 import "dotenv/config";
+import jwt from "jsonwebtoken";
 import { isMissingCoursesStudentIdsError } from "./src/lib/schemaErrors.js";
 import { canAccessTeacherCourses, isAdmin, isAdminSeedAllowed } from "./src/lib/routeAuth.js";
 import { generateFixSuggestion } from "./src/lib/ai/generateFixSuggestion.js";
@@ -9472,6 +9473,70 @@ Rules:
     if (hay.includes('can only be updated to default')) return true;
     return false;
   };
+
+  // ── Jitsi / JaaS token endpoint ─────────────────────────────────────────
+  // Returns a signed JWT so the caller can join as moderator (teacher) or
+  // guest (student) without the meet.jit.si "Log in as moderator" gate.
+  // Requires env vars: JAAS_APP_ID, JAAS_API_KEY_ID, JAAS_PRIVATE_KEY
+  app.post('/api/jitsi-token', async (req, res) => {
+    try {
+      const caller = await assertAuthenticated(req, res);
+      if (!caller) return;
+
+      const { roomName, moderator = false, displayName } = req.body as {
+        roomName?: string;
+        moderator?: boolean;
+        displayName?: string;
+      };
+
+      const appId      = process.env.JAAS_APP_ID;
+      const keyId      = process.env.JAAS_API_KEY_ID;
+      const privateKey = process.env.JAAS_PRIVATE_KEY;
+
+      if (!appId || !keyId || !privateKey) {
+        // Credentials not configured — tell client to fall back to meet.jit.si
+        return res.json({ token: null, domain: 'meet.jit.si', appId: null });
+      }
+
+      const now = Math.floor(Date.now() / 1000);
+      const payload = {
+        iss: 'chat',
+        aud: 'jitsi',
+        iat: now - 10,
+        nbf: now - 10,
+        exp: now + 7200,
+        sub: appId,
+        room: roomName || '*',
+        context: {
+          user: {
+            moderator: String(moderator),
+            name: displayName || caller.displayName || caller.email || 'User',
+            id: caller.id,
+            avatar: '',
+            email: caller.email || '',
+          },
+          features: {
+            livestreaming: 'false',
+            'outbound-call': 'false',
+            'sip-outbound-call': 'false',
+            transcription: 'false',
+            recording: 'false',
+          },
+        },
+      };
+
+      const pemKey = privateKey.replace(/\\n/g, '\n');
+      const token = jwt.sign(payload, pemKey, {
+        algorithm: 'RS256',
+        header: { alg: 'RS256', kid: `${appId}/${keyId}`, typ: 'JWT' } as any,
+      });
+
+      res.json({ token, domain: '8x8.vc', appId });
+    } catch (err: any) {
+      console.error('[jitsi-token] error:', err.message);
+      res.json({ token: null, domain: 'meet.jit.si', appId: null });
+    }
+  });
 
   app.get('/api/teacher/live-sessions', async (req, res) => {
     try {

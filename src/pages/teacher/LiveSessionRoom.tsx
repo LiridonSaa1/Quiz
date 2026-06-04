@@ -85,16 +85,24 @@ function loadJitsiExternalAPI(
   displayName: string,
   startMuted: boolean,
   startVideoMuted: boolean,
-  onReady: (api: JitsiMeetExternalAPIInstance) => void
+  onReady: (api: JitsiMeetExternalAPIInstance) => void,
+  jwtToken?: string | null,
+  jitsiDomain?: string | null,
+  jaasAppId?: string | null,
 ) {
+  const domain = jitsiDomain || 'meet.jit.si';
+  // When using JaaS (8x8.vc) the room name must be prefixed with the app ID
+  const finalRoomName = (domain === '8x8.vc' && jaasAppId)
+    ? `${jaasAppId}/${roomName}`
+    : roomName;
   const scriptId = 'jitsi-external-api';
   const existingScript = document.getElementById(scriptId);
 
   const init = () => {
     const JitsiAPI = window.JitsiMeetExternalAPI;
     if (!JitsiAPI) { console.error('JitsiMeetExternalAPI not available'); return; }
-    const api: JitsiMeetExternalAPIInstance = new JitsiAPI('meet.jit.si', {
-      roomName,
+    const options: Record<string, unknown> = {
+      roomName: finalRoomName,
       parentNode: container,
       width: '100%',
       height: '100%',
@@ -106,7 +114,6 @@ function loadJitsiExternalAPI(
         disableDeepLinking: true,
         disableThirdPartyRequests: true,
         analytics: { disabled: true },
-        // Suppress all notification banners inside Jitsi
         notifications: [],
         disableRemoteMute: false,
         enableNoisyMicDetection: false,
@@ -128,7 +135,9 @@ function loadJitsiExternalAPI(
         DEFAULT_LOGO_URL: '',
         JITSI_WATERMARK_LINK: '',
       },
-    });
+    };
+    if (jwtToken) options.jwt = jwtToken;
+    const api: JitsiMeetExternalAPIInstance = new JitsiAPI(domain, options);
     setTimeout(() => {
       const jitsiIframe = container.querySelector('iframe');
       if (jitsiIframe) {
@@ -139,11 +148,19 @@ function loadJitsiExternalAPI(
     onReady(api);
   };
 
-  if (existingScript) { init(); return; }
+  // Remove stale script if domain changed (e.g. switching between meet.jit.si and 8x8.vc)
+  const existingScriptEl = existingScript as HTMLScriptElement | null;
+  const scriptSrc = `https://${domain}/external_api.js`;
+  if (existingScriptEl && !existingScriptEl.src.includes(domain)) {
+    existingScriptEl.remove();
+  } else if (existingScript) {
+    init();
+    return;
+  }
 
   const script = document.createElement('script');
   script.id = scriptId;
-  script.src = 'https://meet.jit.si/external_api.js';
+  script.src = scriptSrc;
   script.async = true;
   script.onload = init;
   document.head.appendChild(script);
@@ -471,9 +488,27 @@ export default function TeacherLiveSessionRoom() {
     setTimeout(() => initJitsi(newRoomName), 800);
   };
 
-  const initJitsi = (roomName?: string, startAudioMuted?: boolean, startVideoMuted?: boolean) => {
+  const initJitsi = async (roomName?: string, startAudioMuted?: boolean, startVideoMuted?: boolean) => {
     if (!jitsiContainerRef.current || jitsiApiRef.current) return;
     const name = roomName ?? jitsiRoomNameRef.current;
+
+    // Fetch JaaS JWT — teacher joins as moderator so the room starts without a login prompt
+    let jwtToken: string | null = null;
+    let jitsiDomain: string | null = null;
+    let jaasAppId: string | null = null;
+    try {
+      const tokenRes = await authFetch('/api/jitsi-token', {
+        method: 'POST',
+        body: JSON.stringify({ roomName: name, moderator: true, displayName: userDisplayName }),
+      });
+      if (tokenRes.ok) {
+        const tokenJson = await tokenRes.json();
+        jwtToken   = tokenJson.token   ?? null;
+        jitsiDomain = tokenJson.domain  ?? null;
+        jaasAppId   = tokenJson.appId   ?? null;
+      }
+    } catch { /* fall back to meet.jit.si */ }
+
     loadJitsiExternalAPI(
       name,
       jitsiContainerRef.current,
@@ -497,7 +532,10 @@ export default function TeacherLiveSessionRoom() {
           if (jitsiApiRef.current) { jitsiApiRef.current.dispose(); jitsiApiRef.current = null; }
           setMeetingActive(false);
         });
-      }
+      },
+      jwtToken,
+      jitsiDomain,
+      jaasAppId,
     );
   };
 

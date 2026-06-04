@@ -139,63 +139,98 @@ export default function StudentLiveSessionJoin() {
   useEffect(() => {
     if (!joined || isMobile || !jitsiContainerRef.current || jitsiApiRef.current) return;
     const container = jitsiContainerRef.current;
+    let destroyed = false;
 
-    const init = () => {
-      const JitsiAPI = window.JitsiMeetExternalAPI;
-      if (!JitsiAPI) { console.error('JitsiMeetExternalAPI not available'); return; }
-      const api = new JitsiAPI('meet.jit.si', {
-        roomName: activeRoomName,
-        parentNode: container,
-        width: '100%',
-        height: '100%',
-        userInfo: { displayName: userDisplayName },
-        configOverwrite: {
-          prejoinPageEnabled: false,
-          startWithAudioMuted: false,
-          startWithVideoMuted: false,
-          disableDeepLinking: true,
-          disableThirdPartyRequests: true,
-          analytics: { disabled: true },
-          notifications: [],
-          enableNoisyMicDetection: false,
-          enableNoAudioDetection: false,
-        },
-        interfaceConfigOverwrite: {
-          SHOW_JITSI_WATERMARK: false,
-          SHOW_WATERMARK_FOR_GUESTS: false,
-          TOOLBAR_BUTTONS: [],
-          DISABLE_JOIN_LEAVE_NOTIFICATIONS: true,
-          HIDE_INVITE_MORE_HEADER: true,
-          SHOW_PROMOTIONAL_CLOSE_PAGE: false,
-          SHOW_CHROME_EXTENSION_BANNER: false,
-          MOBILE_APP_PROMO: false,
-          ENABLE_FEEDBACK_ANIMATION: false,
-          DEFAULT_LOGO_URL: '',
-          JITSI_WATERMARK_LINK: '',
-        },
-      });
-      setTimeout(() => {
-        const iframe = container.querySelector('iframe');
-        if (iframe) {
-          iframe.setAttribute('allow', 'camera *; microphone *; fullscreen *; display-capture *; autoplay *; clipboard-write *');
+    const initWithToken = async () => {
+      // Fetch JaaS JWT — student joins as guest so room is accessible without login prompt
+      let jwtToken: string | null = null;
+      let domain = 'meet.jit.si';
+      let jaasAppId: string | null = null;
+      try {
+        const tokenRes = await authFetch('/api/jitsi-token', {
+          method: 'POST',
+          body: JSON.stringify({ roomName: activeRoomName, moderator: false, displayName: userDisplayName }),
+        });
+        if (tokenRes.ok) {
+          const tokenJson = await tokenRes.json();
+          jwtToken  = tokenJson.token  ?? null;
+          domain    = tokenJson.domain ?? 'meet.jit.si';
+          jaasAppId = tokenJson.appId  ?? null;
         }
-      }, 1500);
-      jitsiApiRef.current = api;
+      } catch { /* fall back to meet.jit.si */ }
+
+      if (destroyed) return;
+
+      const finalRoomName = (domain === '8x8.vc' && jaasAppId)
+        ? `${jaasAppId}/${activeRoomName}`
+        : activeRoomName;
+
+      const init = () => {
+        if (destroyed) return;
+        const JitsiAPI = window.JitsiMeetExternalAPI;
+        if (!JitsiAPI) { console.error('JitsiMeetExternalAPI not available'); return; }
+        const options: Record<string, unknown> = {
+          roomName: finalRoomName,
+          parentNode: container,
+          width: '100%',
+          height: '100%',
+          userInfo: { displayName: userDisplayName },
+          configOverwrite: {
+            prejoinPageEnabled: false,
+            startWithAudioMuted: false,
+            startWithVideoMuted: false,
+            disableDeepLinking: true,
+            disableThirdPartyRequests: true,
+            analytics: { disabled: true },
+            notifications: [],
+            enableNoisyMicDetection: false,
+            enableNoAudioDetection: false,
+          },
+          interfaceConfigOverwrite: {
+            SHOW_JITSI_WATERMARK: false,
+            SHOW_WATERMARK_FOR_GUESTS: false,
+            TOOLBAR_BUTTONS: [],
+            DISABLE_JOIN_LEAVE_NOTIFICATIONS: true,
+            HIDE_INVITE_MORE_HEADER: true,
+            SHOW_PROMOTIONAL_CLOSE_PAGE: false,
+            SHOW_CHROME_EXTENSION_BANNER: false,
+            MOBILE_APP_PROMO: false,
+            ENABLE_FEEDBACK_ANIMATION: false,
+            DEFAULT_LOGO_URL: '',
+            JITSI_WATERMARK_LINK: '',
+          },
+        };
+        if (jwtToken) options.jwt = jwtToken;
+        const api = new JitsiAPI(domain, options);
+        setTimeout(() => {
+          const iframe = container.querySelector('iframe');
+          if (iframe) {
+            iframe.setAttribute('allow', 'camera *; microphone *; fullscreen *; display-capture *; autoplay *; clipboard-write *');
+          }
+        }, 1500);
+        jitsiApiRef.current = api;
+      };
+
+      const scriptId = 'jitsi-external-api';
+      const existingScript = document.getElementById(scriptId) as HTMLScriptElement | null;
+      const scriptSrc = `https://${domain}/external_api.js`;
+      if (existingScript && existingScript.src.includes(domain)) {
+        init();
+      } else {
+        if (existingScript) existingScript.remove();
+        const script = document.createElement('script');
+        script.id = scriptId;
+        script.src = scriptSrc;
+        script.async = true;
+        script.onload = init;
+        document.head.appendChild(script);
+      }
     };
 
-    const scriptId = 'jitsi-external-api';
-    if (document.getElementById(scriptId)) {
-      init();
-    } else {
-      const script = document.createElement('script');
-      script.id = scriptId;
-      script.src = 'https://meet.jit.si/external_api.js';
-      script.async = true;
-      script.onload = init;
-      document.head.appendChild(script);
-    }
+    initWithToken();
 
     return () => {
+      destroyed = true;
       if (jitsiApiRef.current) { jitsiApiRef.current.dispose(); jitsiApiRef.current = null; }
     };
   }, [joined, userDisplayName, activeRoomName]);
