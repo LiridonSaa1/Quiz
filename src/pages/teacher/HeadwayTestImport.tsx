@@ -206,22 +206,20 @@ export default function HeadwayTestImport() {
       setImportDone({ modules: finalModules, lessons: finalLessons });
       toast.success(`Headway ${activeLevel.key} imported — ${finalModules} modules, ${finalLessons} lessons`);
 
-      // Auto-trigger Drive Library import if audio/video/everyday were included
-      if (importOptions.audioDownload || importOptions.videoDownload || importOptions.everydayEnglish) {
-        setDriveImporting(true);
-        try {
-          const driveRes = await authFetch('/api/teacher/headway/drive-import/start', {
-            method: 'POST',
-            body: JSON.stringify({ level: activeLevel.key }),
-          });
-          const driveJson = await driveRes.json().catch(() => ({}));
-          if (driveRes.ok && driveJson.jobId) {
-            setDriveImportJobId(driveJson.jobId);
-            toast.success('Drive Library import started in the background');
-          }
-        } catch { /* ignore */ } finally {
-          setDriveImporting(false);
+      // Auto-trigger Drive Library import for the imported level
+      setDriveImporting(true);
+      try {
+        const driveRes = await authFetch('/api/teacher/headway/drive-import/start', {
+          method: 'POST',
+          body: JSON.stringify({ level: activeLevel.key }),
+        });
+        const driveJson = await driveRes.json().catch(() => ({}));
+        if (driveRes.ok && driveJson.jobId) {
+          setDriveImportJobId(driveJson.jobId);
+          toast.success('Drive Library import started in the background');
         }
+      } catch { /* ignore */ } finally {
+        setDriveImporting(false);
       }
     } catch (e: any) {
       toast.error(e?.message ?? 'Import failed');
@@ -786,12 +784,10 @@ export default function HeadwayTestImport() {
                     {/* Content options */}
                     <div>
                       <label className="block text-xs font-semibold text-slate-600 mb-2">Include in import</label>
-                      {(importOptions.audioDownload || importOptions.videoDownload || importOptions.everydayEnglish) && (
-                        <div className="mb-2 flex items-start gap-2 px-3 py-2 rounded-xl bg-sky-50 border border-sky-100 text-[11px] text-sky-700">
-                          <HardDrive className="w-3.5 h-3.5 shrink-0 mt-0.5" />
-                          Drive Library audio &amp; video will be imported automatically
-                        </div>
-                      )}
+                      <div className="mb-2 flex items-start gap-2 px-3 py-2 rounded-xl bg-sky-50 border border-sky-100 text-[11px] text-sky-700">
+                        <HardDrive className="w-3.5 h-3.5 shrink-0 mt-0.5" />
+                        Drive Library audio &amp; video will be imported automatically for <strong>Headway {activeLevel.key}</strong>
+                      </div>
                       <div className="rounded-xl border border-slate-200 bg-slate-50 divide-y divide-slate-100 overflow-hidden">
                         {[
                           { key: 'grammar',          label: 'Grammar exercises',           icon: '📘', desc: 'Interactive grammar practice on Oxford site' },
