@@ -746,7 +746,14 @@ export default function TeacherLiveSessionRoom() {
     if (quizPickerList.length > 0) return;
     setQuizPickerLoading(true);
     try {
-      const res = await authFetch('/api/teacher/quizzes');
+      let uid = userId;
+      if (!uid) {
+        const { data: { session } } = await supabase.auth.getSession();
+        uid = session?.user?.id || '';
+      }
+      if (!uid) { toast.error('Sesioni ka skaduar'); return; }
+      const res = await authFetch(`/api/teacher/quizzes?userId=${encodeURIComponent(uid)}`);
+      if (!res.ok) { toast.error('Nuk u ngarkuan kuizet'); return; }
       const json = await res.json();
       const quizzes = (json.quizzes || json.data || []) as { id: string; title: string }[];
       setQuizPickerList(quizzes.map((q: any) => ({ id: q.id, title: q.title })));
