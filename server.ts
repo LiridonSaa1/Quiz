@@ -65,11 +65,28 @@ interface DriveImportJob {
 const driveImportJobs = new Map<string, DriveImportJob>();
 
 const DRIVE_API_BASE = 'https://www.googleapis.com/drive/v3';
-const BEGINNER_DRIVE_FOLDERS: Record<string, string> = {
-  student_audio: '12Mmg0fjHxRhglHgKag9bP5QGGo7sNkx-',
-  workbook_audio: '1jX0bv2qQDRyhedO7qfvu5yjb97qDazQu',
-  video: '15HmRs-8kRI4C1Uzp5iwz-TE4c02lEuCc',
+
+/** Per-level Drive folder IDs.  Keys must match the `level` strings used in headway_media. */
+const LEVEL_DRIVE_FOLDERS: Record<string, Record<string, string>> = {
+  'Beginner': {
+    student_audio: '12Mmg0fjHxRhglHgKag9bP5QGGo7sNkx-',
+    workbook_audio: '1jX0bv2qQDRyhedO7qfvu5yjb97qDazQu',
+    video: '15HmRs-8kRI4C1Uzp5iwz-TE4c02lEuCc',
+  },
+  'Elementary': {
+    student_audio: '1bJpdL3tkWRlIQKS2lp9ZvKBm-SHrahUE',
+    workbook_audio: '1bwL0ANh1IR-YXzc9y53r9wRXEUAw7dkj',
+    video: '1DO4J5r-7HnytBb4UArIPnPjZTX60GPZm',
+  },
+  'Pre-Intermediate': {
+    student_audio: '1-MS0Eu2-uXELtasjK23r5wpIxSYw13WZ',
+    workbook_audio: '1pmBAkEVHE8E0NlZoaZf7VZKrhCUAK5yL',
+    video: '1tl7tpMoajGSOX1y6G1Y3-OvvZtnFgnCH',
+  },
 };
+
+/** Backward-compat alias (Beginner is the default) */
+const BEGINNER_DRIVE_FOLDERS = LEVEL_DRIVE_FOLDERS['Beginner'];
 
 function detectUnitNumber(filename: string): number | null {
   const patterns = [
@@ -6624,11 +6641,15 @@ Rules:
       driveImportJobs.set(jobId, job);
       console.log(`[drive-import] Starting job ${jobId} for level="${level}"`);
 
+      // Choose level-specific folders; fall back to Beginner if level not configured
+      const levelFolders = LEVEL_DRIVE_FOLDERS[level] ?? LEVEL_DRIVE_FOLDERS['Beginner'];
+      job.logs.push(`📚 Level: ${level} — ${Object.keys(levelFolders).length} folder(s) configured`);
+
       res.json({ jobId });
 
       // Run import in background (fire-and-forget)
       (async () => {
-        for (const [type, folderId] of Object.entries(BEGINNER_DRIVE_FOLDERS)) {
+        for (const [type, folderId] of Object.entries(levelFolders)) {
           try {
             job.logs.push(`📂 Listing ${type} folder…`);
             const allEntries = await listDriveFolder(folderId, apiKey);

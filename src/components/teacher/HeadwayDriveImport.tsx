@@ -37,6 +37,49 @@ const TYPE_LABELS: Record<string, { label: string; color: string; icon: React.El
   video: { label: 'Video', color: 'text-rose-700 bg-rose-50 border-rose-200', icon: Film },
 };
 
+/** Levels with configured Drive folders */
+const CONFIGURED_LEVELS = [
+  {
+    key: 'Beginner',
+    units: 14,
+    color: 'from-emerald-500 to-teal-600',
+    badge: 'bg-emerald-50 text-emerald-700 border-emerald-200',
+    folders: {
+      student_audio: '12Mmg0fjHxRhglHgKag9bP5QGGo7sNkx-',
+      workbook_audio: '1jX0bv2qQDRyhedO7qfvu5yjb97qDazQu',
+      video: '15HmRs-8kRI4C1Uzp5iwz-TE4c02lEuCc',
+    },
+  },
+  {
+    key: 'Elementary',
+    units: 12,
+    color: 'from-sky-500 to-blue-600',
+    badge: 'bg-sky-50 text-sky-700 border-sky-200',
+    folders: {
+      student_audio: '1bJpdL3tkWRlIQKS2lp9ZvKBm-SHrahUE',
+      workbook_audio: '1bwL0ANh1IR-YXzc9y53r9wRXEUAw7dkj',
+      video: '1DO4J5r-7HnytBb4UArIPnPjZTX60GPZm',
+    },
+  },
+  {
+    key: 'Pre-Intermediate',
+    units: 12,
+    color: 'from-violet-500 to-purple-600',
+    badge: 'bg-violet-50 text-violet-700 border-violet-200',
+    folders: {
+      student_audio: '1-MS0Eu2-uXELtasjK23r5wpIxSYw13WZ',
+      workbook_audio: '1pmBAkEVHE8E0NlZoaZf7VZKrhCUAK5yL',
+      video: '1tl7tpMoajGSOX1y6G1Y3-OvvZtnFgnCH',
+    },
+  },
+];
+
+const FOLDER_META = [
+  { type: 'student_audio', label: "Student's Book Audio", icon: '📗' },
+  { type: 'workbook_audio', label: 'Workbook Audio', icon: '📘' },
+  { type: 'video', label: 'Video Clips', icon: '🎬' },
+] as const;
+
 function formatBytes(b: number | null): string {
   if (!b) return '';
   if (b < 1024 * 1024) return `${(b / 1024).toFixed(0)} KB`;
@@ -48,7 +91,6 @@ function AudioRow({ m }: { m: DriveMedia }) {
   const [progress, setProgress] = useState(0);
   const [duration, setDuration] = useState(0);
   const ref = useRef<HTMLAudioElement>(null);
-  // Use Supabase Storage public URL when available, fall back to stream proxy
   const streamUrl = m.url || `/api/teacher/headway/drive-stream/${encodeURIComponent(m.drive_file_id)}`;
   const fmt = (s: number) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
   const toggle = () => {
@@ -83,7 +125,6 @@ function AudioRow({ m }: { m: DriveMedia }) {
 }
 
 function VideoRow({ m }: { m: DriveMedia }) {
-  // Use Supabase Storage public URL when available, fall back to stream proxy
   const streamUrl = m.url || `/api/teacher/headway/drive-stream/${encodeURIComponent(m.drive_file_id)}`;
   return (
     <div className="rounded-xl overflow-hidden border border-rose-100 bg-rose-50">
@@ -102,6 +143,7 @@ function VideoRow({ m }: { m: DriveMedia }) {
 
 export default function HeadwayDriveImport() {
   const [configured, setConfigured] = useState<boolean | null>(null);
+  const [selectedLevel, setSelectedLevel] = useState(CONFIGURED_LEVELS[0]);
   const [media, setMedia] = useState<DriveMedia[]>([]);
   const [loadingMedia, setLoadingMedia] = useState(false);
   const [jobId, setJobId] = useState<string | null>(null);
@@ -120,10 +162,11 @@ export default function HeadwayDriveImport() {
     } catch { setConfigured(false); }
   }, []);
 
-  const loadMedia = useCallback(async () => {
+  const loadMedia = useCallback(async (level?: string) => {
     setLoadingMedia(true);
+    const lvl = level ?? selectedLevel.key;
     try {
-      const res = await authFetch('/api/teacher/headway/drive-media?level=Beginner');
+      const res = await authFetch(`/api/teacher/headway/drive-media?level=${encodeURIComponent(lvl)}`);
       if (res.ok) {
         const json = await res.json();
         setMedia(Array.isArray(json.media) ? json.media : []);
@@ -131,12 +174,18 @@ export default function HeadwayDriveImport() {
     } catch { /* ignore */ } finally {
       setLoadingMedia(false);
     }
-  }, []);
+  }, [selectedLevel.key]);
 
   useEffect(() => {
     void checkConfig();
     void loadMedia();
   }, [checkConfig, loadMedia]);
+
+  // Reload media when level changes
+  useEffect(() => {
+    setExpandedUnits(new Set());
+    void loadMedia(selectedLevel.key);
+  }, [selectedLevel.key]);
 
   useEffect(() => {
     if (logsEndRef.current && job?.logs?.length) {
@@ -155,13 +204,13 @@ export default function HeadwayDriveImport() {
         setImporting(false);
         if (j.status === 'done') {
           toast.success(`Import complete — ${j.done} files imported, ${j.skipped} skipped`);
-          void loadMedia();
+          void loadMedia(selectedLevel.key);
         } else {
           toast.error('Import finished with errors');
         }
       }
     } catch { /* ignore */ }
-  }, [loadMedia]);
+  }, [loadMedia, selectedLevel.key]);
 
   const startImport = async () => {
     setImporting(true);
@@ -170,7 +219,7 @@ export default function HeadwayDriveImport() {
     try {
       const res = await authFetch('/api/teacher/headway/drive-import/start', {
         method: 'POST',
-        body: JSON.stringify({ level: 'Beginner' }),
+        body: JSON.stringify({ level: selectedLevel.key }),
       });
       const json = await res.json();
       if (!res.ok) throw new Error(json?.error || 'Failed to start import');
@@ -232,12 +281,31 @@ export default function HeadwayDriveImport() {
             <p className="text-xs text-slate-500">Import Headway audio &amp; video from your Drive folders</p>
           </div>
         </div>
-        <button onClick={() => void loadMedia()}
+        <button onClick={() => void loadMedia(selectedLevel.key)}
           disabled={loadingMedia}
           className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-slate-200 text-xs font-semibold text-slate-600 hover:bg-slate-50 transition-colors disabled:opacity-50">
           <RefreshCw className={cn('w-3.5 h-3.5', loadingMedia && 'animate-spin')} />
           Refresh Library
         </button>
+      </div>
+
+      {/* ── Level selector ── */}
+      <div className="flex items-center gap-2 flex-wrap">
+        <span className="text-xs font-bold text-slate-500 uppercase tracking-wider mr-1">Level:</span>
+        {CONFIGURED_LEVELS.map(lvl => (
+          <button
+            key={lvl.key}
+            onClick={() => setSelectedLevel(lvl)}
+            className={cn(
+              'px-3 py-1.5 rounded-xl text-xs font-bold border transition-all',
+              selectedLevel.key === lvl.key
+                ? `bg-gradient-to-r ${lvl.color} text-white border-transparent shadow-sm`
+                : 'bg-white text-slate-600 border-slate-200 hover:border-slate-300 hover:bg-slate-50'
+            )}
+          >
+            {lvl.key}
+          </button>
+        ))}
       </div>
 
       {/* ── API Key setup notice ── */}
@@ -260,27 +328,28 @@ export default function HeadwayDriveImport() {
         <div className="bg-white rounded-3xl border border-slate-100 p-6 space-y-5">
           <div className="flex items-center gap-2">
             <Layers className="w-4 h-4 text-indigo-600" />
-            <h3 className="text-sm font-bold text-slate-800">Beginner Level — Drive Sources</h3>
-            <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200">
-              14 Units
+            <h3 className="text-sm font-bold text-slate-800">{selectedLevel.key} — Drive Sources</h3>
+            <span className={cn('text-[10px] font-bold px-2 py-0.5 rounded-full border', selectedLevel.badge)}>
+              {selectedLevel.units} Units
             </span>
           </div>
 
+          {/* Folder cards */}
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-            {[
-              { type: 'student_audio', label: "Student's Book Audio", icon: '📗', folderId: '12Mmg0fjHxRhglHgKag9bP5QGGo7sNkx-', accent: 'violet' },
-              { type: 'workbook_audio', label: 'Workbook Audio', icon: '📘', folderId: '1jX0bv2qQDRyhedO7qfvu5yjb97qDazQu', accent: 'teal' },
-              { type: 'video', label: 'Video Clips', icon: '🎬', folderId: '15HmRs-8kRI4C1Uzp5iwz-TE4c02lEuCc', accent: 'rose' },
-            ].map(s => {
-              const count = media.filter(m => m.type === s.type).length;
+            {FOLDER_META.map(f => {
+              const folderId = selectedLevel.folders[f.type];
+              const count = media.filter(m => m.type === f.type).length;
               return (
-                <div key={s.type}
-                  className={`p-4 rounded-2xl border ${count > 0 ? 'border-emerald-200 bg-emerald-50' : 'border-slate-100 bg-slate-50'}`}>
+                <div key={f.type}
+                  className={cn(
+                    'p-4 rounded-2xl border',
+                    count > 0 ? 'border-emerald-200 bg-emerald-50' : 'border-slate-100 bg-slate-50'
+                  )}>
                   <div className="flex items-center gap-2 mb-2">
-                    <span className="text-xl">{s.icon}</span>
-                    <div>
-                      <p className="text-xs font-bold text-slate-800">{s.label}</p>
-                      <p className="text-[10px] text-slate-500 font-mono truncate">{s.folderId.slice(0, 20)}…</p>
+                    <span className="text-xl">{f.icon}</span>
+                    <div className="min-w-0">
+                      <p className="text-xs font-bold text-slate-800">{f.label}</p>
+                      <p className="text-[10px] text-slate-400 font-mono truncate">{folderId.slice(0, 18)}…</p>
                     </div>
                   </div>
                   {count > 0
@@ -333,8 +402,8 @@ export default function HeadwayDriveImport() {
             className="w-full flex items-center justify-center gap-2 py-3 rounded-2xl text-sm font-bold text-white transition-all disabled:opacity-60 disabled:cursor-not-allowed"
             style={{ background: 'linear-gradient(135deg,#4f46e5,#7c3aed)' }}>
             {importing
-              ? <><Loader2 className="w-4 h-4 animate-spin" /> Importing…</>
-              : <><CloudDownload className="w-4 h-4" /> {media.length > 0 ? 'Re-import from Google Drive' : 'Import from Google Drive'}</>}
+              ? <><Loader2 className="w-4 h-4 animate-spin" /> Importing {selectedLevel.key}…</>
+              : <><CloudDownload className="w-4 h-4" /> {media.length > 0 ? `Re-import ${selectedLevel.key} from Google Drive` : `Import ${selectedLevel.key} from Google Drive`}</>}
           </button>
           {media.length > 0 && !importing && (
             <p className="text-center text-[11px] text-slate-400">
@@ -349,8 +418,8 @@ export default function HeadwayDriveImport() {
         <div className="space-y-3">
           <div className="flex items-center gap-2 px-1">
             <h3 className="text-sm font-black text-slate-800">Media Library</h3>
-            <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-indigo-50 text-indigo-600 border border-indigo-200">
-              {media.length} files · Beginner
+            <span className={cn('text-[10px] font-bold px-2 py-0.5 rounded-full border', selectedLevel.badge)}>
+              {media.length} files · {selectedLevel.key}
             </span>
           </div>
 
@@ -371,7 +440,7 @@ export default function HeadwayDriveImport() {
                       onClick={() => toggleUnit(key)}
                       className="w-full flex items-center justify-between px-5 py-3.5 hover:bg-slate-50 transition-colors">
                       <div className="flex items-center gap-3">
-                        <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-indigo-500 to-violet-600 flex items-center justify-center shrink-0">
+                        <div className={cn('w-8 h-8 rounded-xl bg-gradient-to-br flex items-center justify-center shrink-0', selectedLevel.color)}>
                           <span className="text-white text-xs font-black">{unitNum === 0 ? '?' : unitNum}</span>
                         </div>
                         <div className="text-left">
@@ -454,9 +523,9 @@ export default function HeadwayDriveImport() {
       {!loadingMedia && media.length === 0 && configured !== false && (
         <div className="flex flex-col items-center gap-3 py-12 text-center">
           <CloudDownload className="w-10 h-10 text-slate-200" />
-          <p className="text-sm font-bold text-slate-400">No media imported yet</p>
+          <p className="text-sm font-bold text-slate-400">No media imported yet for {selectedLevel.key}</p>
           <p className="text-xs text-slate-400 max-w-xs">
-            Click "Import from Google Drive" above to pull all Beginner audio and video files.
+            Click "Import from Google Drive" above to pull all {selectedLevel.key} audio and video files.
           </p>
         </div>
       )}
