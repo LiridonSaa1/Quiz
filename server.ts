@@ -6622,6 +6622,7 @@ Rules:
       const jobId = `hw-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
       const job: DriveImportJob = { status: "running", total: 0, done: 0, skipped: 0, errors: [], logs: [] };
       driveImportJobs.set(jobId, job);
+      console.log(`[drive-import] Starting job ${jobId} for level="${level}"`);
 
       res.json({ jobId });
 
@@ -6710,10 +6711,13 @@ Rules:
 
         job.status = job.done === 0 && job.errors.length > 0 ? "error" : "done";
         job.logs.push(`🏁 Done — ${job.done} imported, ${job.skipped} skipped, ${job.errors.length} errors`);
+        console.log(`[drive-import] Job ${jobId} finished — done=${job.done} skipped=${job.skipped} errors=${job.errors.length}`);
+        if (job.errors.length > 0) console.warn('[drive-import] Errors:', job.errors.slice(0, 5).join(' | '));
       })().catch(err => {
         job.status = "error";
         job.errors.push(String(err?.message || err));
         job.logs.push(`✗ Fatal: ${err?.message}`);
+        console.error(`[drive-import] Job ${jobId} fatal error:`, err?.message);
       });
     } catch (e: any) {
       console.error("POST /api/teacher/headway/drive-import/start", e);
@@ -16604,6 +16608,42 @@ async function runLiveSessionsRecordingUrlsMigration(): Promise<void> {
   }
 }
 
+async function ensureHeadwayMediaTable(): Promise<void> {
+  const ddl = `
+    CREATE TABLE IF NOT EXISTS headway_media (
+      id            UUID        DEFAULT gen_random_uuid() PRIMARY KEY,
+      level         TEXT        NOT NULL DEFAULT 'Beginner',
+      unit_number   INTEGER,
+      module_id     UUID,
+      lesson_id     UUID,
+      type          TEXT        NOT NULL DEFAULT 'student_audio',
+      title         TEXT,
+      file_name     TEXT,
+      drive_file_id TEXT        UNIQUE NOT NULL,
+      url           TEXT,
+      mime_type     TEXT,
+      size_bytes    BIGINT,
+      created_at    TIMESTAMPTZ DEFAULT NOW()
+    );
+    CREATE INDEX IF NOT EXISTS idx_headway_media_level_unit ON headway_media (level, unit_number);
+    CREATE INDEX IF NOT EXISTS idx_headway_media_drive_id   ON headway_media (drive_file_id);
+  `;
+  try {
+    await poolQuery(ddl);
+    console.log('[migration] headway_media table ensured ✓');
+    return;
+  } catch { /* fall through to RPC */ }
+  try {
+    const probe = await supabaseAdmin.from('headway_media').select('id').limit(1);
+    if (!probe.error) { console.log('[migration] headway_media table already exists ✓'); return; }
+    const rpc = await (supabaseAdmin as any).rpc('exec_sql', { sql: ddl });
+    if (rpc.error) throw rpc.error;
+    console.log('[migration] headway_media table created via RPC ✓');
+  } catch (err: any) {
+    console.warn('[migration] headway_media table could not be auto-created:', err?.message?.split('\n')[0]);
+  }
+}
+
 async function ensureHeadwayMediaBucket(): Promise<void> {
   try {
     // Try creating; if it already exists the error is ignored
@@ -16748,6 +16788,7 @@ async function startServer() {
   void runTeacherHoursMigration();
   void ensureAssignmentFilesBucket();
   void ensureHeadwayMediaBucket();
+  void ensureHeadwayMediaTable();
   void fixHeadwayQuizCorrectAnswers();
 
   const httpServer = http.createServer();
