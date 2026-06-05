@@ -411,44 +411,76 @@ export default function TeacherLessonContentManager() {
                         </div>
                       </div>
                     ) : (
-                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                        <div className="sm:col-span-2">
-                          <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1 ml-1">File</label>
-                          <label className={cn(
-                            'w-full px-3.5 py-3 rounded-xl border-2 border-dashed text-sm flex items-center gap-2 cursor-pointer transition-all',
-                            uploadingId === item.id
-                              ? 'opacity-60 pointer-events-none border-slate-200 bg-slate-50'
-                              : 'border-slate-200 hover:border-indigo-300 hover:bg-indigo-50/40'
-                          )}>
-                            <UploadCloud className="w-4 h-4 text-slate-400" />
-                            <span className="text-slate-500">
-                              {uploadingId === item.id ? 'Uploading…' : item.storage_path ? 'Replace file' : 'Upload file'}
-                            </span>
-                            <input
-                              type="file"
-                              accept={item.type === 'video' ? 'video/*' : item.type === 'audio' ? 'audio/*' : 'application/pdf'}
-                              className="hidden"
-                              onChange={e => { const f = e.target.files?.[0]; if (f) void onUpload(item, f); }}
+                      <div className="space-y-3">
+                        {/* Media preview */}
+                        {item.signed_url && item.type === 'video' && (
+                          <div className="rounded-xl overflow-hidden bg-black">
+                            <video
+                              src={item.signed_url}
+                              controls
+                              className="w-full max-h-72"
                             />
-                          </label>
-                          {item.storage_path && (
-                            <p className="text-[11px] text-slate-400 mt-1.5 ml-1 truncate">{item.storage_path}</p>
-                          )}
-                        </div>
-                        <div>
-                          <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1 ml-1">
-                            {item.type === 'pdf' ? 'Start Page' : 'Duration (sec)'}
-                          </label>
-                          <input
-                            type="number"
-                            min={0}
-                            value={item.type === 'pdf' ? (item.pdf_page || 1) : (item.duration_seconds || 0)}
-                            onChange={e => patchItem(item.id, item.type === 'pdf'
-                              ? { pdf_page: Number(e.target.value) }
-                              : { duration_seconds: Number(e.target.value) }
+                          </div>
+                        )}
+                        {item.signed_url && item.type === 'audio' && (
+                          <div className="rounded-xl bg-violet-50 border border-violet-100 p-3">
+                            <audio src={item.signed_url} controls className="w-full" />
+                          </div>
+                        )}
+                        {item.signed_url && item.type === 'pdf' && (
+                          <div className="flex items-center gap-2 px-3.5 py-2.5 rounded-xl bg-orange-50 border border-orange-100">
+                            <FileImage className="w-4 h-4 text-orange-500 shrink-0" />
+                            <span className="text-sm text-orange-700 flex-1 truncate">PDF uploaded</span>
+                            <a
+                              href={item.signed_url}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-orange-500 text-white text-xs font-bold hover:bg-orange-600 transition-colors shrink-0"
+                            >
+                              <ExternalLink className="w-3 h-3" /> Open
+                            </a>
+                          </div>
+                        )}
+
+                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                          <div className="sm:col-span-2">
+                            <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1 ml-1">File</label>
+                            <label className={cn(
+                              'w-full px-3.5 py-3 rounded-xl border-2 border-dashed text-sm flex items-center gap-2 cursor-pointer transition-all',
+                              uploadingId === item.id
+                                ? 'opacity-60 pointer-events-none border-slate-200 bg-slate-50'
+                                : 'border-slate-200 hover:border-indigo-300 hover:bg-indigo-50/40'
+                            )}>
+                              <UploadCloud className="w-4 h-4 text-slate-400" />
+                              <span className="text-slate-500">
+                                {uploadingId === item.id ? 'Uploading…' : item.storage_path ? 'Replace file' : 'Upload file'}
+                              </span>
+                              <input
+                                type="file"
+                                accept={item.type === 'video' ? 'video/*' : item.type === 'audio' ? 'audio/*' : 'application/pdf'}
+                                className="hidden"
+                                onChange={e => { const f = e.target.files?.[0]; if (f) void onUpload(item, f); }}
+                              />
+                            </label>
+                            {item.storage_path && !item.signed_url && (
+                              <p className="text-[11px] text-slate-400 mt-1.5 ml-1 truncate">{item.storage_path}</p>
                             )}
-                            className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-300 focus:border-indigo-400 transition-all"
-                          />
+                          </div>
+                          <div>
+                            <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1 ml-1">
+                              {item.type === 'pdf' ? 'Start Page' : 'Duration (sec)'}
+                            </label>
+                            <input
+                              type="number"
+                              min={0}
+                              value={item.type === 'pdf' ? (item.pdf_page || 1) : (item.duration_seconds || 0)}
+                              onChange={e => patchItem(item.id, item.type === 'pdf'
+                                ? { pdf_page: Number(e.target.value) }
+                                : { duration_seconds: Number(e.target.value) }
+                              )}
+                              className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-300 focus:border-indigo-400 transition-all"
+                            />
+                          </div>
                         </div>
                       </div>
                     )}

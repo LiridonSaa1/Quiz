@@ -7590,9 +7590,25 @@ Rules:
         }
         throw contentsRes.error;
       }
+
+      // Generate signed URLs for media files (same as student API)
+      const contentRows = normalizeLessonContentRows(contentsRes.data || []).map((row: any) => ({
+        ...row,
+        signed_url: typeof row?.storage_path === 'string' && /^https?:\/\//i.test(row.storage_path)
+          ? row.storage_path
+          : null,
+      }));
+      await ensureLessonMediaBucket();
+      for (const row of contentRows) {
+        const path = String(row?.storage_path || '').trim();
+        if (!path || /^https?:\/\//i.test(path)) continue;
+        const signed = await supabaseAdmin.storage.from('lesson-media').createSignedUrl(path, 3600);
+        row.signed_url = signed.error ? null : signed.data?.signedUrl || null;
+      }
+
       return res.json({
         success: true,
-        contents: normalizeLessonContentRows(contentsRes.data || []),
+        contents: contentRows,
         storage: 'database',
       });
     } catch (e: any) {
@@ -7755,7 +7771,17 @@ Rules:
         }
         throw upd.error;
       }
-      return res.json({ success: true, content: normalizeLessonContentRow(upd.data, 0) });
+      const normalizedRow: any = normalizeLessonContentRow(upd.data, 0);
+      // Generate signed URL for media files
+      const storagePath = String(normalizedRow?.storage_path || '').trim();
+      if (storagePath && !/^https?:\/\//i.test(storagePath)) {
+        await ensureLessonMediaBucket();
+        const signed = await supabaseAdmin.storage.from('lesson-media').createSignedUrl(storagePath, 3600);
+        normalizedRow.signed_url = signed.error ? null : signed.data?.signedUrl || null;
+      } else if (/^https?:\/\//i.test(storagePath)) {
+        normalizedRow.signed_url = storagePath;
+      }
+      return res.json({ success: true, content: normalizedRow });
     } catch (e: any) {
       void logSystemError(
         {
