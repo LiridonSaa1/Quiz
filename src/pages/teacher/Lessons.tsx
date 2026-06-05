@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useMemo } from 'react';
+import React, { useEffect, useState, useMemo, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import { supabase } from '../../supabase';
 import { authFetch, readApiError } from '../../lib/apiUrl';
@@ -9,6 +9,7 @@ import {
   Plus, Search, PlayCircle, Trash2, Edit2, X, Save,
   BookOpen, Layers, Video, FileText, HelpCircle, Clock,
   Lock, Unlock, ChevronRight, ChevronLeft, Calendar, AlertTriangle,
+  Headphones, Film, Music,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { Lesson } from '../../types';
@@ -96,6 +97,9 @@ export default function TeacherLessons() {
   const [saving, setSaving] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<Lesson | null>(null);
   const [deleting, setDeleting] = useState(false);
+  const [hwSummary, setHwSummary] = useState<Record<string, { audioCount: number; videoCount: number; level: string; unit: number | null }>>({});
+  const [hwPopup, setHwPopup] = useState<string | null>(null); // lessonId with popup open
+  const popupRef = useRef<HTMLDivElement>(null);
   const { can } = useTeacherPermissions();
 
   const fetchData = async () => {
@@ -170,7 +174,7 @@ export default function TeacherLessons() {
       }
 
       setModules(modulesData);
-      setLessons(lessonsData.map((l: any) => ({
+      const mappedLessons = lessonsData.map((l: any) => ({
         id: l.id,
         courseId: l.course_id,
         moduleId: l.module_id,
@@ -185,7 +189,22 @@ export default function TeacherLessons() {
         publishAt: (l.publish_at as string | null | undefined) ?? null,
         createdAt: l.created_at,
         updatedAt: l.updated_at,
-      })));
+      }));
+      setLessons(mappedLessons);
+
+      // Fetch Headway media summary for all lessons (one batch call)
+      if (mappedLessons.length > 0) {
+        try {
+          const summaryRes = await authFetch('/api/teacher/headway/lessons-media-summary', {
+            method: 'POST',
+            body: JSON.stringify({ lessonIds: mappedLessons.map((l: any) => l.id) }),
+          });
+          if (summaryRes.ok) {
+            const summaryJson = await summaryRes.json().catch(() => ({}));
+            if (summaryJson?.summary) setHwSummary(summaryJson.summary);
+          }
+        } catch { /* ignore — non-critical */ }
+      }
     } catch {
       toast.error(t('lessons.failedToLoadLessons'));
     } finally {
@@ -194,6 +213,15 @@ export default function TeacherLessons() {
   };
 
   useEffect(() => { fetchData(); }, []);
+
+  // Close popup when clicking outside
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (popupRef.current && !popupRef.current.contains(e.target as Node)) setHwPopup(null);
+    };
+    if (hwPopup) document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [hwPopup]);
   useEffect(() => { setCurrentPage(1); }, [search, courseFilter, classFilter, moduleFilter, typeFilter]);
 
   const modulesForCourse = (courseId: string) =>
@@ -580,6 +608,8 @@ export default function TeacherLessons() {
                   const isPublished = lesson.status === 'published';
                   const modTitle = getModuleName(lesson.moduleId);
                   const courseTitle = getCourseTitle(lesson.courseId);
+                  const hw = hwSummary[lesson.id] ?? null;
+                  const hasHwMedia = hw && (hw.audioCount > 0 || hw.videoCount > 0);
                   return (
                     <motion.div
                       key={lesson.id}
@@ -621,6 +651,84 @@ export default function TeacherLessons() {
                             <span className="flex items-center gap-1 text-violet-500 font-semibold">
                               <Unlock className="w-3 h-3" /> Free
                             </span>
+                          )}
+
+                          {/* Headway media badge */}
+                          {hasHwMedia && (
+                            <div className="relative ml-auto">
+                              <button
+                                onClick={() => setHwPopup(prev => prev === lesson.id ? null : lesson.id)}
+                                className="flex items-center gap-1 px-2 py-0.5 rounded-full bg-violet-100 text-violet-700 font-bold text-[10px] hover:bg-violet-200 transition-colors border border-violet-200"
+                                title="Headway media imported"
+                              >
+                                <Music className="w-2.5 h-2.5" />
+                                HW Media
+                              </button>
+
+                              {/* Popup */}
+                              {hwPopup === lesson.id && (
+                                <div
+                                  ref={popupRef}
+                                  className="absolute bottom-full right-0 mb-2 z-50 bg-white rounded-2xl shadow-xl border border-slate-200 p-4 w-64"
+                                  onClick={e => e.stopPropagation()}
+                                >
+                                  {/* Header */}
+                                  <div className="flex items-center gap-2 mb-3">
+                                    <div className="w-7 h-7 rounded-xl bg-gradient-to-br from-violet-500 to-fuchsia-500 flex items-center justify-center">
+                                      <Music className="w-3.5 h-3.5 text-white" />
+                                    </div>
+                                    <div>
+                                      <p className="text-xs font-bold text-slate-800">Headway Media</p>
+                                      {hw.level && (
+                                        <p className="text-[10px] text-slate-500">
+                                          Level: <span className="font-semibold text-violet-600">{hw.level}</span>
+                                          {hw.unit ? ` · Unit ${hw.unit}` : ''}
+                                        </p>
+                                      )}
+                                    </div>
+                                  </div>
+
+                                  {/* Counts */}
+                                  <div className="grid grid-cols-2 gap-2 mb-3">
+                                    <div className={cn(
+                                      'rounded-xl p-2.5 text-center border',
+                                      hw.audioCount > 0 ? 'bg-violet-50 border-violet-200' : 'bg-slate-50 border-slate-200 opacity-50'
+                                    )}>
+                                      <Headphones className={cn('w-4 h-4 mx-auto mb-1', hw.audioCount > 0 ? 'text-violet-600' : 'text-slate-400')} />
+                                      <p className={cn('text-sm font-black', hw.audioCount > 0 ? 'text-violet-700' : 'text-slate-400')}>{hw.audioCount}</p>
+                                      <p className="text-[10px] text-slate-500 font-medium">Audio</p>
+                                    </div>
+                                    <div className={cn(
+                                      'rounded-xl p-2.5 text-center border',
+                                      hw.videoCount > 0 ? 'bg-rose-50 border-rose-200' : 'bg-slate-50 border-slate-200 opacity-50'
+                                    )}>
+                                      <Film className={cn('w-4 h-4 mx-auto mb-1', hw.videoCount > 0 ? 'text-rose-600' : 'text-slate-400')} />
+                                      <p className={cn('text-sm font-black', hw.videoCount > 0 ? 'text-rose-700' : 'text-slate-400')}>{hw.videoCount}</p>
+                                      <p className="text-[10px] text-slate-500 font-medium">Video</p>
+                                    </div>
+                                  </div>
+
+                                  {/* Status message */}
+                                  <div className={cn(
+                                    'flex items-start gap-2 text-[10px] rounded-xl p-2.5',
+                                    (hw.audioCount > 0 || hw.videoCount > 0) ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-50 text-slate-500'
+                                  )}>
+                                    <span className="shrink-0 mt-0.5">
+                                      {(hw.audioCount > 0 || hw.videoCount > 0) ? '✅' : '⚠️'}
+                                    </span>
+                                    <span>
+                                      {hw.audioCount > 0 && hw.videoCount > 0
+                                        ? `${hw.audioCount} audio & ${hw.videoCount} video files imported — visible in Manage → Content.`
+                                        : hw.audioCount > 0
+                                          ? `${hw.audioCount} audio file${hw.audioCount > 1 ? 's' : ''} imported — visible in Manage → Content.`
+                                          : hw.videoCount > 0
+                                            ? `${hw.videoCount} video file${hw.videoCount > 1 ? 's' : ''} imported — visible in Manage → Content.`
+                                            : 'No media imported yet.'}
+                                    </span>
+                                  </div>
+                                </div>
+                              )}
+                            </div>
                           )}
                         </div>
 

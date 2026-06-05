@@ -6738,6 +6738,44 @@ Rules:
     }
   });
 
+  // ── POST /api/teacher/headway/lessons-media-summary — batch summary per lesson ──
+  app.post("/api/teacher/headway/lessons-media-summary", async (req: Request, res: Response) => {
+    try {
+      const caller = await assertAuthenticated(req, res);
+      if (!caller) return;
+
+      const lessonIds: string[] = Array.isArray(req.body?.lessonIds) ? req.body.lessonIds.slice(0, 200) : [];
+      if (lessonIds.length === 0) return res.json({ summary: {} });
+
+      // Fetch all headway_media rows for these lessons in one query
+      const { data, error } = await supabaseAdmin
+        .from("headway_media")
+        .select("lesson_id, type, level, unit_number")
+        .in("lesson_id", lessonIds);
+
+      if (error) {
+        if (error.code === "42P01") return res.json({ summary: {} }); // table not yet
+        throw error;
+      }
+
+      // Build summary map: lessonId → { audioCount, videoCount, level, unit }
+      const summary: Record<string, { audioCount: number; videoCount: number; level: string; unit: number | null }> = {};
+      for (const row of (data ?? []) as any[]) {
+        const lid = String(row.lesson_id || '');
+        if (!lid) continue;
+        if (!summary[lid]) summary[lid] = { audioCount: 0, videoCount: 0, level: row.level || '', unit: row.unit_number ?? null };
+        const isVideo = String(row.type || '').includes('video');
+        if (isVideo) summary[lid].videoCount++;
+        else summary[lid].audioCount++;
+      }
+
+      return res.json({ summary });
+    } catch (e: any) {
+      console.error("POST /api/teacher/headway/lessons-media-summary", e);
+      return res.status(500).json({ error: e?.message });
+    }
+  });
+
   // ── GET /api/teacher/headway/lesson-media/:lessonId — media linked to a lesson ──
   app.get("/api/teacher/headway/lesson-media/:lessonId", async (req: Request, res: Response) => {
     try {
