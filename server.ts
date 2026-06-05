@@ -6738,6 +6738,69 @@ Rules:
     }
   });
 
+  // ── GET /api/teacher/headway/lesson-media/:lessonId — media linked to a lesson ──
+  app.get("/api/teacher/headway/lesson-media/:lessonId", async (req: Request, res: Response) => {
+    try {
+      const caller = await assertAuthenticated(req, res);
+      if (!caller) return;
+      const lessonId = String(req.params.lessonId || '').trim();
+      if (!lessonId) return res.status(400).json({ error: 'lessonId required' });
+
+      // First try to get media linked by lesson_id
+      const { data: byLesson, error: e1 } = await supabaseAdmin
+        .from("headway_media")
+        .select("id, title, file_name, url, mime_type, type, level, unit_number")
+        .eq("lesson_id", lessonId)
+        .order("type", { ascending: true })
+        .order("file_name", { ascending: true });
+
+      if (e1 && e1.code !== "42P01") throw e1;
+
+      // Also check lesson short_description for headway:levelSlug:unitNum tag
+      const { data: lessonRow } = await supabaseAdmin
+        .from("lessons")
+        .select("short_description")
+        .eq("id", lessonId)
+        .maybeSingle();
+
+      let byUnit: any[] = [];
+      const desc = String((lessonRow as any)?.short_description || '');
+      const hwMatch = desc.match(/headway:([^:\n]+):(\d+)/i);
+      if (hwMatch) {
+        const levelSlug = hwMatch[1].trim();
+        const unitNum   = parseInt(hwMatch[2], 10);
+        const { data: unitRows } = await supabaseAdmin
+          .from("headway_media")
+          .select("id, title, file_name, url, mime_type, type, level, unit_number")
+          .ilike("level", levelSlug)
+          .eq("unit_number", unitNum)
+          .order("type", { ascending: true })
+          .order("file_name", { ascending: true });
+        byUnit = unitRows ?? [];
+      }
+
+      // Merge, deduplicate by id
+      const allRows = [...(byLesson ?? []), ...byUnit];
+      const seen = new Set<string>();
+      const files = allRows
+        .filter((r: any) => { if (seen.has(r.id)) return false; seen.add(r.id); return true; })
+        .map((r: any) => ({
+          id: r.id,
+          name: r.file_name || r.title || 'Media',
+          url: r.url,
+          type: String(r.type || '').includes('video') ? 'video' : 'audio',
+          mime_type: r.mime_type,
+          level: r.level,
+          unit_number: r.unit_number,
+        }));
+
+      return res.json({ files });
+    } catch (e: any) {
+      console.error("GET /api/teacher/headway/lesson-media", e);
+      return res.status(500).json({ error: e?.message });
+    }
+  });
+
   // ── GET /api/teacher/headway/drive-media — list imported Drive media ──────
   app.get("/api/teacher/headway/drive-media", async (req: Request, res: Response) => {
     try {
