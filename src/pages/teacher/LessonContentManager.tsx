@@ -1,12 +1,65 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate, useParams } from 'react-router-dom';
 import TeacherLayout from '../../components/layout/TeacherLayout';
 import { authFetch } from '../../lib/apiUrl';
 import { supabase } from '../../supabase';
-import { ArrowLeft, GripVertical, Plus, Save, Trash2, UploadCloud, ArrowDown, ArrowUp, RotateCcw, ExternalLink, Globe, Headphones, Video, ChevronDown, ChevronRight, BookOpen, Link2 } from 'lucide-react';
+import { ArrowLeft, GripVertical, Plus, Save, Trash2, UploadCloud, ArrowDown, ArrowUp, RotateCcw, ExternalLink, Globe, Headphones, Video, ChevronDown, ChevronRight, BookOpen, Link2, Music, Film, Play, Pause } from 'lucide-react';
 import { toast } from 'sonner';
 import { cn } from '../../lib/utils';
+
+interface DriveMediaFile { name: string; path: string; url: string; type: 'audio' | 'video'; }
+
+function DriveAudioRow({ f }: { f: DriveMediaFile }) {
+  const [playing, setPlaying] = useState(false);
+  const [progress, setProgress] = useState(0);
+  const [duration, setDuration] = useState(0);
+  const ref = useRef<HTMLAudioElement>(null);
+  const fmt = (s: number) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
+  const toggle = () => {
+    if (!ref.current) return;
+    if (playing) { ref.current.pause(); setPlaying(false); }
+    else { void ref.current.play(); setPlaying(true); }
+  };
+  return (
+    <div className="flex items-center gap-3 bg-violet-50 border border-violet-100 rounded-xl px-3 py-2.5">
+      <audio ref={ref} src={f.url} onTimeUpdate={() => { if (ref.current) setProgress(ref.current.currentTime); }}
+        onLoadedMetadata={() => { if (ref.current) setDuration(ref.current.duration); }}
+        onEnded={() => setPlaying(false)} />
+      <button onClick={toggle} className="w-8 h-8 rounded-full bg-violet-600 flex items-center justify-center shrink-0 hover:bg-violet-700 transition-colors">
+        {playing ? <Pause className="w-3.5 h-3.5 text-white" /> : <Play className="w-3.5 h-3.5 text-white" />}
+      </button>
+      <div className="flex-1 min-w-0">
+        <p className="text-xs font-semibold text-violet-800 truncate">{f.name}</p>
+        <div className="flex items-center gap-1.5 mt-1">
+          <div className="flex-1 h-1 bg-violet-200 rounded-full overflow-hidden">
+            <div className="h-full bg-violet-500 rounded-full transition-all" style={{ width: duration > 0 ? `${(progress / duration) * 100}%` : '0%' }} />
+          </div>
+          <span className="text-[10px] text-violet-500 shrink-0">{duration > 0 ? fmt(duration) : '--:--'}</span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function DriveVideoRow({ f }: { f: DriveMediaFile }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="border border-rose-100 rounded-xl overflow-hidden">
+      <div className="flex items-center gap-3 px-3 py-2.5 bg-rose-50">
+        <Film className="w-4 h-4 text-rose-600 shrink-0" />
+        <span className="flex-1 text-xs font-semibold text-rose-800 truncate">{f.name}</span>
+        <button onClick={() => setOpen(v => !v)}
+          className="text-[10px] font-bold text-rose-600 hover:text-rose-800 transition-colors px-2 py-1 rounded-lg hover:bg-rose-100">
+          {open ? 'Hide' : 'Play'}
+        </button>
+      </div>
+      {open && (
+        <video controls src={f.url} className="w-full max-h-64 bg-black" />
+      )}
+    </div>
+  );
+}
 
 type ContentType = 'video' | 'audio' | 'pdf' | 'text' | 'link';
 
@@ -64,11 +117,36 @@ export default function TeacherLessonContentManager() {
   const [headwayTab, setHeadwayTab] = useState<'audio' | 'video' | 'links'>('audio');
   const [headwayUnit, setHeadwayUnit] = useState(1);
   const [addingHeadway, setAddingHeadway] = useState<'audio' | 'video' | null>(null);
+  const [driveMedia, setDriveMedia] = useState<DriveMediaFile[]>([]);
+  const [driveMediaLoading, setDriveMediaLoading] = useState(false);
+  const [showDriveMedia, setShowDriveMedia] = useState(true);
 
   const sorted = useMemo(
     () => [...items].sort((a, b) => (a.position || 0) - (b.position || 0)),
     [items]
   );
+
+  const HEADWAY_LESSON_TYPES = ['Everyday English', 'Audio Downloads', 'Video Downloads'];
+
+  const loadDriveMedia = async (lessonTitle: string, description: string) => {
+    const isHeadwayMedia = HEADWAY_LESSON_TYPES.some(t => lessonTitle.includes(t));
+    if (!isHeadwayMedia) return;
+    const unitMatch = description.match(/Unit\s+(\d+)/i) || lessonTitle.match(/Unit\s+(\d+)/i);
+    const levelMatch = description.match(/headway\/([a-z0-9]+)\//i);
+    if (!unitMatch || !levelMatch) return;
+    const unitNum = parseInt(unitMatch[1], 10);
+    const levelSlug = levelMatch[1];
+    setDriveMediaLoading(true);
+    try {
+      const res = await authFetch(`/api/teacher/headway/media?levelSlug=${encodeURIComponent(levelSlug)}&unitNum=${unitNum}`);
+      if (res.ok) {
+        const json = await res.json().catch(() => ({}));
+        setDriveMedia(Array.isArray(json?.files) ? json.files : []);
+      }
+    } catch { /* ignore */ } finally {
+      setDriveMediaLoading(false);
+    }
+  };
 
   const load = async () => {
     setLoading(true);
@@ -90,9 +168,12 @@ export default function TeacherLessonContentManager() {
     const foundLesson = Array.isArray(lessonJson?.lessons)
       ? lessonJson.lessons.find((l: any) => String(l.id) === String(lessonId))
       : null;
-    setLessonTitle(String(foundLesson?.title || t('lessons.title')));
+    const title = String(foundLesson?.title || t('lessons.title'));
+    const desc = String(foundLesson?.short_description || '');
+    setLessonTitle(title);
     setItems(Array.isArray(contentsJson?.contents) ? contentsJson.contents : []);
     setLoading(false);
+    void loadDriveMedia(title, desc);
   };
 
   useEffect(() => {
@@ -521,6 +602,70 @@ export default function TeacherLessonContentManager() {
             </div>
           )}
         </div>
+
+        {/* Drive Media Panel — auto-shown for Everyday English / Audio Downloads / Video Downloads */}
+        {(driveMediaLoading || driveMedia.length > 0) && (
+          <div className="bg-white rounded-2xl border border-slate-100 overflow-hidden">
+            <button
+              onClick={() => setShowDriveMedia(v => !v)}
+              className="w-full flex items-center justify-between px-5 py-4 hover:bg-slate-50 transition-colors"
+            >
+              <div className="flex items-center gap-3">
+                <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-sky-500 to-indigo-600 flex items-center justify-center">
+                  {lessonTitle.includes('Video') ? <Film className="w-4 h-4 text-white" /> : <Music className="w-4 h-4 text-white" />}
+                </div>
+                <div className="text-left">
+                  <p className="text-sm font-bold text-slate-800">Drive Library Media</p>
+                  <p className="text-xs text-slate-400">
+                    {driveMediaLoading ? 'Loading…' : `${driveMedia.length} file${driveMedia.length !== 1 ? 's' : ''} imported from Google Drive`}
+                  </p>
+                </div>
+              </div>
+              {showDriveMedia
+                ? <ChevronDown className="w-4 h-4 text-slate-400" />
+                : <ChevronRight className="w-4 h-4 text-slate-400" />}
+            </button>
+            {showDriveMedia && (
+              <div className="border-t border-slate-100 px-5 pb-5 pt-3">
+                {driveMediaLoading ? (
+                  <div className="flex items-center gap-2 text-sm text-slate-400 py-4">
+                    <div className="w-4 h-4 rounded-full border-2 border-indigo-400 border-t-transparent animate-spin" />
+                    Loading Drive media…
+                  </div>
+                ) : driveMedia.length === 0 ? (
+                  <p className="text-xs text-slate-400 py-4">No Drive media found for this unit yet. Run a Drive Library import from Headway Tests &amp; Resources.</p>
+                ) : (
+                  <div className="space-y-3">
+                    {driveMedia.filter(f => f.type === 'audio').length > 0 && (
+                      <div>
+                        <p className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2 flex items-center gap-1.5">
+                          <Headphones className="w-3.5 h-3.5" /> Audio Files
+                        </p>
+                        <div className="space-y-2">
+                          {driveMedia.filter(f => f.type === 'audio').map(f => (
+                            <DriveAudioRow key={f.path} f={f} />
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                    {driveMedia.filter(f => f.type === 'video').length > 0 && (
+                      <div>
+                        <p className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2 flex items-center gap-1.5">
+                          <Video className="w-3.5 h-3.5" /> Video Files
+                        </p>
+                        <div className="space-y-2">
+                          {driveMedia.filter(f => f.type === 'video').map(f => (
+                            <DriveVideoRow key={f.path} f={f} />
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        )}
 
         {loading ? (
           <div className="grid grid-cols-1 gap-4">

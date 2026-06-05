@@ -1,15 +1,12 @@
-import React, { useState, useCallback, useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import {
   BookOpen, ChevronDown, ChevronRight, ExternalLink, X,
   Headphones, Video, Globe, FlaskConical, FileText,
-  Download, Save, Loader2, Check, AlertCircle, RefreshCw,
+  Download,
 } from 'lucide-react';
 import { HEADWAY_FULL_DATA, OUP, CC, type HUnit } from '../../lib/headwayData';
 import HeadwayMediaSection from './HeadwayMediaSection';
-import { supabase } from '../../supabase';
-import { authFetch } from '../../lib/apiUrl';
-import { toast } from 'sonner';
 import { cn } from '../../lib/utils';
 
 const HW_LEVELS = [
@@ -64,66 +61,10 @@ function LessonDetailModal({ lesson, onClose }: { lesson: OupLesson; onClose: ()
   const meta = TYPE_META[lesson.type];
   const Icon = meta.icon;
 
-  const [saving, setSaving] = useState(false);
-  const [saved, setSaved] = useState(false);
-  const [courses, setCourses] = useState<any[]>([]);
-  const [courseId, setCourseId] = useState('');
-  const [loadingCourses, setLoadingCourses] = useState(false);
-  const [showQuizSave, setShowQuizSave] = useState(false);
-
   const hasAudio = !!(lesson.unit as any).audioZip;
   const hasVideo = !!(lesson.unit as any).videoZip;
   const audioUrl = (lesson.unit as any).audioZip as string | undefined;
   const videoUrl = (lesson.unit as any).videoZip as string | undefined;
-
-  const loadCourses = useCallback(async () => {
-    if (courses.length > 0) return;
-    setLoadingCourses(true);
-    try {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (!session) return;
-      const res = await authFetch(`/api/teacher/courses?userId=${encodeURIComponent(session.user.id)}`);
-      if (res.ok) {
-        const json = await res.json();
-        const list = Array.isArray(json) ? json : (json.courses ?? json.data ?? []);
-        setCourses(list);
-        if (list.length > 0) setCourseId(list[0].id);
-      }
-    } catch { /* ignore */ } finally {
-      setLoadingCourses(false);
-    }
-  }, [courses.length]);
-
-  const handleShowQuizSave = () => {
-    setShowQuizSave(true);
-    void loadCourses();
-  };
-
-  const handleSaveQuiz = async () => {
-    if (!courseId) { toast.error('Please select a course'); return; }
-    setSaving(true);
-    try {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (!session) { toast.error('Not authenticated'); return; }
-      const res = await authFetch('/api/teacher/headway/save-unit-quiz', {
-        method: 'POST',
-        body: JSON.stringify({
-          userId: session.user.id,
-          courseId,
-          level: Object.keys(HEADWAY_FULL_DATA).find(k => HEADWAY_FULL_DATA[k].slug === lesson.levelSlug) ?? '',
-          unitNum: lesson.unit.num,
-        }),
-      });
-      const json = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(json?.error || 'Failed to save quiz');
-      setSaved(true);
-      toast.success(`Quiz saved! Find it in Teacher → Quizzes.`);
-    } catch (e: any) {
-      toast.error(e?.message || 'Failed to save quiz');
-    } finally {
-      setSaving(false);
-    }
-  };
 
   return (
     <AnimatePresence>
@@ -280,62 +221,7 @@ function LessonDetailModal({ lesson, onClose }: { lesson: OupLesson; onClose: ()
                     className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm font-bold text-white bg-indigo-600 hover:bg-indigo-700 transition-colors">
                     <ExternalLink className="w-3.5 h-3.5" /> Open Test Builder
                   </a>
-                  <button
-                    onClick={handleShowQuizSave}
-                    className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm font-bold text-indigo-700 bg-white border border-indigo-200 hover:bg-indigo-50 transition-colors">
-                    <Save className="w-3.5 h-3.5" /> Save as Quiz
-                  </button>
                 </div>
-
-                {/* Quiz save panel */}
-                <AnimatePresence>
-                  {showQuizSave && (
-                    <motion.div
-                      initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }}
-                      exit={{ opacity: 0, height: 0 }} transition={{ duration: 0.2 }}
-                      className="overflow-hidden">
-                      <div className="mt-4 pt-4 border-t border-indigo-200">
-                        {saved ? (
-                          <div className="flex items-center gap-2 text-sm font-semibold text-emerald-700 bg-emerald-50 px-4 py-3 rounded-xl border border-emerald-200">
-                            <Check className="w-4 h-4 shrink-0" />
-                            Quiz saved! Find it in Teacher → Quizzes.
-                          </div>
-                        ) : (
-                          <div className="space-y-3">
-                            <p className="text-xs font-semibold text-indigo-700 mb-1">Choose a course to save the quiz to:</p>
-                            {loadingCourses ? (
-                              <div className="flex items-center gap-2 text-xs text-slate-400">
-                                <Loader2 className="w-4 h-4 animate-spin" /> Loading courses…
-                              </div>
-                            ) : courses.length === 0 ? (
-                              <div className="flex items-center gap-2 text-xs text-amber-600 bg-amber-50 px-3 py-2 rounded-xl border border-amber-200">
-                                <AlertCircle className="w-4 h-4 shrink-0" /> No courses found. Create a course first.
-                              </div>
-                            ) : (
-                              <>
-                                <select
-                                  value={courseId}
-                                  onChange={e => setCourseId(e.target.value)}
-                                  className="w-full px-3 py-2 rounded-xl border border-indigo-200 bg-white text-sm text-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-400">
-                                  {courses.map((c: any) => (
-                                    <option key={c.id} value={c.id}>{c.title || c.name}</option>
-                                  ))}
-                                </select>
-                                <button
-                                  onClick={() => void handleSaveQuiz()}
-                                  disabled={saving}
-                                  className="inline-flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-bold text-white bg-indigo-600 hover:bg-indigo-700 disabled:opacity-60 transition-colors">
-                                  {saving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />}
-                                  {saving ? 'Saving…' : 'Save Quiz'}
-                                </button>
-                              </>
-                            )}
-                          </div>
-                        )}
-                      </div>
-                    </motion.div>
-                  )}
-                </AnimatePresence>
               </div>
             )}
 

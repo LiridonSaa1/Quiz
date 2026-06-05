@@ -5,12 +5,10 @@ import { authFetch, readApiError } from '../../lib/apiUrl';
 import LoadingButton from '../../components/ui/LoadingButton';
 import { resolveTeacherIdCandidates } from '../../lib/teacherScope';
 import TeacherLayout from '../../components/layout/TeacherLayout';
-import HeadwayLibraryTab from '../../components/teacher/HeadwayLibraryTab';
 import {
   Plus, Search, PlayCircle, Trash2, Edit2, X, Save,
   BookOpen, Layers, Video, FileText, HelpCircle, Clock,
   Lock, Unlock, ChevronRight, ChevronLeft, Calendar, AlertTriangle,
-  Library
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { Lesson } from '../../types';
@@ -450,26 +448,6 @@ export default function TeacherLessons() {
           {/* Main Content */}
           <div className="px-6 sm:px-8 lg:px-10 py-8 space-y-8 bg-slate-50">
 
-            {/* Tab Switcher */}
-            <div className="flex items-center gap-2 p-1 bg-white rounded-2xl border border-slate-100 shadow-sm w-fit">
-              <button
-                onClick={() => setActiveTab('myLessons')}
-                className={cn(
-                  'inline-flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-bold transition-all',
-                  activeTab === 'myLessons'
-                    ? 'bg-gradient-to-r from-indigo-500 to-violet-600 text-white shadow-md'
-                    : 'text-slate-500 hover:text-slate-700 hover:bg-slate-50'
-                )}>
-                <BookOpen className="w-4 h-4" />
-                My Lessons
-              </button>
-              <button
-                onClick={() => navigate('/teacher/headway-tests')}
-                className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-bold transition-all text-slate-500 hover:text-slate-700 hover:bg-slate-50">
-                <Library className="w-4 h-4" />
-                Drive Library
-              </button>
-            </div>
 
 
             {activeTab === 'myLessons' && !loading && courses.length === 0 && (

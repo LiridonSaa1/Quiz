@@ -67,6 +67,8 @@ export default function HeadwayTestImport() {
   const [importing, setImporting] = useState(false);
   const [importProgress, setImportProgress] = useState<ImportProgress | null>(null);
   const [importDone, setImportDone] = useState<{ modules: number; lessons: number } | null>(null);
+  const [driveImportJobId, setDriveImportJobId] = useState<string | null>(null);
+  const [driveImporting, setDriveImporting] = useState(false);
 
   // Preview state
   const [previewUnit, setPreviewUnit] = useState<HUnit | null>(null);
@@ -203,6 +205,24 @@ export default function HeadwayTestImport() {
 
       setImportDone({ modules: finalModules, lessons: finalLessons });
       toast.success(`Headway ${activeLevel.key} imported — ${finalModules} modules, ${finalLessons} lessons`);
+
+      // Auto-trigger Drive Library import if audio/video/everyday were included
+      if (importOptions.audioDownload || importOptions.videoDownload || importOptions.everydayEnglish) {
+        setDriveImporting(true);
+        try {
+          const driveRes = await authFetch('/api/teacher/headway/drive-import/start', {
+            method: 'POST',
+            body: JSON.stringify({ level: activeLevel.key }),
+          });
+          const driveJson = await driveRes.json().catch(() => ({}));
+          if (driveRes.ok && driveJson.jobId) {
+            setDriveImportJobId(driveJson.jobId);
+            toast.success('Drive Library import started in the background');
+          }
+        } catch { /* ignore */ } finally {
+          setDriveImporting(false);
+        }
+      }
     } catch (e: any) {
       toast.error(e?.message ?? 'Import failed');
     } finally {
@@ -214,6 +234,7 @@ export default function HeadwayTestImport() {
   const resetImport = () => {
     setImportDone(null);
     setImportCourseId('');
+    setDriveImportJobId(null);
   };
 
   return (
@@ -653,7 +674,19 @@ export default function HeadwayTestImport() {
                       <span className="font-semibold text-slate-700">{importDone.modules}</span> modules and{' '}
                       <span className="font-semibold text-slate-700">{importDone.lessons}</span> lessons created
                     </p>
-                    <p className="text-xs text-slate-400 mb-6">Each lesson links to real Oxford Headway exercises and quizzes include MC questions</p>
+                    <p className="text-xs text-slate-400 mb-3">Each lesson links to real Oxford Headway exercises and quizzes include MC questions</p>
+                    {driveImporting && (
+                      <div className="flex items-center justify-center gap-2 mb-3 text-xs text-sky-700 bg-sky-50 border border-sky-100 rounded-xl px-4 py-2.5">
+                        <Loader2 className="w-4 h-4 animate-spin shrink-0" />
+                        Starting Drive Library import…
+                      </div>
+                    )}
+                    {driveImportJobId && !driveImporting && (
+                      <div className="flex items-center gap-2 mb-3 text-xs text-emerald-700 bg-emerald-50 border border-emerald-100 rounded-xl px-4 py-2.5">
+                        <CheckCircle2 className="w-4 h-4 shrink-0" />
+                        <span>Drive Library import running in background — audio &amp; video files will appear in lesson details once ready.</span>
+                      </div>
+                    )}
                     <div className="flex gap-3 justify-center">
                       <button
                         type="button"
@@ -753,6 +786,12 @@ export default function HeadwayTestImport() {
                     {/* Content options */}
                     <div>
                       <label className="block text-xs font-semibold text-slate-600 mb-2">Include in import</label>
+                      {(importOptions.audioDownload || importOptions.videoDownload || importOptions.everydayEnglish) && (
+                        <div className="mb-2 flex items-start gap-2 px-3 py-2 rounded-xl bg-sky-50 border border-sky-100 text-[11px] text-sky-700">
+                          <HardDrive className="w-3.5 h-3.5 shrink-0 mt-0.5" />
+                          Drive Library audio &amp; video will be imported automatically
+                        </div>
+                      )}
                       <div className="rounded-xl border border-slate-200 bg-slate-50 divide-y divide-slate-100 overflow-hidden">
                         {[
                           { key: 'grammar',          label: 'Grammar exercises',           icon: '📘', desc: 'Interactive grammar practice on Oxford site' },
