@@ -6434,17 +6434,28 @@ Rules:
       const unitNum   = parseInt(String(req.query.unitNum ?? "0"), 10);
       if (!levelSlug || !unitNum) return res.status(400).json({ error: "levelSlug and unitNum required" });
 
-      const files: { name: string; path: string; url: string; type: "audio" | "video" }[] = [];
-      for (const mediaType of ["audio", "video"] as const) {
-        const prefix = `${levelSlug}/${unitNum}/${mediaType}`;
-        const { data: list } = await supabaseAdmin.storage.from("headway-media").list(prefix);
-        for (const item of list ?? []) {
-          if (item.name === ".emptyFolderPlaceholder") continue;
-          const filePath = `${prefix}/${item.name}`;
-          const { data: { publicUrl } } = supabaseAdmin.storage.from("headway-media").getPublicUrl(filePath);
-          files.push({ name: item.name, path: filePath, url: publicUrl, type: mediaType });
-        }
+      // Query the headway_media table (inserted during Drive import) using
+      // case-insensitive level match so "Beginner" == "beginner" == "BEGINNER"
+      const { data: rows, error } = await supabaseAdmin
+        .from("headway_media")
+        .select("title, file_name, url, mime_type, type")
+        .ilike("level", levelSlug)
+        .eq("unit_number", unitNum);
+
+      if (error) {
+        // Table may not exist yet — return empty list gracefully
+        if (error.code === "42P01") return res.json({ files: [] });
+        throw new Error(error.message);
       }
+
+      const files = (rows ?? []).map((r: any) => ({
+        name: r.file_name || r.title,
+        path: r.url,
+        url:  r.url,
+        // Normalise type: student_audio / workbook_audio → "audio", video → "video"
+        type: String(r.type || "").includes("video") ? "video" : "audio",
+      }));
+
       return res.json({ files });
     } catch (e: any) {
       console.error("GET /api/teacher/headway/media", e);

@@ -120,22 +120,21 @@ export default function TeacherLessonContentManager() {
   const [driveMedia, setDriveMedia] = useState<DriveMediaFile[]>([]);
   const [driveMediaLoading, setDriveMediaLoading] = useState(false);
   const [showDriveMedia, setShowDriveMedia] = useState(true);
+  const [isHeadwayLesson, setIsHeadwayLesson] = useState(false);
 
   const sorted = useMemo(
     () => [...items].sort((a, b) => (a.position || 0) - (b.position || 0)),
     [items]
   );
 
-  const HEADWAY_LESSON_TYPES = ['Everyday English', 'Audio Downloads', 'Video Downloads'];
-
-  const loadDriveMedia = async (lessonTitle: string, description: string) => {
-    const isHeadwayMedia = HEADWAY_LESSON_TYPES.some(t => lessonTitle.includes(t));
-    if (!isHeadwayMedia) return;
-    const unitMatch = description.match(/Unit\s+(\d+)/i) || lessonTitle.match(/Unit\s+(\d+)/i);
-    const levelMatch = description.match(/headway\/([a-z0-9]+)\//i);
-    if (!unitMatch || !levelMatch) return;
-    const unitNum = parseInt(unitMatch[1], 10);
-    const levelSlug = levelMatch[1];
+  const loadDriveMedia = async (_lessonTitle: string, description: string) => {
+    // Tag written by Headway importer: headway:Beginner:3  (level:unitNum)
+    const hwMatch = description.match(/headway:([^:\n]+):(\d+)/i);
+    if (!hwMatch) return;
+    const levelSlug = hwMatch[1].trim();
+    const unitNum   = parseInt(hwMatch[2], 10);
+    if (!levelSlug || !unitNum) return;
+    setIsHeadwayLesson(true);
     setDriveMediaLoading(true);
     try {
       const res = await authFetch(`/api/teacher/headway/media?levelSlug=${encodeURIComponent(levelSlug)}&unitNum=${unitNum}`);
@@ -603,8 +602,8 @@ export default function TeacherLessonContentManager() {
           )}
         </div>
 
-        {/* Drive Media Panel — auto-shown for Everyday English / Audio Downloads / Video Downloads */}
-        {(driveMediaLoading || driveMedia.length > 0) && (
+        {/* Drive Media Panel — shown for all Headway-imported lessons */}
+        {(isHeadwayLesson || driveMediaLoading || driveMedia.length > 0) && (
           <div className="bg-white rounded-2xl border border-slate-100 overflow-hidden">
             <button
               onClick={() => setShowDriveMedia(v => !v)}
