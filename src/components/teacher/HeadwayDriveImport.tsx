@@ -9,6 +9,12 @@ import { authFetch } from '../../lib/apiUrl';
 import { toast } from 'sonner';
 import { cn } from '../../lib/utils';
 
+interface Course {
+  id: string;
+  title: string;
+  level?: string | null;
+}
+
 interface DriveMedia {
   id: string;
   level: string;
@@ -153,6 +159,10 @@ export default function HeadwayDriveImport() {
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [deletingAll, setDeletingAll] = useState(false);
   const [confirmDeleteAll, setConfirmDeleteAll] = useState(false);
+  // Course picker
+  const [courses, setCourses] = useState<Course[]>([]);
+  const [loadingCourses, setLoadingCourses] = useState(false);
+  const [selectedCourseId, setSelectedCourseId] = useState('');
   const logsEndRef = useRef<HTMLDivElement>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
@@ -178,10 +188,28 @@ export default function HeadwayDriveImport() {
     }
   }, [selectedLevel.key]);
 
+  const loadCourses = useCallback(async () => {
+    setLoadingCourses(true);
+    try {
+      const { supabase } = await import('../../supabase');
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session?.user?.id) return;
+      const res = await authFetch(`/api/teacher/courses?userId=${encodeURIComponent(session.user.id)}`);
+      if (res.ok) {
+        const json = await res.json();
+        const list = Array.isArray(json) ? json : (json.courses ?? json.data ?? []);
+        setCourses(list);
+      }
+    } catch { /* ignore */ } finally {
+      setLoadingCourses(false);
+    }
+  }, []);
+
   useEffect(() => {
     void checkConfig();
     void loadMedia();
-  }, [checkConfig, loadMedia]);
+    void loadCourses();
+  }, [checkConfig, loadMedia, loadCourses]);
 
   // Reload media when level changes
   useEffect(() => {
@@ -219,9 +247,11 @@ export default function HeadwayDriveImport() {
     setJob(null);
     setJobId(null);
     try {
+      const body: Record<string, string> = { level: selectedLevel.key };
+      if (selectedCourseId) body.courseId = selectedCourseId;
       const res = await authFetch('/api/teacher/headway/drive-import/start', {
         method: 'POST',
-        body: JSON.stringify({ level: selectedLevel.key }),
+        body: JSON.stringify(body),
       });
       const json = await res.json();
       if (!res.ok) throw new Error(json?.error || 'Failed to start import');
@@ -415,6 +445,39 @@ export default function HeadwayDriveImport() {
               )}
             </div>
           )}
+
+          {/* ── Course picker ── */}
+          <div className="space-y-2">
+            <label className="flex items-center gap-1.5 text-xs font-bold text-slate-700">
+              <span>📚</span> Lidho me kurs (opsionale)
+            </label>
+            <div className="relative">
+              {loadingCourses ? (
+                <div className="flex items-center gap-2 px-3 py-2.5 rounded-xl border border-slate-200 bg-slate-50 text-xs text-slate-400">
+                  <Loader2 className="w-3.5 h-3.5 animate-spin" /> Duke ngarkuar kurset…
+                </div>
+              ) : (
+                <select
+                  value={selectedCourseId}
+                  onChange={e => setSelectedCourseId(e.target.value)}
+                  disabled={importing}
+                  className="w-full px-3 py-2.5 rounded-xl border border-slate-200 bg-white text-sm text-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-400 focus:border-indigo-400 transition disabled:opacity-60 appearance-none cursor-pointer">
+                  <option value="">— Pa kurs (import i lirë) —</option>
+                  {courses.map(c => (
+                    <option key={c.id} value={c.id}>
+                      {c.title}{c.level ? ` · ${c.level}` : ''}
+                    </option>
+                  ))}
+                </select>
+              )}
+            </div>
+            {selectedCourseId && (
+              <p className="text-[11px] text-indigo-600 font-medium flex items-center gap-1">
+                <CheckCircle2 className="w-3 h-3" />
+                Media do të lidhet me kursin e zgjedhur
+              </p>
+            )}
+          </div>
 
           <button
             onClick={() => void startImport()}

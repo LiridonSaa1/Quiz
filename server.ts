@@ -156,7 +156,8 @@ async function processZipEntries(
   zipDriveId: string,
   type: string,
   level: string,
-  job: DriveImportJob
+  job: DriveImportJob,
+  courseId?: string
 ): Promise<void> {
   const unitNum = detectUnitNumber(zipName);
   let zip: InstanceType<typeof AdmZip>;
@@ -208,11 +209,14 @@ async function processZipEntries(
       const { data: { publicUrl } } = supabaseAdmin.storage.from('headway-media').getPublicUrl(storagePath);
       const title = baseName.replace(/\.[^.]+$/, '').replace(/[_-]/g, ' ').trim();
 
-      const { error: insErr } = await supabaseAdmin.from('headway_media').insert({
+      const insertPayload: Record<string, unknown> = {
         level, unit_number: unitNum, type, title,
         file_name: baseName, drive_file_id: compositeId,
         url: publicUrl, mime_type: mime, size_bytes: fileData.length,
-      });
+      };
+      if (courseId) insertPayload.course_id = courseId;
+
+      const { error: insErr } = await supabaseAdmin.from('headway_media').insert(insertPayload);
       if (insErr) {
         if (insErr.code === '42P01') throw new Error('headway_media table not found — run migration 014');
         throw new Error(insErr.message);
@@ -6635,15 +6639,23 @@ Rules:
       const apiKey = process.env.GOOGLE_API_KEY?.trim();
       if (!apiKey) return res.status(503).json({ error: "GOOGLE_API_KEY not configured in Replit Secrets" });
 
-      const level = String(req.body?.level || "Beginner").trim();
+      const level    = String(req.body?.level    || "Beginner").trim();
+      const courseId = typeof req.body?.courseId === "string" ? req.body.courseId.trim() : undefined;
       const jobId = `hw-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
       const job: DriveImportJob = { status: "running", total: 0, done: 0, skipped: 0, errors: [], logs: [] };
       driveImportJobs.set(jobId, job);
-      console.log(`[drive-import] Starting job ${jobId} for level="${level}"`);
+      console.log(`[drive-import] Starting job ${jobId} for level="${level}"${courseId ? ` courseId=${courseId}` : ""}`);
+
+      // Auto-ensure course_id column exists on headway_media (best-effort)
+      try {
+        await supabaseAdmin.rpc("exec_sql", {
+          sql: "ALTER TABLE headway_media ADD COLUMN IF NOT EXISTS course_id UUID REFERENCES courses(id) ON DELETE SET NULL;"
+        });
+      } catch { /* ignore — column may already exist or exec_sql not available */ }
 
       // Choose level-specific folders; fall back to Beginner if level not configured
       const levelFolders = LEVEL_DRIVE_FOLDERS[level] ?? LEVEL_DRIVE_FOLDERS['Beginner'];
-      job.logs.push(`📚 Level: ${level} — ${Object.keys(levelFolders).length} folder(s) configured`);
+      job.logs.push(`📚 Level: ${level}${courseId ? " · linked to course" : ""} — ${Object.keys(levelFolders).length} folder(s) configured`);
 
       res.json({ jobId });
 
@@ -6670,7 +6682,7 @@ Rules:
                 job.logs.push(`📦 Downloading ZIP: ${zipFile.name}…`);
                 const zipBuf = await downloadDriveFileBuffer(zipFile.id, apiKey);
                 job.logs.push(`   ↳ ${(zipBuf.length / 1024 / 1024).toFixed(1)} MB — extracting…`);
-                await processZipEntries(zipBuf, zipFile.name, zipFile.id, type, level, job);
+                await processZipEntries(zipBuf, zipFile.name, zipFile.id, type, level, job, courseId);
               } catch (err: any) {
                 job.errors.push(`${zipFile.name}: ${err?.message}`);
                 job.logs.push(`✗ ${zipFile.name}: ${err?.message}`);
@@ -6706,12 +6718,14 @@ Rules:
                 const { data: { publicUrl } } = supabaseAdmin.storage.from('headway-media').getPublicUrl(storagePath);
                 const title = safeName.replace(/\.[^.]+$/, '').replace(/[_-]/g, ' ').trim();
 
-                const { error: insErr } = await supabaseAdmin.from('headway_media').insert({
+                const insertRow: Record<string, unknown> = {
                   level, unit_number: unitNum, type, title,
                   file_name: safeName, drive_file_id: compositeId,
                   url: publicUrl, mime_type: mime,
                   size_bytes: fileBuf.length,
-                });
+                };
+                if (courseId) insertRow.course_id = courseId;
+                const { error: insErr } = await supabaseAdmin.from('headway_media').insert(insertRow);
                 if (insErr) {
                   if (insErr.code === '42P01') throw new Error('headway_media table not found — run migration 014');
                   throw new Error(insErr.message);
