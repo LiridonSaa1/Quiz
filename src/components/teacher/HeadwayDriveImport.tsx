@@ -164,8 +164,9 @@ export default function HeadwayDriveImport() {
   const [courses, setCourses] = useState<Course[]>([]);
   const [loadingCourses, setLoadingCourses] = useState(false);
   const [selectedCourseId, setSelectedCourseId] = useState('');
-  // Library filter
+  // Library filters
   const [filterCourseId, setFilterCourseId] = useState('');
+  const [filterType, setFilterType] = useState<'' | 'student_audio' | 'workbook_audio' | 'video'>('');
   const logsEndRef = useRef<HTMLDivElement>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
@@ -312,9 +313,11 @@ export default function HeadwayDriveImport() {
       return next;
     });
 
+  const visibleMedia = filterType ? media.filter(m => m.type === filterType) : media;
+
   const grouped = (() => {
     const map = new Map<number, DriveMedia[]>();
-    for (const m of media) {
+    for (const m of visibleMedia) {
       const u = m.unit_number ?? 0;
       if (!map.has(u)) map.set(u, []);
       map.get(u)!.push(m);
@@ -508,7 +511,7 @@ export default function HeadwayDriveImport() {
           <div className="flex items-center gap-2 px-1 flex-wrap">
             <h3 className="text-sm font-black text-slate-800">Media Library</h3>
             <span className={cn('text-[10px] font-bold px-2 py-0.5 rounded-full border', selectedLevel.badge)}>
-              {media.length} files · {selectedLevel.key}
+              {visibleMedia.length}{filterType ? ` / ${media.length}` : ''} files · {selectedLevel.key}
             </span>
 
             {/* ── Course filter dropdown ── */}
@@ -532,6 +535,37 @@ export default function HeadwayDriveImport() {
                   ✕ Hiq filtrin
                 </button>
               )}
+            </div>
+
+            {/* ── Type filter pills ── */}
+            <div className="flex items-center gap-1">
+              {([
+                { value: '', label: 'All', icon: '🎵' },
+                { value: 'student_audio', label: "SB Audio", icon: '📗' },
+                { value: 'workbook_audio', label: 'WB Audio', icon: '📘' },
+                { value: 'video', label: 'Video', icon: '🎬' },
+              ] as const).map(opt => (
+                <button
+                  key={opt.value}
+                  onClick={() => setFilterType(opt.value)}
+                  className={cn(
+                    'inline-flex items-center gap-1 px-2 py-1 rounded-lg text-[10px] font-bold border transition-all',
+                    filterType === opt.value
+                      ? 'bg-indigo-600 text-white border-indigo-600 shadow-sm'
+                      : 'bg-white text-slate-500 border-slate-200 hover:border-slate-300 hover:bg-slate-50'
+                  )}>
+                  <span>{opt.icon}</span>
+                  {opt.label}
+                  {opt.value && (
+                    <span className={cn(
+                      'tabular-nums',
+                      filterType === opt.value ? 'text-indigo-200' : 'text-slate-400'
+                    )}>
+                      {media.filter(m => m.type === opt.value).length}
+                    </span>
+                  )}
+                </button>
+              ))}
             </div>
 
             <div className="ml-auto">
