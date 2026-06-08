@@ -25,6 +25,7 @@ interface DriveMedia {
   drive_file_id: string;
   url: string | null;
   size_bytes: number | null;
+  course_id: string | null;
   created_at: string;
 }
 
@@ -159,10 +160,12 @@ export default function HeadwayDriveImport() {
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [deletingAll, setDeletingAll] = useState(false);
   const [confirmDeleteAll, setConfirmDeleteAll] = useState(false);
-  // Course picker
+  // Course picker (import)
   const [courses, setCourses] = useState<Course[]>([]);
   const [loadingCourses, setLoadingCourses] = useState(false);
   const [selectedCourseId, setSelectedCourseId] = useState('');
+  // Library filter
+  const [filterCourseId, setFilterCourseId] = useState('');
   const logsEndRef = useRef<HTMLDivElement>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
@@ -174,11 +177,14 @@ export default function HeadwayDriveImport() {
     } catch { setConfigured(false); }
   }, []);
 
-  const loadMedia = useCallback(async (level?: string) => {
+  const loadMedia = useCallback(async (level?: string, courseFilter?: string) => {
     setLoadingMedia(true);
     const lvl = level ?? selectedLevel.key;
+    const cid = courseFilter !== undefined ? courseFilter : filterCourseId;
     try {
-      const res = await authFetch(`/api/teacher/headway/drive-media?level=${encodeURIComponent(lvl)}`);
+      let url = `/api/teacher/headway/drive-media?level=${encodeURIComponent(lvl)}`;
+      if (cid) url += `&courseId=${encodeURIComponent(cid)}`;
+      const res = await authFetch(url);
       if (res.ok) {
         const json = await res.json();
         setMedia(Array.isArray(json.media) ? json.media : []);
@@ -186,7 +192,7 @@ export default function HeadwayDriveImport() {
     } catch { /* ignore */ } finally {
       setLoadingMedia(false);
     }
-  }, [selectedLevel.key]);
+  }, [selectedLevel.key, filterCourseId]);
 
   const loadCourses = useCallback(async () => {
     setLoadingCourses(true);
@@ -211,11 +217,11 @@ export default function HeadwayDriveImport() {
     void loadCourses();
   }, [checkConfig, loadMedia, loadCourses]);
 
-  // Reload media when level changes
+  // Reload media when level or course filter changes
   useEffect(() => {
     setExpandedUnits(new Set());
-    void loadMedia(selectedLevel.key);
-  }, [selectedLevel.key]);
+    void loadMedia(selectedLevel.key, filterCourseId);
+  }, [selectedLevel.key, filterCourseId]);
 
   useEffect(() => {
     if (logsEndRef.current && job?.logs?.length) {
@@ -497,13 +503,37 @@ export default function HeadwayDriveImport() {
       )}
 
       {/* ── Media Library ── */}
-      {media.length > 0 && (
+      {(media.length > 0 || filterCourseId) && (
         <div className="space-y-3">
-          <div className="flex items-center gap-2 px-1">
+          <div className="flex items-center gap-2 px-1 flex-wrap">
             <h3 className="text-sm font-black text-slate-800">Media Library</h3>
             <span className={cn('text-[10px] font-bold px-2 py-0.5 rounded-full border', selectedLevel.badge)}>
               {media.length} files · {selectedLevel.key}
             </span>
+
+            {/* ── Course filter dropdown ── */}
+            <div className="flex items-center gap-1.5">
+              <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Kurs:</span>
+              <select
+                value={filterCourseId}
+                onChange={e => setFilterCourseId(e.target.value)}
+                className="text-xs px-2.5 py-1.5 rounded-xl border border-slate-200 bg-white text-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-400 focus:border-indigo-400 transition cursor-pointer appearance-none">
+                <option value="">Të gjitha</option>
+                {courses.map(c => (
+                  <option key={c.id} value={c.id}>
+                    {c.title}{c.level ? ` · ${c.level}` : ''}
+                  </option>
+                ))}
+              </select>
+              {filterCourseId && (
+                <button
+                  onClick={() => setFilterCourseId('')}
+                  className="text-[10px] font-semibold text-indigo-600 hover:text-indigo-800 transition-colors px-1.5 py-1 rounded-lg hover:bg-indigo-50">
+                  ✕ Hiq filtrin
+                </button>
+              )}
+            </div>
+
             <div className="ml-auto">
               {!confirmDeleteAll ? (
                 <button
@@ -635,10 +665,25 @@ export default function HeadwayDriveImport() {
       {!loadingMedia && media.length === 0 && configured !== false && (
         <div className="flex flex-col items-center gap-3 py-12 text-center">
           <CloudDownload className="w-10 h-10 text-slate-200" />
-          <p className="text-sm font-bold text-slate-400">No media imported yet for {selectedLevel.key}</p>
-          <p className="text-xs text-slate-400 max-w-xs">
-            Click "Import from Google Drive" above to pull all {selectedLevel.key} audio and video files.
-          </p>
+          {filterCourseId ? (
+            <>
+              <p className="text-sm font-bold text-slate-400">No media linked to this course for {selectedLevel.key}</p>
+              <p className="text-xs text-slate-400 max-w-xs">
+                Import media and select this course in the course picker above, or{' '}
+                <button onClick={() => setFilterCourseId('')} className="underline text-indigo-500 hover:text-indigo-700">
+                  clear the filter
+                </button>{' '}
+                to see all {selectedLevel.key} media.
+              </p>
+            </>
+          ) : (
+            <>
+              <p className="text-sm font-bold text-slate-400">No media imported yet for {selectedLevel.key}</p>
+              <p className="text-xs text-slate-400 max-w-xs">
+                Click "Import from Google Drive" above to pull all {selectedLevel.key} audio and video files.
+              </p>
+            </>
+          )}
         </div>
       )}
 

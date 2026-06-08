@@ -6953,9 +6953,10 @@ Rules:
     try {
       const caller = await assertAuthenticated(req, res);
       if (!caller) return;
-      const level   = typeof req.query.level === "string" ? req.query.level : "Beginner";
-      const unitNum = req.query.unit ? parseInt(String(req.query.unit), 10) : undefined;
-      const type    = typeof req.query.type === "string" ? req.query.type : undefined;
+      const level    = typeof req.query.level    === "string" ? req.query.level    : "Beginner";
+      const unitNum  = req.query.unit  ? parseInt(String(req.query.unit), 10)  : undefined;
+      const type     = typeof req.query.type     === "string" ? req.query.type     : undefined;
+      const courseId = typeof req.query.courseId === "string" ? req.query.courseId.trim() : undefined;
 
       let q = supabaseAdmin
         .from("headway_media")
@@ -6964,12 +6965,14 @@ Rules:
         .order("unit_number", { ascending: true, nullsFirst: false })
         .order("file_name",   { ascending: true });
 
-      if (unitNum) q = (q as any).eq("unit_number", unitNum);
-      if (type)    q = (q as any).eq("type", type);
+      if (unitNum)  q = (q as any).eq("unit_number", unitNum);
+      if (type)     q = (q as any).eq("type", type);
+      if (courseId) q = (q as any).eq("course_id", courseId);
 
       const { data, error } = await q;
       if (error) {
         if (error.code === "42P01") return res.json({ media: [] }); // table not yet created
+        if (isMissingColumnError(error, "course_id")) return res.json({ media: [] }); // column not in cache yet
         throw error;
       }
       return res.json({ media: data ?? [] });
