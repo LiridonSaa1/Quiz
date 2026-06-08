@@ -216,10 +216,15 @@ async function processZipEntries(
       };
       if (courseId) insertPayload.course_id = courseId;
 
-      const { error: insErr } = await supabaseAdmin.from('headway_media').insert(insertPayload);
-      if (insErr) {
-        if (insErr.code === '42P01') throw new Error('headway_media table not found — run migration 014');
-        throw new Error(insErr.message);
+      let insResult = await supabaseAdmin.from('headway_media').insert(insertPayload);
+      if (insResult.error?.code === '42703' && insertPayload.course_id) {
+        // course_id column doesn't exist yet — retry without it
+        const { course_id: _dropped, ...payloadWithoutCourse } = insertPayload;
+        insResult = await supabaseAdmin.from('headway_media').insert(payloadWithoutCourse);
+      }
+      if (insResult.error) {
+        if (insResult.error.code === '42P01') throw new Error('headway_media table not found — run migration 014');
+        throw new Error(insResult.error.message);
       }
 
       job.done++;
@@ -6725,10 +6730,14 @@ Rules:
                   size_bytes: fileBuf.length,
                 };
                 if (courseId) insertRow.course_id = courseId;
-                const { error: insErr } = await supabaseAdmin.from('headway_media').insert(insertRow);
-                if (insErr) {
-                  if (insErr.code === '42P01') throw new Error('headway_media table not found — run migration 014');
-                  throw new Error(insErr.message);
+                let insResult2 = await supabaseAdmin.from('headway_media').insert(insertRow);
+                if (insResult2.error?.code === '42703' && insertRow.course_id) {
+                  const { course_id: _dropped, ...rowWithoutCourse } = insertRow;
+                  insResult2 = await supabaseAdmin.from('headway_media').insert(rowWithoutCourse);
+                }
+                if (insResult2.error) {
+                  if (insResult2.error.code === '42P01') throw new Error('headway_media table not found — run migration 014');
+                  throw new Error(insResult2.error.message);
                 }
                 job.done++;
                 job.total++;
