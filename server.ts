@@ -22,6 +22,24 @@ let _ws: any;
 try { _ws = _require("ws"); } catch { _ws = undefined; }
 const require = createRequire(import.meta.url);
 let poolPromise: Promise<any> | null = null;
+/**
+ * Returns true when a Supabase/PostgREST error indicates a specific column
+ * is missing from the schema cache (PGRST204) or the DB (42703).
+ * Used to detect stale PostgREST schema cache and retry without that column.
+ */
+function isMissingColumnError(err: any, column: string): boolean {
+  if (!err) return false;
+  const code = String(err.code ?? '');
+  const msg  = String(err.message ?? '').toLowerCase();
+  const col  = column.toLowerCase();
+  return (
+    code === 'PGRST204' ||
+    code === '42703' ||
+    (msg.includes('could not find') && msg.includes(col)) ||
+    (msg.includes('schema cache') && msg.includes(col))
+  );
+}
+
 const stripProfilesJoin = (sql: string): string =>
   sql.replace(
     /LEFT JOIN profiles (\w+) ON \1\.id = \w+\.\w+/gi,
@@ -217,8 +235,8 @@ async function processZipEntries(
       if (courseId) insertPayload.course_id = courseId;
 
       let insResult = await supabaseAdmin.from('headway_media').insert(insertPayload);
-      if (insResult.error?.code === '42703' && insertPayload.course_id) {
-        // course_id column doesn't exist yet — retry without it
+      if (insertPayload.course_id && isMissingColumnError(insResult.error, 'course_id')) {
+        // course_id column not yet visible in PostgREST schema cache — retry without it
         const { course_id: _dropped, ...payloadWithoutCourse } = insertPayload;
         insResult = await supabaseAdmin.from('headway_media').insert(payloadWithoutCourse);
       }
@@ -6731,7 +6749,8 @@ Rules:
                 };
                 if (courseId) insertRow.course_id = courseId;
                 let insResult2 = await supabaseAdmin.from('headway_media').insert(insertRow);
-                if (insResult2.error?.code === '42703' && insertRow.course_id) {
+                if (insertRow.course_id && isMissingColumnError(insResult2.error, 'course_id')) {
+                  // course_id not yet visible in PostgREST schema cache — retry without it
                   const { course_id: _dropped, ...rowWithoutCourse } = insertRow;
                   insResult2 = await supabaseAdmin.from('headway_media').insert(rowWithoutCourse);
                 }
