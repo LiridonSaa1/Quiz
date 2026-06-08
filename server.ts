@@ -16887,16 +16887,25 @@ async function ensureHeadwayMediaTable(): Promise<void> {
   try {
     await poolQuery(ddl);
     console.log('[migration] headway_media table ensured ✓');
-    return;
   } catch { /* fall through to RPC */ }
   try {
     const probe = await supabaseAdmin.from('headway_media').select('id').limit(1);
-    if (!probe.error) { console.log('[migration] headway_media table already exists ✓'); return; }
-    const rpc = await (supabaseAdmin as any).rpc('exec_sql', { sql: ddl });
-    if (rpc.error) throw rpc.error;
-    console.log('[migration] headway_media table created via RPC ✓');
+    if (probe.error) {
+      const rpc = await (supabaseAdmin as any).rpc('exec_sql', { sql: ddl });
+      if (rpc.error) throw rpc.error;
+      console.log('[migration] headway_media table created via RPC ✓');
+    } else {
+      console.log('[migration] headway_media table already exists ✓');
+    }
   } catch (err: any) {
     console.warn('[migration] headway_media table could not be auto-created:', err?.message?.split('\n')[0]);
+  }
+  // Ensure course_id column exists (added after initial migration — no FK to avoid search_path issues)
+  try {
+    await poolQuery(`ALTER TABLE headway_media ADD COLUMN IF NOT EXISTS course_id UUID`);
+    console.log('[migration] headway_media.course_id column ensured ✓');
+  } catch (err: any) {
+    console.warn('[migration] headway_media.course_id column could not be added:', err?.message?.split('\n')[0]);
   }
 }
 

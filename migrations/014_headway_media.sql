@@ -6,6 +6,7 @@ CREATE TABLE IF NOT EXISTS headway_media (
   unit_number  INTEGER,
   module_id    UUID        REFERENCES modules(id)  ON DELETE SET NULL,
   lesson_id    UUID        REFERENCES lessons(id)  ON DELETE SET NULL,
+  course_id    UUID,
   type         TEXT        NOT NULL CHECK (type IN ('student_audio', 'workbook_audio', 'video')),
   title        TEXT,
   file_name    TEXT,
@@ -15,6 +16,9 @@ CREATE TABLE IF NOT EXISTS headway_media (
   size_bytes   BIGINT,
   created_at   TIMESTAMPTZ DEFAULT NOW()
 );
+
+-- Add course_id to existing tables that were created before this column was added
+ALTER TABLE headway_media ADD COLUMN IF NOT EXISTS course_id UUID;
 
 CREATE INDEX IF NOT EXISTS idx_headway_media_level_unit
   ON headway_media (level, unit_number);
