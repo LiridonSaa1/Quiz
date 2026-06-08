@@ -6760,6 +6760,9 @@ Rules:
   });
 
   // ── POST /api/teacher/headway/lessons-media-summary — batch summary per lesson ──
+  // Supports two lookup strategies:
+  //   1. lesson_id column (media explicitly linked to a lesson)
+  //   2. headway:level:unit tag in lesson short_description (tag-based, for imported lessons)
   app.post("/api/teacher/headway/lessons-media-summary", async (req: Request, res: Response) => {
     try {
       const caller = await assertAuthenticated(req, res);
@@ -6768,26 +6771,69 @@ Rules:
       const lessonIds: string[] = Array.isArray(req.body?.lessonIds) ? req.body.lessonIds.slice(0, 200) : [];
       if (lessonIds.length === 0) return res.json({ summary: {} });
 
-      // Fetch all headway_media rows for these lessons in one query
-      const { data, error } = await supabaseAdmin
+      const summary: Record<string, { audioCount: number; videoCount: number; level: string; unit: number | null }> = {};
+
+      // ── Strategy 1: lesson_id column ────────────────────────────────────────
+      const { data: byId, error: e1 } = await supabaseAdmin
         .from("headway_media")
         .select("lesson_id, type, level, unit_number")
         .in("lesson_id", lessonIds);
 
-      if (error) {
-        if (error.code === "42P01") return res.json({ summary: {} }); // table not yet
-        throw error;
+      if (e1 && e1.code !== "42P01") throw e1;
+
+      for (const row of (byId ?? []) as any[]) {
+        const lid = String(row.lesson_id || "");
+        if (!lid) continue;
+        if (!summary[lid]) summary[lid] = { audioCount: 0, videoCount: 0, level: row.level || "", unit: row.unit_number ?? null };
+        if (String(row.type || "").includes("video")) summary[lid].videoCount++;
+        else summary[lid].audioCount++;
       }
 
-      // Build summary map: lessonId → { audioCount, videoCount, level, unit }
-      const summary: Record<string, { audioCount: number; videoCount: number; level: string; unit: number | null }> = {};
-      for (const row of (data ?? []) as any[]) {
-        const lid = String(row.lesson_id || '');
-        if (!lid) continue;
-        if (!summary[lid]) summary[lid] = { audioCount: 0, videoCount: 0, level: row.level || '', unit: row.unit_number ?? null };
-        const isVideo = String(row.type || '').includes('video');
-        if (isVideo) summary[lid].videoCount++;
-        else summary[lid].audioCount++;
+      // ── Strategy 2: headway:level:unit tag in short_description ─────────────
+      // Only for lessons that weren't resolved via lesson_id
+      const unresolved = lessonIds.filter(id => !summary[id]);
+      if (unresolved.length > 0) {
+        // Fetch short_descriptions for unresolved lessons
+        const { data: lessonRows } = await supabaseAdmin
+          .from("lessons")
+          .select("id, short_description")
+          .in("id", unresolved);
+
+        // Group lessons by their "level:unit" tag
+        const tagGroups = new Map<string, { level: string; unit: number; lessonIds: string[] }>();
+        for (const row of (lessonRows ?? []) as any[]) {
+          const desc = String(row.short_description || "");
+          const m = desc.match(/headway:([^:\n\s]+):(\d+)/i);
+          if (!m) continue;
+          const lvl  = m[1].trim();
+          const unit = parseInt(m[2], 10);
+          const key  = `${lvl.toLowerCase()}:${unit}`;
+          if (!tagGroups.has(key)) tagGroups.set(key, { level: lvl, unit, lessonIds: [] });
+          tagGroups.get(key)!.lessonIds.push(String(row.id));
+        }
+
+        // For each tag group, count media from headway_media
+        for (const { level: lvl, unit, lessonIds: lids } of tagGroups.values()) {
+          const { data: mediaRows } = await supabaseAdmin
+            .from("headway_media")
+            .select("type, level")
+            .ilike("level", lvl)
+            .eq("unit_number", unit);
+
+          if (!mediaRows?.length) continue;
+
+          let audioCount = 0, videoCount = 0;
+          for (const mr of mediaRows as any[]) {
+            if (String(mr.type || "").includes("video")) videoCount++;
+            else audioCount++;
+          }
+          if (audioCount === 0 && videoCount === 0) continue;
+
+          const levelDisplay = (mediaRows[0] as any).level || lvl;
+          for (const lid of lids) {
+            summary[lid] = { audioCount, videoCount, level: levelDisplay, unit };
+          }
+        }
       }
 
       return res.json({ summary });
