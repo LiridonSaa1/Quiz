@@ -16903,6 +16903,7 @@ async function ensureHeadwayMediaTable(): Promise<void> {
   // Ensure course_id column exists (added after initial migration — no FK to avoid search_path issues)
   try {
     await poolQuery(`ALTER TABLE headway_media ADD COLUMN IF NOT EXISTS course_id UUID`);
+    await poolQuery(`NOTIFY pgrst, 'reload schema'`).catch(() => {});
     console.log('[migration] headway_media.course_id column ensured ✓');
   } catch (err: any) {
     console.warn('[migration] headway_media.course_id column could not be added:', err?.message?.split('\n')[0]);
