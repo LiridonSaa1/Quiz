@@ -16919,11 +16919,12 @@ async function ensureHeadwayMediaTable(): Promise<void> {
   } catch (err: any) {
     console.warn('[migration] headway_media table could not be auto-created:', err?.message?.split('\n')[0]);
   }
-  // Ensure course_id column exists (added after initial migration — no FK to avoid search_path issues)
+  // Ensure course_id column + index exist (added after initial migration)
   try {
     await poolQuery(`ALTER TABLE headway_media ADD COLUMN IF NOT EXISTS course_id UUID`);
+    await poolQuery(`CREATE INDEX IF NOT EXISTS idx_headway_media_course_id ON headway_media (course_id) WHERE course_id IS NOT NULL`);
     await poolQuery(`NOTIFY pgrst, 'reload schema'`).catch(() => {});
-    console.log('[migration] headway_media.course_id column ensured ✓');
+    console.log('[migration] headway_media.course_id column + index ensured ✓');
   } catch (err: any) {
     console.warn('[migration] headway_media.course_id column could not be added:', err?.message?.split('\n')[0]);
   }

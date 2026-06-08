@@ -23,6 +23,10 @@ ALTER TABLE headway_media ADD COLUMN IF NOT EXISTS course_id UUID;
 CREATE INDEX IF NOT EXISTS idx_headway_media_level_unit
   ON headway_media (level, unit_number);
 
+CREATE INDEX IF NOT EXISTS idx_headway_media_course_id
+  ON headway_media (course_id)
+  WHERE course_id IS NOT NULL;
+
 CREATE INDEX IF NOT EXISTS idx_headway_media_lesson
   ON headway_media (lesson_id)
   WHERE lesson_id IS NOT NULL;
