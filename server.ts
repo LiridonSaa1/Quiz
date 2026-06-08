@@ -6951,6 +6951,45 @@ Rules:
     }
   });
 
+  // ── DELETE /api/teacher/headway/drive-media — bulk delete all media (optionally by level) ──
+  app.delete("/api/teacher/headway/drive-media", async (req: Request, res: Response) => {
+    try {
+      const caller = await assertAuthenticated(req, res);
+      if (!caller) return;
+      if (!["admin", "teacher"].includes(caller.role)) return res.status(403).json({ error: "Forbidden" });
+
+      const level = typeof req.query.level === "string" ? req.query.level.trim() : "";
+
+      let query = supabaseAdmin.from("headway_media").delete();
+      if (level) {
+        query = (query as any).ilike("level", level);
+      } else {
+        // Delete all — require explicit confirmation header
+        const confirm = req.headers["x-confirm-delete-all"];
+        if (confirm !== "yes") {
+          return res.status(400).json({ error: "Pass header x-confirm-delete-all: yes to delete all media" });
+        }
+        query = (query as any).neq("id", "00000000-0000-0000-0000-000000000000"); // match all rows
+      }
+
+      const { error, count } = await (query as any).select("id", { count: "exact", head: true });
+      // Re-run actual delete
+      let delQuery = supabaseAdmin.from("headway_media").delete();
+      if (level) {
+        delQuery = (delQuery as any).ilike("level", level);
+      } else {
+        delQuery = (delQuery as any).neq("id", "00000000-0000-0000-0000-000000000000");
+      }
+      const { error: delErr } = await delQuery;
+      if (delErr) throw delErr;
+
+      return res.json({ success: true, level: level || "all" });
+    } catch (e: any) {
+      console.error("DELETE /api/teacher/headway/drive-media (bulk)", e);
+      return res.status(500).json({ error: e?.message });
+    }
+  });
+
   // ── GET /api/teacher/headway/drive-stream/:fileId — proxy Drive file ───────
   app.get("/api/teacher/headway/drive-stream/:fileId", async (req: Request, res: Response) => {
     try {

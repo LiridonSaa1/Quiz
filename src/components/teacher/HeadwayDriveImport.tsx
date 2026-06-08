@@ -3,7 +3,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import {
   CloudDownload, CheckCircle2, AlertCircle, Loader2, Play, Pause,
   Trash2, Volume2, Film, Music, RefreshCw, ChevronDown, ChevronRight,
-  Key, HardDrive, Layers,
+  Key, HardDrive, Layers, AlertTriangle,
 } from 'lucide-react';
 import { authFetch } from '../../lib/apiUrl';
 import { toast } from 'sonner';
@@ -151,6 +151,8 @@ export default function HeadwayDriveImport() {
   const [importing, setImporting] = useState(false);
   const [expandedUnits, setExpandedUnits] = useState<Set<string>>(new Set());
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [deletingAll, setDeletingAll] = useState(false);
+  const [confirmDeleteAll, setConfirmDeleteAll] = useState(false);
   const logsEndRef = useRef<HTMLDivElement>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
@@ -246,6 +248,24 @@ export default function HeadwayDriveImport() {
       toast.error(err?.message);
     } finally {
       setDeletingId(null);
+    }
+  };
+
+  const deleteAllMedia = async () => {
+    setDeletingAll(true);
+    try {
+      const res = await authFetch(
+        `/api/teacher/headway/drive-media?level=${encodeURIComponent(selectedLevel.key)}`,
+        { method: 'DELETE', headers: { 'x-confirm-delete-all': 'yes' } }
+      );
+      if (!res.ok) throw new Error((await res.json())?.error || 'Delete failed');
+      toast.success(`All ${selectedLevel.key} media deleted`);
+      setMedia([]);
+      setConfirmDeleteAll(false);
+    } catch (err: any) {
+      toast.error(err?.message);
+    } finally {
+      setDeletingAll(false);
     }
   };
 
@@ -421,6 +441,35 @@ export default function HeadwayDriveImport() {
             <span className={cn('text-[10px] font-bold px-2 py-0.5 rounded-full border', selectedLevel.badge)}>
               {media.length} files · {selectedLevel.key}
             </span>
+            <div className="ml-auto">
+              {!confirmDeleteAll ? (
+                <button
+                  onClick={() => setConfirmDeleteAll(true)}
+                  disabled={deletingAll}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-red-200 bg-red-50 text-xs font-semibold text-red-600 hover:bg-red-100 hover:border-red-300 transition-colors disabled:opacity-50">
+                  <Trash2 className="w-3.5 h-3.5" />
+                  Delete All {selectedLevel.key}
+                </button>
+              ) : (
+                <div className="flex items-center gap-2 bg-red-50 border border-red-200 rounded-xl px-3 py-1.5">
+                  <AlertTriangle className="w-3.5 h-3.5 text-red-600 shrink-0" />
+                  <span className="text-xs font-semibold text-red-700">Fshi të gjitha {media.length} skedarët?</span>
+                  <button
+                    onClick={() => void deleteAllMedia()}
+                    disabled={deletingAll}
+                    className="px-2.5 py-1 rounded-lg bg-red-600 text-white text-xs font-bold hover:bg-red-700 transition-colors disabled:opacity-60 flex items-center gap-1">
+                    {deletingAll ? <Loader2 className="w-3 h-3 animate-spin" /> : <Trash2 className="w-3 h-3" />}
+                    Po, fshi
+                  </button>
+                  <button
+                    onClick={() => setConfirmDeleteAll(false)}
+                    disabled={deletingAll}
+                    className="px-2.5 py-1 rounded-lg bg-white border border-slate-200 text-xs font-semibold text-slate-600 hover:bg-slate-50 transition-colors">
+                    Anulo
+                  </button>
+                </div>
+              )}
+            </div>
           </div>
 
           {loadingMedia ? (
