@@ -5,11 +5,12 @@ import { authFetch, readApiError } from '../../lib/apiUrl';
 import LoadingButton from '../../components/ui/LoadingButton';
 import { resolveTeacherIdCandidates } from '../../lib/teacherScope';
 import TeacherLayout from '../../components/layout/TeacherLayout';
+import HeadwayDriveImport from '../../components/teacher/HeadwayDriveImport';
 import {
   Plus, Search, PlayCircle, Trash2, Edit2, X, Save,
   BookOpen, Layers, Video, FileText, HelpCircle, Clock,
   Lock, Unlock, ChevronRight, ChevronLeft, Calendar, AlertTriangle,
-  Headphones, Film, Music,
+  Headphones, Film, Music, HardDrive, Pause, Play,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { Lesson } from '../../types';
@@ -100,6 +101,11 @@ export default function TeacherLessons() {
   const [hwSummary, setHwSummary] = useState<Record<string, { audioCount: number; videoCount: number; level: string; unit: number | null }>>({});
   const [hwPopup, setHwPopup] = useState<string | null>(null); // lessonId with popup open
   const popupRef = useRef<HTMLDivElement>(null);
+  const [showDriveModal, setShowDriveModal] = useState(false);
+  const [drivePopupMedia, setDrivePopupMedia] = useState<Array<{ id: string; name: string; url: string | null; type: 'audio' | 'video'; mime_type: string | null }>>([]);
+  const [drivePopupLoading, setDrivePopupLoading] = useState(false);
+  const [playingMedia, setPlayingMedia] = useState<string | null>(null);
+  const audioRefs = useRef<Record<string, HTMLAudioElement | null>>({});
   const { can } = useTeacherPermissions();
 
   const fetchData = async () => {
@@ -221,6 +227,21 @@ export default function TeacherLessons() {
     };
     if (hwPopup) document.addEventListener('mousedown', handler);
     return () => document.removeEventListener('mousedown', handler);
+  }, [hwPopup]);
+
+  // Fetch actual media files when a lesson popup opens
+  useEffect(() => {
+    if (!hwPopup) { setDrivePopupMedia([]); return; }
+    let cancelled = false;
+    setDrivePopupLoading(true);
+    setDrivePopupMedia([]);
+    setPlayingMedia(null);
+    authFetch(`/api/teacher/headway/lesson-media/${encodeURIComponent(hwPopup)}`)
+      .then(r => r.ok ? r.json() : { files: [] })
+      .then((json: any) => { if (!cancelled) setDrivePopupMedia(json?.files ?? []); })
+      .catch(() => { if (!cancelled) setDrivePopupMedia([]); })
+      .finally(() => { if (!cancelled) setDrivePopupLoading(false); });
+    return () => { cancelled = true; };
   }, [hwPopup]);
   useEffect(() => { setCurrentPage(1); }, [search, courseFilter, classFilter, moduleFilter, typeFilter]);
 
@@ -456,19 +477,31 @@ export default function TeacherLessons() {
                     {t('lessons.createManageContent')}
                   </p>
                 </div>
-                {can('actions.teacher.lessons.manage') && (
+                <div className="flex items-center gap-3 flex-wrap">
                   <motion.button
-                    onClick={openCreate}
-                    disabled={courses.length === 0}
+                    onClick={() => setShowDriveModal(true)}
                     whileHover={{ scale: 1.04, y: -2 }}
                     whileTap={{ scale: 0.97 }}
-                    className="inline-flex items-center gap-2 px-6 py-3 rounded-2xl font-bold text-sm text-white shrink-0 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
-                    style={{ background: 'linear-gradient(135deg, #818cf8 0%, #a78bfa 100%)', boxShadow: '0 8px 32px rgba(139,92,246,0.45), 0 2px 8px rgba(0,0,0,0.15)' }}
+                    className="inline-flex items-center gap-2 px-5 py-3 rounded-2xl font-bold text-sm text-white shrink-0 transition-all"
+                    style={{ background: 'linear-gradient(135deg, #0ea5e9 0%, #6366f1 100%)', boxShadow: '0 8px 32px rgba(99,102,241,0.35)' }}
                   >
-                    <Plus className="w-4 h-4" />
-                    {t('lessons.newLesson')}
+                    <HardDrive className="w-4 h-4" />
+                    Drive Library
                   </motion.button>
-                )}
+                  {can('actions.teacher.lessons.manage') && (
+                    <motion.button
+                      onClick={openCreate}
+                      disabled={courses.length === 0}
+                      whileHover={{ scale: 1.04, y: -2 }}
+                      whileTap={{ scale: 0.97 }}
+                      className="inline-flex items-center gap-2 px-6 py-3 rounded-2xl font-bold text-sm text-white shrink-0 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
+                      style={{ background: 'linear-gradient(135deg, #818cf8 0%, #a78bfa 100%)', boxShadow: '0 8px 32px rgba(139,92,246,0.45), 0 2px 8px rgba(0,0,0,0.15)' }}
+                    >
+                      <Plus className="w-4 h-4" />
+                      {t('lessons.newLesson')}
+                    </motion.button>
+                  )}
+                </div>
               </div>
             </div>
           </div>
@@ -708,23 +741,79 @@ export default function TeacherLessons() {
                                     </div>
                                   </div>
 
-                                  {/* Status message */}
-                                  <div className={cn(
-                                    'flex items-start gap-2 text-[10px] rounded-xl p-2.5',
-                                    (hw.audioCount > 0 || hw.videoCount > 0) ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-50 text-slate-500'
-                                  )}>
-                                    <span className="shrink-0 mt-0.5">
-                                      {(hw.audioCount > 0 || hw.videoCount > 0) ? '✅' : '⚠️'}
-                                    </span>
-                                    <span>
-                                      {hw.audioCount > 0 && hw.videoCount > 0
-                                        ? `${hw.audioCount} audio & ${hw.videoCount} video files imported — visible in Manage → Content.`
-                                        : hw.audioCount > 0
-                                          ? `${hw.audioCount} audio file${hw.audioCount > 1 ? 's' : ''} imported — visible in Manage → Content.`
-                                          : hw.videoCount > 0
-                                            ? `${hw.videoCount} video file${hw.videoCount > 1 ? 's' : ''} imported — visible in Manage → Content.`
-                                            : 'No media imported yet.'}
-                                    </span>
+                                  {/* Actual media files list */}
+                                  <div className="mt-3 space-y-1.5 max-h-56 overflow-y-auto">
+                                    {drivePopupLoading ? (
+                                      <div className="flex items-center gap-2 text-[11px] text-slate-400 py-2">
+                                        <span className="w-3 h-3 border-2 border-slate-300 border-t-violet-500 rounded-full animate-spin" />
+                                        Loading media…
+                                      </div>
+                                    ) : drivePopupMedia.length === 0 ? (
+                                      <p className="text-[10px] text-slate-400 italic py-1">No media files linked yet. Import from Drive Library.</p>
+                                    ) : (
+                                      drivePopupMedia.map((f) => {
+                                        const isPlaying = playingMedia === f.id;
+                                        const isVid = f.type === 'video';
+                                        const streamUrl = `/api/teacher/headway/drive-stream/${f.id.startsWith('drive_') ? f.id.slice(6) : f.id}`;
+                                        const driveId = (() => {
+                                          if (f.url?.includes('id=')) return f.url.split('id=')[1];
+                                          return f.id;
+                                        })();
+                                        const proxyUrl = `/api/teacher/headway/drive-stream/${driveId}`;
+                                        return (
+                                          <div key={f.id} className={cn(
+                                            'flex items-center gap-2 px-2.5 py-1.5 rounded-xl border transition-all',
+                                            isVid ? 'bg-rose-50 border-rose-100' : 'bg-violet-50 border-violet-100'
+                                          )}>
+                                            {isVid
+                                              ? <Film className="w-3 h-3 text-rose-500 shrink-0" />
+                                              : <Music className="w-3 h-3 text-violet-500 shrink-0" />
+                                            }
+                                            <p className="text-[10px] text-slate-700 font-medium flex-1 truncate" title={f.name}>{f.name}</p>
+                                            {!isVid && (
+                                              <button
+                                                onClick={() => {
+                                                  const audio = audioRefs.current[f.id];
+                                                  if (!audio) {
+                                                    const a = new Audio(proxyUrl);
+                                                    audioRefs.current[f.id] = a;
+                                                    a.play().catch(() => {});
+                                                    a.onended = () => setPlayingMedia(null);
+                                                    setPlayingMedia(f.id);
+                                                  } else if (isPlaying) {
+                                                    audio.pause();
+                                                    setPlayingMedia(null);
+                                                  } else {
+                                                    audio.currentTime = 0;
+                                                    audio.play().catch(() => {});
+                                                    setPlayingMedia(f.id);
+                                                  }
+                                                }}
+                                                className={cn(
+                                                  'w-5 h-5 rounded-full flex items-center justify-center shrink-0 transition-colors',
+                                                  isPlaying ? 'bg-violet-500 text-white' : 'bg-violet-200 text-violet-700 hover:bg-violet-300'
+                                                )}
+                                              >
+                                                {isPlaying
+                                                  ? <Pause className="w-2 h-2" />
+                                                  : <Play className="w-2 h-2 ml-px" />
+                                                }
+                                              </button>
+                                            )}
+                                            {isVid && (
+                                              <a
+                                                href={proxyUrl}
+                                                target="_blank"
+                                                rel="noopener noreferrer"
+                                                className="w-5 h-5 rounded-full bg-rose-200 text-rose-700 hover:bg-rose-300 flex items-center justify-center shrink-0 transition-colors"
+                                              >
+                                                <Play className="w-2 h-2 ml-px" />
+                                              </a>
+                                            )}
+                                          </div>
+                                        );
+                                      })
+                                    )}
                                   </div>
                                 </div>
                               )}
@@ -792,6 +881,48 @@ export default function TeacherLessons() {
           </div>
         </div>
       </div>
+
+      {/* ── Drive Library Modal ────────────────────────────────────────────── */}
+      <AnimatePresence>
+        {showDriveModal && (
+          <motion.div
+            initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[60] flex items-center justify-center p-4"
+            onClick={() => setShowDriveModal(false)}
+          >
+            <motion.div
+              initial={{ opacity: 0, scale: 0.94, y: 24 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.94, y: 24 }}
+              transition={{ type: 'spring', stiffness: 280, damping: 26 }}
+              className="bg-white rounded-3xl shadow-2xl w-full max-w-5xl max-h-[90vh] flex flex-col overflow-hidden"
+              onClick={e => e.stopPropagation()}
+            >
+              {/* Header */}
+              <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100 shrink-0"
+                style={{ background: 'linear-gradient(135deg,#0ea5e9 0%,#6366f1 100%)' }}>
+                <div className="flex items-center gap-3">
+                  <div className="w-9 h-9 rounded-xl bg-white/20 flex items-center justify-center">
+                    <HardDrive className="w-5 h-5 text-white" />
+                  </div>
+                  <div>
+                    <h2 className="text-base font-bold text-white">Drive Library</h2>
+                    <p className="text-xs text-white/70">Import & manage Headway audio and video from Google Drive</p>
+                  </div>
+                </div>
+                <button onClick={() => setShowDriveModal(false)}
+                  className="p-2 rounded-xl bg-white/10 hover:bg-white/20 transition-colors">
+                  <X className="w-5 h-5 text-white" />
+                </button>
+              </div>
+              {/* Body */}
+              <div className="overflow-y-auto flex-1 p-6">
+                <HeadwayDriveImport />
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* Edit/Create Modal */}
       <AnimatePresence>
