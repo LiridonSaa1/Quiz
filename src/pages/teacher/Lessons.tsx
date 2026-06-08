@@ -895,7 +895,7 @@ export default function TeacherLessons() {
               animate={{ opacity: 1, scale: 1, y: 0 }}
               exit={{ opacity: 0, scale: 0.94, y: 24 }}
               transition={{ type: 'spring', stiffness: 280, damping: 26 }}
-              className="bg-white rounded-3xl shadow-2xl w-full max-w-5xl max-h-[90vh] flex flex-col overflow-hidden"
+              className="bg-white rounded-3xl shadow-2xl w-full max-w-2xl flex flex-col overflow-hidden"
               onClick={e => e.stopPropagation()}
             >
               {/* Header */}
@@ -916,7 +916,7 @@ export default function TeacherLessons() {
                 </button>
               </div>
               {/* Body */}
-              <div className="overflow-y-auto flex-1 p-6">
+              <div className="overflow-y-auto max-h-[80vh] p-6">
                 <HeadwayDriveImport />
               </div>
             </motion.div>
