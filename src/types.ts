@@ -136,6 +136,7 @@ export interface Quiz {
 /** Quiz question kinds used in QuizBuilder / DB `questions.type` */
 export type QuestionType =
   | 'multiple-choice'
+  | 'multiple-answer'
   | 'true-false'
   | 'open-text'
   | 'fill-in-the-blank'
@@ -147,7 +148,9 @@ export type QuestionType =
   | 'reading'
   | 'instruction'
   | 'matching'
-  | 'ordering';
+  | 'ordering'
+  | 'word-bank'
+  | 'sentence-building';
 
 export interface Question {
   id: string;

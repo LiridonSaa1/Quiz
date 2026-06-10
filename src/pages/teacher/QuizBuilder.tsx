@@ -42,10 +42,11 @@ import { AIPanel, AITriggerButton } from '../../components/AIPanel';
 import type { AIPanelAttachment } from '../../components/AIPanel';
 import {
   generateQuizQuestions,
+  generateQuizQuestionsWithTypes,
   importQuizQuestionsFromImages,
   importQuizQuestionsFromText,
 } from '../../lib/gemini';
-import type { ImportedQuizQuestion } from '../../lib/gemini';
+import type { ImportedQuizQuestion, AIQuestionType } from '../../lib/gemini';
 import { motion, AnimatePresence } from 'motion/react';
 import { isDirectVideoFileUrl, isLikelyVideoLink, toEmbedVideoUrl } from '../../lib/quizMedia';
 import { questionBodyFromRow } from '../../lib/questionText';
@@ -146,7 +147,8 @@ function mapCourseRows(rows: unknown[] | null | undefined): Course[] {
 function toDbQuestionType(t: string | undefined): string {
   const x = (t || 'open-text').toLowerCase();
   const allowed = new Set([
-    'multiple-choice', 'true-false', 'open-text', 'fill-in-the-blank', 'matching', 'ordering',
+    'multiple-choice', 'multiple-answer', 'true-false', 'open-text', 'fill-in-the-blank',
+    'short-answer', 'long-answer', 'matching', 'ordering', 'word-bank', 'sentence-building',
     'image', 'video', 'reading', 'instruction',
   ]);
   if (allowed.has(x)) return x;
@@ -472,7 +474,7 @@ export default function QuizBuilder() {
     toast.success(mapped.length === 1 ? t('quizzes.questionImported', { count: mapped.length, source: sourceLabel }) : t('quizzes.questionImportedPlural', { count: mapped.length, source: sourceLabel }));
   }, [questions, t]);
 
-  const handleQuestionIntake = async (input: string, attachments: AIPanelAttachment[] = []) => {
+  const handleQuestionIntake = async (input: string, attachments: AIPanelAttachment[] = [], selectedTypes?: AIQuestionType[]) => {
     const imageFiles = attachments
       .filter((attachment) => attachment.kind === 'image')
       .map((attachment) => attachment.file);
@@ -489,11 +491,6 @@ export default function QuizBuilder() {
       return;
     }
 
-    const generated = await generateQuizQuestions(input);
-    if (!generated.length) {
-      throw new Error(t('quizzes.noQuestionsFromContent'));
-    }
-
     const existingTexts = new Set(
       questions
         .map((q) => String(q.text || '').trim().toLowerCase())
@@ -502,36 +499,78 @@ export default function QuizBuilder() {
 
     const mapped: Partial<Question>[] = [];
 
-    for (const q of generated) {
-      const text = String(q.text || '').trim();
-      if (!text) continue;
-      const key = text.toLowerCase();
-      if (existingTexts.has(key)) continue;
-      existingTexts.add(key);
+    if (selectedTypes && selectedTypes.length > 0) {
+      const generated = await generateQuizQuestionsWithTypes(input, selectedTypes);
+      if (!generated.length) throw new Error(t('quizzes.noQuestionsFromContent'));
 
-      const safeOptions = Array.isArray(q.options)
-        ? q.options
-            .slice(0, 4)
-            .map((opt, idx) => ({ id: String(idx + 1), text: String(opt?.text || `Option ${idx + 1}`) }))
-        : [];
+      for (const q of generated) {
+        const text = String(q.text || '').trim();
+        if (!text) continue;
+        const key = text.toLowerCase();
+        if (existingTexts.has(key)) continue;
+        existingTexts.add(key);
 
-      while (safeOptions.length < 4) {
-        safeOptions.push({
-          id: String(safeOptions.length + 1),
-          text: `Option ${safeOptions.length + 1}`,
-        });
+        const base = {
+          text,
+          explanation: typeof q.explanation === 'string' ? q.explanation : '',
+          points: Number.isFinite(q.points) ? Math.max(1, Number(q.points)) : 1,
+        };
+
+        if (q.type === 'multiple-choice' || q.type === 'true-false') {
+          const safeOptions = Array.isArray(q.options) ? q.options.map((opt, idx) => ({
+            id: String(idx + 1),
+            text: String(opt?.text || `Option ${idx + 1}`),
+          })) : [];
+          if (q.type === 'multiple-choice') {
+            while (safeOptions.length < 4) safeOptions.push({ id: String(safeOptions.length + 1), text: `Option ${safeOptions.length + 1}` });
+          }
+          const correctAnswer = Array.isArray(q.correctAnswer) ? q.correctAnswer[0] : (q.correctAnswer as string | undefined);
+          mapped.push({ ...base, type: q.type, options: safeOptions, correctAnswer: safeOptions.some((o) => o.id === correctAnswer) ? correctAnswer : safeOptions[0]?.id });
+        } else if (q.type === 'multiple-answer') {
+          const safeOptions = Array.isArray(q.options) ? q.options.map((opt, idx) => ({
+            id: String(idx + 1),
+            text: String(opt?.text || `Option ${idx + 1}`),
+          })) : [];
+          while (safeOptions.length < 2) safeOptions.push({ id: String(safeOptions.length + 1), text: `Option ${safeOptions.length + 1}` });
+          const correctAnswers = Array.isArray(q.correctAnswer) ? q.correctAnswer : (q.correctAnswer ? [q.correctAnswer as string] : [safeOptions[0]?.id]);
+          mapped.push({ ...base, type: 'multiple-answer' as QuestionType, options: safeOptions, correctAnswer: JSON.stringify(correctAnswers) });
+        } else if (q.type === 'fill-in-the-blank' || q.type === 'short-answer') {
+          mapped.push({ ...base, type: q.type as QuestionType, correctAnswer: String(q.correctAnswer || '') });
+        } else if (q.type === 'long-answer') {
+          mapped.push({ ...base, type: 'long-answer' as QuestionType, points: Math.max(2, base.points) });
+        } else if (q.type === 'matching') {
+          const pairs = Array.isArray(q.pairs) ? q.pairs : [];
+          mapped.push({ ...base, type: 'matching' as QuestionType, options: pairs.map((p, i) => ({ id: String(i + 1), text: p.left })) as any, correctAnswer: JSON.stringify(pairs), points: pairs.length });
+        } else if (q.type === 'ordering') {
+          const items = Array.isArray(q.items) ? q.items : [];
+          const correctOrder = Array.isArray(q.correctOrder) ? q.correctOrder : items;
+          mapped.push({ ...base, type: 'ordering' as QuestionType, options: items.map((item, i) => ({ id: String(i + 1), text: item })) as any, correctAnswer: JSON.stringify(correctOrder) });
+        } else if (q.type === 'word-bank') {
+          const wordBank = Array.isArray(q.wordBank) ? q.wordBank : [];
+          mapped.push({ ...base, type: 'word-bank' as QuestionType, options: wordBank.map((w, i) => ({ id: String(i + 1), text: w })) as any, correctAnswer: String(q.correctAnswer || '') });
+        } else if (q.type === 'sentence-building') {
+          const words = Array.isArray(q.words) ? q.words : [];
+          mapped.push({ ...base, type: 'sentence-building' as QuestionType, options: words.map((w, i) => ({ id: String(i + 1), text: w })) as any, correctAnswer: String(q.correctAnswer || '') });
+        }
       }
+    } else {
+      const generated = await generateQuizQuestions(input);
+      if (!generated.length) throw new Error(t('quizzes.noQuestionsFromContent'));
 
-      const correctAnswer = safeOptions.some((opt) => opt.id === q.correctAnswer) ? q.correctAnswer : safeOptions[0].id;
+      for (const q of generated) {
+        const text = String(q.text || '').trim();
+        if (!text) continue;
+        const key = text.toLowerCase();
+        if (existingTexts.has(key)) continue;
+        existingTexts.add(key);
 
-      mapped.push({
-        type: 'multiple-choice',
-        text,
-        options: safeOptions,
-        correctAnswer,
-        explanation: typeof q.explanation === 'string' ? q.explanation : '',
-        points: Number.isFinite(q.points) ? Math.max(1, Number(q.points)) : 1,
-      });
+        const safeOptions = Array.isArray(q.options)
+          ? q.options.slice(0, 4).map((opt, idx) => ({ id: String(idx + 1), text: String(opt?.text || `Option ${idx + 1}`) }))
+          : [];
+        while (safeOptions.length < 4) safeOptions.push({ id: String(safeOptions.length + 1), text: `Option ${safeOptions.length + 1}` });
+        const correctAnswer = safeOptions.some((opt) => opt.id === q.correctAnswer) ? q.correctAnswer : safeOptions[0].id;
+        mapped.push({ type: 'multiple-choice', text, options: safeOptions, correctAnswer, explanation: typeof q.explanation === 'string' ? q.explanation : '', points: Number.isFinite(q.points) ? Math.max(1, Number(q.points)) : 1 });
+      }
     }
 
     if (!mapped.length) {
@@ -551,7 +590,7 @@ export default function QuizBuilder() {
     const newQuestion: Partial<Question> = {
       type,
       text: '',
-      points: type === 'instruction' ? 0 : 1,
+      points: type === 'instruction' ? 0 : type === 'long-answer' ? 2 : type === 'matching' ? 3 : 1,
       mediaType: type === 'video' ? 'video' : type === 'image' ? 'image' : undefined,
       options: needsChoiceOptions
         ? [
@@ -559,11 +598,25 @@ export default function QuizBuilder() {
             { id: '2', text: 'Option 2' },
           ]
         : type === 'true-false'
-          ? [
-              { id: '1', text: 'True' },
-              { id: '2', text: 'False' },
-            ]
-          : undefined,
+          ? [{ id: '1', text: 'True' }, { id: '2', text: 'False' }]
+          : type === 'multiple-answer'
+            ? [{ id: '1', text: 'Option 1' }, { id: '2', text: 'Option 2' }, { id: '3', text: 'Option 3' }, { id: '4', text: 'Option 4' }]
+            : type === 'matching'
+              ? [{ id: '1', text: 'Item 1' }, { id: '2', text: 'Item 2' }, { id: '3', text: 'Item 3' }]
+              : type === 'ordering'
+                ? [{ id: '1', text: 'Step 1' }, { id: '2', text: 'Step 2' }, { id: '3', text: 'Step 3' }]
+                : type === 'word-bank'
+                  ? [{ id: '1', text: 'word1' }, { id: '2', text: 'word2' }, { id: '3', text: 'word3' }, { id: '4', text: 'word4' }]
+                  : type === 'sentence-building'
+                    ? [{ id: '1', text: 'Word' }, { id: '2', text: 'two' }, { id: '3', text: 'three' }]
+                    : undefined,
+      correctAnswer: type === 'multiple-answer'
+        ? JSON.stringify([])
+        : type === 'matching'
+          ? JSON.stringify([{ left: 'Item 1', right: '' }, { left: 'Item 2', right: '' }, { left: 'Item 3', right: '' }])
+          : type === 'ordering'
+            ? JSON.stringify(['Step 1', 'Step 2', 'Step 3'])
+            : undefined,
     };
     setQuestions([...questions, newQuestion]);
   };
@@ -866,7 +919,7 @@ export default function QuizBuilder() {
                   </div>
                 </div>
                 <div className="flex flex-wrap items-center gap-3 shrink-0">
-                  <AITriggerButton onClick={() => setAiOpen(true)} label="AI / Import" />
+                  <AITriggerButton onClick={() => setAiOpen(true)} label="AI / Import" size="md" />
                   {quizId && (quizData.settings as any)?.smartTestMeta && (
                     <motion.button
                       type="button"
@@ -911,16 +964,17 @@ export default function QuizBuilder() {
               open={aiOpen}
               onClose={() => setAiOpen(false)}
               label="AI + Question Import"
-              description="Paste lesson text, upload a quiz .txt, or attach screenshots. Text and image import now work without an API key."
-              placeholder='Paste lesson text, transcript, or fully written quiz questions here...'
-              buttonLabel="Process Questions"
-              loadingLabel="Processing..."
+              description="Select question types, paste your lesson text, and let AI generate a mixed quiz."
+              placeholder='Paste lesson text, transcript, or quiz content here...'
+              buttonLabel="Generate Questions"
+              loadingLabel="Generating..."
               allowTextFileUpload
               fileUploadLabel="Upload quiz/text file"
               fileUploadHint="Supported: .txt, .md, .srt, .vtt, .json, .csv"
               allowImageUpload
               imageUploadLabel="Upload screenshot/photo"
-              imageUploadHint="Use screenshots of question sheets, worksheets, or textbook pages. OCR runs locally, no API key needed."
+              imageUploadHint="Use screenshots of question sheets, worksheets, or textbook pages."
+              showQuestionTypeSelector
               onSubmit={handleQuestionIntake}
             />
 
@@ -1302,9 +1356,16 @@ export default function QuizBuilder() {
                   <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
                     {[
                       { type: 'multiple-choice' as const, label: 'MCQ', icon: CheckSquare },
+                      { type: 'multiple-answer' as const, label: 'Multi ✓', icon: CheckSquare },
                       { type: 'true-false' as const, label: 'T / F', icon: Circle },
+                      { type: 'fill-in-the-blank' as const, label: 'Fill Blank', icon: TextCursorInput },
+                      { type: 'short-answer' as const, label: 'Short Ans', icon: Type },
+                      { type: 'long-answer' as const, label: 'Essay', icon: AlignLeft },
+                      { type: 'matching' as const, label: 'Matching', icon: Layers },
+                      { type: 'ordering' as const, label: 'Ordering', icon: Shuffle },
+                      { type: 'word-bank' as const, label: 'Word Bank', icon: FileText },
+                      { type: 'sentence-building' as const, label: 'Sentence', icon: TextCursorInput },
                       { type: 'open-text' as const, label: 'Open', icon: Type },
-                      { type: 'fill-in-the-blank' as const, label: 'Blank', icon: TextCursorInput },
                       { type: 'instruction' as const, label: 'Text only', icon: AlignLeft },
                       { type: 'image' as const, label: 'Image', icon: ImageIcon },
                       { type: 'video' as const, label: 'Video', icon: Video },
@@ -1554,6 +1615,160 @@ export default function QuizBuilder() {
                                     : 'e.g. photosynthesis, chlorophyll'
                                 }
                               />
+                            </div>
+                          )}
+
+                          {(q.type === 'short-answer' || q.type === 'long-answer') && (
+                            <div>
+                              <label className="block text-xs font-semibold text-slate-600 mb-1.5">
+                                {q.type === 'short-answer' ? 'Model answer / keywords' : 'Model answer or rubric hints'}
+                              </label>
+                              <textarea
+                                rows={q.type === 'long-answer' ? 4 : 2}
+                                value={typeof q.correctAnswer === 'string' ? q.correctAnswer : ''}
+                                onChange={(e) => updateQuestion(index, { correctAnswer: e.target.value })}
+                                className="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-violet-400 resize-none"
+                                placeholder={q.type === 'short-answer' ? 'Expected answer...' : 'Sample answer or grading rubric hints...'}
+                              />
+                            </div>
+                          )}
+
+                          {q.type === 'multiple-answer' && (
+                            <div className="space-y-3">
+                              <label className="block text-xs font-semibold text-slate-600">Answer options <span className="text-violet-600">(tick all correct)</span></label>
+                              {(() => {
+                                let correctIds: string[] = [];
+                                try { correctIds = JSON.parse(String(q.correctAnswer || '[]')); } catch { correctIds = []; }
+                                return (
+                                  <div className="space-y-2">
+                                    {(Array.isArray(q.options) ? q.options : []).map((opt, optIndex) => {
+                                      const isCorrect = correctIds.includes(opt.id);
+                                      return (
+                                        <div key={opt.id ?? optIndex} className="flex items-center gap-2 group/opt">
+                                          <button
+                                            type="button"
+                                            onClick={() => {
+                                              const next = isCorrect ? correctIds.filter((id) => id !== opt.id) : [...correctIds, opt.id];
+                                              updateQuestion(index, { correctAnswer: JSON.stringify(next.length ? next : [opt.id]) });
+                                            }}
+                                            className={cn(
+                                              'w-7 h-7 rounded-lg border-2 flex items-center justify-center transition-all shrink-0',
+                                              isCorrect ? 'border-emerald-500 bg-emerald-500 text-white' : 'border-slate-200 hover:border-slate-400'
+                                            )}
+                                          >
+                                            {isCorrect && <CheckCircle2 className="w-4 h-4" />}
+                                          </button>
+                                          <input
+                                            type="text"
+                                            value={opt.text ?? ''}
+                                            onChange={(e) => {
+                                              const newOpts = [...(Array.isArray(q.options) ? q.options : [])];
+                                              newOpts[optIndex] = { ...opt, text: e.target.value };
+                                              updateQuestion(index, { options: newOpts });
+                                            }}
+                                            className="flex-1 px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-violet-400"
+                                          />
+                                          {Array.isArray(q.options) && q.options.length > 2 && (
+                                            <button type="button" onClick={() => { const newOpts = (Array.isArray(q.options) ? q.options : []).filter((_, i) => i !== optIndex); updateQuestion(index, { options: newOpts }); }} className="p-2 text-slate-400 hover:text-red-600 opacity-0 group-hover/opt:opacity-100 transition-all"><X className="w-4 h-4" /></button>
+                                          )}
+                                        </div>
+                                      );
+                                    })}
+                                    <button type="button" onClick={() => { const safeOpts = Array.isArray(q.options) ? q.options : []; updateQuestion(index, { options: [...safeOpts, { id: Math.random().toString(36).slice(2, 11), text: `Option ${safeOpts.length + 1}` }] }); }} className="text-xs font-bold text-violet-600 hover:text-violet-700 flex items-center gap-1.5 pl-9 pt-1"><Plus className="w-4 h-4" /> Add option</button>
+                                  </div>
+                                );
+                              })()}
+                            </div>
+                          )}
+
+                          {q.type === 'matching' && (
+                            <div className="space-y-3">
+                              <label className="block text-xs font-semibold text-slate-600">Matching pairs</label>
+                              {(() => {
+                                let pairs: { left: string; right: string }[] = [];
+                                try { pairs = JSON.parse(String(q.correctAnswer || '[]')); } catch { pairs = []; }
+                                if (!pairs.length && Array.isArray(q.options)) {
+                                  pairs = (q.options as any[]).map((o: any) => ({ left: String(o.text || ''), right: '' }));
+                                }
+                                return (
+                                  <div className="space-y-2">
+                                    {pairs.map((pair, pIdx) => (
+                                      <div key={pIdx} className="flex items-center gap-2">
+                                        <input type="text" value={pair.left} onChange={(e) => { const n = [...pairs]; n[pIdx] = { ...n[pIdx], left: e.target.value }; updateQuestion(index, { correctAnswer: JSON.stringify(n), options: n.map((p, i) => ({ id: String(i + 1), text: p.left })) as any }); }} className="flex-1 px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-violet-400" placeholder="Left side" />
+                                        <span className="text-slate-400 font-bold shrink-0">↔</span>
+                                        <input type="text" value={pair.right} onChange={(e) => { const n = [...pairs]; n[pIdx] = { ...n[pIdx], right: e.target.value }; updateQuestion(index, { correctAnswer: JSON.stringify(n), options: n.map((p, i) => ({ id: String(i + 1), text: p.left })) as any }); }} className="flex-1 px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-violet-400" placeholder="Right side" />
+                                        {pairs.length > 2 && <button type="button" onClick={() => { const n = pairs.filter((_, i) => i !== pIdx); updateQuestion(index, { correctAnswer: JSON.stringify(n), options: n.map((p, i) => ({ id: String(i + 1), text: p.left })) as any }); }} className="p-1 text-slate-400 hover:text-red-500 transition-colors"><X className="w-3.5 h-3.5" /></button>}
+                                      </div>
+                                    ))}
+                                    <button type="button" onClick={() => { const n = [...pairs, { left: '', right: '' }]; updateQuestion(index, { correctAnswer: JSON.stringify(n), options: n.map((p, i) => ({ id: String(i + 1), text: p.left })) as any }); }} className="text-xs font-bold text-violet-600 hover:text-violet-700 flex items-center gap-1.5 pt-1"><Plus className="w-4 h-4" /> Add pair</button>
+                                  </div>
+                                );
+                              })()}
+                            </div>
+                          )}
+
+                          {q.type === 'ordering' && (
+                            <div className="space-y-3">
+                              <label className="block text-xs font-semibold text-slate-600">Items in correct order <span className="text-slate-400 text-[10px]">(students will see them shuffled)</span></label>
+                              {(() => {
+                                let correctOrder: string[] = [];
+                                try { correctOrder = JSON.parse(String(q.correctAnswer || '[]')); } catch { correctOrder = []; }
+                                if (!correctOrder.length && Array.isArray(q.options)) correctOrder = (q.options as any[]).map((o: any) => String(o.text || ''));
+                                return (
+                                  <div className="space-y-2">
+                                    {correctOrder.map((item, oIdx) => (
+                                      <div key={oIdx} className="flex items-center gap-2">
+                                        <span className="w-6 h-6 rounded-md bg-violet-100 text-violet-700 text-xs font-bold flex items-center justify-center shrink-0">{oIdx + 1}</span>
+                                        <input type="text" value={item} onChange={(e) => { const n = [...correctOrder]; n[oIdx] = e.target.value; updateQuestion(index, { correctAnswer: JSON.stringify(n), options: n.map((t, i) => ({ id: String(i + 1), text: t })) as any }); }} className="flex-1 px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-violet-400" placeholder={`Item ${oIdx + 1}`} />
+                                        {correctOrder.length > 2 && <button type="button" onClick={() => { const n = correctOrder.filter((_, i) => i !== oIdx); updateQuestion(index, { correctAnswer: JSON.stringify(n), options: n.map((t, i) => ({ id: String(i + 1), text: t })) as any }); }} className="p-1 text-slate-400 hover:text-red-500 transition-colors"><X className="w-3.5 h-3.5" /></button>}
+                                      </div>
+                                    ))}
+                                    <button type="button" onClick={() => { const n = [...correctOrder, '']; updateQuestion(index, { correctAnswer: JSON.stringify(n), options: n.map((t, i) => ({ id: String(i + 1), text: t })) as any }); }} className="text-xs font-bold text-violet-600 hover:text-violet-700 flex items-center gap-1.5 pt-1"><Plus className="w-4 h-4" /> Add item</button>
+                                  </div>
+                                );
+                              })()}
+                            </div>
+                          )}
+
+                          {q.type === 'word-bank' && (
+                            <div className="space-y-3">
+                              <div>
+                                <label className="block text-xs font-semibold text-slate-600 mb-1.5">Correct answer <span className="text-slate-400 text-[10px]">(the blank should be filled with this)</span></label>
+                                <input type="text" value={typeof q.correctAnswer === 'string' ? q.correctAnswer : ''} onChange={(e) => updateQuestion(index, { correctAnswer: e.target.value })} className="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-violet-400" placeholder="Correct word" />
+                              </div>
+                              <div>
+                                <label className="block text-xs font-semibold text-slate-600 mb-1.5">Word bank options <span className="text-slate-400 text-[10px]">(include the correct word)</span></label>
+                                <div className="space-y-2">
+                                  {(Array.isArray(q.options) ? q.options : []).map((opt, optIndex) => (
+                                    <div key={opt.id ?? optIndex} className="flex items-center gap-2">
+                                      <input type="text" value={opt.text ?? ''} onChange={(e) => { const newOpts = [...(Array.isArray(q.options) ? q.options : [])]; newOpts[optIndex] = { ...opt, text: e.target.value }; updateQuestion(index, { options: newOpts }); }} className="flex-1 px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-violet-400" placeholder={`Word ${optIndex + 1}`} />
+                                      {Array.isArray(q.options) && q.options.length > 2 && <button type="button" onClick={() => { const newOpts = (Array.isArray(q.options) ? q.options : []).filter((_, i) => i !== optIndex); updateQuestion(index, { options: newOpts }); }} className="p-1 text-slate-400 hover:text-red-500 transition-colors"><X className="w-3.5 h-3.5" /></button>}
+                                    </div>
+                                  ))}
+                                  <button type="button" onClick={() => { const safeOpts = Array.isArray(q.options) ? q.options : []; updateQuestion(index, { options: [...safeOpts, { id: Math.random().toString(36).slice(2, 11), text: '' }] }); }} className="text-xs font-bold text-violet-600 hover:text-violet-700 flex items-center gap-1.5 pt-1"><Plus className="w-4 h-4" /> Add word</button>
+                                </div>
+                              </div>
+                            </div>
+                          )}
+
+                          {q.type === 'sentence-building' && (
+                            <div className="space-y-3">
+                              <div>
+                                <label className="block text-xs font-semibold text-slate-600 mb-1.5">Correct sentence</label>
+                                <input type="text" value={typeof q.correctAnswer === 'string' ? q.correctAnswer : ''} onChange={(e) => updateQuestion(index, { correctAnswer: e.target.value })} className="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-violet-400" placeholder="The sky is blue" />
+                              </div>
+                              <div>
+                                <label className="block text-xs font-semibold text-slate-600 mb-1.5">Words for student to arrange <span className="text-slate-400 text-[10px]">(will be shuffled)</span></label>
+                                <div className="space-y-2">
+                                  {(Array.isArray(q.options) ? q.options : []).map((opt, optIndex) => (
+                                    <div key={opt.id ?? optIndex} className="flex items-center gap-2">
+                                      <input type="text" value={opt.text ?? ''} onChange={(e) => { const newOpts = [...(Array.isArray(q.options) ? q.options : [])]; newOpts[optIndex] = { ...opt, text: e.target.value }; updateQuestion(index, { options: newOpts }); }} className="flex-1 px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-violet-400" placeholder={`Word ${optIndex + 1}`} />
+                                      {Array.isArray(q.options) && q.options.length > 2 && <button type="button" onClick={() => { const newOpts = (Array.isArray(q.options) ? q.options : []).filter((_, i) => i !== optIndex); updateQuestion(index, { options: newOpts }); }} className="p-1 text-slate-400 hover:text-red-500 transition-colors"><X className="w-3.5 h-3.5" /></button>}
+                                    </div>
+                                  ))}
+                                  <button type="button" onClick={() => { const safeOpts = Array.isArray(q.options) ? q.options : []; updateQuestion(index, { options: [...safeOpts, { id: Math.random().toString(36).slice(2, 11), text: '' }] }); }} className="text-xs font-bold text-violet-600 hover:text-violet-700 flex items-center gap-1.5 pt-1"><Plus className="w-4 h-4" /> Add word</button>
+                                </div>
+                              </div>
                             </div>
                           )}
 
