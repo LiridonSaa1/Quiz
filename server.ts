@@ -9702,19 +9702,74 @@ Content:\n"""${clipped}"""`;
 
         console.log(`[smart-quiz] AI generated ${questions.length} questions for ${selectedSections.length} sections (level=${level}, types=${questionTypes.join(",")})`);
       } else {
+        // Transform static bank questions into the selected question types by cycling through them
+        const transformToType = (q: { text: string; options: string[]; correct: number; explanation: string }, qType: string, qIndex: number): SmartQ => {
+          const correctText = q.options[q.correct ?? 0] ?? q.options[0];
+          const wrongOptions = q.options.filter((_, i) => i !== (q.correct ?? 0));
+          const wrongText = wrongOptions[qIndex % wrongOptions.length] ?? q.options[1] ?? "";
+
+          switch (qType) {
+            case "fill-in-the-blank":
+              return { type: "fill-in-the-blank", text: q.text, options: [], correct_answer: correctText, explanation: q.explanation };
+
+            case "true-false": {
+              // Alternate: even index → True (correct sentence), odd → False (wrong sentence)
+              const useTrue = qIndex % 2 === 0;
+              const sentence = q.text.replace("_____", useTrue ? correctText : wrongText);
+              return {
+                type: "true-false",
+                text: sentence,
+                options: ["True", "False"],
+                correct_answer: useTrue ? "True" : "False",
+                explanation: q.explanation,
+              };
+            }
+
+            case "word-bank": {
+              // Shuffle options for the word bank
+              const shuffled = [...q.options].sort(() => Math.random() - 0.5);
+              return { type: "word-bank", text: q.text, options: shuffled, word_bank: shuffled, correct_answer: correctText, explanation: q.explanation };
+            }
+
+            case "short-answer":
+              return { type: "short-answer", text: q.text, options: [], correct_answer: correctText, explanation: q.explanation };
+
+            case "sentence-building": {
+              const fullSentence = q.text.replace("_____", correctText);
+              const words = fullSentence.replace(/[.!?]$/, "").split(" ").filter(Boolean);
+              const scrambled = [...words].sort(() => Math.random() - 0.5);
+              return {
+                type: "sentence-building",
+                text: "Arrange the words to form a correct sentence:",
+                options: scrambled,
+                words: scrambled,
+                correct_answer: fullSentence.replace(/[.!?]$/, ""),
+                explanation: q.explanation,
+              };
+            }
+
+            case "multiple-choice":
+            default:
+              return {
+                type: "multiple-choice",
+                text: q.text,
+                options: q.options,
+                correct_answer: String((q.correct ?? 0) + 1),
+                explanation: q.explanation,
+              };
+          }
+        };
+
+        let typeIndex = 0;
         for (const sec of selectedSections) {
           const staticQs = getQuestionsForSection(level, sec.topic, questionsPerSection);
           for (const q of staticQs) {
-            questions.push({
-              type: "multiple-choice",
-              text: q.text,
-              options: q.options,
-              correct_answer: String((q.correct ?? 0) + 1),
-              explanation: q.explanation,
-            });
+            const qType = questionTypes[typeIndex % questionTypes.length];
+            questions.push(transformToType(q, qType, typeIndex));
+            typeIndex++;
           }
         }
-        console.log(`[smart-quiz] Static bank generated ${questions.length} questions for ${selectedSections.length} sections (level=${level})`);
+        console.log(`[smart-quiz] Static bank generated ${questions.length} questions for ${selectedSections.length} sections (level=${level}, types=${questionTypes.join(",")})`);
       }
 
       if (questions.length === 0) {
