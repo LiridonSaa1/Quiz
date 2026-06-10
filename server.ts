@@ -9635,7 +9635,7 @@ Content:\n"""${clipped}"""`;
       let questions: SmartQ[] = [];
 
       if (useAI) {
-        const aiApiKey = (process.env.AI_INTEGRATIONS_GEMINI_API_KEY || process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || "").trim();
+        const aiApiKey = (process.env.AI_INTEGRATIONS_GEMINI_API_KEY || process.env.GEMINI_API_KEY || "").trim();
 
         const TYPE_LABELS: Record<string, string> = {
           "multiple-choice": "Multiple Choice", "multiple-answer": "Multiple Answer",

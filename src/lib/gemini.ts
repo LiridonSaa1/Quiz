@@ -6,8 +6,7 @@ const IMAGE_IMPORT_NOTE_MAX_CHARS = 4000;
 const getApiKey = (): string => {
   const replitKey = (process.env.AI_INTEGRATIONS_GEMINI_API_KEY as string | undefined) || '';
   const processKey = (process.env.GEMINI_API_KEY as string | undefined) || '';
-  const googleKey = (process.env.GOOGLE_API_KEY as string | undefined) || '';
-  return String(replitKey || processKey || googleKey).trim();
+  return String(replitKey || processKey).trim();
 };
 
 const getBaseUrl = (): string | undefined => {
