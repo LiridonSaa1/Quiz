@@ -9421,6 +9421,161 @@ Rules:
   app.post("/api/teacher/quizzes", teacherQuizzesPostHandler);
   app.post("/api/teacher/quizzes/", teacherQuizzesPostHandler);
 
+  /** AI Question Generation — server-side Gemini call so the browser never needs an API key */
+  app.post("/api/teacher/ai/generate-questions", async (req: Request, res: Response) => {
+    try {
+      const caller = await assertAuthenticated(req, res);
+      if (!caller) return;
+      if (caller.role !== "teacher" && caller.role !== "admin") {
+        return res.status(403).json({ error: "Forbidden" });
+      }
+      const { content, questionTypes } = req.body as { content?: string; questionTypes?: string[] };
+      if (!content?.trim()) return res.status(400).json({ error: "content is required" });
+      const apiKey = (process.env.AI_INTEGRATIONS_GEMINI_API_KEY || process.env.GEMINI_API_KEY || "").trim();
+      if (!apiKey) return res.status(503).json({ error: "AI not configured — set GEMINI_API_KEY in Secrets." });
+
+      const QUIZ_MAX = 16000;
+      const clipped = content.trim().slice(0, QUIZ_MAX);
+      const types: string[] = Array.isArray(questionTypes) && questionTypes.length > 0
+        ? questionTypes : ["multiple-choice", "true-false", "fill-in-the-blank"];
+
+      const words = (clipped.match(/[A-Za-z0-9]+/g) || []).length;
+      const autoCount = words <= 120 ? 3 : words <= 250 ? 4 : words <= 450 ? 5 : words <= 850 ? 7 : 9;
+      const count = Math.max(types.length, autoCount);
+
+      const TYPE_LABELS: Record<string, string> = {
+        "multiple-choice": "Multiple Choice", "multiple-answer": "Multiple Answer",
+        "true-false": "True / False", "fill-in-the-blank": "Fill in the Blank",
+        "short-answer": "Short Answer", "long-answer": "Essay", "matching": "Matching",
+        "ordering": "Ordering", "word-bank": "Word Bank", "sentence-building": "Sentence Building",
+        "drag-drop": "Drag & Drop", "cloze": "Cloze Test", "listening": "Listening Questions",
+        "audio-fill-blank": "Audio Fill in Blank", "dictation": "Dictation", "speaking": "Speaking",
+        "pronunciation": "Pronunciation Check", "reading-comprehension": "Reading Comprehension",
+      };
+      const TYPE_SCHEMAS: Record<string, string> = {
+        "multiple-choice": `{"type":"multiple-choice","question":"...","options":["A","B","C","D"],"correct_answer":"A","explanation":"..."}`,
+        "multiple-answer": `{"type":"multiple-answer","question":"...","options":["A","B","C","D"],"correct_answers":["A","C"],"explanation":"..."}`,
+        "true-false": `{"type":"true-false","question":"...","correct_answer":"True","explanation":"..."}`,
+        "fill-in-the-blank": `{"type":"fill-in-the-blank","question":"The ___ is the powerhouse of the cell.","correct_answer":"mitochondria","explanation":"..."}`,
+        "short-answer": `{"type":"short-answer","question":"...","correct_answer":"brief answer","explanation":"..."}`,
+        "long-answer": `{"type":"long-answer","question":"Explain in detail...","explanation":"sample answer or rubric hint"}`,
+        "matching": `{"type":"matching","question":"Match each word to its definition:","pairs":[{"left":"apple","right":"a red fruit"},{"left":"book","right":"pages bound together"}],"explanation":"..."}`,
+        "ordering": `{"type":"ordering","question":"Put these steps in order:","items":["Step C","Step A","Step B"],"correct_order":["Step A","Step B","Step C"],"explanation":"..."}`,
+        "word-bank": `{"type":"word-bank","question":"Choose the correct word: The ___ shines brightly.","word_bank":["sun","moon","rain","cloud"],"correct_answer":"sun","explanation":"..."}`,
+        "sentence-building": `{"type":"sentence-building","question":"Arrange the words:","words":["is","The","sky","blue"],"correct_answer":"The sky is blue","explanation":"..."}`,
+        "drag-drop": `{"type":"drag-drop","question":"Drag to put in correct order:","items":["C","A","B"],"correct_order":["A","B","C"],"explanation":"..."}`,
+        "cloze": `{"type":"cloze","question":"Complete the passage:","passage":"The ___ (1) rises in the east.","blanks":["sun"],"explanation":"..."}`,
+        "reading-comprehension": `{"type":"reading-comprehension","question":"Read the passage and answer:","passage":"...","options":["A","B","C","D"],"correct_answer":"A","explanation":"..."}`,
+        "listening": `{"type":"listening","question":"[Listening] ...","audio_transcript":"Full transcript","options":["A","B","C","D"],"correct_answer":"A","explanation":"..."}`,
+        "audio-fill-blank": `{"type":"audio-fill-blank","question":"Listen and fill: 'The capital of France is ___.'","audio_transcript":"Paris.","correct_answer":"Paris","explanation":"..."}`,
+        "dictation": `{"type":"dictation","question":"Listen carefully and write what you hear.","audio_transcript":"The quick brown fox.","correct_answer":"The quick brown fox.","explanation":"..."}`,
+        "speaking": `{"type":"speaking","question":"Describe your favourite holiday in 3-4 sentences.","explanation":"..."}`,
+        "pronunciation": `{"type":"pronunciation","question":"Say the following word clearly:","correct_answer":"necessary","explanation":"..."}`,
+      };
+
+      const onlyMC = types.length === 1 && types[0] === "multiple-choice";
+      const typeLabels = types.map(t => TYPE_LABELS[t] || t).join(", ");
+      const schemaDesc = types.map(t => `- ${TYPE_LABELS[t] || t}: ${TYPE_SCHEMAS[t] || `{"type":"${t}","question":"...","correct_answer":"...","explanation":"..."}`}`).join("\n");
+
+      const prompt = onlyMC
+        ? `You are creating student-friendly quiz questions for an LMS.
+Rules: Use ONLY the content below. Create exactly ${count} multiple-choice questions, each with exactly 4 options and 1 correct answer. Avoid duplicates. Keep language simple.
+Return ONLY a valid JSON array, no markdown:
+[{"type":"multiple-choice","question":"...","options":["A","B","C","D"],"correct_answer":"A","explanation":"..."}]
+Content:\n"""${clipped}"""`
+        : `You are an expert teacher creating quiz questions for a modern LMS.
+Task: Generate exactly ${count} questions based ONLY on the content below.
+Selected question types: ${typeLabels}
+Distribute evenly (~${Math.ceil(count / types.length)} per type).
+Rules:
+1) Use ONLY the content below.
+2) For fill-in-the-blank: use ___ in the question text.
+3) For matching: 3-5 pairs. For ordering: 3-5 items. For word-bank: 4 words.
+4) For multiple-choice: exactly 4 options, 1 correct. For multiple-answer: 2+ correct answers.
+5) Always include "explanation" field.
+JSON schemas by type:\n${schemaDesc}
+Return ONLY a valid JSON array:\n[...questions]
+Content:\n"""${clipped}"""`;
+
+      const { GoogleGenAI } = await import("@google/genai");
+      const geminiBaseUrl = (process.env.AI_INTEGRATIONS_GEMINI_BASE_URL || "").trim();
+      const ai = geminiBaseUrl
+        ? new GoogleGenAI({ apiKey, httpOptions: { apiVersion: "", baseUrl: geminiBaseUrl } })
+        : new GoogleGenAI({ apiKey });
+      const result = await ai.models.generateContent({ model: "gemini-2.5-flash", contents: prompt });
+      const rawText = (result.text || "").trim();
+
+      const parseJsonFromText = (text: string): any[] => {
+        const fenced = text.match(/```(?:json)?\s*([\s\S]*?)```/i);
+        const clean = (fenced ? fenced[1] : text).trim();
+        try { const p = JSON.parse(clean); return Array.isArray(p) ? p : (p?.questions ?? []); } catch {}
+        let depth = 0, start = -1;
+        for (let i = 0; i < clean.length; i++) {
+          if (clean[i] === '[') { if (start === -1) start = i; depth++; }
+          else if (clean[i] === ']' && start !== -1) { depth--; if (depth === 0) { try { const p = JSON.parse(clean.slice(start, i + 1)); return Array.isArray(p) ? p : []; } catch {} } }
+        }
+        return [];
+      };
+
+      const parsed = parseJsonFromText(rawText);
+      const questions = parsed.map((item: any) => {
+        const type = String(item.type || "multiple-choice");
+        const text = String(item.question || item.text || "").trim();
+        if (!text) return null;
+        const q: any = { type, text, explanation: String(item.explanation || "").trim(), points: 1 };
+        if (type === "multiple-choice" || type === "reading-comprehension" || type === "listening") {
+          const opts = Array.isArray(item.options) ? item.options.map(String) : [];
+          q.options = opts.slice(0, 4).map((t: string, i: number) => ({ id: String(i + 1), text: t }));
+          const ca = String(item.correct_answer || opts[0] || "");
+          const caIdx = q.options.findIndex((o: any) => o.text === ca);
+          q.correctAnswer = caIdx >= 0 ? String(caIdx + 1) : "1";
+          if (type !== "multiple-choice") q.passage = String(item.passage || item.audio_transcript || "");
+        } else if (type === "multiple-answer") {
+          const opts = Array.isArray(item.options) ? item.options.map(String) : [];
+          q.options = opts.slice(0, 4).map((t: string, i: number) => ({ id: String(i + 1), text: t }));
+          const cas: string[] = Array.isArray(item.correct_answers) ? item.correct_answers.map(String) : [String(item.correct_answer || opts[0] || "")];
+          q.correctAnswer = cas.map((ca: string) => { const idx = q.options.findIndex((o: any) => o.text === ca); return idx >= 0 ? String(idx + 1) : "1"; });
+        } else if (type === "true-false") {
+          q.options = [{ id: "1", text: "True" }, { id: "2", text: "False" }];
+          q.correctAnswer = String(item.correct_answer || "True").toLowerCase().startsWith("t") ? "1" : "2";
+        } else if (["fill-in-the-blank","short-answer","audio-fill-blank","dictation","pronunciation"].includes(type)) {
+          q.correctAnswer = String(item.correct_answer || item.audio_transcript || "").trim();
+          if (item.audio_transcript) q.audioTranscript = String(item.audio_transcript);
+        } else if (type === "long-answer" || type === "speaking") {
+          q.points = 2;
+        } else if (type === "matching") {
+          q.pairs = Array.isArray(item.pairs) ? item.pairs.filter((p: any) => p.left && p.right) : [];
+          if (q.pairs.length < 2) return null;
+          q.points = q.pairs.length;
+        } else if (type === "ordering" || type === "drag-drop") {
+          q.items = Array.isArray(item.items) ? item.items.map(String) : [];
+          q.correctOrder = Array.isArray(item.correct_order) ? item.correct_order.map(String) : q.items;
+          if (q.items.length < 2) return null;
+        } else if (type === "word-bank") {
+          q.wordBank = Array.isArray(item.word_bank) ? item.word_bank.map(String) : [];
+          q.correctAnswer = String(item.correct_answer || "").trim();
+        } else if (type === "sentence-building") {
+          q.words = Array.isArray(item.words) ? item.words.map(String) : [];
+          q.correctAnswer = String(item.correct_answer || q.words.join(" ")).trim();
+          if (q.words.length < 2) return null;
+        } else if (type === "cloze") {
+          q.passage = String(item.passage || text);
+          q.blanks = Array.isArray(item.blanks) ? item.blanks.map(String) : [];
+          q.correctAnswer = JSON.stringify(q.blanks);
+        }
+        return q;
+      }).filter(Boolean);
+
+      if (questions.length === 0) {
+        return res.status(500).json({ error: "AI could not generate questions from the provided content. Try adding more detailed text." });
+      }
+      return res.json({ questions });
+    } catch (e: any) {
+      console.error("POST /api/teacher/ai/generate-questions", e);
+      return res.status(500).json({ error: e?.message || "Failed to generate questions" });
+    }
+  });
+
   /** Smart Test Builder — AI generates questions from Headway grammar/vocabulary sections */
   app.post("/api/teacher/smart-quiz/generate", async (req: Request, res: Response) => {
     try {
@@ -9438,12 +9593,16 @@ Rules:
         timeLimit?: number;
         passmark?: number;
         questionsPerSection?: number;
+        questionTypes?: string[];
       };
 
       const { level, selectedSections, courseId, title } = body;
       const timeLimit = Number(body.timeLimit) || 30;
       const passmark = Number(body.passmark) || 70;
       const questionsPerSection = Math.min(Math.max(Number(body.questionsPerSection) || 3, 2), 8);
+      const questionTypes: string[] = Array.isArray(body.questionTypes) && body.questionTypes.length > 0
+        ? body.questionTypes : ["multiple-choice"];
+      const useAI = questionTypes.some(t => t !== "multiple-choice");
 
       if (!level || !Array.isArray(selectedSections) || selectedSections.length === 0) {
         return res.status(400).json({ error: "level and selectedSections are required" });
@@ -9462,32 +9621,109 @@ Rules:
         }
       }
 
-      // Build questions from the expanded static bank (shuffled per-call for variety — no API needed)
-      type SmartQ = { text: string; options: string[]; correct_answer: string; explanation: string };
-      const questions: SmartQ[] = [];
+      // Build questions — AI path for mixed types, static bank for MC-only
+      type SmartQ = { type: string; text: string; options: string[]; correct_answer: string; explanation: string; [key: string]: any };
+      let questions: SmartQ[] = [];
 
-      for (const sec of selectedSections) {
-        const staticQs = getQuestionsForSection(level, sec.topic, questionsPerSection);
-        for (const q of staticQs) {
-          questions.push({
-            text: q.text,
-            options: q.options,
-            // Store as 1-based index string to match QuizBuilder's opt.id convention ("1","2","3","4")
-            correct_answer: String((q.correct ?? 0) + 1),
-            explanation: q.explanation,
-          });
+      if (useAI) {
+        const aiApiKey = (process.env.AI_INTEGRATIONS_GEMINI_API_KEY || process.env.GEMINI_API_KEY || "").trim();
+        if (!aiApiKey) return res.status(503).json({ error: "AI not configured — set GEMINI_API_KEY in Secrets." });
+
+        const TYPE_LABELS: Record<string, string> = {
+          "multiple-choice": "Multiple Choice", "multiple-answer": "Multiple Answer",
+          "true-false": "True / False", "fill-in-the-blank": "Fill in the Blank",
+          "short-answer": "Short Answer", "long-answer": "Essay", "matching": "Matching",
+          "ordering": "Ordering", "word-bank": "Word Bank", "sentence-building": "Sentence Building",
+          "drag-drop": "Drag & Drop", "cloze": "Cloze Test", "listening": "Listening Questions",
+          "audio-fill-blank": "Audio Fill in Blank", "dictation": "Dictation", "speaking": "Speaking",
+          "pronunciation": "Pronunciation Check", "reading-comprehension": "Reading Comprehension",
+        };
+        const typeLabels = questionTypes.map(t => TYPE_LABELS[t] || t).join(", ");
+        const totalCount = selectedSections.length * questionsPerSection;
+        const perType = Math.ceil(totalCount / questionTypes.length);
+
+        const sectionList = selectedSections.map(s => `- ${s.unitTitle}: ${s.type} (${s.topic})`).join("\n");
+        const aiPrompt = `You are an expert English language teacher creating a Headway-style quiz for ${level} level students.
+
+Generate exactly ${totalCount} quiz questions based on these English language learning topics:
+${sectionList}
+
+Selected question types: ${typeLabels}
+Distribute ~${perType} questions per type.
+
+Rules:
+1) Questions must test English grammar, vocabulary, and language use appropriate for ${level} level.
+2) For fill-in-the-blank: use ___ in the question text.
+3) For matching: 3-5 pairs. For ordering: 3-5 items. For word-bank: 4 words.
+4) For multiple-choice and true-false: match the topic closely.
+5) Keep language natural and clear for language learners.
+6) Always include "explanation" field.
+
+Schemas (examples):
+- Multiple Choice: {"type":"multiple-choice","question":"...","options":["A","B","C","D"],"correct_answer":"A","explanation":"..."}
+- True/False: {"type":"true-false","question":"...","correct_answer":"True","explanation":"..."}
+- Fill in Blank: {"type":"fill-in-the-blank","question":"She ___ to school every day.","correct_answer":"goes","explanation":"..."}
+- Short Answer: {"type":"short-answer","question":"...","correct_answer":"...","explanation":"..."}
+- Matching: {"type":"matching","question":"Match the verbs to their past forms:","pairs":[{"left":"go","right":"went"},{"left":"see","right":"saw"}],"explanation":"..."}
+- Word Bank: {"type":"word-bank","question":"Choose the correct word: I ___ happy.","word_bank":["am","is","are","be"],"correct_answer":"am","explanation":"..."}
+- Sentence Building: {"type":"sentence-building","question":"Arrange the words:","words":["is","She","happy"],"correct_answer":"She is happy","explanation":"..."}
+
+Return ONLY a valid JSON array, no markdown:
+[...questions]`;
+
+        const { GoogleGenAI } = await import("@google/genai");
+        const geminiBaseUrl = (process.env.AI_INTEGRATIONS_GEMINI_BASE_URL || "").trim();
+        const ai = geminiBaseUrl
+          ? new GoogleGenAI({ apiKey: aiApiKey, httpOptions: { apiVersion: "", baseUrl: geminiBaseUrl } })
+          : new GoogleGenAI({ apiKey: aiApiKey });
+        const aiResult = await ai.models.generateContent({ model: "gemini-2.5-flash", contents: aiPrompt });
+        const rawAI = (aiResult.text || "").trim();
+
+        const parseArr = (text: string): any[] => {
+          const fenced = text.match(/```(?:json)?\s*([\s\S]*?)```/i);
+          const clean = (fenced ? fenced[1] : text).trim();
+          try { const p = JSON.parse(clean); return Array.isArray(p) ? p : []; } catch {}
+          let depth = 0, start = -1;
+          for (let i = 0; i < clean.length; i++) {
+            if (clean[i] === '[') { if (start === -1) start = i; depth++; }
+            else if (clean[i] === ']' && start !== -1) { depth--; if (depth === 0) { try { const p = JSON.parse(clean.slice(start, i + 1)); return Array.isArray(p) ? p : []; } catch {} } }
+          }
+          return [];
+        };
+
+        const parsed = parseArr(rawAI);
+        questions = parsed.map((item: any) => {
+          const type = String(item.type || "multiple-choice");
+          const text = String(item.question || item.text || "").trim();
+          if (!text) return null;
+          return { type, text, options: Array.isArray(item.options) ? item.options.map(String) : [], correct_answer: String(item.correct_answer || ""), explanation: String(item.explanation || ""), ...item };
+        }).filter(Boolean) as SmartQ[];
+
+        console.log(`[smart-quiz] AI generated ${questions.length} questions for ${selectedSections.length} sections (level=${level}, types=${questionTypes.join(",")})`);
+      } else {
+        for (const sec of selectedSections) {
+          const staticQs = getQuestionsForSection(level, sec.topic, questionsPerSection);
+          for (const q of staticQs) {
+            questions.push({
+              type: "multiple-choice",
+              text: q.text,
+              options: q.options,
+              correct_answer: String((q.correct ?? 0) + 1),
+              explanation: q.explanation,
+            });
+          }
         }
+        console.log(`[smart-quiz] Static bank generated ${questions.length} questions for ${selectedSections.length} sections (level=${level})`);
       }
-      console.log(`[smart-quiz] Static bank generated ${questions.length} questions for ${selectedSections.length} sections (level=${level})`);
 
       if (questions.length === 0) {
-        return res.status(400).json({ error: "No questions available for the selected sections." });
+        return res.status(400).json({ error: "No questions could be generated for the selected sections. Try different types or add more sections." });
       }
 
       // Create the quiz
       const quizPayload: Record<string, unknown> = {
         title: title.trim(),
-        description: `Smart Test Builder — ${level} · ${selectedSections.length} sections · Headway-style fill-in-the-blank`,
+        description: `Smart Test Builder — ${level} · ${selectedSections.length} sections · ${questionTypes.join(", ")}`,
         course_id: courseId,
         teacher_id: caller.userId,
         time_limit: timeLimit,
@@ -9502,6 +9738,7 @@ Rules:
             level,
             sections: selectedSections,
             questionsPerSection,
+            questionTypes,
           },
         },
       };
@@ -9514,16 +9751,16 @@ Rules:
 
       const quizId = inserted.id;
 
-      // Insert questions
+      // Insert questions — preserve actual type for AI-generated questions
       const questionRows = questions.map((q: any, idx: number) => ({
         quiz_id: quizId,
-        type: "multiple-choice",
+        type: String(q.type || "multiple-choice"),
         text: String(q.text || q.question || "").trim() || " ",
         question_text: String(q.text || q.question || "").trim() || " ",
         options: Array.isArray(q.options) ? q.options : [],
         correct_answer: q.correct_answer ?? (Array.isArray(q.options) ? q.options[0] : ""),
         explanation: q.explanation ?? null,
-        points: 1,
+        points: ["long-answer","speaking","matching"].includes(String(q.type)) ? 2 : 1,
         order: idx,
       }));
 

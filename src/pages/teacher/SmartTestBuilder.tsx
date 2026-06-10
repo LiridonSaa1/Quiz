@@ -7,11 +7,13 @@ import { HEADWAY_FULL_DATA } from '../../lib/headwayData';
 import { motion, AnimatePresence } from 'motion/react';
 import { toast } from 'sonner';
 import {
-  ChevronRight, ChevronLeft, BookOpen, Sparkles, Check,
+  ChevronRight, ChevronLeft, Sparkles, Check,
   Clock, Target, Layers, Loader2, X, ArrowRight,
-  GraduationCap, Zap,
+  GraduationCap, Zap, ChevronDown, ChevronUp,
 } from 'lucide-react';
 import { cn } from '../../lib/utils';
+import { AI_QUESTION_TYPE_LABELS } from '../../lib/gemini';
+import type { AIQuestionType } from '../../lib/gemini';
 
 const LEVELS = [
   { key: 'Beginner',          label: 'Beginner',           color: 'from-emerald-500 to-teal-600',    ring: 'ring-emerald-300', badge: 'bg-emerald-100 text-emerald-700', cefr: 'A1' },
@@ -47,6 +49,8 @@ export default function SmartTestBuilder() {
   const [questionsPerSection, setQuestionsPerSection] = useState(3);
   const [generating, setGenerating] = useState(false);
   const [sectionFilter, setSectionFilter] = useState<'grammar' | 'vocabulary' | 'both'>('grammar');
+  const [questionTypes, setQuestionTypes] = useState<AIQuestionType[]>(['multiple-choice', 'true-false', 'fill-in-the-blank']);
+  const [typePickerOpen, setTypePickerOpen] = useState(false);
 
   useEffect(() => {
     const load = async () => {
@@ -156,6 +160,7 @@ export default function SmartTestBuilder() {
           timeLimit,
           passmark,
           questionsPerSection,
+          questionTypes,
         }),
       });
       if (!res.ok) {
@@ -527,6 +532,60 @@ export default function SmartTestBuilder() {
                           </div>
                         </div>
                         <p className="text-xs text-slate-400 mt-1">Total: ~{selectedIds.size * questionsPerSection} questions</p>
+                      </div>
+
+                      {/* Question Types */}
+                      <div>
+                        <button
+                          type="button"
+                          onClick={() => setTypePickerOpen(v => !v)}
+                          className="w-full flex items-center justify-between text-sm font-semibold text-slate-700 mb-1.5 hover:text-indigo-600 transition-colors group"
+                        >
+                          <span className="flex items-center gap-1.5">
+                            <Sparkles className="w-3.5 h-3.5 text-indigo-400" />
+                            Question Types
+                            <span className="ml-1 text-xs font-normal text-slate-400">({questionTypes.length} selected)</span>
+                          </span>
+                          {typePickerOpen
+                            ? <ChevronUp className="w-4 h-4 text-slate-400 group-hover:text-indigo-500" />
+                            : <ChevronDown className="w-4 h-4 text-slate-400 group-hover:text-indigo-500" />}
+                        </button>
+                        {typePickerOpen && (
+                          <div className="flex flex-wrap gap-2 pt-1">
+                            {(Object.entries(AI_QUESTION_TYPE_LABELS) as [AIQuestionType, string][]).map(([type, label]) => {
+                              const active = questionTypes.includes(type);
+                              return (
+                                <button
+                                  key={type}
+                                  type="button"
+                                  onClick={() => setQuestionTypes(prev =>
+                                    active
+                                      ? prev.length > 1 ? prev.filter(t => t !== type) : prev
+                                      : [...prev, type]
+                                  )}
+                                  className={cn(
+                                    "px-3 py-1.5 rounded-lg text-xs font-medium border transition-all",
+                                    active
+                                      ? "bg-indigo-500 text-white border-indigo-500 shadow-sm"
+                                      : "bg-white text-slate-600 border-slate-200 hover:border-indigo-300 hover:text-indigo-600"
+                                  )}
+                                >
+                                  {label}
+                                </button>
+                              );
+                            })}
+                          </div>
+                        )}
+                        {!typePickerOpen && (
+                          <div className="flex flex-wrap gap-1.5">
+                            {questionTypes.map(t => (
+                              <span key={t} className="px-2.5 py-1 rounded-md text-xs bg-indigo-50 text-indigo-700 border border-indigo-100">
+                                {AI_QUESTION_TYPE_LABELS[t]}
+                              </span>
+                            ))}
+                          </div>
+                        )}
+                        <p className="text-xs text-slate-400 mt-1.5">AI will generate a mix of these types across your selected sections.</p>
                       </div>
 
                       {/* Time & Pass */}

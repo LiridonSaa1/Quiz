@@ -47,8 +47,6 @@ import { FormPageSkeleton } from '../../components/ui/Skeleton';
 import { AIPanel, AITriggerButton } from '../../components/AIPanel';
 import type { AIPanelAttachment } from '../../components/AIPanel';
 import {
-  generateQuizQuestions,
-  generateQuizQuestionsWithTypes,
   importQuizQuestionsFromImages,
   importQuizQuestionsFromText,
 } from '../../lib/gemini';
@@ -507,7 +505,13 @@ export default function QuizBuilder() {
     const mapped: Partial<Question>[] = [];
 
     if (selectedTypes && selectedTypes.length > 0) {
-      const generated = await generateQuizQuestionsWithTypes(input, selectedTypes);
+      const aiRes = await authFetch('/api/teacher/ai/generate-questions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ content: input, questionTypes: selectedTypes }),
+      });
+      if (!aiRes.ok) { const err = await readApiError(aiRes); throw new Error(err); }
+      const { questions: generated } = await aiRes.json() as { questions: any[] };
       if (!generated.length) throw new Error(t('quizzes.noQuestionsFromContent'));
 
       for (const q of generated) {
@@ -586,7 +590,13 @@ export default function QuizBuilder() {
         }
       }
     } else {
-      const generated = await generateQuizQuestions(input);
+      const aiRes = await authFetch('/api/teacher/ai/generate-questions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ content: input, questionTypes: ['multiple-choice'] }),
+      });
+      if (!aiRes.ok) { const err = await readApiError(aiRes); throw new Error(err); }
+      const { questions: generated } = await aiRes.json() as { questions: any[] };
       if (!generated.length) throw new Error(t('quizzes.noQuestionsFromContent'));
 
       for (const q of generated) {
