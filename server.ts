@@ -9655,29 +9655,31 @@ Content:\n"""${clipped}"""`;
         const smartUserPrompt = `Generate exactly ${totalCount} English language questions for ${level} level students based on these topics:\n${sectionList}\n\nTypes: ${typeLabels} (~${perType} per type).\nRules: fill-in-the-blank uses ___. matching needs pairs array. ordering/drag-drop needs items+correct_order. word-bank needs word_bank array. Always include explanation.\nReturn ONLY a JSON array:\n[...questions]`;
 
         let rawAI = "";
+        let aiSucceeded = false;
         if (aiApiKey) {
           const { GoogleGenAI } = await import("@google/genai");
           const geminiBaseUrl = (process.env.AI_INTEGRATIONS_GEMINI_BASE_URL || "").trim();
           const ai = geminiBaseUrl
             ? new GoogleGenAI({ apiKey: aiApiKey, httpOptions: { apiVersion: "", baseUrl: geminiBaseUrl } })
             : new GoogleGenAI({ apiKey: aiApiKey });
-          const aiResult = await ai.models.generateContent({ model: "gemini-2.5-flash", contents: `${smartSysPrompt}\n\n${smartUserPrompt}` });
-          rawAI = (aiResult.text || "").trim();
-        } else {
-          const pollinationsRes = await fetch("https://text.pollinations.ai/", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              messages: [
-                { role: "system", content: smartSysPrompt },
-                { role: "user", content: smartUserPrompt },
-              ],
-              model: "openai",
-              jsonMode: true,
-            }),
-          });
-          if (!pollinationsRes.ok) throw new Error(`AI service error: ${pollinationsRes.status}`);
-          rawAI = (await pollinationsRes.text()).trim();
+          const maxRetries = 3;
+          for (let attempt = 0; attempt < maxRetries; attempt++) {
+            try {
+              if (attempt > 0) await new Promise(r => setTimeout(r, attempt * 2000));
+              const aiResult = await ai.models.generateContent({ model: "gemini-1.5-flash", contents: `${smartSysPrompt}\n\n${smartUserPrompt}` });
+              rawAI = (aiResult.text || "").trim();
+              aiSucceeded = true;
+              break;
+            } catch (aiErr: any) {
+              const status = aiErr?.status ?? aiErr?.code ?? 0;
+              const isRetryable = status === 503 || status === 429 || String(aiErr?.message || "").includes("UNAVAILABLE") || String(aiErr?.message || "").includes("overloaded");
+              console.warn(`[smart-quiz] Gemini attempt ${attempt + 1} failed (${status}): ${aiErr?.message}`);
+              if (!isRetryable || attempt === maxRetries - 1) break;
+            }
+          }
+        }
+        if (!aiSucceeded) {
+          console.warn("[smart-quiz] AI unavailable — falling back to static question bank");
         }
 
         const parseArr = (text: string): any[] => {
@@ -9692,74 +9694,51 @@ Content:\n"""${clipped}"""`;
           return [];
         };
 
-        const parsed = parseArr(rawAI);
-        questions = parsed.map((item: any) => {
-          const type = String(item.type || "multiple-choice");
-          const text = String(item.question || item.text || "").trim();
-          if (!text) return null;
-          return { type, text, options: Array.isArray(item.options) ? item.options.map(String) : [], correct_answer: String(item.correct_answer || ""), explanation: String(item.explanation || ""), ...item };
-        }).filter(Boolean) as SmartQ[];
+        if (aiSucceeded && rawAI) {
+          const parsed = parseArr(rawAI);
+          questions = parsed.map((item: any) => {
+            const type = String(item.type || "multiple-choice");
+            const text = String(item.question || item.text || "").trim();
+            if (!text) return null;
+            return { type, text, options: Array.isArray(item.options) ? item.options.map(String) : [], correct_answer: String(item.correct_answer || ""), explanation: String(item.explanation || ""), ...item };
+          }).filter(Boolean) as SmartQ[];
+          console.log(`[smart-quiz] AI generated ${questions.length} questions for ${selectedSections.length} sections (level=${level}, types=${questionTypes.join(",")})`);
+        }
 
-        console.log(`[smart-quiz] AI generated ${questions.length} questions for ${selectedSections.length} sections (level=${level}, types=${questionTypes.join(",")})`);
-      } else {
-        // Transform static bank questions into the selected question types by cycling through them
+      }
+
+      // Static bank fallback — runs when useAI=false OR when AI returned nothing
+      if (questions.length === 0) {
+        if (useAI) console.warn("[smart-quiz] AI returned no questions — using static bank as fallback");
         const transformToType = (q: { text: string; options: string[]; correct: number; explanation: string }, qType: string, qIndex: number): SmartQ => {
           const correctText = q.options[q.correct ?? 0] ?? q.options[0];
           const wrongOptions = q.options.filter((_, i) => i !== (q.correct ?? 0));
           const wrongText = wrongOptions[qIndex % wrongOptions.length] ?? q.options[1] ?? "";
-
           switch (qType) {
             case "fill-in-the-blank":
               return { type: "fill-in-the-blank", text: q.text, options: [], correct_answer: correctText, explanation: q.explanation };
-
             case "true-false": {
-              // Alternate: even index → True (correct sentence), odd → False (wrong sentence)
               const useTrue = qIndex % 2 === 0;
               const sentence = q.text.replace("_____", useTrue ? correctText : wrongText);
-              return {
-                type: "true-false",
-                text: sentence,
-                options: ["True", "False"],
-                correct_answer: useTrue ? "True" : "False",
-                explanation: q.explanation,
-              };
+              return { type: "true-false", text: sentence, options: ["True", "False"], correct_answer: useTrue ? "True" : "False", explanation: q.explanation };
             }
-
             case "word-bank": {
-              // Shuffle options for the word bank
               const shuffled = [...q.options].sort(() => Math.random() - 0.5);
               return { type: "word-bank", text: q.text, options: shuffled, word_bank: shuffled, correct_answer: correctText, explanation: q.explanation };
             }
-
             case "short-answer":
               return { type: "short-answer", text: q.text, options: [], correct_answer: correctText, explanation: q.explanation };
-
             case "sentence-building": {
               const fullSentence = q.text.replace("_____", correctText);
               const words = fullSentence.replace(/[.!?]$/, "").split(" ").filter(Boolean);
               const scrambled = [...words].sort(() => Math.random() - 0.5);
-              return {
-                type: "sentence-building",
-                text: "Arrange the words to form a correct sentence:",
-                options: scrambled,
-                words: scrambled,
-                correct_answer: fullSentence.replace(/[.!?]$/, ""),
-                explanation: q.explanation,
-              };
+              return { type: "sentence-building", text: "Arrange the words to form a correct sentence:", options: scrambled, words: scrambled, correct_answer: fullSentence.replace(/[.!?]$/, ""), explanation: q.explanation };
             }
-
             case "multiple-choice":
             default:
-              return {
-                type: "multiple-choice",
-                text: q.text,
-                options: q.options,
-                correct_answer: String((q.correct ?? 0) + 1),
-                explanation: q.explanation,
-              };
+              return { type: "multiple-choice", text: q.text, options: q.options, correct_answer: String((q.correct ?? 0) + 1), explanation: q.explanation };
           }
         };
-
         let typeIndex = 0;
         for (const sec of selectedSections) {
           const staticQs = getQuestionsForSection(level, sec.topic, questionsPerSection);
