@@ -45,6 +45,14 @@ const TYPE_ICONS: Record<AIQuestionType, string> = {
   'ordering': '⇅',
   'word-bank': '🔤',
   'sentence-building': '🧩',
+  'drag-drop': '🖱',
+  'cloze': '📄',
+  'listening': '🎧',
+  'audio-fill-blank': '🔊',
+  'dictation': '🎙',
+  'speaking': '🗣',
+  'pronunciation': '👄',
+  'reading-comprehension': '📖',
 };
 
 const ALL_AI_TYPES: AIQuestionType[] = [
@@ -56,8 +64,16 @@ const ALL_AI_TYPES: AIQuestionType[] = [
   'long-answer',
   'matching',
   'ordering',
+  'drag-drop',
   'word-bank',
   'sentence-building',
+  'cloze',
+  'reading-comprehension',
+  'listening',
+  'audio-fill-blank',
+  'dictation',
+  'speaking',
+  'pronunciation',
 ];
 
 export function AIPanel({

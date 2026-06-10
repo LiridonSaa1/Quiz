@@ -776,7 +776,15 @@ export type AIQuestionType =
   | 'matching'
   | 'ordering'
   | 'word-bank'
-  | 'sentence-building';
+  | 'sentence-building'
+  | 'drag-drop'
+  | 'cloze'
+  | 'listening'
+  | 'audio-fill-blank'
+  | 'dictation'
+  | 'speaking'
+  | 'pronunciation'
+  | 'reading-comprehension';
 
 export interface AIGeneratedQuestion {
   type: AIQuestionType;
@@ -790,6 +798,9 @@ export interface AIGeneratedQuestion {
   correctOrder?: string[];
   wordBank?: string[];
   words?: string[];
+  passage?: string;
+  audioTranscript?: string;
+  blanks?: string[];
 }
 
 export const AI_QUESTION_TYPE_LABELS: Record<AIQuestionType, string> = {
@@ -803,6 +814,14 @@ export const AI_QUESTION_TYPE_LABELS: Record<AIQuestionType, string> = {
   'ordering': 'Ordering',
   'word-bank': 'Word Bank',
   'sentence-building': 'Sentence Building',
+  'drag-drop': 'Drag & Drop',
+  'cloze': 'Cloze Test',
+  'listening': 'Listening Questions',
+  'audio-fill-blank': 'Audio Fill in Blank',
+  'dictation': 'Dictation',
+  'speaking': 'Speaking',
+  'pronunciation': 'Pronunciation Check',
+  'reading-comprehension': 'Reading Comprehension',
 };
 
 export const DEFAULT_AI_QUESTION_TYPES: AIQuestionType[] = [
@@ -880,6 +899,14 @@ function buildTypeSchemaDescription(types: AIQuestionType[]): string {
     'ordering': `{"type":"ordering","question":"Put these steps in order:","items":["Step C","Step A","Step B"],"correct_order":["Step A","Step B","Step C"],"explanation":"..."}`,
     'word-bank': `{"type":"word-bank","question":"Choose the correct word: The ___ shines brightly.","word_bank":["sun","moon","rain","cloud"],"correct_answer":"sun","explanation":"..."}`,
     'sentence-building': `{"type":"sentence-building","question":"Arrange the words to form a correct sentence:","words":["is","The","sky","blue"],"correct_answer":"The sky is blue","explanation":"..."}`,
+    'drag-drop': `{"type":"drag-drop","question":"Drag to put in correct order:","items":["Item C","Item A","Item B"],"correct_order":["Item A","Item B","Item C"],"explanation":"..."}`,
+    'cloze': `{"type":"cloze","question":"Complete the passage:","passage":"The ___ (1) rises in the east and sets in the ___ (2). It gives us light and ___ (3).","blanks":["sun","west","warmth"],"explanation":"..."}`,
+    'listening': `{"type":"listening","question":"[Listening] A teacher explains...","audio_transcript":"Full transcript of what would be heard","options":["A","B","C","D"],"correct_answer":"A","explanation":"..."}`,
+    'audio-fill-blank': `{"type":"audio-fill-blank","question":"Listen and fill in the blank: 'The capital of France is ___.'","audio_transcript":"The capital of France is Paris.","correct_answer":"Paris","explanation":"..."}`,
+    'dictation': `{"type":"dictation","question":"Listen carefully and write what you hear.","audio_transcript":"The quick brown fox jumps over the lazy dog.","correct_answer":"The quick brown fox jumps over the lazy dog.","explanation":"..."}`,
+    'speaking': `{"type":"speaking","question":"Describe your favourite holiday in 3-4 sentences.","explanation":"Students should mention location, activities, and feelings."}`,
+    'pronunciation': `{"type":"pronunciation","question":"Say the following word clearly:","correct_answer":"necessary","explanation":"Stress on first syllable: NE-ces-sa-ry"}`,
+    'reading-comprehension': `{"type":"reading-comprehension","question":"Read the passage and answer:","passage":"Long text passage here...","options":["A","B","C","D"],"correct_answer":"A","explanation":"..."}`,
   };
   return types.map((t) => `- ${AI_QUESTION_TYPE_LABELS[t]}: ${schemas[t]}`).join('\n');
 }

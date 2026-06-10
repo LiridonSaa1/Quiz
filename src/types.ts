@@ -150,7 +150,15 @@ export type QuestionType =
   | 'matching'
   | 'ordering'
   | 'word-bank'
-  | 'sentence-building';
+  | 'sentence-building'
+  | 'drag-drop'
+  | 'cloze'
+  | 'listening'
+  | 'audio-fill-blank'
+  | 'dictation'
+  | 'speaking'
+  | 'pronunciation'
+  | 'reading-comprehension';
 
 export interface Question {
   id: string;

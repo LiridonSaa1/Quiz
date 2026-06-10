@@ -30,6 +30,12 @@ import {
   Calendar,
   RefreshCw,
   Layers,
+  Mic,
+  Headphones,
+  Volume2,
+  GripVertical,
+  LayoutList,
+  PenLine,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { Quiz, Question, Course, QuestionType } from '../../types';
@@ -150,6 +156,7 @@ function toDbQuestionType(t: string | undefined): string {
     'multiple-choice', 'multiple-answer', 'true-false', 'open-text', 'fill-in-the-blank',
     'short-answer', 'long-answer', 'matching', 'ordering', 'word-bank', 'sentence-building',
     'image', 'video', 'reading', 'instruction',
+    'drag-drop', 'cloze', 'listening', 'audio-fill-blank', 'dictation', 'speaking', 'pronunciation', 'reading-comprehension',
   ]);
   if (allowed.has(x)) return x;
   return 'open-text';
@@ -551,6 +558,31 @@ export default function QuizBuilder() {
         } else if (q.type === 'sentence-building') {
           const words = Array.isArray(q.words) ? q.words : [];
           mapped.push({ ...base, type: 'sentence-building' as QuestionType, options: words.map((w, i) => ({ id: String(i + 1), text: w })) as any, correctAnswer: String(q.correctAnswer || '') });
+        } else if (q.type === 'drag-drop') {
+          const items = Array.isArray(q.items) ? q.items : [];
+          const correctOrder = Array.isArray(q.correctOrder) ? q.correctOrder : items;
+          mapped.push({ ...base, type: 'drag-drop' as QuestionType, options: items.map((item, i) => ({ id: String(i + 1), text: item })) as any, correctAnswer: JSON.stringify(correctOrder) });
+        } else if (q.type === 'cloze') {
+          const blanks = Array.isArray(q.blanks) ? q.blanks : (q.correctAnswer ? [String(q.correctAnswer)] : []);
+          mapped.push({ ...base, type: 'cloze' as QuestionType, readingPassage: String((q as any).passage || ''), correctAnswer: JSON.stringify(blanks) });
+        } else if (q.type === 'listening') {
+          const safeOptions = Array.isArray(q.options) ? q.options.map((opt, idx) => ({ id: String(idx + 1), text: String(opt?.text || `Option ${idx + 1}`) })) : [];
+          while (safeOptions.length < 4) safeOptions.push({ id: String(safeOptions.length + 1), text: `Option ${safeOptions.length + 1}` });
+          const correctAnswer = Array.isArray(q.correctAnswer) ? q.correctAnswer[0] : (q.correctAnswer as string | undefined);
+          mapped.push({ ...base, type: 'listening' as QuestionType, options: safeOptions, correctAnswer: safeOptions.some((o) => o.id === correctAnswer) ? correctAnswer : safeOptions[0]?.id, readingPassage: String((q as any).audioTranscript || '') });
+        } else if (q.type === 'audio-fill-blank') {
+          mapped.push({ ...base, type: 'audio-fill-blank' as QuestionType, correctAnswer: String(q.correctAnswer || ''), readingPassage: String((q as any).audioTranscript || '') });
+        } else if (q.type === 'dictation') {
+          mapped.push({ ...base, type: 'dictation' as QuestionType, correctAnswer: String(q.correctAnswer || (q as any).audioTranscript || ''), readingPassage: String((q as any).audioTranscript || '') });
+        } else if (q.type === 'speaking') {
+          mapped.push({ ...base, type: 'speaking' as QuestionType, points: Math.max(2, base.points) });
+        } else if (q.type === 'pronunciation') {
+          mapped.push({ ...base, type: 'pronunciation' as QuestionType, correctAnswer: String(q.correctAnswer || '') });
+        } else if (q.type === 'reading-comprehension') {
+          const safeOptions = Array.isArray(q.options) ? q.options.map((opt, idx) => ({ id: String(idx + 1), text: String(opt?.text || `Option ${idx + 1}`) })) : [];
+          while (safeOptions.length < 4) safeOptions.push({ id: String(safeOptions.length + 1), text: `Option ${safeOptions.length + 1}` });
+          const correctAnswer = Array.isArray(q.correctAnswer) ? q.correctAnswer[0] : (q.correctAnswer as string | undefined);
+          mapped.push({ ...base, type: 'reading-comprehension' as QuestionType, options: safeOptions, correctAnswer: safeOptions.some((o) => o.id === correctAnswer) ? correctAnswer : safeOptions[0]?.id, readingPassage: String((q as any).passage || '') });
         }
       }
     } else {
@@ -593,17 +625,14 @@ export default function QuizBuilder() {
       points: type === 'instruction' ? 0 : type === 'long-answer' ? 2 : type === 'matching' ? 3 : 1,
       mediaType: type === 'video' ? 'video' : type === 'image' ? 'image' : undefined,
       options: needsChoiceOptions
-        ? [
-            { id: '1', text: 'Option 1' },
-            { id: '2', text: 'Option 2' },
-          ]
+        ? [{ id: '1', text: 'Option 1' }, { id: '2', text: 'Option 2' }]
         : type === 'true-false'
           ? [{ id: '1', text: 'True' }, { id: '2', text: 'False' }]
-          : type === 'multiple-answer'
-            ? [{ id: '1', text: 'Option 1' }, { id: '2', text: 'Option 2' }, { id: '3', text: 'Option 3' }, { id: '4', text: 'Option 4' }]
+          : type === 'multiple-answer' || type === 'listening' || type === 'reading-comprehension'
+            ? [{ id: '1', text: 'Option A' }, { id: '2', text: 'Option B' }, { id: '3', text: 'Option C' }, { id: '4', text: 'Option D' }]
             : type === 'matching'
               ? [{ id: '1', text: 'Item 1' }, { id: '2', text: 'Item 2' }, { id: '3', text: 'Item 3' }]
-              : type === 'ordering'
+              : type === 'ordering' || type === 'drag-drop'
                 ? [{ id: '1', text: 'Step 1' }, { id: '2', text: 'Step 2' }, { id: '3', text: 'Step 3' }]
                 : type === 'word-bank'
                   ? [{ id: '1', text: 'word1' }, { id: '2', text: 'word2' }, { id: '3', text: 'word3' }, { id: '4', text: 'word4' }]
@@ -614,9 +643,11 @@ export default function QuizBuilder() {
         ? JSON.stringify([])
         : type === 'matching'
           ? JSON.stringify([{ left: 'Item 1', right: '' }, { left: 'Item 2', right: '' }, { left: 'Item 3', right: '' }])
-          : type === 'ordering'
+          : type === 'ordering' || type === 'drag-drop'
             ? JSON.stringify(['Step 1', 'Step 2', 'Step 3'])
-            : undefined,
+            : type === 'cloze'
+              ? JSON.stringify(['answer1', 'answer2'])
+              : undefined,
     };
     setQuestions([...questions, newQuestion]);
   };
@@ -1359,17 +1390,24 @@ export default function QuizBuilder() {
                       { type: 'multiple-answer' as const, label: 'Multi ✓', icon: CheckSquare },
                       { type: 'true-false' as const, label: 'T / F', icon: Circle },
                       { type: 'fill-in-the-blank' as const, label: 'Fill Blank', icon: TextCursorInput },
+                      { type: 'cloze' as const, label: 'Cloze', icon: LayoutList },
                       { type: 'short-answer' as const, label: 'Short Ans', icon: Type },
                       { type: 'long-answer' as const, label: 'Essay', icon: AlignLeft },
                       { type: 'matching' as const, label: 'Matching', icon: Layers },
                       { type: 'ordering' as const, label: 'Ordering', icon: Shuffle },
+                      { type: 'drag-drop' as const, label: 'Drag & Drop', icon: GripVertical },
                       { type: 'word-bank' as const, label: 'Word Bank', icon: FileText },
                       { type: 'sentence-building' as const, label: 'Sentence', icon: TextCursorInput },
-                      { type: 'open-text' as const, label: 'Open', icon: Type },
-                      { type: 'instruction' as const, label: 'Text only', icon: AlignLeft },
+                      { type: 'reading-comprehension' as const, label: 'Reading', icon: BookOpen },
+                      { type: 'listening' as const, label: 'Listening', icon: Headphones },
+                      { type: 'audio-fill-blank' as const, label: 'Audio Blank', icon: Volume2 },
+                      { type: 'dictation' as const, label: 'Dictation', icon: PenLine },
+                      { type: 'speaking' as const, label: 'Speaking', icon: Mic },
+                      { type: 'pronunciation' as const, label: 'Pronunciat.', icon: Mic },
                       { type: 'image' as const, label: 'Image', icon: ImageIcon },
                       { type: 'video' as const, label: 'Video', icon: Video },
-                      { type: 'reading' as const, label: 'Reading', icon: BookOpen },
+                      { type: 'open-text' as const, label: 'Open', icon: Type },
+                      { type: 'instruction' as const, label: 'Text only', icon: AlignLeft },
                     ].map((item) => (
                       <button
                         key={item.type}
@@ -1768,6 +1806,180 @@ export default function QuizBuilder() {
                                   ))}
                                   <button type="button" onClick={() => { const safeOpts = Array.isArray(q.options) ? q.options : []; updateQuestion(index, { options: [...safeOpts, { id: Math.random().toString(36).slice(2, 11), text: '' }] }); }} className="text-xs font-bold text-violet-600 hover:text-violet-700 flex items-center gap-1.5 pt-1"><Plus className="w-4 h-4" /> Add word</button>
                                 </div>
+                              </div>
+                            </div>
+                          )}
+
+                          {q.type === 'drag-drop' && (
+                            <div className="space-y-3">
+                              <div className="flex items-center gap-2 text-xs text-violet-700 bg-violet-50 border border-violet-200 rounded-lg px-3 py-2">
+                                <GripVertical className="w-4 h-4 shrink-0" />
+                                Students drag items into the correct order. Enter them in the correct sequence below.
+                              </div>
+                              {(() => {
+                                let correctOrder: string[] = [];
+                                try { correctOrder = JSON.parse(String(q.correctAnswer || '[]')); } catch { correctOrder = []; }
+                                if (!correctOrder.length && Array.isArray(q.options)) correctOrder = (q.options as any[]).map((o: any) => String(o.text || ''));
+                                return (
+                                  <div className="space-y-2">
+                                    {correctOrder.map((item, oIdx) => (
+                                      <div key={oIdx} className="flex items-center gap-2">
+                                        <GripVertical className="w-4 h-4 text-slate-300 shrink-0" />
+                                        <span className="w-6 h-6 rounded-md bg-violet-100 text-violet-700 text-xs font-bold flex items-center justify-center shrink-0">{oIdx + 1}</span>
+                                        <input type="text" value={item} onChange={(e) => { const n = [...correctOrder]; n[oIdx] = e.target.value; updateQuestion(index, { correctAnswer: JSON.stringify(n), options: n.map((t, i) => ({ id: String(i + 1), text: t })) as any }); }} className="flex-1 px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-violet-400" placeholder={`Item ${oIdx + 1}`} />
+                                        {correctOrder.length > 2 && <button type="button" onClick={() => { const n = correctOrder.filter((_, i) => i !== oIdx); updateQuestion(index, { correctAnswer: JSON.stringify(n), options: n.map((t, i) => ({ id: String(i + 1), text: t })) as any }); }} className="p-1 text-slate-400 hover:text-red-500 transition-colors"><X className="w-3.5 h-3.5" /></button>}
+                                      </div>
+                                    ))}
+                                    <button type="button" onClick={() => { const n = [...correctOrder, '']; updateQuestion(index, { correctAnswer: JSON.stringify(n), options: n.map((t, i) => ({ id: String(i + 1), text: t })) as any }); }} className="text-xs font-bold text-violet-600 hover:text-violet-700 flex items-center gap-1.5 pt-1"><Plus className="w-4 h-4" /> Add item</button>
+                                  </div>
+                                );
+                              })()}
+                            </div>
+                          )}
+
+                          {q.type === 'cloze' && (
+                            <div className="space-y-3">
+                              <div>
+                                <label className="block text-xs font-semibold text-slate-600 mb-1.5">
+                                  Passage with blanks <span className="text-slate-400 text-[10px]">(use ___ for each blank)</span>
+                                </label>
+                                <textarea
+                                  rows={4}
+                                  value={typeof q.readingPassage === 'string' ? q.readingPassage : ''}
+                                  onChange={(e) => updateQuestion(index, { readingPassage: e.target.value })}
+                                  className="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-violet-400 resize-none"
+                                  placeholder="The ___ is the powerhouse of the cell. It produces ___ through a process called ___."
+                                />
+                              </div>
+                              <div>
+                                <label className="block text-xs font-semibold text-slate-600 mb-1.5">Answers for each blank <span className="text-slate-400 text-[10px]">(in order)</span></label>
+                                {(() => {
+                                  let blanks: string[] = [];
+                                  try { blanks = JSON.parse(String(q.correctAnswer || '[]')); } catch { blanks = []; }
+                                  return (
+                                    <div className="space-y-2">
+                                      {blanks.map((blank, bIdx) => (
+                                        <div key={bIdx} className="flex items-center gap-2">
+                                          <span className="w-6 h-6 rounded-md bg-emerald-100 text-emerald-700 text-xs font-bold flex items-center justify-center shrink-0">{bIdx + 1}</span>
+                                          <input type="text" value={blank} onChange={(e) => { const n = [...blanks]; n[bIdx] = e.target.value; updateQuestion(index, { correctAnswer: JSON.stringify(n) }); }} className="flex-1 px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-violet-400" placeholder={`Answer ${bIdx + 1}`} />
+                                          {blanks.length > 1 && <button type="button" onClick={() => { const n = blanks.filter((_, i) => i !== bIdx); updateQuestion(index, { correctAnswer: JSON.stringify(n) }); }} className="p-1 text-slate-400 hover:text-red-500 transition-colors"><X className="w-3.5 h-3.5" /></button>}
+                                        </div>
+                                      ))}
+                                      <button type="button" onClick={() => { const n = [...blanks, '']; updateQuestion(index, { correctAnswer: JSON.stringify(n) }); }} className="text-xs font-bold text-violet-600 hover:text-violet-700 flex items-center gap-1.5 pt-1"><Plus className="w-4 h-4" /> Add blank answer</button>
+                                    </div>
+                                  );
+                                })()}
+                              </div>
+                            </div>
+                          )}
+
+                          {(q.type === 'listening' || q.type === 'reading-comprehension') && (
+                            <div className="space-y-3">
+                              <div>
+                                <label className="block text-xs font-semibold text-slate-600 mb-1.5">
+                                  {q.type === 'listening' ? '🎧 Audio transcript / script' : '📖 Reading passage'}
+                                </label>
+                                <textarea
+                                  rows={4}
+                                  value={typeof q.readingPassage === 'string' ? q.readingPassage : ''}
+                                  onChange={(e) => updateQuestion(index, { readingPassage: e.target.value })}
+                                  className="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-violet-400 resize-none"
+                                  placeholder={q.type === 'listening' ? 'Paste the audio transcript here so the question makes sense...' : 'Paste the reading text here...'}
+                                />
+                              </div>
+                              {q.type === 'listening' && (
+                                <div>
+                                  <label className="block text-xs font-semibold text-slate-600 mb-1.5">Audio URL <span className="text-slate-400 text-[10px]">(optional — paste a direct audio link)</span></label>
+                                  <input type="url" value={typeof q.mediaUrl === 'string' ? q.mediaUrl : ''} onChange={(e) => updateQuestion(index, { mediaUrl: e.target.value })} className="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-violet-400" placeholder="https://..." />
+                                </div>
+                              )}
+                              <div>
+                                <label className="block text-xs font-semibold text-slate-600 mb-1.5">Answer options</label>
+                                <div className="space-y-2">
+                                  {(Array.isArray(q.options) ? q.options : []).map((opt, optIndex) => {
+                                    const isCorrect = q.correctAnswer === opt.id;
+                                    return (
+                                      <div key={opt.id ?? optIndex} className="flex items-center gap-2 group/opt">
+                                        <button type="button" onClick={() => updateQuestion(index, { correctAnswer: opt.id })} className={cn('w-7 h-7 rounded-lg border-2 flex items-center justify-center transition-all shrink-0', isCorrect ? 'border-emerald-500 bg-emerald-500 text-white' : 'border-slate-200 hover:border-slate-400')}>{isCorrect && <CheckCircle2 className="w-4 h-4" />}</button>
+                                        <input type="text" value={opt.text ?? ''} onChange={(e) => { const newOpts = [...(Array.isArray(q.options) ? q.options : [])]; newOpts[optIndex] = { ...opt, text: e.target.value }; updateQuestion(index, { options: newOpts }); }} className="flex-1 px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-violet-400" />
+                                        {Array.isArray(q.options) && q.options.length > 2 && <button type="button" onClick={() => { const newOpts = (Array.isArray(q.options) ? q.options : []).filter((_, i) => i !== optIndex); updateQuestion(index, { options: newOpts }); }} className="p-2 text-slate-400 hover:text-red-600 opacity-0 group-hover/opt:opacity-100 transition-all"><X className="w-4 h-4" /></button>}
+                                      </div>
+                                    );
+                                  })}
+                                  <button type="button" onClick={() => { const safeOpts = Array.isArray(q.options) ? q.options : []; updateQuestion(index, { options: [...safeOpts, { id: Math.random().toString(36).slice(2, 11), text: `Option ${safeOpts.length + 1}` }] }); }} className="text-xs font-bold text-violet-600 hover:text-violet-700 flex items-center gap-1.5 pl-9 pt-1"><Plus className="w-4 h-4" /> Add option</button>
+                                </div>
+                              </div>
+                            </div>
+                          )}
+
+                          {q.type === 'audio-fill-blank' && (
+                            <div className="space-y-3">
+                              <div className="flex items-center gap-2 text-xs text-blue-700 bg-blue-50 border border-blue-200 rounded-lg px-3 py-2">
+                                <Volume2 className="w-4 h-4 shrink-0" />
+                                Student listens to audio and fills in the missing word or phrase.
+                              </div>
+                              <div>
+                                <label className="block text-xs font-semibold text-slate-600 mb-1.5">Audio URL <span className="text-slate-400 text-[10px]">(paste a direct link to the audio)</span></label>
+                                <input type="url" value={typeof q.mediaUrl === 'string' ? q.mediaUrl : ''} onChange={(e) => updateQuestion(index, { mediaUrl: e.target.value })} className="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-violet-400" placeholder="https://..." />
+                              </div>
+                              <div>
+                                <label className="block text-xs font-semibold text-slate-600 mb-1.5">Audio transcript <span className="text-slate-400 text-[10px]">(shown after submission)</span></label>
+                                <input type="text" value={typeof q.readingPassage === 'string' ? q.readingPassage : ''} onChange={(e) => updateQuestion(index, { readingPassage: e.target.value })} className="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-violet-400" placeholder="The capital of France is Paris." />
+                              </div>
+                              <div>
+                                <label className="block text-xs font-semibold text-slate-600 mb-1.5">Correct answer</label>
+                                <input type="text" value={typeof q.correctAnswer === 'string' ? q.correctAnswer : ''} onChange={(e) => updateQuestion(index, { correctAnswer: e.target.value })} className="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-violet-400" placeholder="Paris" />
+                              </div>
+                            </div>
+                          )}
+
+                          {q.type === 'dictation' && (
+                            <div className="space-y-3">
+                              <div className="flex items-center gap-2 text-xs text-indigo-700 bg-indigo-50 border border-indigo-200 rounded-lg px-3 py-2">
+                                <PenLine className="w-4 h-4 shrink-0" />
+                                Student listens to the audio and types exactly what they hear.
+                              </div>
+                              <div>
+                                <label className="block text-xs font-semibold text-slate-600 mb-1.5">Audio URL <span className="text-slate-400 text-[10px]">(the sentence to be dictated)</span></label>
+                                <input type="url" value={typeof q.mediaUrl === 'string' ? q.mediaUrl : ''} onChange={(e) => updateQuestion(index, { mediaUrl: e.target.value })} className="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-violet-400" placeholder="https://..." />
+                              </div>
+                              <div>
+                                <label className="block text-xs font-semibold text-slate-600 mb-1.5">Correct transcription <span className="text-slate-400 text-[10px]">(what the student should write)</span></label>
+                                <textarea rows={2} value={typeof q.correctAnswer === 'string' ? q.correctAnswer : ''} onChange={(e) => updateQuestion(index, { correctAnswer: e.target.value })} className="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-violet-400 resize-none" placeholder="The quick brown fox jumps over the lazy dog." />
+                              </div>
+                            </div>
+                          )}
+
+                          {q.type === 'speaking' && (
+                            <div className="space-y-3">
+                              <div className="flex items-center gap-2 text-xs text-rose-700 bg-rose-50 border border-rose-200 rounded-lg px-3 py-2">
+                                <Mic className="w-4 h-4 shrink-0" />
+                                Student records an audio response. Add rubric hints in the explanation field below.
+                              </div>
+                              <div>
+                                <label className="block text-xs font-semibold text-slate-600 mb-1.5">Speaking prompt <span className="text-slate-400 text-[10px]">(what the student should talk about)</span></label>
+                                <textarea rows={3} value={typeof q.text === 'string' ? q.text : ''} onChange={(e) => updateQuestion(index, { text: e.target.value })} className="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-violet-400 resize-none" placeholder="Describe your favourite holiday in 3-4 sentences. Mention the place, what you did, and how you felt." />
+                              </div>
+                              <div>
+                                <label className="block text-xs font-semibold text-slate-600 mb-1.5">Sample answer / rubric hints</label>
+                                <textarea rows={2} value={typeof q.explanation === 'string' ? q.explanation : ''} onChange={(e) => updateQuestion(index, { explanation: e.target.value })} className="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-violet-400 resize-none" placeholder="e.g. Student should use past tense, mention a location, and express feelings..." />
+                              </div>
+                            </div>
+                          )}
+
+                          {q.type === 'pronunciation' && (
+                            <div className="space-y-3">
+                              <div className="flex items-center gap-2 text-xs text-purple-700 bg-purple-50 border border-purple-200 rounded-lg px-3 py-2">
+                                <Mic className="w-4 h-4 shrink-0" />
+                                Student records themselves pronouncing the target word or phrase.
+                              </div>
+                              <div>
+                                <label className="block text-xs font-semibold text-slate-600 mb-1.5">Word or phrase to pronounce</label>
+                                <input type="text" value={typeof q.correctAnswer === 'string' ? q.correctAnswer : ''} onChange={(e) => updateQuestion(index, { correctAnswer: e.target.value })} className="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-violet-400" placeholder="necessary" />
+                              </div>
+                              <div>
+                                <label className="block text-xs font-semibold text-slate-600 mb-1.5">Pronunciation guide <span className="text-slate-400 text-[10px]">(shown to student)</span></label>
+                                <input type="text" value={typeof q.explanation === 'string' ? q.explanation : ''} onChange={(e) => updateQuestion(index, { explanation: e.target.value })} className="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-violet-400" placeholder="NE-ces-sa-ry — stress on first syllable" />
                               </div>
                             </div>
                           )}
