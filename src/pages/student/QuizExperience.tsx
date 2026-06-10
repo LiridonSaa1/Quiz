@@ -460,6 +460,22 @@ export default function QuizExperience() {
       });
       const attemptId = attemptRow?.id ?? null;
 
+      // Auto-generate certificate when the student passes — best-effort, never blocks navigation
+      if (passed && attemptId) {
+        authFetch('/api/student/quiz/auto-certificate', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ attemptId }),
+        })
+          .then(async (r) => {
+            const data = await r.json().catch(() => ({}));
+            if (data.ok && !data.duplicate) {
+              toast.success('🎓 Certificate earned! Check your Certificates page.');
+            }
+          })
+          .catch(() => { /* best-effort */ });
+      }
+
       if (attemptId) {
         toast.success('Quiz submitted!');
         navigate(`/student/results/${attemptId}`);

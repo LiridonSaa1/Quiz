@@ -135,6 +135,18 @@ function PerQuestionBar({ questions, isCorrectFn, answers }: {
   );
 }
 
+interface CertData {
+  id: string;
+  grade: string;
+  score: number;
+  certificateNumber: string;
+  title: string;
+  issuedAt: string;
+  level: string | null;
+  totalPoints: number | null;
+  earnedPoints: number | null;
+}
+
 export default function QuizResults() {
   const { t } = useTranslation();
   const { attemptId } = useParams();
@@ -145,6 +157,7 @@ export default function QuizResults() {
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<'overview' | 'sections' | 'review'>('overview');
   const [quizSections, setQuizSections] = useState<any[]>([]);
+  const [certData, setCertData] = useState<CertData | null>(null);
 
   useEffect(() => {
     const fetchData = async () => {
@@ -221,6 +234,17 @@ export default function QuizResults() {
             if (Array.isArray(secJson?.sections)) setQuizSections(secJson.sections);
           }
         } catch { /* quiz_sections table may not exist */ }
+
+        // Fetch certificate data for this quiz (if one was auto-issued)
+        if (norm.passed) {
+          try {
+            const certRes = await authFetch(`/api/student/certificate/by-quiz?quizId=${encodeURIComponent(norm.quiz_id)}`);
+            if (certRes.ok) {
+              const certJson = await certRes.json().catch(() => ({}));
+              if (certJson?.cert) setCertData(certJson.cert);
+            }
+          } catch { /* best-effort */ }
+        }
       } catch (err) {
         console.error('Error fetching results:', err);
       } finally {
@@ -389,21 +413,60 @@ export default function QuizResults() {
             initial={{ opacity: 0, scale: 0.96 }}
             animate={{ opacity: 1, scale: 1 }}
             transition={{ delay: 0.3 }}
-            className="flex items-center gap-4 p-4 bg-gradient-to-r from-amber-50 to-yellow-50 border border-amber-200 rounded-2xl"
+            className="bg-gradient-to-br from-amber-50 via-yellow-50 to-orange-50 border-2 border-amber-200 rounded-2xl overflow-hidden shadow-sm"
           >
-            <div className="w-11 h-11 rounded-xl bg-gradient-to-br from-amber-400 to-yellow-500 flex items-center justify-center flex-shrink-0 shadow-sm">
-              <Award className="w-6 h-6 text-white" />
+            {/* Top strip */}
+            <div className="flex items-center gap-3 px-5 pt-4 pb-3 border-b border-amber-100">
+              <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-amber-400 to-yellow-500 flex items-center justify-center flex-shrink-0 shadow-sm">
+                <Award className="w-5 h-5 text-white" />
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-bold text-amber-900">🎓 Certificate automatically issued!</p>
+                {certData?.certificateNumber && (
+                  <p className="text-xs text-amber-600 font-mono mt-0.5">{certData.certificateNumber}</p>
+                )}
+              </div>
+              <Link
+                to="/student/certificates"
+                className="flex-shrink-0 px-3 py-1.5 rounded-xl bg-amber-500 text-white text-xs font-bold hover:bg-amber-600 transition-colors whitespace-nowrap"
+              >
+                View →
+              </Link>
             </div>
-            <div className="flex-1 min-w-0">
-              <p className="text-sm font-bold text-amber-900">🎓 Certificate automatically issued!</p>
-              <p className="text-xs text-amber-700 mt-0.5">Your certificate is available in <Link to="/student/certificates" className="underline font-semibold hover:text-amber-900">My Certificates</Link>.</p>
+            {/* Details row */}
+            <div className="grid grid-cols-3 divide-x divide-amber-100 px-1 py-2">
+              {/* Grade */}
+              <div className="flex flex-col items-center py-2 px-3">
+                <span className="text-[10px] font-semibold text-amber-500 uppercase tracking-wider">Grade</span>
+                <span className="text-2xl font-black text-amber-800 leading-tight">
+                  {certData?.grade ?? (
+                    scorePercent >= 97 ? 'A+' : scorePercent >= 93 ? 'A' : scorePercent >= 90 ? 'A-' :
+                    scorePercent >= 87 ? 'B+' : scorePercent >= 83 ? 'B' : scorePercent >= 80 ? 'B-' :
+                    scorePercent >= 77 ? 'C+' : scorePercent >= 73 ? 'C' : scorePercent >= 70 ? 'C-' : 'D'
+                  )}
+                </span>
+              </div>
+              {/* Level */}
+              <div className="flex flex-col items-center py-2 px-3">
+                <span className="text-[10px] font-semibold text-amber-500 uppercase tracking-wider">Level</span>
+                <span className="text-sm font-bold text-amber-800 text-center leading-snug mt-0.5">
+                  {certData?.level ?? (
+                    scorePercent >= 97 ? 'Outstanding' : scorePercent >= 90 ? 'Excellent' :
+                    scorePercent >= 83 ? 'Very Good' : scorePercent >= 73 ? 'Good' :
+                    scorePercent >= 70 ? 'Satisfactory' : 'Pass'
+                  )}
+                </span>
+              </div>
+              {/* Points */}
+              <div className="flex flex-col items-center py-2 px-3">
+                <span className="text-[10px] font-semibold text-amber-500 uppercase tracking-wider">Points</span>
+                <span className="text-sm font-bold text-amber-800 text-center leading-snug mt-0.5">
+                  {certData?.earnedPoints != null && certData?.totalPoints != null
+                    ? `${certData.earnedPoints} / ${certData.totalPoints}`
+                    : `${effectiveScore} / ${effectiveTotal}`}
+                </span>
+              </div>
             </div>
-            <Link
-              to="/student/certificates"
-              className="flex-shrink-0 px-3 py-1.5 rounded-xl bg-amber-500 text-white text-xs font-bold hover:bg-amber-600 transition-colors"
-            >
-              View →
-            </Link>
           </motion.div>
         )}
 

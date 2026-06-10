@@ -12036,10 +12036,10 @@ Content:\n"""${clipped}"""`;
       if (attempt.student_id !== caller.userId) return res.status(403).json({ error: 'Forbidden' });
       if (!attempt.passed) return res.status(400).json({ error: 'Student did not pass this quiz' });
 
-      // 2. Fetch quiz details (title, course_id, teacher_id)
+      // 2. Fetch quiz details (title, course_id, teacher_id, type)
       const { data: quiz } = await supabaseAdmin
         .from('quizzes')
-        .select('id, title, course_id, teacher_id')
+        .select('id, title, course_id, teacher_id, type')
         .eq('id', attempt.quiz_id)
         .maybeSingle()
         .catch(() => ({ data: null }));
@@ -12047,14 +12047,18 @@ Content:\n"""${clipped}"""`;
       if (!quiz) return res.status(404).json({ error: 'Quiz not found' });
 
       const courseId = quiz.course_id ? String(quiz.course_id) : null;
+      const isExam = String(quiz.type || '').toLowerCase() === 'exam';
 
-      // 3. Idempotency: don't issue a second certificate for same student + quiz
-      const dupCheck = courseId
-        ? await supabaseAdmin.from('certificates').select('id').eq('student_id', caller.userId).eq('course_id', courseId).limit(1).maybeSingle().catch(() => ({ data: null }))
-        : await supabaseAdmin.from('certificates').select('id').eq('student_id', caller.userId).contains('meta', { quiz_id: quiz.id }).limit(1).maybeSingle().catch(() => ({ data: null }));
+      // 3. Idempotency: for exams check per quiz_id; for regular quizzes check per course
+      const dupCheck = isExam
+        ? await supabaseAdmin.from('certificates').select('id, grade, score, certificate_number').eq('student_id', caller.userId).contains('meta', { quiz_id: quiz.id }).limit(1).maybeSingle().catch(() => ({ data: null }))
+        : courseId
+          ? await supabaseAdmin.from('certificates').select('id, grade, score, certificate_number').eq('student_id', caller.userId).eq('course_id', courseId).not('meta', 'cs', '{"quiz_type":"exam"}').limit(1).maybeSingle().catch(() => ({ data: null }))
+          : await supabaseAdmin.from('certificates').select('id, grade, score, certificate_number').eq('student_id', caller.userId).contains('meta', { quiz_id: quiz.id }).limit(1).maybeSingle().catch(() => ({ data: null }));
 
       if ((dupCheck as any)?.data?.id) {
-        return res.json({ ok: true, duplicate: true, certificateId: (dupCheck as any).data.id });
+        const dup = (dupCheck as any).data;
+        return res.json({ ok: true, duplicate: true, certificateId: dup.id, grade: dup.grade, score: dup.score, certificateNumber: dup.certificate_number });
       }
 
       // 4. Compute grade from score percentage
@@ -12074,30 +12078,49 @@ Content:\n"""${clipped}"""`;
         pct >= 70 ? 'C-' :
         'D';
 
+      // Derive a descriptive performance level from the grade
+      const level =
+        grade === 'A+' || grade === 'A'  ? 'Outstanding' :
+        grade === 'A-' || grade === 'B+' ? 'Excellent' :
+        grade === 'B'  || grade === 'B-' ? 'Very Good' :
+        grade === 'C+' || grade === 'C'  ? 'Good' :
+        grade === 'C-'                   ? 'Satisfactory' :
+        'Pass';
+
       // 5. Generate unique certificate number
       const certYear = new Date().getFullYear();
       const certRand = Math.random().toString(36).toUpperCase().slice(2, 8);
       const certNumber = `CERT-${certYear}-${certRand}`;
 
-      // 6. Fetch course title for the certificate title
-      let courseTitle = quiz.title;
-      if (courseId) {
+      // 6. Determine certificate title
+      //    For exams: use the exam title directly.
+      //    For regular quizzes: use the course title (fallback to quiz title).
+      let certTitle = quiz.title;
+      if (!isExam && courseId) {
         const { data: course } = await supabaseAdmin.from('courses').select('title').eq('id', courseId).maybeSingle().catch(() => ({ data: null }));
-        if (course?.title) courseTitle = String(course.title);
+        if (course?.title) certTitle = String(course.title);
       }
 
-      // 7. Insert certificate
+      // 7. Insert certificate with full meta
       const { data: cert, error: certErr } = await supabaseAdmin
         .from('certificates')
         .insert({
           student_id: caller.userId,
           course_id: courseId,
-          title: courseTitle,
+          title: certTitle,
           issued_at: new Date().toISOString().slice(0, 10),
           certificate_number: certNumber,
           grade,
           score: pct,
           status: 'issued',
+          meta: {
+            quiz_id: quiz.id,
+            quiz_title: quiz.title,
+            quiz_type: quiz.type || 'standard',
+            level,
+            score: attempt.score,
+            total_points: attempt.total_points,
+          },
         })
         .select('id')
         .maybeSingle();
@@ -12118,16 +12141,56 @@ Content:\n"""${clipped}"""`;
             studentId: caller.userId,
             teacherId,
             courseId: courseId ?? undefined,
-            courseTitle,
+            courseTitle: certTitle,
             certificateId: cert.id,
             certificateNumber: certNumber,
           }
         );
       } catch { /* notifications are best-effort */ }
 
-      return res.json({ ok: true, duplicate: false, certificateId: cert.id, certificateNumber: certNumber, grade, score: pct });
+      return res.json({ ok: true, duplicate: false, certificateId: cert.id, certificateNumber: certNumber, grade, level, score: pct, totalPoints: attempt.total_points, earnedPoints: attempt.score });
     } catch (e: any) {
       console.error('[auto-certificate]', e?.message);
+      return res.status(500).json({ error: 'Server error' });
+    }
+  });
+
+  /** Look up the auto-issued certificate for the current student + a given quiz */
+  app.get('/api/student/certificate/by-quiz', async (req: Request, res: Response) => {
+    try {
+      const caller = await assertAuthenticated(req, res);
+      if (!caller) return;
+      const quizId = typeof req.query.quizId === 'string' ? req.query.quizId.trim() : '';
+      if (!quizId) return res.status(400).json({ error: 'quizId is required' });
+
+      const { data: cert } = await supabaseAdmin
+        .from('certificates')
+        .select('id, grade, score, certificate_number, title, issued_at, meta, status')
+        .eq('student_id', caller.userId)
+        .contains('meta', { quiz_id: quizId })
+        .eq('status', 'issued')
+        .limit(1)
+        .maybeSingle()
+        .catch(() => ({ data: null }));
+
+      if (!cert) return res.json({ cert: null });
+
+      const meta: any = cert.meta || {};
+      return res.json({
+        cert: {
+          id: cert.id,
+          grade: cert.grade,
+          score: cert.score,
+          certificateNumber: cert.certificate_number,
+          title: cert.title,
+          issuedAt: cert.issued_at,
+          level: meta.level || null,
+          totalPoints: meta.total_points ?? null,
+          earnedPoints: meta.score ?? null,
+        },
+      });
+    } catch (e: any) {
+      console.error('[cert-by-quiz]', e?.message);
       return res.status(500).json({ error: 'Server error' });
     }
   });
