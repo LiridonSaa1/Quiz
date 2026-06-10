@@ -1412,7 +1412,7 @@ export async function createApp(options: CreateAppOptions = {}) {
 
       if (!message) return res.status(400).json({ error: "message is required" });
 
-      const apiKey = (process.env.AI_INTEGRATIONS_GEMINI_API_KEY || process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || "").trim();
+      const apiKey = (process.env.AI_INTEGRATIONS_GEMINI_API_KEY || process.env.GEMINI_API_KEY || "").trim();
 
       const roleContext: Record<string, string> = {
         teacher: `You are an expert teaching assistant for an online educational platform. The teacher is currently on the "${page}" page (path: ${path || "unknown"}).
@@ -6211,7 +6211,7 @@ When giving instructions, number each step clearly. Be precise and technical whe
       }
 
       // Build questions — try AI first, fall back to static bank
-      const aiApiKey = (process.env.AI_INTEGRATIONS_GEMINI_API_KEY || process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || "").trim();
+      const aiApiKey = (process.env.AI_INTEGRATIONS_GEMINI_API_KEY || process.env.GEMINI_API_KEY || "").trim();
       let questionRows: Record<string, unknown>[] = [];
 
       if (aiApiKey && (unit.grammar.length > 0 || unit.vocabulary.length > 0)) {
@@ -6362,7 +6362,7 @@ Return ONLY a valid JSON array — no markdown, no code fences:
       const unit = levelData.units.find(u => u.num === unitNum);
       if (!unit)  return res.status(404).json({ error: `Unit ${unitNum} not found` });
 
-      const apiKey = (process.env.AI_INTEGRATIONS_GEMINI_API_KEY || process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || "").trim();
+      const apiKey = (process.env.AI_INTEGRATIONS_GEMINI_API_KEY || process.env.GEMINI_API_KEY || "").trim();
       if (!apiKey) return res.status(503).json({ error: "AI not configured — set GEMINI_API_KEY in Secrets." });
 
       const topics: Array<{ type: "grammar" | "vocabulary"; topic: string }> = [
@@ -7105,7 +7105,7 @@ Rules:
 
       if (!topic) return res.status(400).json({ error: "topic is required" });
 
-      const aiApiKey = (process.env.AI_INTEGRATIONS_GEMINI_API_KEY || process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || "").trim();
+      const aiApiKey = (process.env.AI_INTEGRATIONS_GEMINI_API_KEY || process.env.GEMINI_API_KEY || "").trim();
 
       // ── No API key → fall back to the same static bank as the Smart Test Builder ──
       if (!aiApiKey) {
@@ -7366,7 +7366,7 @@ JSON format (array of objects):
       const unit = levelData.units.find(u => u.num === unitNum);
       if (!unit)  return res.status(404).json({ error: `Unit ${unitNum} not found` });
 
-      const aiApiKey = (process.env.AI_INTEGRATIONS_GEMINI_API_KEY || process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || "").trim();
+      const aiApiKey = (process.env.AI_INTEGRATIONS_GEMINI_API_KEY || process.env.GEMINI_API_KEY || "").trim();
       if (!aiApiKey) return res.status(503).json({ error: "AI not configured — set GEMINI_API_KEY in Secrets." });
 
       const cefrMap: Record<string, string> = {
@@ -9431,7 +9431,7 @@ Rules:
       }
       const { content, questionTypes } = req.body as { content?: string; questionTypes?: string[] };
       if (!content?.trim()) return res.status(400).json({ error: "content is required" });
-      const apiKey = (process.env.AI_INTEGRATIONS_GEMINI_API_KEY || process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || "").trim();
+      const apiKey = (process.env.AI_INTEGRATIONS_GEMINI_API_KEY || process.env.GEMINI_API_KEY || "").trim();
       if (!apiKey) return res.status(503).json({ error: "AI not configured — set GEMINI_API_KEY in Secrets." });
 
       const QUIZ_MAX = 16000;
@@ -9626,7 +9626,7 @@ Content:\n"""${clipped}"""`;
       let questions: SmartQ[] = [];
 
       if (useAI) {
-        const aiApiKey = (process.env.AI_INTEGRATIONS_GEMINI_API_KEY || process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || "").trim();
+        const aiApiKey = (process.env.AI_INTEGRATIONS_GEMINI_API_KEY || process.env.GEMINI_API_KEY || "").trim();
         if (!aiApiKey) return res.status(503).json({ error: "AI not configured — set GEMINI_API_KEY in Secrets." });
 
         const TYPE_LABELS: Record<string, string> = {
@@ -16301,7 +16301,7 @@ Return ONLY a valid JSON array, no markdown:
       if (!topic) return res.status(400).json({ error: 'Topic is required' });
 
       const count = Math.min(Math.max(Number(slideCount) || 8, 3), 20);
-      const apiKey = (process.env.AI_INTEGRATIONS_GEMINI_API_KEY || process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || '').trim();
+      const apiKey = (process.env.AI_INTEGRATIONS_GEMINI_API_KEY || process.env.GEMINI_API_KEY || '').trim();
 
       const prompt = `You are an expert educational presentation creator. Generate a complete presentation about "${topic}".
 
