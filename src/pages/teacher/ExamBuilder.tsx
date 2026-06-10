@@ -582,18 +582,72 @@ function QuestionCard({ idx, q, total, onChange, onRemove }: {
   onChange: (patch: Partial<ExamQuestion>) => void;
   onRemove: () => void;
 }) {
-  const typeLabel = (q.type || 'multiple-choice').replace(/-/g, ' ');
+  const [showTypeMenu, setShowTypeMenu] = React.useState(false);
+
+  const handleTypeChange = (newType: QuestionType) => {
+    const blank = makeBlankQuestion(newType, idx);
+    onChange({ ...blank, text: q.text, explanation: q.explanation, points: newType === 'instruction' ? 0 : q.points });
+    setShowTypeMenu(false);
+  };
+
+  const currentTypeLabel = QUESTION_TYPES.find(t => t.type === q.type)?.label
+    ?? (q.type || 'multiple-choice').replace(/-/g, ' ');
+  const CurrentIcon = QUESTION_TYPES.find(t => t.type === q.type)?.icon ?? CheckSquare;
 
   return (
     <motion.div id={`q-${idx}`} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className="group">
       <div className="flex items-start gap-4">
-        {/* Number badge */}
-        <div className="flex flex-col items-center gap-1.5 shrink-0 pt-1">
+        {/* Number badge + type selector */}
+        <div className="flex flex-col items-center gap-1.5 shrink-0 pt-1 relative">
           <span className="w-9 h-9 rounded-full flex items-center justify-center text-sm font-extrabold text-white shrink-0"
             style={{ background: 'linear-gradient(135deg, #312e81, #4f46e5)' }}>
             {idx + 1}
           </span>
-          <span className="text-[9px] font-bold text-slate-400 uppercase tracking-wide text-center leading-tight">{typeLabel}</span>
+          <button
+            type="button"
+            onClick={() => setShowTypeMenu(v => !v)}
+            title="Change question type"
+            className="flex items-center gap-1 text-[9px] font-bold text-indigo-600 uppercase tracking-wide text-center leading-tight bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 rounded-lg px-1.5 py-0.5 transition-colors"
+          >
+            <CurrentIcon className="w-2.5 h-2.5 shrink-0" />
+            <span className="max-w-[52px] truncate">{currentTypeLabel}</span>
+          </button>
+
+          {/* Type dropdown */}
+          <AnimatePresence>
+            {showTypeMenu && (
+              <>
+                <div className="fixed inset-0 z-40" onClick={() => setShowTypeMenu(false)} />
+                <motion.div
+                  initial={{ opacity: 0, scale: 0.92, y: -4 }}
+                  animate={{ opacity: 1, scale: 1, y: 0 }}
+                  exit={{ opacity: 0, scale: 0.92, y: -4 }}
+                  transition={{ duration: 0.12 }}
+                  className="absolute top-full left-0 mt-1 z-50 bg-white rounded-2xl shadow-2xl border border-slate-100 p-3 w-52"
+                >
+                  <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2">Change question type</p>
+                  <div className="grid grid-cols-2 gap-1">
+                    {QUESTION_TYPES.map(({ type, label, icon: Icon }) => (
+                      <button
+                        key={type}
+                        type="button"
+                        onClick={() => handleTypeChange(type)}
+                        className={cn(
+                          'flex items-center gap-1.5 px-2 py-1.5 rounded-lg text-[10px] font-bold transition-all text-left',
+                          q.type === type
+                            ? 'bg-indigo-600 text-white'
+                            : 'text-slate-600 hover:bg-indigo-50 hover:text-indigo-700'
+                        )}
+                      >
+                        <Icon className="w-3 h-3 shrink-0" />
+                        <span className="truncate">{label}</span>
+                      </button>
+                    ))}
+                  </div>
+                </motion.div>
+              </>
+            )}
+          </AnimatePresence>
         </div>
 
         <div className="flex-1 space-y-4">
