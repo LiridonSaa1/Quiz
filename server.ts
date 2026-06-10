@@ -9611,7 +9611,7 @@ Content:\n"""${clipped}"""`;
       const questionsPerSection = Math.min(Math.max(Number(body.questionsPerSection) || 3, 2), 8);
       const questionTypes: string[] = Array.isArray(body.questionTypes) && body.questionTypes.length > 0
         ? body.questionTypes : ["multiple-choice"];
-      const useAI = questionTypes.some(t => t !== "multiple-choice");
+      const useAI = false;
 
       if (!level || !Array.isArray(selectedSections) || selectedSections.length === 0) {
         return res.status(400).json({ error: "level and selectedSections are required" });
