@@ -9666,7 +9666,7 @@ Content:\n"""${clipped}"""`;
           for (let attempt = 0; attempt < maxRetries; attempt++) {
             try {
               if (attempt > 0) await new Promise(r => setTimeout(r, attempt * 2000));
-              const aiResult = await ai.models.generateContent({ model: "gemini-1.5-flash", contents: `${smartSysPrompt}\n\n${smartUserPrompt}` });
+              const aiResult = await ai.models.generateContent({ model: "gemini-2.0-flash-lite", contents: `${smartSysPrompt}\n\n${smartUserPrompt}` });
               rawAI = (aiResult.text || "").trim();
               aiSucceeded = true;
               break;
@@ -9786,10 +9786,23 @@ Content:\n"""${clipped}"""`;
 
       const quizId = inserted.id;
 
+      // Map any question type to the subset the DB constraint allows
+      const DB_ALLOWED_TYPES = new Set(['multiple-choice','true-false','open-text','fill-in-the-blank','matching','ordering','image','video','reading','instruction']);
+      const normalizeQType = (t: string): string => {
+        if (DB_ALLOWED_TYPES.has(t)) return t;
+        const map: Record<string, string> = {
+          'word-bank': 'fill-in-the-blank', 'cloze': 'fill-in-the-blank', 'audio-fill-blank': 'fill-in-the-blank',
+          'sentence-building': 'open-text', 'short-answer': 'open-text', 'long-answer': 'open-text',
+          'dictation': 'open-text', 'speaking': 'open-text', 'pronunciation': 'open-text', 'listening': 'open-text',
+          'drag-drop': 'ordering', 'multiple-answer': 'multiple-choice', 'reading-comprehension': 'reading',
+        };
+        return map[t] ?? 'multiple-choice';
+      };
+
       // Insert questions — preserve actual type for AI-generated questions
       const questionRows = questions.map((q: any, idx: number) => ({
         quiz_id: quizId,
-        type: String(q.type || "multiple-choice"),
+        type: normalizeQType(String(q.type || "multiple-choice")),
         text: String(q.text || q.question || "").trim() || " ",
         question_text: String(q.text || q.question || "").trim() || " ",
         options: Array.isArray(q.options) ? q.options : [],
