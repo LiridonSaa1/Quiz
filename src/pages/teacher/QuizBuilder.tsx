@@ -950,7 +950,15 @@ export default function QuizBuilder() {
                   </div>
                 </div>
                 <div className="flex flex-wrap items-center gap-3 shrink-0">
-                  <AITriggerButton onClick={() => setAiOpen(true)} label="AI / Import" size="md" />
+                  <button
+                    type="button"
+                    onClick={() => setAiOpen(true)}
+                    className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-bold text-white transition-all active:scale-[0.98] shadow-xl shadow-violet-900/40 border border-white/20"
+                    style={{ background: 'linear-gradient(135deg, #7c3aed 0%, #4f46e5 100%)' }}
+                  >
+                    <Sparkles className="w-4 h-4" />
+                    Generate Questions
+                  </button>
                   {quizId && (quizData.settings as any)?.smartTestMeta && (
                     <motion.button
                       type="button"
@@ -1375,6 +1383,27 @@ export default function QuizBuilder() {
                   )}
                 </div>
 
+                {/* AI Generate card — always visible */}
+                <button
+                  type="button"
+                  onClick={() => setAiOpen(true)}
+                  className="w-full rounded-2xl p-5 text-white text-left space-y-2 transition-all hover:opacity-90 active:scale-[0.98] shadow-lg"
+                  style={{ background: 'linear-gradient(135deg,#7c3aed 0%,#4f46e5 60%,#2563eb 100%)' }}
+                >
+                  <div className="flex items-center gap-2.5">
+                    <div className="w-8 h-8 rounded-xl bg-white/20 flex items-center justify-center">
+                      <Sparkles className="w-4 h-4" />
+                    </div>
+                    <span className="font-extrabold text-base">Generate Questions with AI</span>
+                  </div>
+                  <p className="text-white/70 text-xs leading-relaxed">
+                    Select question types → paste your text → AI builds the quiz for you. Supports MCQ, cloze, matching, listening, speaking and 15 more.
+                  </p>
+                  <div className="inline-flex items-center gap-1.5 bg-white/20 rounded-lg px-3 py-1.5 text-xs font-bold mt-1">
+                    <Sparkles className="w-3.5 h-3.5" /> Open AI Generator
+                  </div>
+                </button>
+
                 <div
                   className="rounded-2xl p-5 text-white space-y-4"
                   style={{
@@ -1382,7 +1411,7 @@ export default function QuizBuilder() {
                   }}
                 >
                   <h3 className="font-bold text-sm flex items-center gap-2">
-                    <Plus className="w-4 h-4" /> Add questions
+                    <Plus className="w-4 h-4" /> Add questions manually
                   </h3>
                   <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
                     {[
@@ -2028,11 +2057,25 @@ export default function QuizBuilder() {
                     );
                   })
                 ) : (
-                  <div className="py-24 text-center bg-white rounded-2xl border border-dashed border-indigo-200 shadow-sm">
-                    <FileText className="w-14 h-14 text-indigo-200 mx-auto mb-4" />
-                    <h3 className="text-lg font-bold text-slate-800 mb-1">No questions yet</h3>
-                    <p className="text-slate-500 text-sm max-w-sm mx-auto mb-6">
-                      Use <span className="font-semibold text-slate-700">Add questions</span> on the left: MCQ, true/false, open-ended, fill-in-the-blank, <span className="font-semibold text-slate-700">Text only</span> (passages / directions), reading, image, or video. Image and video questions support links and uploads to Storage.
+                  <div className="py-16 text-center bg-white rounded-2xl border border-dashed border-indigo-200 shadow-sm">
+                    <div className="w-16 h-16 mx-auto mb-5 rounded-2xl flex items-center justify-center" style={{ background: 'linear-gradient(135deg,#7c3aed,#4f46e5)' }}>
+                      <Sparkles className="w-8 h-8 text-white" />
+                    </div>
+                    <h3 className="text-xl font-extrabold text-slate-800 mb-2">No questions yet</h3>
+                    <p className="text-slate-500 text-sm max-w-sm mx-auto mb-8">
+                      Let AI build your quiz instantly — just paste your lesson text or topic. Or add questions manually from the sidebar.
+                    </p>
+                    <button
+                      type="button"
+                      onClick={() => setAiOpen(true)}
+                      className="inline-flex items-center gap-2.5 px-6 py-3 rounded-2xl text-sm font-bold text-white shadow-xl shadow-violet-300/40 transition-all hover:scale-105 active:scale-[0.98] mb-4"
+                      style={{ background: 'linear-gradient(135deg,#7c3aed 0%,#4f46e5 100%)' }}
+                    >
+                      <Sparkles className="w-5 h-5" />
+                      Generate Questions with AI
+                    </button>
+                    <p className="text-xs text-slate-400">
+                      Supports 20 question types — MCQ, matching, cloze, listening, speaking, and more
                     </p>
                   </div>
                 )}
