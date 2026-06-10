@@ -9431,8 +9431,7 @@ Rules:
       }
       const { content, questionTypes } = req.body as { content?: string; questionTypes?: string[] };
       if (!content?.trim()) return res.status(400).json({ error: "content is required" });
-      const apiKey = (process.env.AI_INTEGRATIONS_GEMINI_API_KEY || process.env.GEMINI_API_KEY || "").trim();
-      if (!apiKey) return res.status(503).json({ error: "AI not configured — set GEMINI_API_KEY in Secrets." });
+      const geminiKey = (process.env.AI_INTEGRATIONS_GEMINI_API_KEY || process.env.GEMINI_API_KEY || "").trim();
 
       const QUIZ_MAX = 16000;
       const clipped = content.trim().slice(0, QUIZ_MAX);
@@ -9477,33 +9476,43 @@ Rules:
       const typeLabels = types.map(t => TYPE_LABELS[t] || t).join(", ");
       const schemaDesc = types.map(t => `- ${TYPE_LABELS[t] || t}: ${TYPE_SCHEMAS[t] || `{"type":"${t}","question":"...","correct_answer":"...","explanation":"..."}`}`).join("\n");
 
-      const prompt = onlyMC
-        ? `You are creating student-friendly quiz questions for an LMS.
-Rules: Use ONLY the content below. Create exactly ${count} multiple-choice questions, each with exactly 4 options and 1 correct answer. Avoid duplicates. Keep language simple.
-Return ONLY a valid JSON array, no markdown:
+      const systemPrompt = `You are an expert quiz creator for an LMS platform. You always respond with ONLY a valid JSON array of question objects — no markdown, no explanation, no extra text.`;
+      const userPrompt = onlyMC
+        ? `Create exactly ${count} multiple-choice quiz questions using ONLY the content below. Each question needs exactly 4 options and 1 correct answer. Return a JSON array:
 [{"type":"multiple-choice","question":"...","options":["A","B","C","D"],"correct_answer":"A","explanation":"..."}]
 Content:\n"""${clipped}"""`
-        : `You are an expert teacher creating quiz questions for a modern LMS.
-Task: Generate exactly ${count} questions based ONLY on the content below.
-Selected question types: ${typeLabels}
-Distribute evenly (~${Math.ceil(count / types.length)} per type).
-Rules:
-1) Use ONLY the content below.
-2) For fill-in-the-blank: use ___ in the question text.
-3) For matching: 3-5 pairs. For ordering: 3-5 items. For word-bank: 4 words.
-4) For multiple-choice: exactly 4 options, 1 correct. For multiple-answer: 2+ correct answers.
-5) Always include "explanation" field.
-JSON schemas by type:\n${schemaDesc}
-Return ONLY a valid JSON array:\n[...questions]
+        : `Generate exactly ${count} quiz questions using ONLY the content below.
+Types to use: ${typeLabels} (distribute evenly, ~${Math.ceil(count / types.length)} per type).
+Rules: For fill-in-the-blank use ___ for the blank. For matching provide pairs array. For ordering/drag-drop provide items and correct_order. For word-bank provide word_bank array. For multiple-choice: 4 options, 1 correct. Always include explanation.
+Schemas:\n${schemaDesc}
+Return ONLY a JSON array:\n[...questions]
 Content:\n"""${clipped}"""`;
 
-      const { GoogleGenAI } = await import("@google/genai");
-      const geminiBaseUrl = (process.env.AI_INTEGRATIONS_GEMINI_BASE_URL || "").trim();
-      const ai = geminiBaseUrl
-        ? new GoogleGenAI({ apiKey, httpOptions: { apiVersion: "", baseUrl: geminiBaseUrl } })
-        : new GoogleGenAI({ apiKey });
-      const result = await ai.models.generateContent({ model: "gemini-2.5-flash", contents: prompt });
-      const rawText = (result.text || "").trim();
+      let rawText = "";
+      if (geminiKey) {
+        const { GoogleGenAI } = await import("@google/genai");
+        const geminiBaseUrl = (process.env.AI_INTEGRATIONS_GEMINI_BASE_URL || "").trim();
+        const ai = geminiBaseUrl
+          ? new GoogleGenAI({ apiKey: geminiKey, httpOptions: { apiVersion: "", baseUrl: geminiBaseUrl } })
+          : new GoogleGenAI({ apiKey: geminiKey });
+        const result = await ai.models.generateContent({ model: "gemini-2.5-flash", contents: `${systemPrompt}\n\n${userPrompt}` });
+        rawText = (result.text || "").trim();
+      } else {
+        const pollinationsRes = await fetch("https://text.pollinations.ai/", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            messages: [
+              { role: "system", content: systemPrompt },
+              { role: "user", content: userPrompt },
+            ],
+            model: "openai",
+            jsonMode: true,
+          }),
+        });
+        if (!pollinationsRes.ok) throw new Error(`AI service error: ${pollinationsRes.status}`);
+        rawText = (await pollinationsRes.text()).trim();
+      }
 
       const parseJsonFromText = (text: string): any[] => {
         const fenced = text.match(/```(?:json)?\s*([\s\S]*?)```/i);
@@ -9627,7 +9636,6 @@ Content:\n"""${clipped}"""`;
 
       if (useAI) {
         const aiApiKey = (process.env.AI_INTEGRATIONS_GEMINI_API_KEY || process.env.GEMINI_API_KEY || "").trim();
-        if (!aiApiKey) return res.status(503).json({ error: "AI not configured — set GEMINI_API_KEY in Secrets." });
 
         const TYPE_LABELS: Record<string, string> = {
           "multiple-choice": "Multiple Choice", "multiple-answer": "Multiple Answer",
@@ -9643,41 +9651,34 @@ Content:\n"""${clipped}"""`;
         const perType = Math.ceil(totalCount / questionTypes.length);
 
         const sectionList = selectedSections.map(s => `- ${s.unitTitle}: ${s.type} (${s.topic})`).join("\n");
-        const aiPrompt = `You are an expert English language teacher creating a Headway-style quiz for ${level} level students.
+        const smartSysPrompt = `You are an expert English language teacher creating a Headway-style quiz. Respond ONLY with a valid JSON array — no markdown, no extra text.`;
+        const smartUserPrompt = `Generate exactly ${totalCount} English language questions for ${level} level students based on these topics:\n${sectionList}\n\nTypes: ${typeLabels} (~${perType} per type).\nRules: fill-in-the-blank uses ___. matching needs pairs array. ordering/drag-drop needs items+correct_order. word-bank needs word_bank array. Always include explanation.\nReturn ONLY a JSON array:\n[...questions]`;
 
-Generate exactly ${totalCount} quiz questions based on these English language learning topics:
-${sectionList}
-
-Selected question types: ${typeLabels}
-Distribute ~${perType} questions per type.
-
-Rules:
-1) Questions must test English grammar, vocabulary, and language use appropriate for ${level} level.
-2) For fill-in-the-blank: use ___ in the question text.
-3) For matching: 3-5 pairs. For ordering: 3-5 items. For word-bank: 4 words.
-4) For multiple-choice and true-false: match the topic closely.
-5) Keep language natural and clear for language learners.
-6) Always include "explanation" field.
-
-Schemas (examples):
-- Multiple Choice: {"type":"multiple-choice","question":"...","options":["A","B","C","D"],"correct_answer":"A","explanation":"..."}
-- True/False: {"type":"true-false","question":"...","correct_answer":"True","explanation":"..."}
-- Fill in Blank: {"type":"fill-in-the-blank","question":"She ___ to school every day.","correct_answer":"goes","explanation":"..."}
-- Short Answer: {"type":"short-answer","question":"...","correct_answer":"...","explanation":"..."}
-- Matching: {"type":"matching","question":"Match the verbs to their past forms:","pairs":[{"left":"go","right":"went"},{"left":"see","right":"saw"}],"explanation":"..."}
-- Word Bank: {"type":"word-bank","question":"Choose the correct word: I ___ happy.","word_bank":["am","is","are","be"],"correct_answer":"am","explanation":"..."}
-- Sentence Building: {"type":"sentence-building","question":"Arrange the words:","words":["is","She","happy"],"correct_answer":"She is happy","explanation":"..."}
-
-Return ONLY a valid JSON array, no markdown:
-[...questions]`;
-
-        const { GoogleGenAI } = await import("@google/genai");
-        const geminiBaseUrl = (process.env.AI_INTEGRATIONS_GEMINI_BASE_URL || "").trim();
-        const ai = geminiBaseUrl
-          ? new GoogleGenAI({ apiKey: aiApiKey, httpOptions: { apiVersion: "", baseUrl: geminiBaseUrl } })
-          : new GoogleGenAI({ apiKey: aiApiKey });
-        const aiResult = await ai.models.generateContent({ model: "gemini-2.5-flash", contents: aiPrompt });
-        const rawAI = (aiResult.text || "").trim();
+        let rawAI = "";
+        if (aiApiKey) {
+          const { GoogleGenAI } = await import("@google/genai");
+          const geminiBaseUrl = (process.env.AI_INTEGRATIONS_GEMINI_BASE_URL || "").trim();
+          const ai = geminiBaseUrl
+            ? new GoogleGenAI({ apiKey: aiApiKey, httpOptions: { apiVersion: "", baseUrl: geminiBaseUrl } })
+            : new GoogleGenAI({ apiKey: aiApiKey });
+          const aiResult = await ai.models.generateContent({ model: "gemini-2.5-flash", contents: `${smartSysPrompt}\n\n${smartUserPrompt}` });
+          rawAI = (aiResult.text || "").trim();
+        } else {
+          const pollinationsRes = await fetch("https://text.pollinations.ai/", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              messages: [
+                { role: "system", content: smartSysPrompt },
+                { role: "user", content: smartUserPrompt },
+              ],
+              model: "openai",
+              jsonMode: true,
+            }),
+          });
+          if (!pollinationsRes.ok) throw new Error(`AI service error: ${pollinationsRes.status}`);
+          rawAI = (await pollinationsRes.text()).trim();
+        }
 
         const parseArr = (text: string): any[] => {
           const fenced = text.match(/```(?:json)?\s*([\s\S]*?)```/i);
