@@ -7,12 +7,12 @@
     "node": ">=18.0.0"
   },
   "scripts": {
-    "dev": "tsx server.ts",
+    "dev": "node scripts/start-dev.mjs",
     "build": "vite build",
-    "preview": "NODE_ENV=production tsx server.ts",
+    "preview": "NODE_ENV=production node scripts/start-dev.mjs",
     "preview:vite": "vite preview",
-    "start": "NODE_ENV=production tsx server.ts",
-    "clean": "rm -rf dist",
+    "start": "NODE_ENV=production node scripts/start-dev.mjs",
+    "clean": "rm -rf dist server.mjs",
     "lint": "tsc --noEmit",
     "test:auth": "tsx --test tests/routeAuth.test.ts",
     "telegram:set-webhook": "tsx scripts/set-telegram-webhook.ts"
@@ -24,6 +24,7 @@
     "@google/genai": "1.1.0",
     "@hookform/resolvers": "^5.4.0",
     "@supabase/supabase-js": "^2.106.2",
+    "@tailwindcss/oxide-linux-x64-gnu": "^4.3.0",
     "@tailwindcss/vite": "^4.3.0",
     "@types/adm-zip": "^0.5.8",
     "@types/canvas-confetti": "^1.9.0",
@@ -69,7 +70,7 @@
     "tailwind-merge": "^3.6.0",
     "tailwindcss": "^4.3.0",
     "tesseract.js": "^7.0.0",
-    "tsx": "^4.22.3",
+    "tsx": "^4.22.4",
     "typescript": "~5.8.2",
     "unzipper": "^0.12.3",
     "vite": "^6.4.2",
@@ -77,6 +78,5 @@
     "xlsx": "^0.18.5",
     "zod": "^4.4.3",
     "zod-validation-error": "^5.0.0"
-  },
-  "devDependencies": {}
+  }
 }

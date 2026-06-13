@@ -16670,12 +16670,6 @@ Speaker notes: 2-3 sentences on a single line with no line breaks.`;
             'canvas-confetti',
             'dompurify',
           ],
-          force: true,
-          esbuildOptions: {
-            // Banner changes chunk content → new content hash → new chunk filename.
-            // This busts any browser-cached copies from prior optimization runs.
-            banner: { js: '/* qm-deps-v3 */' },
-          },
         },
         server: {
           middlewareMode: true,
@@ -17538,9 +17532,20 @@ async function startServer() {
   void ensureHeadwayMediaTable();
   void fixHeadwayQuizCorrectAnswers();
 
-  const httpServer = http.createServer();
-  const app = await createApp({ includeFrontend: true, httpServer });
-  httpServer.on("request", app);
+  // Create a minimal HTTP server that binds the port immediately so Replit's
+  // workflow health-check passes, then swap in the full Express app once Vite
+  // has finished pre-bundling dependencies (which can take >30s on first run).
+  let appHandler: ((req: any, res: any) => void) | null = null;
+  const httpServer = http.createServer((req, res) => {
+    if (appHandler) {
+      appHandler(req, res);
+    } else {
+      // Vite is still initialising — respond with a loading page so the
+      // browser doesn't show a connection-refused error.
+      res.writeHead(200, { 'Content-Type': 'text/html' });
+      res.end('<html><body style="font-family:sans-serif;display:flex;align-items:center;justify-content:center;height:100vh;margin:0"><p>Starting up, please wait…</p></body></html>');
+    }
+  });
 
   const tryListen = (port: number, host: string) =>
     new Promise<void>((resolve, reject) => {
@@ -17560,6 +17565,7 @@ async function startServer() {
     });
 
   let lastRecoverableError: NodeJS.ErrnoException | null = null;
+  let boundPort: number | null = null;
 
   for (let portOffset = 0; portOffset < maxPortAttempts; portOffset++) {
     const portToTry = preferredPort + portOffset;
@@ -17567,21 +17573,8 @@ async function startServer() {
     for (const hostToTry of hostCandidates) {
       try {
         await tryListen(portToTry, hostToTry);
-        // In Replit, .replit maps both localPort=5000 and localPort=24678 to
-        // externalPort=80. The proxy uses the last mapping (24678), so we must
-        // also listen on 24678 with the same app to handle web traffic correctly.
-        if (process.env.REPL_ID) {
-          const replitProxyServer = http.createServer(app);
-          replitProxyServer.listen(24678, "0.0.0.0", () => {
-            console.log("Replit proxy listener also running on port 24678");
-          });
-          replitProxyServer.on("error", (e: NodeJS.ErrnoException) => {
-            if (e.code !== "EADDRINUSE") {
-              console.warn("Replit proxy port 24678 error:", e.code);
-            }
-          });
-        }
-        return;
+        boundPort = portToTry;
+        break;
       } catch (error) {
         const listenError = error as NodeJS.ErrnoException;
         if (!listenError.code || !recoverableListenErrors.has(listenError.code)) {
@@ -17600,11 +17593,44 @@ async function startServer() {
         }
       }
     }
+    if (boundPort !== null) break;
   }
 
-  throw new Error(
-    `Unable to start server after trying ports ${preferredPort}-${preferredPort + maxPortAttempts - 1}. Last error: ${lastRecoverableError?.code ?? "unknown"}`,
-  );
+  if (boundPort === null) {
+    throw new Error(
+      `Unable to start server after trying ports ${preferredPort}-${preferredPort + maxPortAttempts - 1}. Last error: ${lastRecoverableError?.code ?? "unknown"}`,
+    );
+  }
+
+  // Now initialise the full Express + Vite app asynchronously (may take a while
+  // on first run due to Vite dependency pre-bundling).
+  console.log('[startup] Initialising Express + Vite app…');
+  createApp({ includeFrontend: true, httpServer }).then(app => {
+    appHandler = app;
+    console.log('[startup] App ready — all requests now served by Express + Vite');
+  }).catch(err => {
+    console.error('[startup] createApp failed:', err);
+  });
+
+  // In Replit, also listen on 24678 with the same handler.
+  if (process.env.REPL_ID) {
+    const replitProxyServer = http.createServer((req, res) => {
+      if (appHandler) {
+        appHandler(req, res);
+      } else {
+        res.writeHead(200, { 'Content-Type': 'text/html' });
+        res.end('<html><body style="font-family:sans-serif;display:flex;align-items:center;justify-content:center;height:100vh;margin:0"><p>Starting up, please wait…</p></body></html>');
+      }
+    });
+    replitProxyServer.listen(24678, "0.0.0.0", () => {
+      console.log("Replit proxy listener also running on port 24678");
+    });
+    replitProxyServer.on("error", (e: NodeJS.ErrnoException) => {
+      if (e.code !== "EADDRINUSE") {
+        console.warn("Replit proxy port 24678 error:", e.code);
+      }
+    });
+  }
 }
 
 async function runAutoPublishQuizzes() {
