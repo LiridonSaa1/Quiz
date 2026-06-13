@@ -38,14 +38,12 @@ const wrapWithNetworkErrorHandler = (obj: any): any => {
           try {
             const result = value.apply(target, args);
             
-            // If it's a promise, catch network errors
             if (result instanceof Promise) {
               return result.catch((error: any) => {
                 return normalizeNetworkError(error);
               });
             }
             
-            // If it's an object (like .from().select()), wrap it too
             if (shouldWrapObject(result)) {
               return wrapWithNetworkErrorHandler(result);
             }
@@ -57,7 +55,6 @@ const wrapWithNetworkErrorHandler = (obj: any): any => {
         };
       }
       
-      // Recursively wrap objects (like .auth)
       if (shouldWrapObject(value, prop)) {
         return wrapWithNetworkErrorHandler(value);
       }
@@ -67,23 +64,40 @@ const wrapWithNetworkErrorHandler = (obj: any): any => {
   });
 };
 
+function validateSupabaseUrl(raw: string | undefined): string {
+  const url = (raw ?? '').trim();
+  if (!url) {
+    throw new Error(
+      'VITE_SUPABASE_URL is not set. Add it to your environment variables (must be a valid https:// URL).'
+    );
+  }
+  if (!url.startsWith('https://') && !url.startsWith('http://')) {
+    throw new Error(
+      `VITE_SUPABASE_URL is invalid: "${url}". It must start with https:// (e.g. https://your-project.supabase.co).`
+    );
+  }
+  return url;
+}
+
+function validateSupabaseKey(raw: string | undefined): string {
+  const key = (raw ?? '').trim();
+  if (!key) {
+    throw new Error(
+      'VITE_SUPABASE_ANON_KEY is not set. Add it to your environment variables.'
+    );
+  }
+  return key;
+}
+
 const getSupabase = (): SupabaseClient => {
   if (!supabaseInstance) {
-    const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
-    const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
-
-    if (!supabaseUrl || !supabaseAnonKey) {
-      const msg = 'Supabase URL and Anon Key are missing. Please add VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY to the Settings > Secrets menu in AI Studio.';
-      console.error(msg);
-      throw new Error(msg);
-    }
-
+    const supabaseUrl = validateSupabaseUrl(import.meta.env.VITE_SUPABASE_URL);
+    const supabaseAnonKey = validateSupabaseKey(import.meta.env.VITE_SUPABASE_ANON_KEY);
     supabaseInstance = createClient(supabaseUrl, supabaseAnonKey);
   }
   return supabaseInstance;
 };
 
-// Export a proxy that lazily initializes the Supabase client on first access
 export const supabase = new Proxy({} as SupabaseClient, {
   get: (target, prop, receiver) => {
     const instance = getSupabase();
