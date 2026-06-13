@@ -2559,17 +2559,79 @@ When giving instructions, number each step clearly. Be precise and technical whe
   setInterval(() => { void _refreshHealthCache(); }, 30_000);
 
   app.get("/api/health", (_req, res) => {
-    const supabaseUrl = process.env.VITE_SUPABASE_URL;
-    const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-    res.json({
-      status: "ok",
-      config: {
-        hasUrl: !!supabaseUrl,
-        hasServiceKey: !!supabaseServiceKey,
-        urlPrefix: supabaseUrl ? supabaseUrl.substring(0, 15) + '...' : null,
+    type VarStatus = 'set' | 'missing' | 'invalid';
+    interface VarReport { status: VarStatus; hint?: string }
+
+    const checkUrl = (key: string): VarReport => {
+      const raw = (process.env[key] ?? '').trim();
+      if (!raw) return { status: 'missing', hint: `Add ${key} to environment variables` };
+      if (!raw.startsWith('https://') && !raw.startsWith('http://'))
+        return { status: 'invalid', hint: `${key} must start with https:// (got: ${raw.slice(0, 20)}...)` };
+      return { status: 'set' };
+    };
+
+    const checkSecret = (key: string, hint?: string): VarReport => {
+      const raw = (process.env[key] ?? '').trim();
+      if (!raw) return { status: 'missing', hint: hint ?? `Add ${key} to environment variables` };
+      return { status: 'set' };
+    };
+
+    const vars: Record<string, Record<string, VarReport>> = {
+      core: {
+        VITE_SUPABASE_URL:       checkUrl('VITE_SUPABASE_URL'),
+        VITE_SUPABASE_ANON_KEY:  checkSecret('VITE_SUPABASE_ANON_KEY', 'Frontend Supabase key — required for login'),
+        SUPABASE_SERVICE_ROLE_KEY: checkSecret('SUPABASE_SERVICE_ROLE_KEY', 'Backend-only service role key'),
       },
+      ai: {
+        GEMINI_API_KEY: (() => {
+          const replit = (process.env.AI_INTEGRATIONS_GEMINI_API_KEY ?? '').trim();
+          const direct = (process.env.GEMINI_API_KEY ?? '').trim();
+          if (replit || direct) return { status: 'set' } as VarReport;
+          return { status: 'missing', hint: 'Set GEMINI_API_KEY for AI quiz/content features' } as VarReport;
+        })(),
+      },
+      email: {
+        BREVO_API_KEY:      checkSecret('BREVO_API_KEY',      '2FA verification emails require this'),
+        BREVO_SENDER_EMAIL: checkSecret('BREVO_SENDER_EMAIL', 'Must match a verified sender in Brevo'),
+        BREVO_SENDER_NAME:  checkSecret('BREVO_SENDER_NAME',  'Display name shown in email inbox'),
+      },
+      alerts: {
+        TELEGRAM_BOT_TOKEN: checkSecret('TELEGRAM_BOT_TOKEN', 'Optional — enables error alerts via Telegram'),
+        TELEGRAM_CHAT_ID:   checkSecret('TELEGRAM_CHAT_ID',   'Optional — Telegram chat to receive alerts'),
+      },
+      database: {
+        DATABASE_URL: checkSecret('DATABASE_URL', 'Optional — direct pg pool for migrations/raw SQL'),
+      },
+    };
+
+    const allVars = Object.values(vars).flatMap(g => Object.values(g));
+    const missingCritical = ['VITE_SUPABASE_URL', 'VITE_SUPABASE_ANON_KEY', 'SUPABASE_SERVICE_ROLE_KEY']
+      .filter(k => vars.core[k].status !== 'set');
+    const invalidCount = allVars.filter(v => v.status === 'invalid').length;
+    const missingCount = allVars.filter(v => v.status === 'missing').length;
+
+    const overallStatus =
+      missingCritical.length > 0 || invalidCount > 0 ? 'error'
+      : missingCount > 0 ? 'degraded'
+      : 'ok';
+
+    const supabaseUrlRaw = (process.env.VITE_SUPABASE_URL ?? '').trim();
+
+    res.status(overallStatus === 'error' ? 503 : 200).json({
+      status: overallStatus,
+      timestamp: new Date().toISOString(),
+      node: process.version,
+      env: process.env.NODE_ENV ?? 'development',
+      summary: {
+        total:   allVars.length,
+        set:     allVars.filter(v => v.status === 'set').length,
+        missing: missingCount,
+        invalid: invalidCount,
+      },
+      vars,
       supabase: {
-        status: _cachedHealth.status,
+        urlPrefix: supabaseUrlRaw ? supabaseUrlRaw.replace(/^(https?:\/\/[^.]+).*/, '$1') + '…' : null,
+        connectivity: _cachedHealth.status,
         error: _cachedHealth.error,
         cachedAgoMs: _cachedHealth.checkedAt ? Date.now() - _cachedHealth.checkedAt : null,
       },
@@ -17402,7 +17464,55 @@ async function fixHeadwayQuizCorrectAnswers(): Promise<void> {
   }
 }
 
+function logEnvValidation() {
+  type VarLevel = 'required' | 'optional';
+  const checks: { key: string; level: VarLevel; isUrl?: boolean }[] = [
+    { key: 'VITE_SUPABASE_URL',        level: 'required', isUrl: true },
+    { key: 'VITE_SUPABASE_ANON_KEY',   level: 'required' },
+    { key: 'SUPABASE_SERVICE_ROLE_KEY',level: 'required' },
+    { key: 'GEMINI_API_KEY',           level: 'optional' },
+    { key: 'BREVO_API_KEY',            level: 'optional' },
+    { key: 'BREVO_SENDER_EMAIL',       level: 'optional' },
+    { key: 'TELEGRAM_BOT_TOKEN',       level: 'optional' },
+    { key: 'DATABASE_URL',             level: 'optional' },
+  ];
+
+  const errors: string[] = [];
+  const warnings: string[] = [];
+
+  for (const { key, level, isUrl } of checks) {
+    const raw = key === 'GEMINI_API_KEY'
+      ? ((process.env.AI_INTEGRATIONS_GEMINI_API_KEY ?? '') || (process.env.GEMINI_API_KEY ?? '')).trim()
+      : (process.env[key] ?? '').trim();
+
+    if (!raw) {
+      if (level === 'required') errors.push(`  ✗ ${key} — MISSING (required)`);
+      else warnings.push(`  ⚠ ${key} — not set (optional)`);
+      continue;
+    }
+    if (isUrl && !raw.startsWith('https://') && !raw.startsWith('http://')) {
+      errors.push(`  ✗ ${key} — INVALID URL: must start with https:// (got: "${raw.slice(0, 30)}…")`);
+      continue;
+    }
+    const preview = isUrl
+      ? raw.replace(/^(https?:\/\/[^.]+).*/, '$1') + '…'
+      : `${raw.slice(0, 4)}${'*'.repeat(Math.max(0, raw.length - 4))}`;
+    console.log(`  ✓ ${key} — ${preview}`);
+  }
+
+  for (const w of warnings) console.warn(w);
+  if (errors.length) {
+    for (const e of errors) console.error(e);
+    console.error(`[env] ${errors.length} required variable(s) missing or invalid — the app may not work correctly.`);
+  } else {
+    console.log('[env] All required environment variables are set ✓');
+  }
+}
+
 async function startServer() {
+  console.log('[env] Validating environment variables…');
+  logEnvValidation();
+
   const parsedPort = Number(process.env.PORT);
   const preferredPort = Number.isInteger(parsedPort) && parsedPort > 0 ? parsedPort : 5000;
   const preferredHost = process.env.HOST || "0.0.0.0";
