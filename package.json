@@ -8,7 +8,7 @@
   },
   "scripts": {
     "dev": "node scripts/start-dev.mjs",
-    "build": "vite build",
+    "build": "cross-env NODE_OPTIONS=--max-old-space-size=512 vite build",
     "preview": "NODE_ENV=production node scripts/start-dev.mjs",
     "preview:vite": "vite preview",
     "start": "NODE_ENV=production node scripts/start-dev.mjs",
