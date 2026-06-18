@@ -171,8 +171,9 @@ export default function AdminSettings() {
       try {
         const res = await fetch('/api/admin/config/settings');
         const json = await res.json();
-        if (!json.success || !json.config?.value) return;
-        const v = json.config.value;
+        // GET returns { success, section, value }; PUT returns { success, config: { section, value } }
+        const v = json.value ?? json.config?.value;
+        if (!json.success || !v) return;
         if (v.general) setGeneral(prev => ({ ...prev, ...v.general }));
         if (v.notifications) setNotifs(prev => ({ ...prev, ...v.notifications }));
         if (v.email) setEmailSettings(prev => ({ ...prev, ...v.email }));
