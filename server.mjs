@@ -321,6 +321,80 @@ async function sendEmail(msg, override) {
   const json = await res.json().catch(() => ({}));
   return { messageId: json?.messageId };
 }
+function renderCredentialEmail(opts) {
+  const brand = (opts.brandName || "QuizMaster").trim();
+  const isTeacher2 = opts.role === "teacher";
+  const subject = isTeacher2 ? `Ftes\xEB p\xEBr akses n\xEB ${brand}` : `Llogaria juaj n\xEB ${brand} \xEBsht\xEB krijuar`;
+  const roleLabel = isTeacher2 ? "m\xEBsues" : "student";
+  const accentColor = isTeacher2 ? "#6366f1" : "#10b981";
+  const greeting = isTeacher2 ? `Ju jeni ftuar si <strong>${roleLabel}</strong> n\xEB platform\xEBn <strong>${brand}</strong>.` : `Llogaria juaj si <strong>${roleLabel}</strong> n\xEB platform\xEBn <strong>${brand}</strong> \xEBsht\xEB krijuar me sukses.`;
+  const textContent = [
+    `P\xEBrsh\xEBndetje ${opts.name},`,
+    ``,
+    greeting.replace(/<[^>]+>/g, ""),
+    ``,
+    `Kredencialet tuaja jan\xEB:`,
+    `  Email: ${opts.email}`,
+    `  Fjal\xEBkalim: ${opts.password}`,
+    ``,
+    `Klikoni k\xEBtu p\xEBr t'u ky\xE7ur: ${opts.loginUrl}`,
+    ``,
+    `Ju mir\xEBpresim!`,
+    `Ekipi i ${brand}`
+  ].join("\n");
+  const htmlContent = `<!doctype html>
+<html>
+<body style="margin:0;padding:0;background:#f1f5f9;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f1f5f9;padding:40px 16px;">
+    <tr><td align="center">
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:520px;background:#ffffff;border-radius:20px;overflow:hidden;box-shadow:0 4px 24px rgba(0,0,0,0.06);">
+        <!-- Header -->
+        <tr><td style="background:${accentColor};padding:32px 36px;">
+          <div style="font-size:22px;font-weight:800;color:#ffffff;letter-spacing:-0.02em;">${brand}</div>
+          <div style="font-size:13px;color:rgba(255,255,255,0.8);margin-top:4px;">${isTeacher2 ? "Ftes\xEB M\xEBsuesi" : "Llogari e Re Studenti"}</div>
+        </td></tr>
+        <!-- Body -->
+        <tr><td style="padding:36px;">
+          <p style="margin:0 0 8px;font-size:15px;font-weight:700;color:#0f172a;">P\xEBrsh\xEBndetje, ${opts.name}!</p>
+          <p style="margin:0 0 24px;font-size:14px;line-height:1.6;color:#475569;">${greeting}</p>
+
+          <!-- Credentials box -->
+          <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:14px;padding:20px 24px;margin-bottom:24px;">
+            <p style="margin:0 0 14px;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:1px;color:#94a3b8;">Kredencialet e aksesit</p>
+            <table role="presentation" cellpadding="0" cellspacing="0" width="100%">
+              <tr>
+                <td style="padding:6px 0;font-size:13px;color:#64748b;width:90px;">\u{1F4E7} Email</td>
+                <td style="padding:6px 0;font-size:13px;font-weight:600;color:#0f172a;">${opts.email}</td>
+              </tr>
+              <tr>
+                <td style="padding:6px 0;font-size:13px;color:#64748b;">\u{1F511} Fjal\xEBkalim</td>
+                <td style="padding:6px 0;font-size:13px;font-weight:600;color:#0f172a;font-family:'Courier New',monospace;">${opts.password}</td>
+              </tr>
+            </table>
+          </div>
+
+          <!-- Login button -->
+          <div style="text-align:center;margin-bottom:28px;">
+            <a href="${opts.loginUrl}" style="display:inline-block;background:${accentColor};color:#ffffff;font-size:14px;font-weight:700;text-decoration:none;padding:14px 32px;border-radius:12px;">
+              \u{1F517} Ky\xE7u tani
+            </a>
+          </div>
+
+          <p style="margin:0;font-size:12px;line-height:1.6;color:#94a3b8;">
+            N\xEBse keni pyetje, na kontaktoni. Mos e ndani fjal\xEBkalimin tuaj me ask\xEBnd tjet\xEBr.
+          </p>
+        </td></tr>
+        <!-- Footer -->
+        <tr><td style="background:#f8fafc;padding:16px 36px;border-top:1px solid #e2e8f0;">
+          <p style="margin:0;font-size:11px;color:#94a3b8;text-align:center;">D\xEBrguar nga platforma <strong>${brand}</strong> \xB7 Ju mir\xEBpresim!</p>
+        </td></tr>
+      </table>
+    </td></tr>
+  </table>
+</body>
+</html>`;
+  return { subject, htmlContent, textContent };
+}
 
 // src/lib/notifyEvents.ts
 var RECIPIENTS = {
@@ -5014,6 +5088,98 @@ Assistant:`
       res.status(500).json({ error: error.message });
     }
   });
+  const sendUserCredentials = async (opts) => {
+    try {
+      const settings = await getConfigSection("settings");
+      const channels = settings?.notification_channels || {};
+      const brandName = settings?.general?.school_name || "QuizMaster";
+      const baseUrl = process.env.REPLIT_DEV_DOMAIN ? `https://${process.env.REPLIT_DEV_DOMAIN}` : settings?.general?.website || "http://localhost:5000";
+      const loginUrl = `${baseUrl}/login`;
+      const plainText = [
+        `P\xEBrsh\xEBndetje ${opts.name},`,
+        opts.role === "teacher" ? `Ju jeni ftuar si m\xEBsues n\xEB platform\xEBn ${brandName}.` : `Llogaria juaj si student n\xEB ${brandName} \xEBsht\xEB krijuar me sukses.`,
+        ``,
+        `Kredencialet tuaja:`,
+        `Email: ${opts.email}`,
+        `Fjal\xEBkalim: ${opts.password}`,
+        `Ky\xE7uni: ${loginUrl}`,
+        ``,
+        `Ju mir\xEBpresim! \u2014 Ekipi i ${brandName}`
+      ].join("\n");
+      const results = {};
+      if (channels.email_enabled !== false) {
+        try {
+          if (isEmailConfigured()) {
+            const tpl = renderCredentialEmail({ name: opts.name, email: opts.email, password: opts.password, role: opts.role, loginUrl, brandName });
+            await sendEmail({ to: opts.email, toName: opts.name, subject: tpl.subject, htmlContent: tpl.htmlContent, textContent: tpl.textContent });
+            results.email = "sent";
+          } else {
+            results.email = "not_configured";
+          }
+        } catch (e) {
+          results.email = `error: ${e.message}`;
+        }
+      }
+      if (channels.viber_enabled && channels.viber_token && opts.phone) {
+        try {
+          const vRes = await fetch("https://chatapi.viber.com/pa/send_message", {
+            method: "POST",
+            headers: { "X-Viber-Auth-Token": String(channels.viber_token), "Content-Type": "application/json" },
+            body: JSON.stringify({ receiver: opts.phone.replace(/[^0-9]/g, ""), type: "text", text: plainText })
+          });
+          const vJson = await vRes.json().catch(() => ({}));
+          results.viber = vJson.status === 0 ? "sent" : `error: ${vJson.status_message || vRes.status}`;
+        } catch (e) {
+          results.viber = `error: ${e.message}`;
+        }
+      }
+      if (channels.whatsapp_enabled && channels.whatsapp_token && channels.whatsapp_phone_id && opts.phone) {
+        try {
+          const waRes = await fetch(`https://graph.facebook.com/v19.0/${channels.whatsapp_phone_id}/messages`, {
+            method: "POST",
+            headers: { "Authorization": `Bearer ${channels.whatsapp_token}`, "Content-Type": "application/json" },
+            body: JSON.stringify({
+              messaging_product: "whatsapp",
+              to: opts.phone.replace(/[^0-9]/g, ""),
+              type: "text",
+              text: { body: plainText }
+            })
+          });
+          const waJson = await waRes.json().catch(() => ({}));
+          results.whatsapp = waJson.messages?.[0]?.id ? "sent" : `error: ${JSON.stringify(waJson.error || waJson)}`;
+        } catch (e) {
+          results.whatsapp = `error: ${e.message}`;
+        }
+      }
+      if (channels.gmail_enabled && channels.gmail_user && channels.gmail_password) {
+        try {
+          const nodemailer = await import("nodemailer");
+          const transporter = nodemailer.default.createTransport({
+            host: "smtp.gmail.com",
+            port: 587,
+            secure: false,
+            auth: { user: String(channels.gmail_user), pass: String(channels.gmail_password) }
+          });
+          const tpl = renderCredentialEmail({ name: opts.name, email: opts.email, password: opts.password, role: opts.role, loginUrl, brandName });
+          await transporter.sendMail({
+            from: `"${brandName}" <${channels.gmail_user}>`,
+            to: opts.email,
+            subject: tpl.subject,
+            html: tpl.htmlContent,
+            text: tpl.textContent
+          });
+          results.gmail = "sent";
+        } catch (e) {
+          results.gmail = `error: ${e.message}`;
+        }
+      }
+      console.log(`[credentials] ${opts.role} ${opts.email} \u2192`, JSON.stringify(results));
+      return results;
+    } catch (e) {
+      console.error("[credentials] sendUserCredentials error:", e.message);
+      return {};
+    }
+  };
   app.post("/api/admin/create-teacher", async (req, res) => {
     const { name, email, password, phone, specialization } = req.body;
     try {
@@ -5067,6 +5233,7 @@ Assistant:`
       const { error: teacherError } = await supabaseAdmin.from("teachers").upsert(teacherPayload);
       if (teacherError) throw teacherError;
       res.json({ success: true, uid: userId });
+      void sendUserCredentials({ name, email, password, role: "teacher", phone: phone || void 0 });
     } catch (error) {
       console.error("Error creating teacher:", error);
       res.status(500).json({ error: error.message });
@@ -5232,6 +5399,7 @@ Assistant:`
         }
       }
       res.json({ success: true, uid: userId });
+      void sendUserCredentials({ name, email, password, role: "student", phone: phone || void 0 });
     } catch (error) {
       console.error("Error creating student:", error);
       res.status(500).json({ error: error.message });

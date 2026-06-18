@@ -140,3 +140,95 @@ export function renderVerificationEmail(opts: {
 
   return { subject, htmlContent, textContent };
 }
+
+/** Renders credential email for a newly created teacher or student (Albanian). */
+export function renderCredentialEmail(opts: {
+  name: string;
+  email: string;
+  password: string;
+  role: 'teacher' | 'student';
+  loginUrl: string;
+  brandName?: string;
+}) {
+  const brand = (opts.brandName || 'QuizMaster').trim();
+  const isTeacher = opts.role === 'teacher';
+
+  const subject = isTeacher
+    ? `Ftesë për akses në ${brand}`
+    : `Llogaria juaj në ${brand} është krijuar`;
+
+  const roleLabel = isTeacher ? 'mësues' : 'student';
+  const accentColor = isTeacher ? '#6366f1' : '#10b981';
+  const greeting = isTeacher
+    ? `Ju jeni ftuar si <strong>${roleLabel}</strong> në platformën <strong>${brand}</strong>.`
+    : `Llogaria juaj si <strong>${roleLabel}</strong> në platformën <strong>${brand}</strong> është krijuar me sukses.`;
+
+  const textContent = [
+    `Përshëndetje ${opts.name},`,
+    ``,
+    greeting.replace(/<[^>]+>/g, ''),
+    ``,
+    `Kredencialet tuaja janë:`,
+    `  Email: ${opts.email}`,
+    `  Fjalëkalim: ${opts.password}`,
+    ``,
+    `Klikoni këtu për t'u kyçur: ${opts.loginUrl}`,
+    ``,
+    `Ju mirëpresim!`,
+    `Ekipi i ${brand}`,
+  ].join('\n');
+
+  const htmlContent = `<!doctype html>
+<html>
+<body style="margin:0;padding:0;background:#f1f5f9;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f1f5f9;padding:40px 16px;">
+    <tr><td align="center">
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:520px;background:#ffffff;border-radius:20px;overflow:hidden;box-shadow:0 4px 24px rgba(0,0,0,0.06);">
+        <!-- Header -->
+        <tr><td style="background:${accentColor};padding:32px 36px;">
+          <div style="font-size:22px;font-weight:800;color:#ffffff;letter-spacing:-0.02em;">${brand}</div>
+          <div style="font-size:13px;color:rgba(255,255,255,0.8);margin-top:4px;">${isTeacher ? 'Ftesë Mësuesi' : 'Llogari e Re Studenti'}</div>
+        </td></tr>
+        <!-- Body -->
+        <tr><td style="padding:36px;">
+          <p style="margin:0 0 8px;font-size:15px;font-weight:700;color:#0f172a;">Përshëndetje, ${opts.name}!</p>
+          <p style="margin:0 0 24px;font-size:14px;line-height:1.6;color:#475569;">${greeting}</p>
+
+          <!-- Credentials box -->
+          <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:14px;padding:20px 24px;margin-bottom:24px;">
+            <p style="margin:0 0 14px;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:1px;color:#94a3b8;">Kredencialet e aksesit</p>
+            <table role="presentation" cellpadding="0" cellspacing="0" width="100%">
+              <tr>
+                <td style="padding:6px 0;font-size:13px;color:#64748b;width:90px;">📧 Email</td>
+                <td style="padding:6px 0;font-size:13px;font-weight:600;color:#0f172a;">${opts.email}</td>
+              </tr>
+              <tr>
+                <td style="padding:6px 0;font-size:13px;color:#64748b;">🔑 Fjalëkalim</td>
+                <td style="padding:6px 0;font-size:13px;font-weight:600;color:#0f172a;font-family:'Courier New',monospace;">${opts.password}</td>
+              </tr>
+            </table>
+          </div>
+
+          <!-- Login button -->
+          <div style="text-align:center;margin-bottom:28px;">
+            <a href="${opts.loginUrl}" style="display:inline-block;background:${accentColor};color:#ffffff;font-size:14px;font-weight:700;text-decoration:none;padding:14px 32px;border-radius:12px;">
+              🔗 Kyçu tani
+            </a>
+          </div>
+
+          <p style="margin:0;font-size:12px;line-height:1.6;color:#94a3b8;">
+            Nëse keni pyetje, na kontaktoni. Mos e ndani fjalëkalimin tuaj me askënd tjetër.
+          </p>
+        </td></tr>
+        <!-- Footer -->
+        <tr><td style="background:#f8fafc;padding:16px 36px;border-top:1px solid #e2e8f0;">
+          <p style="margin:0;font-size:11px;color:#94a3b8;text-align:center;">Dërguar nga platforma <strong>${brand}</strong> · Ju mirëpresim!</p>
+        </td></tr>
+      </table>
+    </td></tr>
+  </table>
+</body>
+</html>`;
+
+  return { subject, htmlContent, textContent };
+}

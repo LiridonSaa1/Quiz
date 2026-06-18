@@ -115,6 +115,18 @@ export default function AdminSettings() {
     brevo_sender_email: '',
   });
 
+  const [notifChannels, setNotifChannels] = useState({
+    email_enabled: true,
+    viber_enabled: false,
+    viber_token: '',
+    whatsapp_enabled: false,
+    whatsapp_token: '',
+    whatsapp_phone_id: '',
+    gmail_enabled: false,
+    gmail_user: '',
+    gmail_password: '',
+  });
+
   const handleSave = async () => {
     try {
       setSaving(true);
@@ -126,6 +138,7 @@ export default function AdminSettings() {
             general,
             notifications: notifs,
             email: emailSettings,
+            notification_channels: notifChannels,
             security: {
               registrationOpen,
               requireEmailVerify,
@@ -163,6 +176,7 @@ export default function AdminSettings() {
         if (v.general) setGeneral(prev => ({ ...prev, ...v.general }));
         if (v.notifications) setNotifs(prev => ({ ...prev, ...v.notifications }));
         if (v.email) setEmailSettings(prev => ({ ...prev, ...v.email }));
+        if (v.notification_channels) setNotifChannels(prev => ({ ...prev, ...v.notification_channels }));
         if (v.security) {
           const asRoleBool = (obj: any, def: boolean): RoleBoolMap => ({
             student: typeof obj?.student === 'boolean' ? obj.student : def,
@@ -475,6 +489,157 @@ export default function AdminSettings() {
                   </div>
 
                   <button className="mt-3 text-sm text-indigo-600 font-semibold hover:underline">{t('settings.email.sendTest')}</button>
+                </Section>
+
+                {/* ── Notification Channels ── */}
+                <Section title="Kanalet e Njoftimeve të Kredencialeve" icon={Bell}>
+                  <p className="text-sm text-slate-500 mb-4">
+                    Kur krijoni një mësues ose student, kredencialet dërgohen automatikisht përmes kanaleve të aktivizuara më poshtë.
+                  </p>
+
+                  {/* Email via Brevo */}
+                  <div className="rounded-xl border border-slate-200 overflow-hidden mb-3">
+                    <div className="flex items-center justify-between px-4 py-3 bg-slate-50">
+                      <div className="flex items-center gap-2">
+                        <span className="text-lg">✉️</span>
+                        <div>
+                          <p className="text-sm font-semibold text-slate-800">Email (Brevo)</p>
+                          <p className="text-xs text-slate-500">Dërgon email me kredencialet tek adresa e regjistruar</p>
+                        </div>
+                      </div>
+                      <label className="relative inline-flex items-center cursor-pointer">
+                        <input type="checkbox" className="sr-only peer"
+                          checked={notifChannels.email_enabled}
+                          onChange={e => setNotifChannels(p => ({ ...p, email_enabled: e.target.checked }))} />
+                        <div className="w-10 h-6 bg-slate-200 peer-checked:bg-indigo-600 rounded-full transition-colors after:content-[''] after:absolute after:top-0.5 after:left-0.5 after:bg-white after:rounded-full after:w-5 after:h-5 after:transition-transform peer-checked:after:translate-x-4" />
+                      </label>
+                    </div>
+                    {notifChannels.email_enabled && (
+                      <div className="px-4 py-3 border-t border-slate-100 bg-white">
+                        <p className="text-xs text-slate-500">Konfigurimet e Brevo janë në seksionin <strong>Brevo API</strong> mbi këtë.</p>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Viber */}
+                  <div className="rounded-xl border border-slate-200 overflow-hidden mb-3">
+                    <div className="flex items-center justify-between px-4 py-3 bg-slate-50">
+                      <div className="flex items-center gap-2">
+                        <span className="text-lg">💬</span>
+                        <div>
+                          <p className="text-sm font-semibold text-slate-800">Viber Bot</p>
+                          <p className="text-xs text-slate-500">Dërgon mesazh Viber (përdoruesi duhet të ketë abonuar bot-in)</p>
+                        </div>
+                      </div>
+                      <label className="relative inline-flex items-center cursor-pointer">
+                        <input type="checkbox" className="sr-only peer"
+                          checked={notifChannels.viber_enabled}
+                          onChange={e => setNotifChannels(p => ({ ...p, viber_enabled: e.target.checked }))} />
+                        <div className="w-10 h-6 bg-slate-200 peer-checked:bg-violet-600 rounded-full transition-colors after:content-[''] after:absolute after:top-0.5 after:left-0.5 after:bg-white after:rounded-full after:w-5 after:h-5 after:transition-transform peer-checked:after:translate-x-4" />
+                      </label>
+                    </div>
+                    {notifChannels.viber_enabled && (
+                      <div className="px-4 py-3 border-t border-slate-100 bg-white">
+                        <Field label="Viber Bot Auth Token">
+                          <input
+                            type="password"
+                            placeholder="Token nga Viber Developer Panel"
+                            value={notifChannels.viber_token}
+                            onChange={e => setNotifChannels(p => ({ ...p, viber_token: e.target.value }))}
+                            className={inputCls}
+                          />
+                        </Field>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* WhatsApp */}
+                  <div className="rounded-xl border border-slate-200 overflow-hidden mb-3">
+                    <div className="flex items-center justify-between px-4 py-3 bg-slate-50">
+                      <div className="flex items-center gap-2">
+                        <span className="text-lg">📱</span>
+                        <div>
+                          <p className="text-sm font-semibold text-slate-800">WhatsApp (Meta Cloud API)</p>
+                          <p className="text-xs text-slate-500">Kërkon numrin e telefonit të ruajtur gjatë regjistrimit</p>
+                        </div>
+                      </div>
+                      <label className="relative inline-flex items-center cursor-pointer">
+                        <input type="checkbox" className="sr-only peer"
+                          checked={notifChannels.whatsapp_enabled}
+                          onChange={e => setNotifChannels(p => ({ ...p, whatsapp_enabled: e.target.checked }))} />
+                        <div className="w-10 h-6 bg-slate-200 peer-checked:bg-green-600 rounded-full transition-colors after:content-[''] after:absolute after:top-0.5 after:left-0.5 after:bg-white after:rounded-full after:w-5 after:h-5 after:transition-transform peer-checked:after:translate-x-4" />
+                      </label>
+                    </div>
+                    {notifChannels.whatsapp_enabled && (
+                      <div className="px-4 py-3 border-t border-slate-100 bg-white grid grid-cols-1 md:grid-cols-2 gap-3">
+                        <Field label="WhatsApp Access Token">
+                          <input
+                            type="password"
+                            placeholder="Token nga Meta Developer Console"
+                            value={notifChannels.whatsapp_token}
+                            onChange={e => setNotifChannels(p => ({ ...p, whatsapp_token: e.target.value }))}
+                            className={inputCls}
+                          />
+                        </Field>
+                        <Field label="WhatsApp Phone Number ID">
+                          <input
+                            type="text"
+                            placeholder="p.sh. 123456789012345"
+                            value={notifChannels.whatsapp_phone_id}
+                            onChange={e => setNotifChannels(p => ({ ...p, whatsapp_phone_id: e.target.value }))}
+                            className={inputCls}
+                          />
+                        </Field>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Gmail */}
+                  <div className="rounded-xl border border-slate-200 overflow-hidden">
+                    <div className="flex items-center justify-between px-4 py-3 bg-slate-50">
+                      <div className="flex items-center gap-2">
+                        <span className="text-lg">📧</span>
+                        <div>
+                          <p className="text-sm font-semibold text-slate-800">Gmail (SMTP)</p>
+                          <p className="text-xs text-slate-500">Dërgon email nga llogaria Gmail me App Password</p>
+                        </div>
+                      </div>
+                      <label className="relative inline-flex items-center cursor-pointer">
+                        <input type="checkbox" className="sr-only peer"
+                          checked={notifChannels.gmail_enabled}
+                          onChange={e => setNotifChannels(p => ({ ...p, gmail_enabled: e.target.checked }))} />
+                        <div className="w-10 h-6 bg-slate-200 peer-checked:bg-red-500 rounded-full transition-colors after:content-[''] after:absolute after:top-0.5 after:left-0.5 after:bg-white after:rounded-full after:w-5 after:h-5 after:transition-transform peer-checked:after:translate-x-4" />
+                      </label>
+                    </div>
+                    {notifChannels.gmail_enabled && (
+                      <div className="px-4 py-3 border-t border-slate-100 bg-white grid grid-cols-1 md:grid-cols-2 gap-3">
+                        <Field label="Gmail Adresa">
+                          <input
+                            type="email"
+                            placeholder="you@gmail.com"
+                            value={notifChannels.gmail_user}
+                            onChange={e => setNotifChannels(p => ({ ...p, gmail_user: e.target.value }))}
+                            className={inputCls}
+                          />
+                        </Field>
+                        <Field label="App Password (16 karaktere)">
+                          <input
+                            type="password"
+                            placeholder="xxxx xxxx xxxx xxxx"
+                            value={notifChannels.gmail_password}
+                            onChange={e => setNotifChannels(p => ({ ...p, gmail_password: e.target.value }))}
+                            className={inputCls}
+                          />
+                        </Field>
+                        <div className="md:col-span-2">
+                          <p className="text-xs text-slate-500">
+                            Aktivizo <strong>2-Step Verification</strong> në Google Account, pastaj krijo <strong>App Password</strong> nga &nbsp;
+                            <a href="https://myaccount.google.com/apppasswords" target="_blank" rel="noopener noreferrer" className="text-indigo-600 hover:underline">myaccount.google.com/apppasswords</a>.
+                          </p>
+                        </div>
+                      </div>
+                    )}
+                  </div>
                 </Section>
               </>
             )}

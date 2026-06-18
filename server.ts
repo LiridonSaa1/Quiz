@@ -4,7 +4,7 @@ import jwt from "jsonwebtoken";
 import { isMissingCoursesStudentIdsError } from "./src/lib/schemaErrors.js";
 import { canAccessTeacherCourses, isAdmin, isAdminSeedAllowed } from "./src/lib/routeAuth.js";
 import { generateFixSuggestion } from "./src/lib/ai/generateFixSuggestion.js";
-import { isEmailConfigured, sendEmail, renderVerificationEmail } from "./src/lib/email.js";
+import { isEmailConfigured, sendEmail, renderVerificationEmail, renderCredentialEmail } from "./src/lib/email.js";
 import { notifyEvent, type NotifyContext, type NotifyEventKey } from "./src/lib/notifyEvents.js";
 import { HEADWAY_FULL_DATA, buildUnitQuestions as buildHwUnitQuestions, type HUnit } from "./src/lib/headwayData.js";
 import { getQuestionsForSection, getTopicsForLevel, HEADWAY_QUESTIONS } from "./src/lib/headwayQuestions.js";
@@ -3580,6 +3580,121 @@ When giving instructions, number each step clearly. Be precise and technical whe
   });
 
   // Route to create a teacher (Admin only)
+  // ── Helper: send credentials to a newly created user via configured channels ─
+  const sendUserCredentials = async (opts: {
+    name: string;
+    email: string;
+    password: string;
+    role: 'teacher' | 'student';
+    phone?: string;
+  }) => {
+    try {
+      const settings: any = await getConfigSection('settings');
+      const channels = settings?.notification_channels || {};
+      const brandName: string = settings?.general?.school_name || 'QuizMaster';
+      const baseUrl = process.env.REPLIT_DEV_DOMAIN
+        ? `https://${process.env.REPLIT_DEV_DOMAIN}`
+        : (settings?.general?.website || 'http://localhost:5000');
+      const loginUrl = `${baseUrl}/login`;
+
+      const plainText = [
+        `Përshëndetje ${opts.name},`,
+        opts.role === 'teacher'
+          ? `Ju jeni ftuar si mësues në platformën ${brandName}.`
+          : `Llogaria juaj si student në ${brandName} është krijuar me sukses.`,
+        ``,
+        `Kredencialet tuaja:`,
+        `Email: ${opts.email}`,
+        `Fjalëkalim: ${opts.password}`,
+        `Kyçuni: ${loginUrl}`,
+        ``,
+        `Ju mirëpresim! — Ekipi i ${brandName}`,
+      ].join('\n');
+
+      const results: Record<string, string> = {};
+
+      // ── 1. Email via Brevo (enabled by default unless explicitly disabled) ──
+      if (channels.email_enabled !== false) {
+        try {
+          if (isEmailConfigured()) {
+            const tpl = renderCredentialEmail({ name: opts.name, email: opts.email, password: opts.password, role: opts.role, loginUrl, brandName });
+            await sendEmail({ to: opts.email, toName: opts.name, subject: tpl.subject, htmlContent: tpl.htmlContent, textContent: tpl.textContent });
+            results.email = 'sent';
+          } else {
+            results.email = 'not_configured';
+          }
+        } catch (e: any) {
+          results.email = `error: ${e.message}`;
+        }
+      }
+
+      // ── 2. Viber ──
+      if (channels.viber_enabled && channels.viber_token && opts.phone) {
+        try {
+          const vRes = await fetch('https://chatapi.viber.com/pa/send_message', {
+            method: 'POST',
+            headers: { 'X-Viber-Auth-Token': String(channels.viber_token), 'Content-Type': 'application/json' },
+            body: JSON.stringify({ receiver: opts.phone.replace(/[^0-9]/g, ''), type: 'text', text: plainText }),
+          });
+          const vJson = await vRes.json().catch(() => ({})) as any;
+          results.viber = vJson.status === 0 ? 'sent' : `error: ${vJson.status_message || vRes.status}`;
+        } catch (e: any) {
+          results.viber = `error: ${e.message}`;
+        }
+      }
+
+      // ── 3. WhatsApp (Meta Cloud API) ──
+      if (channels.whatsapp_enabled && channels.whatsapp_token && channels.whatsapp_phone_id && opts.phone) {
+        try {
+          const waRes = await fetch(`https://graph.facebook.com/v19.0/${channels.whatsapp_phone_id}/messages`, {
+            method: 'POST',
+            headers: { 'Authorization': `Bearer ${channels.whatsapp_token}`, 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              messaging_product: 'whatsapp',
+              to: opts.phone.replace(/[^0-9]/g, ''),
+              type: 'text',
+              text: { body: plainText },
+            }),
+          });
+          const waJson = await waRes.json().catch(() => ({})) as any;
+          results.whatsapp = waJson.messages?.[0]?.id ? 'sent' : `error: ${JSON.stringify(waJson.error || waJson)}`;
+        } catch (e: any) {
+          results.whatsapp = `error: ${e.message}`;
+        }
+      }
+
+      // ── 4. Gmail (SMTP via nodemailer) ──
+      if (channels.gmail_enabled && channels.gmail_user && channels.gmail_password) {
+        try {
+          const nodemailer = await import('nodemailer');
+          const transporter = nodemailer.default.createTransport({
+            host: 'smtp.gmail.com',
+            port: 587,
+            secure: false,
+            auth: { user: String(channels.gmail_user), pass: String(channels.gmail_password) },
+          });
+          const tpl = renderCredentialEmail({ name: opts.name, email: opts.email, password: opts.password, role: opts.role, loginUrl, brandName });
+          await transporter.sendMail({
+            from: `"${brandName}" <${channels.gmail_user}>`,
+            to: opts.email,
+            subject: tpl.subject,
+            html: tpl.htmlContent,
+            text: tpl.textContent,
+          });
+          results.gmail = 'sent';
+        } catch (e: any) {
+          results.gmail = `error: ${e.message}`;
+        }
+      }
+
+      console.log(`[credentials] ${opts.role} ${opts.email} →`, JSON.stringify(results));
+      return results;
+    } catch (e: any) {
+      console.error('[credentials] sendUserCredentials error:', e.message);
+      return {};
+    }
+  };
+
   app.post("/api/admin/create-teacher", async (req, res) => {
     const { name, email, password, phone, specialization } = req.body;
     
@@ -3653,6 +3768,8 @@ When giving instructions, number each step clearly. Be precise and technical whe
       if (teacherError) throw teacherError;
 
       res.json({ success: true, uid: userId });
+      // Fire-and-forget: send credentials via configured notification channels
+      void sendUserCredentials({ name, email, password, role: 'teacher', phone: phone || undefined });
     } catch (error: any) {
       console.error('Error creating teacher:', error);
       res.status(500).json({ error: error.message });
@@ -3867,6 +3984,8 @@ When giving instructions, number each step clearly. Be precise and technical whe
       }
 
       res.json({ success: true, uid: userId });
+      // Fire-and-forget: send credentials via configured notification channels
+      void sendUserCredentials({ name, email, password, role: 'student', phone: phone || undefined });
     } catch (error: any) {
       console.error('Error creating student:', error);
       res.status(500).json({ error: error.message });
