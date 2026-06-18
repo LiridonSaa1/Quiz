@@ -107,6 +107,19 @@ Set these in Replit Secrets:
 - Vite is configured with `allowedHosts: true` for Replit proxy compatibility
 - The server listens on `0.0.0.0` to be accessible in the Replit environment
 
+## Render Deployment
+This is a full-stack app (Express backend + React frontend). Do NOT deploy as a static site.
+
+**Correct Render settings:**
+- **Environment**: Node
+- **Build Command**: `npm install` (skip `npm run build` — Vite production build OOMs on free tier)
+- **Start Command**: `npm run start` (runs `node scripts/start-dev.mjs` — uses esbuild to compile the server, then Express serves the API + frontend via Vite middleware)
+- **Environment Variables**: Add all secrets from Replit Secrets panel (VITE_SUPABASE_URL, VITE_SUPABASE_ANON_KEY, SUPABASE_SERVICE_ROLE_KEY, GEMINI_API_KEY, BREVO_API_KEY, BREVO_SENDER_EMAIL, BREVO_SENDER_NAME, SESSION_SECRET). Set `PORT=10000` if Render requires a specific port.
+
+**Why NOT `npx serve -s dist`:** `dist/` is gitignored and the Vite build OOMs on Render's free tier, so `dist/` is never created. `serve` without a valid directory falls back to serving the project root, which exposes the `artifacts/mockup-sandbox/` Component Preview Server page instead of the real app.
+
+**Why the Express server works:** `scripts/start-dev.mjs` uses esbuild to bundle `server.ts` (very fast, low memory), then runs the Express server which handles all `/api/*` routes AND serves the React frontend via Vite middleware — no separate build step needed.
+
 ## Two-Factor Authentication (2FA)
 Per-role 2FA toggle in `/admin/settings` → Security tab. Admin can enable separately for Student / Teacher / Admin.
 
