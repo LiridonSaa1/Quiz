@@ -19,7 +19,12 @@ export default defineConfig(({mode}) => {
   const hmrClientPort = Number(env.VITE_HMR_CLIENT_PORT) || undefined;
   const isReplit = !!(process.env.REPL_ID || process.env.REPLIT_DEV_DOMAIN);
   return {
+    base: '/',
     plugins: [react(), tailwindcss()],
+    build: {
+      outDir: 'dist',
+      emptyOutDir: true,
+    },
     resolve: {
       alias: {
         '@': path.resolve(__dirname, '.'),
