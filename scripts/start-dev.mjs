@@ -17,7 +17,7 @@ try {
     platform: 'node',
     format: 'esm',
     outfile: OUT,
-    target: 'node18',
+    target: 'node22',
     packages: 'external',
     logLevel: 'warning',
   });
