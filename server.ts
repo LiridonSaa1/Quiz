@@ -9197,6 +9197,7 @@ Rules:
   });
 
   app.post('/api/admin/student-payments', async (req, res) => {
+    if (!process.env.DATABASE_URL?.trim()) return res.status(503).json({ error: 'DATABASE_URL not configured. Add it to Render environment variables.' });
     try {
       const { student_id, month_year, amount = 0, notes = '' } = req.body || {};
       if (!student_id) return res.status(400).json({ error: 'student_id is required' });
@@ -9245,6 +9246,7 @@ Rules:
   });
 
   app.delete('/api/admin/student-payments/:id', async (req, res) => {
+    if (!process.env.DATABASE_URL?.trim()) return res.status(503).json({ error: 'DATABASE_URL not configured.' });
     try {
       const { id } = req.params;
       await poolQuery(`DELETE FROM student_monthly_payments WHERE id = $1`, [id]);
@@ -9331,6 +9333,7 @@ Rules:
   });
 
   app.post('/api/admin/teacher-hours', async (req, res) => {
+    if (!process.env.DATABASE_URL?.trim()) return res.status(503).json({ error: 'DATABASE_URL not configured. Add it to Render environment variables.' });
     try {
       const { teacher_id, work_date, hours, rate_per_hour = 40, notes = '' } = req.body || {};
       if (!teacher_id) return res.status(400).json({ error: 'teacher_id is required' });
@@ -9358,6 +9361,7 @@ Rules:
   });
 
   app.patch('/api/admin/teacher-hours/:id', async (req, res) => {
+    if (!process.env.DATABASE_URL?.trim()) return res.status(503).json({ error: 'DATABASE_URL not configured.' });
     try {
       const { id } = req.params;
       const { hours, rate_per_hour, notes, work_date } = req.body || {};
@@ -9377,6 +9381,7 @@ Rules:
   });
 
   app.delete('/api/admin/teacher-hours/:id', async (req, res) => {
+    if (!process.env.DATABASE_URL?.trim()) return res.status(503).json({ error: 'DATABASE_URL not configured.' });
     try {
       const { id } = req.params;
       await poolQuery(`DELETE FROM teacher_hours WHERE id = $1`, [id]);
