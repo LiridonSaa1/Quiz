@@ -56,33 +56,13 @@ export default function StudentLiveSessionJoin() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
 
-  // Block browser tab close / refresh while joined
-  useEffect(() => {
-    const handler = (e: BeforeUnloadEvent) => {
-      if (joined) {
-        e.preventDefault();
-        e.returnValue = '';
-      }
-    };
-    window.addEventListener('beforeunload', handler);
-    return () => window.removeEventListener('beforeunload', handler);
-  }, [joined]);
-
+  // ── All state declarations first (Rules of Hooks: no hooks after conditional) ──
   const [session, setSession] = useState<LiveSession | null>(null);
   const [loading, setLoading] = useState(true);
   const [userId, setUserId] = useState('');
   const [userDisplayName, setUserDisplayName] = useState('');
   const [joined, setJoined] = useState(false);
   const [showNavWarning, setShowNavWarning] = useState(false);
-
-  // Intercept browser back button while joined
-  useEffect(() => {
-    if (!joined) return;
-    const handler = () => { setShowNavWarning(true); window.history.pushState(null, '', window.location.href); };
-    window.history.pushState(null, '', window.location.href);
-    window.addEventListener('popstate', handler);
-    return () => window.removeEventListener('popstate', handler);
-  }, [joined]);
   const [joining, setJoining] = useState(false);
   const [handRaised, setHandRaised] = useState(false);
   const [showReactions, setShowReactions] = useState(false);
@@ -95,37 +75,18 @@ export default function StudentLiveSessionJoin() {
   const [timeRemaining, setTimeRemaining] = useState<number | null>(null);
   const [networkQuality, setNetworkQuality] = useState<'good' | 'fair' | 'poor' | null>(null);
   const [linkCopied, setLinkCopied] = useState(false);
-  const chatEndRef = useRef<HTMLDivElement | null>(null);
-  const jitsiContainerRef = useRef<HTMLDivElement | null>(null);
-  const jitsiApiRef = useRef<ReturnType<typeof window.JitsiMeetExternalAPI> | null>(null);
-
-  useEffect(() => {
-    if (!session || session.status !== 'live' || !session.started_at) {
-      setTimeRemaining(null);
-      return;
-    }
-    
-    const interval = setInterval(() => {
-      const start = new Date(session.started_at!).getTime();
-      const end = start + session.duration_minutes * 60 * 1000;
-      const now = Date.now();
-      const remaining = Math.max(0, Math.floor((end - now) / 1000));
-      setTimeRemaining(remaining);
-    }, 1000);
-
-    return () => clearInterval(interval);
-  }, [session]);
-
-  const formatTime = (s: number) => {
-    const m = Math.floor(s / 60).toString().padStart(2, '0');
-    const sec = (s % 60).toString().padStart(2, '0');
-    return `${m}:${sec}`;
-  };
-
   const defaultJitsiRoomName = `quizmaster-session-${id?.slice(0, 8)}`;
   const [activeRoomName, setActiveRoomName] = useState(defaultJitsiRoomName);
   const [jaasDomain, setJaasDomain] = useState<string | null>(null);
   const [jaasAppId, setJaasAppId] = useState<string | null>(null);
+  const [liveQuizPush, setLiveQuizPush] = useState<{ quizId: string; quizTitle: string; sessionId: string } | null>(null);
+
+  // ── Refs ──
+  const chatEndRef = useRef<HTMLDivElement | null>(null);
+  const jitsiContainerRef = useRef<HTMLDivElement | null>(null);
+  const jitsiApiRef = useRef<ReturnType<typeof window.JitsiMeetExternalAPI> | null>(null);
+
+  // ── Derived constants (no hooks below) ──
   const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(
     typeof navigator !== 'undefined' ? navigator.userAgent : ''
   );
@@ -133,8 +94,50 @@ export default function StudentLiveSessionJoin() {
     ? `https://8x8.vc/${jaasAppId}/${activeRoomName}`
     : `https://meet.jit.si/${activeRoomName}`;
 
-  // Push-quiz state
-  const [liveQuizPush, setLiveQuizPush] = useState<{ quizId: string; quizTitle: string; sessionId: string } | null>(null);
+  const formatTime = (s: number) => {
+    const m = Math.floor(s / 60).toString().padStart(2, '0');
+    const sec = (s % 60).toString().padStart(2, '0');
+    return `${m}:${sec}`;
+  };
+
+  // ── Effects ──
+
+  // Block browser tab close / refresh while joined
+  useEffect(() => {
+    const handler = (e: BeforeUnloadEvent) => {
+      if (joined) {
+        e.preventDefault();
+        e.returnValue = '';
+      }
+    };
+    window.addEventListener('beforeunload', handler);
+    return () => window.removeEventListener('beforeunload', handler);
+  }, [joined]);
+
+  // Intercept browser back button while joined
+  useEffect(() => {
+    if (!joined) return;
+    const handler = () => { setShowNavWarning(true); window.history.pushState(null, '', window.location.href); };
+    window.history.pushState(null, '', window.location.href);
+    window.addEventListener('popstate', handler);
+    return () => window.removeEventListener('popstate', handler);
+  }, [joined]);
+
+  // Countdown timer while session is live
+  useEffect(() => {
+    if (!session || session.status !== 'live' || !session.started_at) {
+      setTimeRemaining(null);
+      return;
+    }
+    const interval = setInterval(() => {
+      const start = new Date(session.started_at!).getTime();
+      const end = start + session.duration_minutes * 60 * 1000;
+      const now = Date.now();
+      const remaining = Math.max(0, Math.floor((end - now) / 1000));
+      setTimeRemaining(remaining);
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [session]);
 
   // Sync activeRoomName when teacher reconnects (jitsi_room_name changes via Realtime)
   useEffect(() => {

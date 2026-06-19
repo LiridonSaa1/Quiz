@@ -11122,16 +11122,16 @@ Content:\n"""${clipped}"""`;
     res.status(403).json({ error: 'Forbidden: you are not a participant of this session' }); return null;
   };
 
-  // Student session detail — accessible to invited participants AND enrolled students (for ended sessions)
+  // Student session detail — any authenticated student can view session info via direct link
   app.get('/api/student/live-sessions/:id', async (req, res) => {
     try {
-      const userId = await assertSessionAccess(req, res, req.params.id);
-      if (!userId) return;
+      const caller = await getAuthUser(req);
+      if (!caller) { res.status(401).json({ error: 'Unauthorized' }); return; }
       const { data, error } = await supabaseAdmin
         .from('live_sessions')
         .select('*, host:profiles!host_id(id,display_name,email), course:courses!course_id(id,title)')
         .eq('id', req.params.id).single();
-      if (error) throw error;
+      if (error || !data) { res.status(404).json({ error: 'Session not found' }); return; }
       res.json({ success: true, session: data });
     } catch (e: unknown) { res.status(500).json({ error: (e as Error).message }); }
   });

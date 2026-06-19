@@ -11078,10 +11078,16 @@ ${smartUserPrompt}` });
   };
   app.get("/api/student/live-sessions/:id", async (req, res) => {
     try {
-      const userId = await assertSessionAccess(req, res, req.params.id);
-      if (!userId) return;
+      const caller = await getAuthUser(req);
+      if (!caller) {
+        res.status(401).json({ error: "Unauthorized" });
+        return;
+      }
       const { data, error } = await supabaseAdmin.from("live_sessions").select("*, host:profiles!host_id(id,display_name,email), course:courses!course_id(id,title)").eq("id", req.params.id).single();
-      if (error) throw error;
+      if (error || !data) {
+        res.status(404).json({ error: "Session not found" });
+        return;
+      }
       res.json({ success: true, session: data });
     } catch (e) {
       res.status(500).json({ error: e.message });
