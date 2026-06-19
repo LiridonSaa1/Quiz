@@ -27,7 +27,7 @@ try {
   process.exit(1);
 }
 
-const child = spawn('node', [OUT], {
+const child = spawn('node', ['--dns-result-order=ipv4first', OUT], {
   stdio: 'inherit',
   env: process.env,
 });
