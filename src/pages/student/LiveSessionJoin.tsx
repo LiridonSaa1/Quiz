@@ -155,39 +155,17 @@ export default function StudentLiveSessionJoin() {
     const container = jitsiContainerRef.current;
     let destroyed = false;
 
-    const initWithToken = async () => {
-      // Fetch JaaS JWT — student joins as guest so room is accessible without login prompt
-      let jwtToken: string | null = null;
-      let domain = 'meet.jit.si';
-      let jaasAppId: string | null = null;
-      try {
-        const tokenRes = await authFetch('/api/jitsi-token', {
-          method: 'POST',
-          body: JSON.stringify({ roomName: activeRoomName, moderator: false, displayName: userDisplayName }),
-        });
-        if (tokenRes.ok) {
-          const tokenJson = await tokenRes.json();
-          jwtToken  = tokenJson.token  ?? null;
-          domain    = tokenJson.domain ?? 'meet.jit.si';
-          jaasAppId = tokenJson.appId  ?? null;
-          // Store domain/appId so jitsiMeetUrl (mobile link) uses correct domain
-          setJaasDomain(domain);
-          setJaasAppId(jaasAppId);
-        }
-      } catch { /* fall back to meet.jit.si */ }
+    const initWithToken = () => {
+      const domain = 'meet.jit.si';
 
       if (destroyed) return;
-
-      const finalRoomName = (domain === '8x8.vc' && jaasAppId)
-        ? `${jaasAppId}/${activeRoomName}`
-        : activeRoomName;
 
       const init = () => {
         if (destroyed) return;
         const JitsiAPI = window.JitsiMeetExternalAPI;
         if (!JitsiAPI) { console.error('JitsiMeetExternalAPI not available'); return; }
         const options: Record<string, unknown> = {
-          roomName: finalRoomName,
+          roomName: activeRoomName,
           parentNode: container,
           width: '100%',
           height: '100%',
@@ -202,6 +180,11 @@ export default function StudentLiveSessionJoin() {
             notifications: [],
             enableNoisyMicDetection: false,
             enableNoAudioDetection: false,
+            enableAuth: false,
+            enableFeaturesBasedOnToken: false,
+            p2p: { enabled: true },
+            lobbyChatEnabled: false,
+            enableLobbyChat: false,
           },
           interfaceConfigOverwrite: {
             SHOW_JITSI_WATERMARK: false,
@@ -217,7 +200,6 @@ export default function StudentLiveSessionJoin() {
             JITSI_WATERMARK_LINK: '',
           },
         };
-        if (jwtToken) options.jwt = jwtToken;
         const api = new JitsiAPI(domain, options);
         setTimeout(() => {
           const iframe = container.querySelector('iframe');

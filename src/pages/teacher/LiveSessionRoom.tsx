@@ -120,6 +120,11 @@ function loadJitsiExternalAPI(
         enableNoisyMicDetection: false,
         enableNoAudioDetection: false,
         hideConferenceTimer: false,
+        enableAuth: false,
+        enableFeaturesBasedOnToken: false,
+        p2p: { enabled: true },
+        lobbyChatEnabled: false,
+        enableLobbyChat: false,
       },
       interfaceConfigOverwrite: {
         SHOW_JITSI_WATERMARK: false,
@@ -495,26 +500,9 @@ export default function TeacherLiveSessionRoom() {
     setTimeout(() => initJitsi(newRoomName), 800);
   };
 
-  const initJitsi = async (roomName?: string, startAudioMuted?: boolean, startVideoMuted?: boolean) => {
+  const initJitsi = (roomName?: string, startAudioMuted?: boolean, startVideoMuted?: boolean) => {
     if (!jitsiContainerRef.current || jitsiApiRef.current) return;
     const name = roomName ?? jitsiRoomNameRef.current;
-
-    // Fetch JaaS JWT — teacher joins as moderator so the room starts without a login prompt
-    let jwtToken: string | null = null;
-    let jitsiDomain: string | null = null;
-    let jaasAppId: string | null = null;
-    try {
-      const tokenRes = await authFetch('/api/jitsi-token', {
-        method: 'POST',
-        body: JSON.stringify({ roomName: name, moderator: true, displayName: userDisplayName }),
-      });
-      if (tokenRes.ok) {
-        const tokenJson = await tokenRes.json();
-        jwtToken   = tokenJson.token   ?? null;
-        jitsiDomain = tokenJson.domain  ?? null;
-        jaasAppId   = tokenJson.appId   ?? null;
-      }
-    } catch { /* fall back to meet.jit.si */ }
 
     loadJitsiExternalAPI(
       name,
@@ -539,17 +527,14 @@ export default function TeacherLiveSessionRoom() {
           else if (q >= 30) setNetworkQuality('fair');
           else setNetworkQuality('poor');
         });
-        // readyToClose fires on connection drops / room closure — we do NOT auto-end
-        // the DB session here because it triggers on network glitches too.
-        // The teacher must explicitly click "End Session" to mark the session as ended.
         api.addListener('readyToClose', () => {
           if (jitsiApiRef.current) { jitsiApiRef.current.dispose(); jitsiApiRef.current = null; }
           setMeetingActive(false);
         });
       },
-      jwtToken,
-      jitsiDomain,
-      jaasAppId,
+      null,
+      null,
+      null,
     );
   };
 
