@@ -6,7 +6,7 @@ import { cn } from '../../lib/utils';
 import NotificationCenter from '../NotificationCenter';
 import BackendStatus from '../BackendStatus';
 import LanguageDropdown from '../LanguageDropdown';
-import { authFetch } from '../../lib/apiUrl';
+import { authFetch, authFetchJsonCached } from '../../lib/apiUrl';
 import { defaultFeatureFlags, extractFeatureFlags, FeatureFlags } from '../../lib/platformFeatures';
 import { useBranding } from '../../lib/useBranding';
 import {
@@ -121,16 +121,15 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
     let mounted = true;
     const loadSettings = async () => {
       try {
-        const settingsRes = await authFetch('/api/admin/config/settings');
-        const settingsJson = await settingsRes.json();
+        const json = await authFetchJsonCached('/api/admin/config/settings', { ttlMs: 5 * 60 * 1000 });
         if (!mounted) return;
-        if (settingsRes.ok && settingsJson?.success) {
-          setFeatures(extractFeatureFlags(settingsJson.value));
-        }
+        if (json?.success) setFeatures(extractFeatureFlags(json.value));
       } catch { /* keep default features */ }
     };
     loadSettings();
-    const onSettingsUpdated = () => loadSettings();
+    const onSettingsUpdated = () => authFetchJsonCached('/api/admin/config/settings', { ttlMs: 5 * 60 * 1000, forceRefresh: true })
+      .then((json: any) => { if (mounted && json?.success) setFeatures(extractFeatureFlags(json.value)); })
+      .catch(() => {});
     window.addEventListener('settings-updated', onSettingsUpdated);
     return () => {
       mounted = false;

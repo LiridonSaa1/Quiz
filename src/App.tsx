@@ -103,12 +103,28 @@ import { isProfileAccessAllowed } from './lib/profileAccess';
 import { normalizeUserRole } from './lib/userRole';
 import { defaultFeatureFlags, extractFeatureFlags, FeatureFlags } from './lib/platformFeatures';
 
-const PLATFORM_CONFIG_CACHE_TTL_MS = 20_000;
-let platformConfigCache: { runtime: any; branding: any; expiresAt: number } = {
-  runtime: null,
-  branding: null,
-  expiresAt: 0,
-};
+const PLATFORM_CONFIG_CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
+const SESSION_STORAGE_KEY = 'qm_platform_init';
+
+// In-memory cache for within-session reuse
+let platformConfigCache: { data: any; expiresAt: number } = { data: null, expiresAt: 0 };
+
+// Read/write sessionStorage so data survives React re-mounts but not tab close
+function readPlatformInitCache(): any | null {
+  try {
+    const raw = sessionStorage.getItem(SESSION_STORAGE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (Date.now() < parsed.expiresAt) return parsed.data;
+    sessionStorage.removeItem(SESSION_STORAGE_KEY);
+  } catch { /* ignore */ }
+  return null;
+}
+function writePlatformInitCache(data: any) {
+  try {
+    sessionStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify({ data, expiresAt: Date.now() + PLATFORM_CONFIG_CACHE_TTL_MS }));
+  } catch { /* quota exceeded — ignore */ }
+}
 
 export default function App() {
   const [user, setUser] = useState<UserProfile | null>(null);
@@ -191,47 +207,48 @@ export default function App() {
 
   const loadPlatformRuntimeConfig = async () => {
     try {
-      const now = Date.now();
-      let runtimeJson: any = platformConfigCache.runtime;
-      let brandingJson: any = platformConfigCache.branding;
-
-      if (now >= platformConfigCache.expiresAt || !runtimeJson || !brandingJson) {
-        const [runtimeRes, brandingRes] = await Promise.all([
-          fetch(apiUrl('/api/platform/runtime')),
-          fetch(apiUrl('/api/platform/branding')),
-        ]);
-        runtimeJson = await runtimeRes.json().catch(() => ({}));
-        brandingJson = await brandingRes.json().catch(() => ({}));
-        if (runtimeRes.ok || brandingRes.ok) {
-          platformConfigCache = {
-            runtime: runtimeJson,
-            branding: brandingJson,
-            expiresAt: Date.now() + PLATFORM_CONFIG_CACHE_TTL_MS,
-          };
-        }
+      // 1. In-memory cache (fastest — survives React re-renders)
+      if (platformConfigCache.data && Date.now() < platformConfigCache.expiresAt) {
+        applyPlatformInit(platformConfigCache.data);
+        return;
       }
-
-      if (runtimeJson?.success) {
-        const nextFeatures = extractFeatureFlags({ features: runtimeJson.features });
-        setFeatures(nextFeatures);
-        setMaintenanceMode(Boolean(runtimeJson.maintenanceMode));
-        const schoolName = String(runtimeJson.schoolName || 'QuizMaster').trim();
-        if (schoolName) document.title = schoolName;
+      // 2. sessionStorage cache (survives page navigations within the tab)
+      const cached = readPlatformInitCache();
+      if (cached) {
+        platformConfigCache = { data: cached, expiresAt: Date.now() + PLATFORM_CONFIG_CACHE_TTL_MS };
+        applyPlatformInit(cached);
+        return;
       }
-      if (brandingJson?.success) {
-        const faviconUrl = brandingJson?.faviconUrl;
-        if (typeof faviconUrl === 'string' && faviconUrl.trim()) {
-          let link = document.querySelector("link[rel~='icon']") as HTMLLinkElement | null;
-          if (!link) {
-            link = document.createElement('link');
-            link.rel = 'icon';
-            document.head.appendChild(link);
-          }
-          link.href = faviconUrl;
-        }
+      // 3. Network — ONE request instead of two
+      const res = await fetch(apiUrl('/api/platform/init'));
+      const json = await res.json().catch(() => ({}));
+      if (res.ok && json?.success) {
+        platformConfigCache = { data: json, expiresAt: Date.now() + PLATFORM_CONFIG_CACHE_TTL_MS };
+        writePlatformInitCache(json);
+        applyPlatformInit(json);
       }
     } catch {
       // keep defaults when config table is unavailable
+    }
+  };
+
+  const applyPlatformInit = (json: any) => {
+    if (!json?.success) return;
+    const nextFeatures = extractFeatureFlags({ features: json.features });
+    setFeatures(nextFeatures);
+    setMaintenanceMode(Boolean(json.maintenanceMode));
+    const schoolName = String(json.schoolName || 'QuizMaster').trim();
+    if (schoolName) document.title = schoolName;
+    // Apply favicon
+    const faviconUrl = json?.faviconUrl;
+    if (typeof faviconUrl === 'string' && faviconUrl.trim()) {
+      let link = document.querySelector("link[rel~='icon']") as HTMLLinkElement | null;
+      if (!link) {
+        link = document.createElement('link');
+        link.rel = 'icon';
+        document.head.appendChild(link);
+      }
+      link.href = faviconUrl;
     }
   };
 

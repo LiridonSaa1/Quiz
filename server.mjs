@@ -4473,6 +4473,51 @@ Assistant:`
       res.status(500).json({ error: e?.message || "Failed to load platform runtime config" });
     }
   });
+  app.get("/api/platform/init", async (_req, res) => {
+    try {
+      const [settings, branding] = await Promise.all([
+        getConfigSection("settings").catch(() => null),
+        getConfigSection("branding").catch(() => null)
+      ]);
+      const s = settings || {};
+      const b = branding || {};
+      const features = extractPublicFeatureFlags(settings);
+      const maintenanceMode = Boolean(s?.advanced?.maintenance);
+      const schoolName = typeof s?.general?.school_name === "string" && s.general.school_name.trim() || typeof b?.schoolName === "string" && b.schoolName.trim() || "QuizMaster";
+      res.set("Cache-Control", "public, max-age=60, stale-while-revalidate=300");
+      res.json({
+        success: true,
+        features,
+        maintenanceMode,
+        schoolName,
+        logoUrl: typeof b.logoUrl === "string" ? b.logoUrl : null,
+        faviconUrl: typeof b.faviconUrl === "string" ? b.faviconUrl : null,
+        logoText: typeof b.logoText === "string" ? b.logoText.trim().toUpperCase() : null,
+        colors: b.colors && typeof b.colors === "object" ? b.colors : null,
+        typography: b.typography && typeof b.typography === "object" ? b.typography : null,
+        copy: b.copy && typeof b.copy === "object" ? b.copy : null,
+        darkMode: Boolean(b.darkMode)
+      });
+    } catch (e) {
+      if (isPlatformConfigMissing(e)) {
+        res.set("Cache-Control", "public, max-age=60");
+        return res.json({
+          success: true,
+          features: extractPublicFeatureFlags(null),
+          maintenanceMode: false,
+          schoolName: "QuizMaster",
+          logoUrl: null,
+          faviconUrl: null,
+          logoText: null,
+          colors: null,
+          typography: null,
+          copy: null,
+          darkMode: false
+        });
+      }
+      res.status(500).json({ error: e?.message || "Failed to load platform config" });
+    }
+  });
   const twoFactorCodes = /* @__PURE__ */ new Map();
   const TWOFA_TTL_MS = 5 * 60 * 1e3;
   const TWOFA_MAX_ATTEMPTS = 5;

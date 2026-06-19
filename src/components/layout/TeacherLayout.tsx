@@ -13,7 +13,7 @@ import { cn } from '../../lib/utils';
 import NotificationCenter from '../NotificationCenter';
 import BackendStatus from '../BackendStatus';
 import LanguageDropdown from '../LanguageDropdown';
-import { authFetch } from '../../lib/apiUrl';
+import { authFetch, authFetchJsonCached } from '../../lib/apiUrl';
 import { defaultFeatureFlags, extractFeatureFlags, FeatureFlags } from '../../lib/platformFeatures';
 import { getTeacherPagePermission, useTeacherPermissions } from '../../lib/teacherPermissions';
 import { useBranding } from '../../lib/useBranding';
@@ -291,14 +291,15 @@ export default function TeacherLayout({ children }: { children: React.ReactNode 
     let mounted = true;
     const loadSettings = async () => {
       try {
-        const res = await authFetch('/api/platform/features');
-        const json = await res.json();
-        if (!mounted || !res.ok || !json?.success) return;
+        const json = await authFetchJsonCached('/api/platform/features', { ttlMs: 5 * 60 * 1000 });
+        if (!mounted || !json?.success) return;
         setFeatures(extractFeatureFlags({ features: json.features }));
       } catch { /* keep defaults */ }
     };
     loadSettings();
-    const onSettingsUpdated = () => loadSettings();
+    const onSettingsUpdated = () => authFetchJsonCached('/api/platform/features', { ttlMs: 5 * 60 * 1000, forceRefresh: true })
+      .then((json: any) => { if (mounted && json?.success) setFeatures(extractFeatureFlags({ features: json.features })); })
+      .catch(() => {});
     window.addEventListener('settings-updated', onSettingsUpdated);
     return () => {
       mounted = false;

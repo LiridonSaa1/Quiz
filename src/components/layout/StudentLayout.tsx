@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { supabase } from '../../supabase';
-import { authFetch } from '../../lib/apiUrl';
+import { authFetch, authFetchJsonCached } from '../../lib/apiUrl';
 import { cn } from '../../lib/utils';
 import NotificationCenter from '../NotificationCenter';
 import BackendStatus from '../BackendStatus';
@@ -110,14 +110,16 @@ export default function StudentLayout({ children }: { children: React.ReactNode 
     let mounted = true;
     const loadSettings = async () => {
       try {
-        const res = await authFetch('/api/platform/features');
-        const json = await res.json();
-        if (!mounted || !res.ok || !json?.success) return;
+        // authFetchJsonCached deduplicates concurrent calls and caches for 5 minutes
+        const json = await authFetchJsonCached('/api/platform/features', { ttlMs: 5 * 60 * 1000 });
+        if (!mounted || !json?.success) return;
         setFeatures(extractFeatureFlags({ features: json.features }));
       } catch { /* keep defaults */ }
     };
     loadSettings();
-    const onSettingsUpdated = () => loadSettings();
+    const onSettingsUpdated = () => authFetchJsonCached('/api/platform/features', { ttlMs: 5 * 60 * 1000, forceRefresh: true })
+      .then((json: any) => { if (mounted && json?.success) setFeatures(extractFeatureFlags({ features: json.features })); })
+      .catch(() => {});
     window.addEventListener('settings-updated', onSettingsUpdated);
     return () => {
       mounted = false;
@@ -145,16 +147,16 @@ export default function StudentLayout({ children }: { children: React.ReactNode 
     if (!features.announcementsEnabled) { setUrgentAnnCount(0); return; }
     const check = async () => {
       try {
-        const res = await authFetch('/api/student/announcements');
-        const json = await res.json();
-        if (json.success) {
+        // Cache for 3 minutes — urgent count doesn't need to be real-time
+        const json = await authFetchJsonCached('/api/student/announcements', { ttlMs: 3 * 60 * 1000 });
+        if (json?.success) {
           const urgent = (json.announcements || []).filter((a: any) => a.priority === 'urgent').length;
           setUrgentAnnCount(urgent);
         }
       } catch { /* silent */ }
     };
     check();
-    const interval = setInterval(check, 60000);
+    const interval = setInterval(check, 3 * 60 * 1000);
     return () => clearInterval(interval);
   }, [features.announcementsEnabled]);
 

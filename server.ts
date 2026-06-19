@@ -2735,6 +2735,51 @@ When giving instructions, number each step clearly. Be precise and technical whe
     }
   });
 
+  // ── Combined platform init endpoint — returns runtime + branding + features in ONE request.
+  // Replaces the 2-3 separate calls that App.tsx, StudentLayout and TeacherLayout used to fire.
+  app.get("/api/platform/init", async (_req, res) => {
+    try {
+      const [settings, branding] = await Promise.all([
+        getConfigSection("settings").catch(() => null),
+        getConfigSection("branding").catch(() => null),
+      ]);
+      const s: any = settings || {};
+      const b: any = branding || {};
+      const features = extractPublicFeatureFlags(settings);
+      const maintenanceMode = Boolean(s?.advanced?.maintenance);
+      const schoolName = (typeof s?.general?.school_name === "string" && s.general.school_name.trim()) ||
+        (typeof b?.schoolName === "string" && b.schoolName.trim()) || "QuizMaster";
+      // Set a short browser cache so identical unauthenticated visits reuse the response
+      res.set("Cache-Control", "public, max-age=60, stale-while-revalidate=300");
+      res.json({
+        success: true,
+        features,
+        maintenanceMode,
+        schoolName,
+        logoUrl: typeof b.logoUrl === "string" ? b.logoUrl : null,
+        faviconUrl: typeof b.faviconUrl === "string" ? b.faviconUrl : null,
+        logoText: typeof b.logoText === "string" ? b.logoText.trim().toUpperCase() : null,
+        colors: b.colors && typeof b.colors === "object" ? b.colors : null,
+        typography: b.typography && typeof b.typography === "object" ? b.typography : null,
+        copy: b.copy && typeof b.copy === "object" ? b.copy : null,
+        darkMode: Boolean(b.darkMode),
+      });
+    } catch (e: any) {
+      if (isPlatformConfigMissing(e)) {
+        res.set("Cache-Control", "public, max-age=60");
+        return res.json({
+          success: true,
+          features: extractPublicFeatureFlags(null),
+          maintenanceMode: false,
+          schoolName: "QuizMaster",
+          logoUrl: null, faviconUrl: null, logoText: null, colors: null,
+          typography: null, copy: null, darkMode: false,
+        });
+      }
+      res.status(500).json({ error: e?.message || "Failed to load platform config" });
+    }
+  });
+
   // ─── Two-Factor Authentication ──────────────────────────────────────────
   const twoFactorCodes = new Map<string, { code: string; expiresAt: number; attempts: number }>();
   const TWOFA_TTL_MS = 5 * 60 * 1000;
