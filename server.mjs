@@ -9467,13 +9467,13 @@ ${e?.stack || ""}`),
     try {
       const { month } = req.query;
       const monthYear = month || (/* @__PURE__ */ new Date()).toISOString().slice(0, 7);
-      const [studentsRes, paymentsResult, teachersResult] = await Promise.all([
+      const [studentsRes, paymentsRes, teachersResult] = await Promise.all([
         supabaseAdmin.from("profiles").select("id, display_name, email, teacher_id").eq("role", "student").order("display_name"),
-        poolQuery(`SELECT * FROM student_monthly_payments WHERE month_year = $1 ORDER BY paid_at DESC`, [monthYear]).catch(() => null),
+        supabaseAdmin.from("student_monthly_payments").select("*").eq("month_year", monthYear).order("paid_at", { ascending: false }),
         supabaseAdmin.from("profiles").select("id, display_name, email").eq("role", "teacher")
       ]);
       if (studentsRes.error) throw studentsRes.error;
-      const payments = paymentsResult?.rows || [];
+      const payments = paymentsRes.data || [];
       const teacherMap = {};
       (teachersResult.data || []).forEach((t) => {
         teacherMap[t.id] = t.display_name || t.email || "Unknown";
@@ -9498,22 +9498,15 @@ ${e?.stack || ""}`),
     }
   });
   app.post("/api/admin/student-payments", async (req, res) => {
-    if (!process.env.DATABASE_URL?.trim()) return res.status(503).json({ error: "DATABASE_URL not configured. Add it to Render environment variables." });
     try {
       const { student_id, month_year, amount = 0, notes = "" } = req.body || {};
       if (!student_id) return res.status(400).json({ error: "student_id is required" });
       const monthYear = month_year || (/* @__PURE__ */ new Date()).toISOString().slice(0, 7);
       const { data: student, error: sErr } = await supabaseAdmin.from("profiles").select("id, display_name, email, teacher_id").eq("id", student_id).single();
       if (sErr || !student) return res.status(400).json({ error: "Student not found" });
-      const result = await poolQuery(
-        `INSERT INTO student_monthly_payments (student_id, month_year, amount, notes, paid_at)
-         VALUES ($1, $2, $3, $4, NOW())
-         ON CONFLICT (student_id, month_year)
-         DO UPDATE SET amount = EXCLUDED.amount, notes = EXCLUDED.notes, paid_at = NOW()
-         RETURNING id`,
-        [student_id, monthYear, Number(amount) || 0, notes || ""]
-      );
-      const paymentId = result.rows[0]?.id;
+      const { data: inserted, error: insErr } = await supabaseAdmin.from("student_monthly_payments").upsert({ student_id, month_year: monthYear, amount: Number(amount) || 0, notes: notes || "", paid_at: (/* @__PURE__ */ new Date()).toISOString() }, { onConflict: "student_id,month_year" }).select("id").single();
+      if (insErr) throw insErr;
+      const paymentId = inserted?.id;
       const studentName = student.display_name || student.email || "Student";
       const [yr, mo] = monthYear.split("-");
       const monthLabel = new Date(Number(yr), Number(mo) - 1, 1).toLocaleString("default", { month: "long", year: "numeric" });
@@ -9541,10 +9534,10 @@ ${e?.stack || ""}`),
     }
   });
   app.delete("/api/admin/student-payments/:id", async (req, res) => {
-    if (!process.env.DATABASE_URL?.trim()) return res.status(503).json({ error: "DATABASE_URL not configured." });
     try {
       const { id } = req.params;
-      await poolQuery(`DELETE FROM student_monthly_payments WHERE id = $1`, [id]);
+      const { error } = await supabaseAdmin.from("student_monthly_payments").delete().eq("id", id);
+      if (error) throw error;
       res.json({ success: true });
     } catch (e) {
       res.status(500).json({ error: e.message || "Failed to delete payment" });
@@ -9559,11 +9552,8 @@ ${e?.stack || ""}`),
       const { data: profile } = await supabaseAdmin.from("profiles").select("role").eq("id", user.id).single();
       if (profile?.role !== "student") return res.json({ required: false, paid: true });
       const monthYear = (/* @__PURE__ */ new Date()).toISOString().slice(0, 7);
-      const result = await poolQuery(
-        `SELECT id FROM student_monthly_payments WHERE student_id = $1 AND month_year = $2 LIMIT 1`,
-        [user.id, monthYear]
-      ).catch(() => null);
-      res.json({ required: true, paid: (result?.rows?.length || 0) > 0 });
+      const { data: payRow } = await supabaseAdmin.from("student_monthly_payments").select("id").eq("student_id", user.id).eq("month_year", monthYear).maybeSingle();
+      res.json({ required: true, paid: !!payRow });
     } catch (e) {
       res.json({ required: false, paid: true });
     }
@@ -9575,13 +9565,13 @@ ${e?.stack || ""}`),
       const [yr, mo] = monthYear.split("-");
       const startDate = `${yr}-${mo}-01`;
       const endDate = new Date(Number(yr), Number(mo), 0).toISOString().slice(0, 10);
-      const sql = teacher_id ? `SELECT * FROM teacher_hours WHERE work_date >= $1 AND work_date <= $2 AND teacher_id = $3 ORDER BY work_date DESC` : `SELECT * FROM teacher_hours WHERE work_date >= $1 AND work_date <= $2 ORDER BY work_date DESC`;
-      const params = teacher_id ? [startDate, endDate, teacher_id] : [startDate, endDate];
-      const [hoursResult, teachersRes] = await Promise.all([
-        poolQuery(sql, params).catch(() => null),
+      let hoursQuery = supabaseAdmin.from("teacher_hours").select("*").gte("work_date", startDate).lte("work_date", endDate).order("work_date", { ascending: false });
+      if (teacher_id) hoursQuery = hoursQuery.eq("teacher_id", teacher_id);
+      const [hoursRes, teachersRes] = await Promise.all([
+        hoursQuery,
         supabaseAdmin.from("profiles").select("id, display_name, email").eq("role", "teacher").order("display_name")
       ]);
-      const rows = hoursResult?.rows || [];
+      const rows = hoursRes.data || [];
       const teacherMap = {};
       (teachersRes.data || []).forEach((t) => {
         teacherMap[t.id] = t.display_name || t.email || "Unknown";
@@ -9613,7 +9603,6 @@ ${e?.stack || ""}`),
     }
   });
   app.post("/api/admin/teacher-hours", async (req, res) => {
-    if (!process.env.DATABASE_URL?.trim()) return res.status(503).json({ error: "DATABASE_URL not configured. Add it to Render environment variables." });
     try {
       const { teacher_id, work_date, hours, rate_per_hour = 40, notes = "" } = req.body || {};
       if (!teacher_id) return res.status(400).json({ error: "teacher_id is required" });
@@ -9626,52 +9615,35 @@ ${e?.stack || ""}`),
       if (work_date < monthStart || work_date > monthEnd) {
         return res.status(400).json({ error: "Data e pun\xEBs nuk \xEBsht\xEB e vlefshme" });
       }
-      const result = await poolQuery(
-        `INSERT INTO teacher_hours (teacher_id, work_date, hours, rate_per_hour, notes)
-         VALUES ($1, $2, $3, $4, $5) RETURNING id`,
-        [teacher_id, work_date, numHours, Number(rate_per_hour) || 40, notes || ""]
-      );
-      res.json({ success: true, id: result.rows[0]?.id });
+      const { data: inserted, error: insErr } = await supabaseAdmin.from("teacher_hours").insert({ teacher_id, work_date, hours: numHours, rate_per_hour: Number(rate_per_hour) || 40, notes: notes || "" }).select("id").single();
+      if (insErr) throw insErr;
+      res.json({ success: true, id: inserted?.id });
     } catch (e) {
       res.status(500).json({ error: e.message || "Failed to record hours" });
     }
   });
   app.patch("/api/admin/teacher-hours/:id", async (req, res) => {
-    if (!process.env.DATABASE_URL?.trim()) return res.status(503).json({ error: "DATABASE_URL not configured." });
     try {
       const { id } = req.params;
       const { hours, rate_per_hour, notes, work_date } = req.body || {};
-      const setClauses = [];
-      const params = [];
-      if (hours !== void 0) {
-        params.push(Number(hours));
-        setClauses.push(`hours = $${params.length}`);
-      }
-      if (rate_per_hour !== void 0) {
-        params.push(Number(rate_per_hour));
-        setClauses.push(`rate_per_hour = $${params.length}`);
-      }
-      if (notes !== void 0) {
-        params.push(notes);
-        setClauses.push(`notes = $${params.length}`);
-      }
-      if (work_date !== void 0) {
-        params.push(work_date);
-        setClauses.push(`work_date = $${params.length}`);
-      }
-      if (!setClauses.length) return res.json({ success: true });
-      params.push(id);
-      await poolQuery(`UPDATE teacher_hours SET ${setClauses.join(", ")} WHERE id = $${params.length}`, params);
+      const updates = {};
+      if (hours !== void 0) updates.hours = Number(hours);
+      if (rate_per_hour !== void 0) updates.rate_per_hour = Number(rate_per_hour);
+      if (notes !== void 0) updates.notes = notes;
+      if (work_date !== void 0) updates.work_date = work_date;
+      if (!Object.keys(updates).length) return res.json({ success: true });
+      const { error } = await supabaseAdmin.from("teacher_hours").update(updates).eq("id", id);
+      if (error) throw error;
       res.json({ success: true });
     } catch (e) {
       res.status(500).json({ error: e.message || "Failed to update hours" });
     }
   });
   app.delete("/api/admin/teacher-hours/:id", async (req, res) => {
-    if (!process.env.DATABASE_URL?.trim()) return res.status(503).json({ error: "DATABASE_URL not configured." });
     try {
       const { id } = req.params;
-      await poolQuery(`DELETE FROM teacher_hours WHERE id = $1`, [id]);
+      const { error } = await supabaseAdmin.from("teacher_hours").delete().eq("id", id);
+      if (error) throw error;
       res.json({ success: true });
     } catch (e) {
       res.status(500).json({ error: e.message || "Failed to delete hours" });
@@ -9685,15 +9657,12 @@ ${e?.stack || ""}`),
       const [yr, mo] = monthYear.split("-");
       const startDate = `${yr}-${mo}-01`;
       const endDate = new Date(Number(yr), Number(mo), 0).toISOString().slice(0, 10);
-      const [teacherRes, hoursResult] = await Promise.all([
+      const [teacherRes, hoursRes] = await Promise.all([
         supabaseAdmin.from("profiles").select("id, display_name, email").eq("id", teacher_id).single(),
-        poolQuery(
-          `SELECT * FROM teacher_hours WHERE teacher_id = $1 AND work_date >= $2 AND work_date <= $3 ORDER BY work_date`,
-          [teacher_id, startDate, endDate]
-        ).catch(() => null)
+        supabaseAdmin.from("teacher_hours").select("*").eq("teacher_id", teacher_id).gte("work_date", startDate).lte("work_date", endDate).order("work_date")
       ]);
       if (teacherRes.error) throw teacherRes.error;
-      const rows = hoursResult?.rows || [];
+      const rows = hoursRes.data || [];
       const total_hours = rows.reduce((s, r) => s + Number(r.hours), 0);
       const total_amount = rows.reduce((s, r) => s + Number(r.hours) * Number(r.rate_per_hour), 0);
       res.json({
@@ -9718,12 +9687,8 @@ ${e?.stack || ""}`),
       const [yr, mo] = monthYear.split("-");
       const startDate = `${yr}-${mo}-01`;
       const endDate = new Date(Number(yr), Number(mo), 0).toISOString().slice(0, 10);
-      const result = await poolQuery(
-        `SELECT hours, rate_per_hour, work_date FROM teacher_hours
-         WHERE teacher_id = $1 AND work_date >= $2 AND work_date <= $3`,
-        [user.id, startDate, endDate]
-      ).catch(() => null);
-      const rows = result?.rows || [];
+      const { data: earningsData } = await supabaseAdmin.from("teacher_hours").select("hours, rate_per_hour, work_date").eq("teacher_id", user.id).gte("work_date", startDate).lte("work_date", endDate);
+      const rows = earningsData || [];
       const total_hours = rows.reduce((s, r) => s + Number(r.hours), 0);
       const total_amount = rows.reduce((s, r) => s + Number(r.hours) * Number(r.rate_per_hour), 0);
       res.json({ success: true, total_hours, total_amount, month_year: monthYear });
