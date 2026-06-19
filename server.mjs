@@ -12459,6 +12459,77 @@ ${smartUserPrompt}` });
       return res.status(500).json({ error: e?.message || "Failed to load student profile" });
     }
   });
+  app.get("/api/student/modules", async (req, res) => {
+    try {
+      const caller = await assertAuthenticated(req, res);
+      if (!caller) return;
+      if (caller.role !== "student" && caller.role !== "admin") {
+        return res.status(403).json({ error: "Forbidden" });
+      }
+      const uid = caller.userId;
+      let courseIds = [];
+      const directRes = await supabaseAdmin.from("courses").select("id,title,level,status").contains("student_ids", [uid]).eq("status", "published");
+      if (!directRes.error) {
+        courseIds = (directRes.data || []).map((c) => String(c.id));
+      }
+      const classRes = await supabaseAdmin.from("classes").select("course_id").contains("student_ids", [uid]);
+      if (!classRes.error && classRes.data?.length) {
+        const classCourseIds = classRes.data.map((r) => String(r.course_id)).filter(Boolean);
+        const missing = classCourseIds.filter((id) => !courseIds.includes(id));
+        if (missing.length) {
+          const extraRes = await supabaseAdmin.from("courses").select("id").in("id", missing).eq("status", "published");
+          if (!extraRes.error) courseIds.push(...(extraRes.data || []).map((c) => String(c.id)));
+        }
+      }
+      if (!courseIds.length) {
+        const profileRes = await supabaseAdmin.from("profiles").select("teacher_id").eq("id", uid).single();
+        const teacherId = profileRes.data?.teacher_id;
+        if (teacherId) {
+          const teacherCourses = await supabaseAdmin.from("courses").select("id").eq("teacher_id", teacherId).eq("status", "published");
+          if (!teacherCourses.error) courseIds.push(...(teacherCourses.data || []).map((c) => String(c.id)));
+        }
+        if (!courseIds.length) {
+          const allRes = await supabaseAdmin.from("courses").select("id").eq("status", "published");
+          if (!allRes.error) courseIds.push(...(allRes.data || []).map((c) => String(c.id)));
+        }
+      }
+      courseIds = [...new Set(courseIds)];
+      if (!courseIds.length) return res.json({ success: true, modules: [], courses: [] });
+      const [coursesRes, modulesRes] = await Promise.all([
+        supabaseAdmin.from("courses").select("id,title,level").in("id", courseIds),
+        supabaseAdmin.from("modules").select("id,title,description,order,status,course_id,created_at").in("course_id", courseIds).order("order", { ascending: true })
+      ]);
+      const moduleIds = (modulesRes.data || []).map((m) => String(m.id));
+      const lessonsRes = moduleIds.length ? await supabaseAdmin.from("lessons").select("id,module_id").in("module_id", moduleIds) : { data: [] };
+      const lessonsByModule = {};
+      (lessonsRes.data || []).forEach((l) => {
+        lessonsByModule[l.module_id] = (lessonsByModule[l.module_id] || 0) + 1;
+      });
+      const courseTitleMap = {};
+      const courseLevelMap = {};
+      (coursesRes.data || []).forEach((c) => {
+        courseTitleMap[c.id] = c.title || "";
+        courseLevelMap[c.id] = c.level || "";
+      });
+      const modules = (modulesRes.data || []).map((m) => ({
+        id: m.id,
+        title: m.title || "Untitled Module",
+        description: m.description || "",
+        order: m.order ?? 0,
+        status: m.status || "active",
+        course_id: m.course_id,
+        courseTitle: courseTitleMap[m.course_id] || "Course",
+        courseLevel: courseLevelMap[m.course_id] || "",
+        lessonCount: lessonsByModule[m.id] || 0,
+        createdAt: m.created_at || ""
+      }));
+      const courses = (coursesRes.data || []).map((c) => ({ id: c.id, title: c.title || "Course", level: c.level || "" }));
+      return res.json({ success: true, modules, courses });
+    } catch (e) {
+      console.error("GET /api/student/modules", e);
+      return res.status(500).json({ error: e?.message || "Failed to load modules" });
+    }
+  });
   app.get("/api/student/lessons", async (req, res) => {
     try {
       const caller = await assertAuthenticated(req, res);

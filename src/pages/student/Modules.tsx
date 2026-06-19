@@ -79,113 +79,36 @@ export default function StudentModules() {
         if (!session) { setLoading(false); return; }
         const uid = session.user.id;
 
-        // Step 1 — get enrolled courses the same way Courses.tsx does:
-        // (a) direct student_ids enrollment, (b) class-based enrollment, (c) available via teacher
-        const [enrolledRes, classesRes, availableRes] = await Promise.all([
-          supabase.from('courses').select('id,title,level,status').contains('student_ids', [uid]),
-          supabase.from('classes').select('course_id').contains('student_ids', [uid]),
-          authFetch('/api/student/courses/available').then((r) => r.json()).catch(() => ({ courses: [] })),
-        ]);
+        // Use the server-side API that bypasses RLS with supabaseAdmin
+        const resp = await authFetch('/api/student/modules');
+        const json = await resp.json();
+        if (!json.success) { setLoading(false); return; }
 
-        let courseRows: any[] = [];
+        const moduleData: any[] = json.modules || [];
+        const courseData: any[] = json.courses || [];
 
-        // Direct enrollment (ignore schema-missing errors silently)
-        if (!enrolledRes.error || isMissingCoursesStudentIdsError(enrolledRes.error)) {
-          courseRows = Array.isArray(enrolledRes.data) ? enrolledRes.data : [];
-        }
+        setCourses(courseData.map((c: any) => ({ id: c.id, title: c.title || 'Course', level: c.level || '' })));
 
-        // Class-based enrollment — add courses linked via class membership
-        if (!classesRes.error || isMissingCoursesStudentIdsError(classesRes.error)) {
-          const classCourseIds = (Array.isArray(classesRes.data) ? classesRes.data : [])
-            .map((r: any) => String(r.course_id || ''))
-            .filter(Boolean);
-          const missingIds = classCourseIds.filter((cid) => !courseRows.some((c: any) => c.id === cid));
-          if (missingIds.length > 0) {
-            const { data: extra } = await supabase
-              .from('courses')
-              .select('id,title,level,status')
-              .in('id', missingIds);
-            if (extra) courseRows = [...courseRows, ...extra];
-          }
-        }
-
-        // Available via teacher (covers the no-student_ids fallback path)
-        const available: any[] = Array.isArray(availableRes?.courses) ? availableRes.courses : [];
-        const enrolledIds = new Set(courseRows.map((c: any) => String(c.id)));
-        for (const ac of available) {
-          if (ac?.id && !enrolledIds.has(String(ac.id))) {
-            courseRows.push(ac);
-            enrolledIds.add(String(ac.id));
-          }
-        }
-
-        // Keep only published courses
-        courseRows = courseRows.filter((c: any) => String(c.status || '').toLowerCase() === 'published');
-
-        if (!courseRows.length) { setLoading(false); return; }
-
-        const courseIds = courseRows.map((c) => c.id);
-        const courseTitleMap: Record<string, string> = {};
-        const courseLevelMap: Record<string, string> = {};
-        courseRows.forEach((c) => {
-          courseTitleMap[c.id] = c.title || 'Course';
-          courseLevelMap[c.id] = c.level || '';
-        });
-
-        setCourses(courseRows.map((c) => ({ id: c.id, title: c.title || 'Course', level: c.level || '' })));
-
-        // Fetch modules
-        const { data: modRows } = await supabase
-          .from('modules')
-          .select('id,title,description,order,status,course_id,created_at')
-          .in('course_id', courseIds)
-          .order('order', { ascending: true });
-
-        if (!modRows?.length) { setLoading(false); return; }
-
-        const moduleIds = modRows.map((m) => m.id);
-
-        // Fetch lesson counts
-        const { data: lessonRows } = await supabase
-          .from('lessons')
-          .select('id,module_id')
-          .in('module_id', moduleIds);
-
-        const lessonsByModule: Record<string, string[]> = {};
-        (lessonRows || []).forEach((l: any) => {
-          if (!lessonsByModule[l.module_id]) lessonsByModule[l.module_id] = [];
-          lessonsByModule[l.module_id].push(l.id);
-        });
-
-        // Read localStorage progress per course
+        // Merge localStorage progress (completed lesson IDs stored client-side)
         const completedByModule: Record<string, number> = {};
-        courseIds.forEach((cid) => {
+        const lessonCountByModule: Record<string, number> = {};
+        moduleData.forEach((m: any) => { lessonCountByModule[m.id] = m.lessonCount || 0; });
+
+        courseData.forEach((c: any) => {
           try {
-            const raw = localStorage.getItem(`course_progress:${uid}:${cid}`);
+            const raw = localStorage.getItem(`course_progress:${uid}:${c.id}`);
             if (!raw) return;
             const parsed = JSON.parse(raw);
             const completedIds: string[] = Array.isArray(parsed?.completedLessonIds) ? parsed.completedLessonIds : [];
-            modRows
-              .filter((m) => m.course_id === cid)
-              .forEach((m) => {
-                const modLessons = lessonsByModule[m.id] || [];
-                completedByModule[m.id] = modLessons.filter((lid) => completedIds.includes(lid)).length;
-              });
+            moduleData.filter((m: any) => m.course_id === c.id).forEach((m: any) => {
+              completedByModule[m.id] = completedIds.length > 0 ? Math.min(completedIds.length, lessonCountByModule[m.id] || 0) : 0;
+            });
           } catch { /* skip */ }
         });
 
-        setModules(modRows.map((m) => ({
-          id: m.id,
-          title: m.title || 'Untitled Module',
-          description: m.description || '',
-          order: m.order ?? 0,
-          status: m.status || 'active',
-          course_id: m.course_id,
-          courseTitle: courseTitleMap[m.course_id] || 'Course',
-          courseLevel: courseLevelMap[m.course_id] || '',
-          lessonCount: (lessonsByModule[m.id] || []).length,
+        setModules(moduleData.map((m: any) => ({
+          ...m,
           completedCount: completedByModule[m.id] || 0,
-          createdAt: m.created_at || '',
         })));
       } catch { /* graceful */ } finally {
         setLoading(false);

@@ -13139,6 +13139,96 @@ Content:\n"""${clipped}"""`;
     }
   });
 
+  // Student modules: returns all modules for enrolled courses via supabaseAdmin (bypasses RLS).
+  app.get('/api/student/modules', async (req, res) => {
+    try {
+      const caller = await assertAuthenticated(req, res);
+      if (!caller) return;
+      if (caller.role !== 'student' && caller.role !== 'admin') {
+        return res.status(403).json({ error: 'Forbidden' });
+      }
+
+      // Resolve enrolled course IDs using the same multi-path logic as /api/student/courses/available
+      const uid = caller.userId;
+
+      // Path A: direct student_ids enrollment
+      let courseIds: string[] = [];
+      const directRes = await supabaseAdmin.from('courses')
+        .select('id,title,level,status')
+        .contains('student_ids', [uid])
+        .eq('status', 'published');
+      if (!directRes.error) {
+        courseIds = (directRes.data || []).map((c: any) => String(c.id));
+      }
+
+      // Path B: class-based enrollment
+      const classRes = await supabaseAdmin.from('classes').select('course_id').contains('student_ids', [uid]);
+      if (!classRes.error && classRes.data?.length) {
+        const classCourseIds = classRes.data.map((r: any) => String(r.course_id)).filter(Boolean);
+        const missing = classCourseIds.filter((id) => !courseIds.includes(id));
+        if (missing.length) {
+          const extraRes = await supabaseAdmin.from('courses').select('id').in('id', missing).eq('status', 'published');
+          if (!extraRes.error) courseIds.push(...(extraRes.data || []).map((c: any) => String(c.id)));
+        }
+      }
+
+      // Path C: teacher-linked courses (via profile.teacher_id)
+      if (!courseIds.length) {
+        const profileRes = await supabaseAdmin.from('profiles').select('teacher_id').eq('id', uid).single();
+        const teacherId = profileRes.data?.teacher_id;
+        if (teacherId) {
+          const teacherCourses = await supabaseAdmin.from('courses').select('id').eq('teacher_id', teacherId).eq('status', 'published');
+          if (!teacherCourses.error) courseIds.push(...(teacherCourses.data || []).map((c: any) => String(c.id)));
+        }
+        if (!courseIds.length) {
+          // fallback: all published courses
+          const allRes = await supabaseAdmin.from('courses').select('id').eq('status', 'published');
+          if (!allRes.error) courseIds.push(...(allRes.data || []).map((c: any) => String(c.id)));
+        }
+      }
+
+      courseIds = [...new Set(courseIds)];
+      if (!courseIds.length) return res.json({ success: true, modules: [], courses: [] });
+
+      // Fetch course details + modules + lesson counts
+      const [coursesRes, modulesRes] = await Promise.all([
+        supabaseAdmin.from('courses').select('id,title,level').in('id', courseIds),
+        supabaseAdmin.from('modules').select('id,title,description,order,status,course_id,created_at').in('course_id', courseIds).order('order', { ascending: true }),
+      ]);
+
+      const moduleIds = (modulesRes.data || []).map((m: any) => String(m.id));
+      const lessonsRes = moduleIds.length
+        ? await supabaseAdmin.from('lessons').select('id,module_id').in('module_id', moduleIds)
+        : { data: [] };
+
+      const lessonsByModule: Record<string, number> = {};
+      (lessonsRes.data || []).forEach((l: any) => { lessonsByModule[l.module_id] = (lessonsByModule[l.module_id] || 0) + 1; });
+
+      const courseTitleMap: Record<string, string> = {};
+      const courseLevelMap: Record<string, string> = {};
+      (coursesRes.data || []).forEach((c: any) => { courseTitleMap[c.id] = c.title || ''; courseLevelMap[c.id] = c.level || ''; });
+
+      const modules = (modulesRes.data || []).map((m: any) => ({
+        id: m.id,
+        title: m.title || 'Untitled Module',
+        description: m.description || '',
+        order: m.order ?? 0,
+        status: m.status || 'active',
+        course_id: m.course_id,
+        courseTitle: courseTitleMap[m.course_id] || 'Course',
+        courseLevel: courseLevelMap[m.course_id] || '',
+        lessonCount: lessonsByModule[m.id] || 0,
+        createdAt: m.created_at || '',
+      }));
+
+      const courses = (coursesRes.data || []).map((c: any) => ({ id: c.id, title: c.title || 'Course', level: c.level || '' }));
+      return res.json({ success: true, modules, courses });
+    } catch (e: any) {
+      console.error('GET /api/student/modules', e);
+      return res.status(500).json({ error: e?.message || 'Failed to load modules' });
+    }
+  });
+
   // Student lessons: only from enrolled courses (optionally one specific course).
   app.get('/api/student/lessons', async (req, res) => {
     try {
