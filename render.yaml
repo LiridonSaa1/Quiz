@@ -22,4 +22,12 @@ services:
         sync: false
       - key: BREVO_SENDER_NAME
         sync: false
+      - key: TELEGRAM_BOT_TOKEN
+        sync: false
+      - key: TELEGRAM_CHAT_ID
+        sync: false
+      - key: TELEGRAM_ALERT_FIX_URL
+        sync: false
+      - key: TELEGRAM_ALERT_COOLDOWN_MS
+        sync: false
     healthCheckPath: /api/health
