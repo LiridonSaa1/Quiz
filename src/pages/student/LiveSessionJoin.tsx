@@ -66,6 +66,10 @@ export default function StudentLiveSessionJoin() {
   const [joining, setJoining] = useState(false);
   const [handRaised, setHandRaised] = useState(false);
   const [showReactions, setShowReactions] = useState(false);
+  // Session controls pushed by teacher
+  const [chatEnabled, setChatEnabled] = useState(true);
+  const [reactionsEnabled, setReactionsEnabled] = useState(true);
+  const [raiseHandEnabled, setRaiseHandEnabled] = useState(true);
   const [floatingReactions, setFloatingReactions] = useState<{ id: string; emoji: string }[]>([]);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
@@ -291,8 +295,24 @@ export default function StudentLiveSessionJoin() {
       }, (payload) => {
         const updated = payload.new as LiveSession;
         setSession(prev => prev ? { ...prev, ...updated } : prev);
-        // Check for pushed quiz (live_quiz_id set on session)
+        // Sync session controls
         const u = payload.new as any;
+        if (u.chat_enabled !== undefined) {
+          const next = u.chat_enabled !== false;
+          setChatEnabled(next);
+          if (!next) toast.warning('💬 Mësuesi bllokoi chat-in');
+        }
+        if (u.reactions_enabled !== undefined) {
+          const next = u.reactions_enabled !== false;
+          setReactionsEnabled(next);
+          if (!next) toast.warning('😶 Mësuesi bllokoi reaksionet');
+        }
+        if (u.raise_hand_enabled !== undefined) {
+          const next = u.raise_hand_enabled !== false;
+          setRaiseHandEnabled(next);
+          if (!next) { toast.warning('✋ Mësuesi bllokoi ngritjen e dorës'); setHandRaised(false); }
+        }
+        // Check for pushed quiz (live_quiz_id set on session)
         if (u.live_quiz_id && u.live_quiz_title) {
           setLiveQuizPush({ quizId: u.live_quiz_id, quizTitle: u.live_quiz_title, sessionId: id! });
           toast.info(`📝 Mësuesi nisi kuizin: ${u.live_quiz_title}`);
@@ -354,6 +374,9 @@ export default function StudentLiveSessionJoin() {
       const json = await res.json();
       if (json.success) {
         setSession(json.session);
+        setChatEnabled(json.session.chat_enabled !== false);
+        setReactionsEnabled(json.session.reactions_enabled !== false);
+        setRaiseHandEnabled(json.session.raise_hand_enabled !== false);
       } else {
         toast.error(t('errors.notFound'));
         navigate('/student/live-sessions');
@@ -702,6 +725,7 @@ export default function StudentLiveSessionJoin() {
             {/* Raise Hand */}
             <button
               onClick={async () => {
+                if (!raiseHandEnabled) { toast.warning('✋ Mësuesi ka bllokuar ngritjen e dorës'); return; }
                 const next = !handRaised;
                 setHandRaised(next);
                 toast.info(next ? t('liveSessionStudent.handRaised') : t('liveSessionStudent.handLowered'));
@@ -714,25 +738,37 @@ export default function StudentLiveSessionJoin() {
               }}
               className={cn(
                 'flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold transition-all',
-                handRaised
-                  ? 'bg-amber-100 text-amber-700 border border-amber-200'
-                  : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                !raiseHandEnabled
+                  ? 'bg-slate-100 text-slate-400 cursor-not-allowed opacity-60'
+                  : handRaised
+                    ? 'bg-amber-100 text-amber-700 border border-amber-200'
+                    : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
               )}
             >
               <Hand className="w-4 h-4" />
               {handRaised ? t('liveSessionStudent.lowerHand') : t('liveSessionStudent.raiseHand')}
+              {!raiseHandEnabled && <span className="text-[10px] text-rose-500 font-normal">bllokuar</span>}
             </button>
 
             {/* Reactions */}
             <div className="relative">
               <button
-                onClick={() => setShowReactions(v => !v)}
-                className="flex items-center gap-2 px-4 py-2.5 bg-slate-100 text-slate-600 hover:bg-slate-200 rounded-xl text-sm font-semibold transition-all"
+                onClick={() => {
+                  if (!reactionsEnabled) { toast.warning('😶 Mësuesi ka bllokuar reaksionet'); return; }
+                  setShowReactions(v => !v);
+                }}
+                className={cn(
+                  'flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold transition-all',
+                  !reactionsEnabled
+                    ? 'bg-slate-100 text-slate-400 cursor-not-allowed opacity-60'
+                    : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                )}
               >
                 <Smile className="w-4 h-4" /> {t('liveSessionStudent.reactions')}
+                {!reactionsEnabled && <span className="text-[10px] text-rose-500 font-normal">bllokuar</span>}
               </button>
               <AnimatePresence>
-                {showReactions && (
+                {showReactions && reactionsEnabled && (
                   <motion.div
                     initial={{ opacity: 0, y: 8 }}
                     animate={{ opacity: 1, y: 0 }}
@@ -751,16 +787,22 @@ export default function StudentLiveSessionJoin() {
 
             {/* Chat toggle */}
             <button
-              onClick={() => setSidebarOpen(v => !v)}
+              onClick={() => {
+                if (!chatEnabled) { toast.warning('💬 Mësuesi ka bllokuar chat-in'); return; }
+                setSidebarOpen(v => !v);
+              }}
               className={cn(
                 'flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold transition-all',
-                sidebarOpen
-                  ? 'bg-emerald-100 text-emerald-700 border border-emerald-200'
-                  : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                !chatEnabled
+                  ? 'bg-slate-100 text-slate-400 cursor-not-allowed opacity-60'
+                  : sidebarOpen
+                    ? 'bg-emerald-100 text-emerald-700 border border-emerald-200'
+                    : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
               )}
             >
               <MessageSquare className="w-4 h-4" /> {t('liveSessionStudent.chat')}
-              {chatMessages.length > 0 && (
+              {!chatEnabled && <span className="text-[10px] text-rose-500 font-normal">bllokuar</span>}
+              {chatEnabled && chatMessages.length > 0 && (
                 <span className="px-1.5 py-0.5 text-[10px] bg-emerald-500 text-white rounded-full">{chatMessages.length}</span>
               )}
             </button>

@@ -7,7 +7,7 @@ import {
   Menu, X, Layers, PlayCircle, School, ClipboardList, CalendarCheck,
   Award, Video, MessageSquare, Megaphone, FileBarChart, User,
   GraduationCap, ScrollText, ChevronRight, PanelLeftClose, PanelLeftOpen,
-  Zap, FileBarChart2, ListChecks, Settings
+  Zap, FileBarChart2, ListChecks, Settings, HelpCircle
 } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import NotificationCenter from '../NotificationCenter';
@@ -259,8 +259,9 @@ export default function TeacherLayout({ children }: { children: React.ReactNode 
       key: 'account',
       title: t('nav.sections.account'),
       items: [
-        { icon: User,     label: t('nav.profile'),  path: '/teacher/profile' },
-        { icon: Settings, label: 'Settings',         path: '/teacher/settings' },
+        { icon: User,        label: t('nav.profile'),  path: '/teacher/profile' },
+        { icon: Settings,    label: 'Settings',         path: '/teacher/settings' },
+        { icon: HelpCircle,  label: 'Udhëzues',         path: '/teacher/guide' },
       ],
     },
   ];

@@ -10938,7 +10938,7 @@ ${smartUserPrompt}` });
     try {
       const hostId = await assertSessionHost(req, res, req.params.id);
       if (!hostId) return;
-      const ALLOWED_FIELDS = ["status", "title", "description", "scheduled_at", "duration_minutes", "recording_url", "jitsi_room_name", "started_at"];
+      const ALLOWED_FIELDS = ["status", "title", "description", "scheduled_at", "duration_minutes", "recording_url", "jitsi_room_name", "started_at", "chat_enabled", "reactions_enabled", "raise_hand_enabled"];
       const update = { updated_at: (/* @__PURE__ */ new Date()).toISOString() };
       for (const key of ALLOWED_FIELDS) {
         if (key in req.body) update[key] = req.body[key];
@@ -16360,6 +16360,49 @@ async function runLiveSessionsRecordingUrlsMigration() {
     console.warn("[migration] Run manually:", ddl);
   }
 }
+async function runLiveSessionsControlsMigration() {
+  const ddls = [
+    `ALTER TABLE public.live_sessions ADD COLUMN IF NOT EXISTS chat_enabled BOOLEAN NOT NULL DEFAULT true`,
+    `ALTER TABLE public.live_sessions ADD COLUMN IF NOT EXISTS reactions_enabled BOOLEAN NOT NULL DEFAULT true`,
+    `ALTER TABLE public.live_sessions ADD COLUMN IF NOT EXISTS raise_hand_enabled BOOLEAN NOT NULL DEFAULT true`
+  ];
+  try {
+    for (const ddl of ddls) await poolQuery(ddl);
+    console.log("[migration] live_sessions controls columns ensured \u2713");
+    return;
+  } catch {
+  }
+  try {
+    for (const ddl of ddls) {
+      const rpc = await supabaseAdmin.rpc("exec_sql", { sql: ddl });
+      if (rpc.error && !String(rpc.error.message).includes("already exists")) throw rpc.error;
+    }
+    console.log("[migration] live_sessions controls columns added via RPC \u2713");
+  } catch (err) {
+    console.warn("[migration] live_sessions controls columns could not be auto-created:", err?.message?.split("\n")[0]);
+  }
+}
+async function runSessionParticipantsHandRaisedMigration() {
+  const ddl = `ALTER TABLE public.session_participants ADD COLUMN IF NOT EXISTS is_hand_raised BOOLEAN NOT NULL DEFAULT false`;
+  try {
+    await poolQuery(ddl);
+    console.log("[migration] session_participants.is_hand_raised column ensured \u2713");
+    return;
+  } catch {
+  }
+  try {
+    const probe = await supabaseAdmin.from("session_participants").select("is_hand_raised").limit(1);
+    if (!probe.error) {
+      console.log("[migration] session_participants.is_hand_raised already exists \u2713");
+      return;
+    }
+    const rpc = await supabaseAdmin.rpc("exec_sql", { sql: ddl });
+    if (rpc.error) throw rpc.error;
+    console.log("[migration] session_participants.is_hand_raised added via RPC \u2713");
+  } catch (err) {
+    console.warn("[migration] session_participants.is_hand_raised could not be auto-created:", err?.message?.split("\n")[0]);
+  }
+}
 async function ensureHeadwayMediaTable() {
   const ddl = `
     CREATE TABLE IF NOT EXISTS headway_media (
@@ -16539,6 +16582,8 @@ async function startServer() {
   void runAssignmentsPublishAtMigration();
   void runNotificationsColumnsMigration();
   void runLiveSessionsRecordingUrlsMigration();
+  void runLiveSessionsControlsMigration();
+  void runSessionParticipantsHandRaisedMigration();
   void runQuizSectionsMigration();
   void runStudentTransfersMigration();
   void runStudentMonthlyPaymentsMigration();

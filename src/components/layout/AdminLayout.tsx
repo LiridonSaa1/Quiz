@@ -13,7 +13,8 @@ import {
   LayoutDashboard, BookOpen, Layers, PlayCircle, FileText, Users, ShieldCheck,
   School, ClipboardList, CalendarCheck, Award, Video, MessageSquare, Megaphone,
   BarChart3, FileBarChart, DollarSign, Receipt, Settings, Palette, Lock,
-  User, Shield, LogOut, Menu, X, GraduationCap, Presentation, CreditCard, Clock
+  User, Shield, LogOut, Menu, X, GraduationCap, Presentation, CreditCard, Clock,
+  HelpCircle
 } from 'lucide-react';
 
 export default function AdminLayout({ children }: { children: React.ReactNode }) {
@@ -89,8 +90,9 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
     {
       key: 'account',
       items: [
-        { icon: User,   label: t('nav.profile'),  path: '/admin/profile' },
-        { icon: Shield, label: t('nav.security'), path: '/admin/security' },
+        { icon: User,        label: t('nav.profile'),  path: '/admin/profile' },
+        { icon: Shield,      label: t('nav.security'), path: '/admin/security' },
+        { icon: HelpCircle,  label: 'Udhëzues',        path: '/admin/guide' },
       ]
     }
   ];

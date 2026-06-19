@@ -98,6 +98,7 @@ const ModuleTestBuilder = lazy(() => import('./pages/student/ModuleTestBuilder')
 const HeadwayGrammar = lazy(() => import('./pages/student/HeadwayGrammar'));
 const StudentModules = lazy(() => import('./pages/student/Modules'));
 const NotFound = lazy(() => import('./pages/NotFound'));
+const GuidePage = lazy(() => import('./pages/GuidePage'));
 import { apiUrl } from './lib/apiUrl';
 import { isProfileAccessAllowed } from './lib/profileAccess';
 import { normalizeUserRole } from './lib/userRole';
@@ -445,6 +446,7 @@ function AdminRoutes({ features }: { features: FeatureFlags }) {
       <Route path="/roles" element={<AdminRoles />} />
       <Route path="/profile" element={<AdminProfile />} />
       <Route path="/security" element={<AdminSecurityPage />} />
+      <Route path="/guide" element={<GuidePage />} />
       <Route path="*" element={<Navigate to="/not-found" replace />} />
     </Routes>
   );
@@ -486,6 +488,7 @@ function TeacherRoutes({ features }: { features: FeatureFlags }) {
       <Route path="/profile" element={<TeacherProfilePage />} />
       <Route path="/settings" element={<TeacherSettingsPage />} />
       <Route path="/exams/builder/:examId" element={<TeacherExamBuilder />} />
+      <Route path="/guide" element={<GuidePage />} />
       <Route path="*" element={<Navigate to="/not-found" replace />} />
     </Routes>
   );
@@ -524,6 +527,7 @@ function StudentRoutes({ features }: { features: FeatureFlags }) {
       <Route path="/test-builder" element={<TestBuilder />} />
       <Route path="/module-test-builder" element={<ModuleTestBuilder />} />
       <Route path="/headway-grammar" element={<HeadwayGrammar />} />
+      <Route path="/guide" element={<GuidePage />} />
       <Route path="*" element={<Navigate to="/not-found" replace />} />
     </Routes>
   );

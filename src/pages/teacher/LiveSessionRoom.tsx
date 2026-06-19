@@ -10,7 +10,8 @@ import {
   Circle, StopCircle, Hand, Users, MessageSquare, PhoneOff,
   Smile, ChevronLeft, ChevronRight, Send, Loader2,
   CheckCircle2, Film, VolumeX, Pin, UserX, Download, X, RefreshCw,
-  Copy, ClipboardCheck, BookOpen, PlayCircle, Wifi, WifiOff
+  Copy, ClipboardCheck, BookOpen, PlayCircle, Wifi, WifiOff,
+  Shield
 } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { format } from 'date-fns';
@@ -27,6 +28,9 @@ interface LiveSession {
   started_at: string | null;
   host_id: string | null;
   course: { id: string; title: string } | null;
+  chat_enabled: boolean;
+  reactions_enabled: boolean;
+  raise_hand_enabled: boolean;
 }
 
 interface Participant {
@@ -53,7 +57,7 @@ interface ChatMessage {
 }
 
 type RecordingState = 'idle' | 'recording' | 'uploading' | 'saved';
-type SidebarTab = 'participants' | 'chat';
+type SidebarTab = 'participants' | 'chat' | 'controls';
 
 const REACTIONS = ['👏', '❤️', '😂', '🎉', '😮', '👍', '🔥'];
 
@@ -231,6 +235,12 @@ export default function TeacherLiveSessionRoom() {
   const [networkQuality, setNetworkQuality] = useState<'good' | 'fair' | 'poor' | null>(null);
   const [linkCopied, setLinkCopied] = useState(false);
   const [showQuizPicker, setShowQuizPicker] = useState(false);
+
+  // Session controls (teacher can toggle per-session)
+  const [chatEnabled, setChatEnabled] = useState(true);
+  const [reactionsEnabled, setReactionsEnabled] = useState(true);
+  const [raiseHandEnabled, setRaiseHandEnabled] = useState(true);
+  const [savingControl, setSavingControl] = useState<string | null>(null);
   const [quizPickerList, setQuizPickerList] = useState<{ id: string; title: string }[]>([]);
   const [quizPickerLoading, setQuizPickerLoading] = useState(false);
   const [pushingQuiz, setPushingQuiz] = useState(false);
@@ -365,6 +375,33 @@ export default function TeacherLiveSessionRoom() {
     return () => { supabase.removeChannel(channel); };
   }, [id]);
 
+  // Real-time reactions from students — show floating emoji + toast
+  useEffect(() => {
+    if (!id) return;
+    const channel = supabase
+      .channel(`session-reactions-teacher-${id}`)
+      .on('postgres_changes', {
+        event: 'INSERT',
+        schema: 'public',
+        table: 'session_reactions',
+        filter: `session_id=eq.${id}`,
+      }, async (payload) => {
+        const row = payload.new as { user_id: string; emoji: string; session_id: string };
+        // Don't echo own reactions
+        if (row.user_id === userId) return;
+        // Fetch sender name
+        const { data: sender } = await supabase
+          .from('profiles').select('display_name').eq('id', row.user_id).single();
+        const name = (sender as any)?.display_name || 'Student';
+        toast(`${row.emoji} ${name}`, { duration: 3000 });
+        const rid = Math.random().toString(36).slice(2);
+        setFloatingReactions(prev => [...prev, { id: rid, emoji: row.emoji }]);
+        setTimeout(() => setFloatingReactions(prev => prev.filter(r => r.id !== rid)), 3000);
+      })
+      .subscribe();
+    return () => { supabase.removeChannel(channel); };
+  }, [id, userId]);
+
   const fetchSession = async () => {
     setLoading(true);
     setFetchError(null);
@@ -378,6 +415,10 @@ export default function TeacherLiveSessionRoom() {
           : json.session.recording_url ? [json.session.recording_url] : [];
         if (urls.length > 0) setSavedRecordings(urls);
         if (json.session.status === 'live') setMeetingActive(true);
+        // Load session controls (default true if column not yet in DB)
+        setChatEnabled(json.session.chat_enabled !== false);
+        setReactionsEnabled(json.session.reactions_enabled !== false);
+        setRaiseHandEnabled(json.session.raise_hand_enabled !== false);
       } else {
         const msg = json.error || t('liveSessions.sessionNotFound');
         setFetchError(msg);
@@ -596,6 +637,31 @@ export default function TeacherLiveSessionRoom() {
       method: 'POST',
       body: JSON.stringify({ emoji }),
     }).catch(() => {});
+  };
+
+  const lowerHand = async (p: Participant) => {
+    try {
+      await authFetch(`/api/teacher/live-sessions/${id}/participants/${p.user_id}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ is_hand_raised: false }),
+      });
+      setParticipants(prev => prev.map(x => x.user_id === p.user_id ? { ...x, is_hand_raised: false } : x));
+    } catch { /* silent */ }
+  };
+
+  const toggleSessionControl = async (field: 'chat_enabled' | 'reactions_enabled' | 'raise_hand_enabled', current: boolean) => {
+    const next = !current;
+    setSavingControl(field);
+    try {
+      await authFetch(`/api/teacher/live-sessions/${id}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ [field]: next }),
+      });
+      if (field === 'chat_enabled') setChatEnabled(next);
+      if (field === 'reactions_enabled') setReactionsEnabled(next);
+      if (field === 'raise_hand_enabled') setRaiseHandEnabled(next);
+    } catch { toast.error('Ndryshimi dështoi'); }
+    finally { setSavingControl(null); }
   };
 
   const muteParticipant = async (p: Participant) => {
@@ -1144,8 +1210,11 @@ export default function TeacherLiveSessionRoom() {
                     )}
                   >
                     <Users className="w-4 h-4" />
-                    <span className="hidden sm:inline">Participants</span>
-                    {participants.length > 0 && (
+                    <span className="hidden sm:inline">Stu.</span>
+                    {participants.filter(p => p.is_hand_raised).length > 0 && (
+                      <span className="px-1.5 py-0.5 text-[10px] bg-amber-500 text-white rounded-full">✋{participants.filter(p => p.is_hand_raised).length}</span>
+                    )}
+                    {participants.filter(p => p.is_hand_raised).length === 0 && participants.length > 0 && (
                       <span className="px-1.5 py-0.5 text-[10px] bg-slate-700 text-slate-300 rounded-full">{participants.length}</span>
                     )}
                   </button>
@@ -1163,6 +1232,18 @@ export default function TeacherLiveSessionRoom() {
                     {chatMessages.length > 0 && (
                       <span className="px-1.5 py-0.5 text-[10px] bg-slate-700 text-slate-300 rounded-full">{chatMessages.length}</span>
                     )}
+                  </button>
+                  <button
+                    onClick={() => setSidebarTab('controls')}
+                    className={cn(
+                      'flex-1 flex items-center justify-center gap-2 py-3 text-sm font-semibold border-b-2 transition-colors',
+                      sidebarTab === 'controls'
+                        ? 'border-violet-500 text-violet-400'
+                        : 'border-transparent text-slate-500 hover:text-slate-300'
+                    )}
+                  >
+                    <Shield className="w-4 h-4" />
+                    <span className="hidden sm:inline">Kont.</span>
                   </button>
                   <button
                     onClick={() => setSidebarOpen(false)}
@@ -1198,6 +1279,15 @@ export default function TeacherLiveSessionRoom() {
                             </div>
                           </div>
                           <div className="flex items-center gap-1">
+                            {p.is_hand_raised && (
+                              <button
+                                onClick={() => lowerHand(p)}
+                                className="p-1.5 rounded-lg bg-amber-500/20 text-amber-400 hover:bg-amber-500/40 transition-colors"
+                                title="Ul dorën"
+                              >
+                                <Hand className="w-3.5 h-3.5" />
+                              </button>
+                            )}
                             <button
                               onClick={() => muteParticipant(p)}
                               className={cn(
@@ -1221,7 +1311,7 @@ export default function TeacherLiveSessionRoom() {
                       ))
                     )}
                   </div>
-                ) : (
+                ) : sidebarTab === 'chat' ? (
                   <div className="flex-1 flex flex-col min-h-0">
                     <div className="flex-1 overflow-y-auto p-3 space-y-3">
                       {chatMessages.length === 0 ? (
@@ -1273,6 +1363,85 @@ export default function TeacherLiveSessionRoom() {
                           {sendingChat ? <Loader2 className="w-4 h-4 text-white animate-spin" /> : <Send className="w-4 h-4 text-white" />}
                         </button>
                       </form>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="flex-1 overflow-y-auto p-3 space-y-3">
+                    <p className="text-xs text-slate-500 px-1 pb-1">Kontrollo çfarë mund të bëjnë studentët gjatë sesionit live.</p>
+
+                    {/* Raise Hand */}
+                    <div className="flex items-center justify-between p-3 bg-slate-800/60 rounded-xl border border-slate-700">
+                      <div className="flex items-center gap-2.5">
+                        <div className={cn('p-1.5 rounded-lg', raiseHandEnabled ? 'bg-amber-500/20 text-amber-400' : 'bg-slate-700 text-slate-500')}>
+                          <Hand className="w-4 h-4" />
+                        </div>
+                        <div>
+                          <p className="text-sm font-semibold text-slate-200">Ngrit Dorë</p>
+                          <p className="text-[11px] text-slate-500">{raiseHandEnabled ? 'E lejuar' : 'E bllokuar'}</p>
+                        </div>
+                      </div>
+                      <button
+                        onClick={() => toggleSessionControl('raise_hand_enabled', raiseHandEnabled)}
+                        disabled={savingControl === 'raise_hand_enabled'}
+                        className={cn(
+                          'relative w-10 h-6 rounded-full transition-colors duration-200',
+                          raiseHandEnabled ? 'bg-amber-500' : 'bg-slate-600'
+                        )}
+                      >
+                        {savingControl === 'raise_hand_enabled'
+                          ? <Loader2 className="w-3 h-3 text-white animate-spin absolute top-1.5 left-3.5" />
+                          : <span className={cn('absolute top-1 w-4 h-4 bg-white rounded-full shadow transition-all duration-200', raiseHandEnabled ? 'left-5' : 'left-1')} />}
+                      </button>
+                    </div>
+
+                    {/* Reactions */}
+                    <div className="flex items-center justify-between p-3 bg-slate-800/60 rounded-xl border border-slate-700">
+                      <div className="flex items-center gap-2.5">
+                        <div className={cn('p-1.5 rounded-lg', reactionsEnabled ? 'bg-pink-500/20 text-pink-400' : 'bg-slate-700 text-slate-500')}>
+                          <Smile className="w-4 h-4" />
+                        </div>
+                        <div>
+                          <p className="text-sm font-semibold text-slate-200">Reaksionet</p>
+                          <p className="text-[11px] text-slate-500">{reactionsEnabled ? 'E lejuar' : 'E bllokuar'}</p>
+                        </div>
+                      </div>
+                      <button
+                        onClick={() => toggleSessionControl('reactions_enabled', reactionsEnabled)}
+                        disabled={savingControl === 'reactions_enabled'}
+                        className={cn(
+                          'relative w-10 h-6 rounded-full transition-colors duration-200',
+                          reactionsEnabled ? 'bg-pink-500' : 'bg-slate-600'
+                        )}
+                      >
+                        {savingControl === 'reactions_enabled'
+                          ? <Loader2 className="w-3 h-3 text-white animate-spin absolute top-1.5 left-3.5" />
+                          : <span className={cn('absolute top-1 w-4 h-4 bg-white rounded-full shadow transition-all duration-200', reactionsEnabled ? 'left-5' : 'left-1')} />}
+                      </button>
+                    </div>
+
+                    {/* Chat */}
+                    <div className="flex items-center justify-between p-3 bg-slate-800/60 rounded-xl border border-slate-700">
+                      <div className="flex items-center gap-2.5">
+                        <div className={cn('p-1.5 rounded-lg', chatEnabled ? 'bg-emerald-500/20 text-emerald-400' : 'bg-slate-700 text-slate-500')}>
+                          <MessageSquare className="w-4 h-4" />
+                        </div>
+                        <div>
+                          <p className="text-sm font-semibold text-slate-200">Chat</p>
+                          <p className="text-[11px] text-slate-500">{chatEnabled ? 'E lejuar' : 'E bllokuar'}</p>
+                        </div>
+                      </div>
+                      <button
+                        onClick={() => toggleSessionControl('chat_enabled', chatEnabled)}
+                        disabled={savingControl === 'chat_enabled'}
+                        className={cn(
+                          'relative w-10 h-6 rounded-full transition-colors duration-200',
+                          chatEnabled ? 'bg-emerald-500' : 'bg-slate-600'
+                        )}
+                      >
+                        {savingControl === 'chat_enabled'
+                          ? <Loader2 className="w-3 h-3 text-white animate-spin absolute top-1.5 left-3.5" />
+                          : <span className={cn('absolute top-1 w-4 h-4 bg-white rounded-full shadow transition-all duration-200', chatEnabled ? 'left-5' : 'left-1')} />}
+                      </button>
                     </div>
                   </div>
                 )}

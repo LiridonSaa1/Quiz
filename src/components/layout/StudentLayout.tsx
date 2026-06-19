@@ -79,7 +79,8 @@ export default function StudentLayout({ children }: { children: React.ReactNode 
     {
       key: 'account',
       items: [
-        { icon: User, label: t('nav.profile'), path: '/student/profile' },
+        { icon: User,        label: t('nav.profile'), path: '/student/profile' },
+        { icon: HelpCircle,  label: 'Udhëzues',       path: '/student/guide' },
       ]
     }
   ];
