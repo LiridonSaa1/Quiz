@@ -1,5 +1,6 @@
 // server.ts
 import "dotenv/config";
+import dns from "dns";
 import AdmZip from "adm-zip";
 import jwt from "jsonwebtoken";
 
@@ -2349,6 +2350,7 @@ import path2 from "path";
 import { fileURLToPath } from "url";
 import { createClient } from "@supabase/supabase-js";
 import { createRequire as _cr } from "module";
+dns.setDefaultResultOrder("ipv4first");
 var _require = _cr(import.meta.url);
 var _ws;
 try {

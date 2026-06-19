@@ -1,4 +1,6 @@
 import "dotenv/config";
+import dns from "dns";
+dns.setDefaultResultOrder("ipv4first");
 import AdmZip from "adm-zip";
 import jwt from "jsonwebtoken";
 import { isMissingCoursesStudentIdsError } from "./src/lib/schemaErrors.js";
