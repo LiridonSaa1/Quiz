@@ -85,6 +85,7 @@ export default function StudentLiveSessionJoin() {
   const chatEndRef = useRef<HTMLDivElement | null>(null);
   const jitsiContainerRef = useRef<HTMLDivElement | null>(null);
   const jitsiApiRef = useRef<ReturnType<typeof window.JitsiMeetExternalAPI> | null>(null);
+  const micMutedRef = useRef(false); // tracks actual Jitsi audio state for teacher-mute sync
 
   // ── Derived constants (no hooks below) ──
   const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(
@@ -224,6 +225,10 @@ export default function StudentLiveSessionJoin() {
             iframe.setAttribute('allow', 'camera *; microphone *; fullscreen *; display-capture *; autoplay *; clipboard-write *');
           }
         }, 1500);
+        // Track mic state so teacher-mute sync can toggle correctly
+        (api as any).addListener('audioMuteStatusChanged', (e: unknown) => {
+          micMutedRef.current = Boolean((e as any)?.muted);
+        });
         // Network quality listener
         (api as any).addListener('connectionQualityChanged', (e: unknown) => {
           const ev = e as { quality?: number };
@@ -324,6 +329,29 @@ export default function StudentLiveSessionJoin() {
 
     return () => { supabase.removeChannel(channel); };
   }, [id]);
+
+  // Teacher mute/unmute: listen for is_muted changes on own participant row
+  useEffect(() => {
+    if (!id || !userId) return;
+    const channel = supabase
+      .channel(`student-mute-${id}-${userId}`)
+      .on('postgres_changes', {
+        event: 'UPDATE',
+        schema: 'public',
+        table: 'session_participants',
+        filter: `session_id=eq.${id}`,
+      }, (payload) => {
+        const row = payload.new as any;
+        if (row.user_id !== userId) return;
+        const shouldBeMuted = Boolean(row.is_muted);
+        if (shouldBeMuted !== micMutedRef.current && jitsiApiRef.current) {
+          (jitsiApiRef.current as any).executeCommand('toggleAudio');
+          toast.info(shouldBeMuted ? '🔇 Mësuesi ju bëri mute' : '🎤 Mësuesi ju dha mikrofonin');
+        }
+      })
+      .subscribe();
+    return () => { supabase.removeChannel(channel); };
+  }, [id, userId]);
 
   // Log leave on unmount
   useEffect(() => {
@@ -815,7 +843,7 @@ export default function StudentLiveSessionJoin() {
                   Më vonë
                 </button>
                 <a
-                  href={`/student/realtime-quiz/${liveQuizPush.quizId}`}
+                  href={`/student/quiz/${liveQuizPush.quizId}`}
                   className="flex-1 flex items-center justify-center gap-2 px-4 py-2.5 bg-violet-600 hover:bg-violet-700 text-white rounded-xl text-sm font-semibold transition"
                   onClick={() => setLiveQuizPush(null)}
                 >

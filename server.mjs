@@ -11334,7 +11334,7 @@ ${smartUserPrompt}` });
           title: "\u{1F4DD} Kuiz i ri",
           message: `M\xEBsuesi ka nisur kuizin: ${quizTitle}`,
           type: "quiz",
-          action_url: `/student/realtime-quiz/${quizId}`,
+          action_url: `/student/quiz/${quizId}`,
           read: false,
           created_at: (/* @__PURE__ */ new Date()).toISOString()
         }));

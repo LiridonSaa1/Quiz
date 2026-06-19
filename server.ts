@@ -11457,7 +11457,7 @@ Content:\n"""${clipped}"""`;
           title: '📝 Kuiz i ri',
           message: `Mësuesi ka nisur kuizin: ${quizTitle}`,
           type: 'quiz',
-          action_url: `/student/realtime-quiz/${quizId}`,
+          action_url: `/student/quiz/${quizId}`,
           read: false,
           created_at: new Date().toISOString(),
         }));

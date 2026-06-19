@@ -1212,9 +1212,18 @@ export default function TeacherLiveSessionRoom() {
                               {p.left_at && <span className="text-[10px] text-slate-600">Left</span>}
                             </div>
                           </div>
-                          <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                            <button onClick={() => muteParticipant(p)} className="p-1.5 rounded-lg hover:bg-slate-700 text-slate-400 hover:text-white transition-colors" title={p.is_muted ? 'Unmute' : 'Mute'}>
-                              <VolumeX className="w-3.5 h-3.5" />
+                          <div className="flex items-center gap-1">
+                            <button
+                              onClick={() => muteParticipant(p)}
+                              className={cn(
+                                'p-1.5 rounded-lg transition-colors',
+                                p.is_muted
+                                  ? 'bg-rose-900/60 text-rose-400 hover:bg-rose-900'
+                                  : 'text-emerald-400 hover:bg-slate-700 hover:text-white'
+                              )}
+                              title={p.is_muted ? 'Unmute (Jep Mic)' : 'Mute (Hiq Mic)'}
+                            >
+                              {p.is_muted ? <MicOff className="w-3.5 h-3.5" /> : <Mic className="w-3.5 h-3.5" />}
                             </button>
                             <button onClick={() => pinParticipant(p)} className={cn('p-1.5 rounded-lg hover:bg-slate-700 transition-colors', p.is_pinned ? 'text-amber-400' : 'text-slate-400 hover:text-white')} title="Pin">
                               <Pin className="w-3.5 h-3.5" />
