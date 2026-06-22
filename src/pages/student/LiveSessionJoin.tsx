@@ -295,6 +295,15 @@ export default function StudentLiveSessionJoin() {
       }, (payload) => {
         const updated = payload.new as LiveSession;
         setSession(prev => prev ? { ...prev, ...updated } : prev);
+
+        // ── Teacher ended the session → kick student out ──
+        if ((payload.new as any).status === 'ended') {
+          toast.info('📴 Mësuesi mbylli sesionin. Po largoheni...', { duration: 4000 });
+          if (jitsiApiRef.current) { jitsiApiRef.current.dispose(); jitsiApiRef.current = null; }
+          setTimeout(() => navigate('/student/live-sessions'), 3000);
+          return;
+        }
+
         // Sync session controls
         const u = payload.new as any;
         if (u.chat_enabled !== undefined) {
