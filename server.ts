@@ -4846,7 +4846,8 @@ When giving instructions, number each step clearly. Be precise and technical whe
       const teacherIds = await getTeacherIdCandidates(requestedUserId);
       const scopedIds = teacherIds.length > 0 ? teacherIds : [requestedUserId];
 
-      const teacherCourseIds = (await fetchTeacherCourseRows(scopedIds)).map((c: any) => String(c.id || "")).filter(Boolean);
+      const teacherCourseRowsFull = await fetchTeacherCourseRows(scopedIds, true);
+      const teacherCourseIds = teacherCourseRowsFull.map((c: any) => String(c.id || "")).filter(Boolean);
 
       let quizRows: any[] = [];
       if (teacherCourseIds.length > 0) {
@@ -4869,23 +4870,67 @@ When giving instructions, number each step clearly. Be precise and technical whe
         return acc;
       }, {});
 
-      const studentsRes = await supabaseAdmin
+      // Collect students from 3 sources (same pattern as /api/teacher/students & /api/teacher/progress)
+      const studentById = new Map<string, { name: string; email: string }>();
+
+      // Source 1: profiles.teacher_id
+      const linkedStudentsRes = await supabaseAdmin
         .from("profiles")
-        .select("id,display_name,email,teacher_id,role")
+        .select("id,display_name,email")
         .in("teacher_id", scopedIds)
         .eq("role", "student");
-      if (studentsRes.error) throw studentsRes.error;
-      const studentRows = studentsRes.data || [];
-      const allowedStudentIds = new Set<string>(studentRows.map((s: any) => String(s.id || "")).filter(Boolean));
-      const students: Record<string, { name: string; email: string }> = {};
-      studentRows.forEach((s: any) => {
-        const sid = String(s.id || "");
-        if (!sid) return;
-        students[sid] = {
-          name: String(s.display_name || "Unknown"),
-          email: String(s.email || ""),
-        };
-      });
+      if (!linkedStudentsRes.error) {
+        for (const s of (linkedStudentsRes.data || [])) {
+          const sid = String(s.id || "");
+          if (sid) studentById.set(sid, { name: String(s.display_name || "Unknown"), email: String(s.email || "") });
+        }
+      }
+
+      // Source 2: courses.student_ids
+      const courseEnrolledIds = new Set<string>();
+      for (const c of teacherCourseRowsFull) {
+        if (Array.isArray(c.student_ids)) {
+          for (const sid of c.student_ids) {
+            const s = String(sid || "");
+            if (s && !studentById.has(s)) courseEnrolledIds.add(s);
+          }
+        }
+      }
+
+      // Source 3: classes.student_ids
+      const classResForResults = await supabaseAdmin
+        .from("classes")
+        .select("student_ids")
+        .in("teacher_id", scopedIds);
+      if (!classResForResults.error && Array.isArray(classResForResults.data)) {
+        for (const cl of classResForResults.data) {
+          if (Array.isArray(cl.student_ids)) {
+            for (const sid of cl.student_ids) {
+              const s = String(sid || "");
+              if (s && !studentById.has(s)) courseEnrolledIds.add(s);
+            }
+          }
+        }
+      }
+
+      // Fetch profiles for course/class-enrolled students not yet in map
+      if (courseEnrolledIds.size > 0) {
+        const enrolledRes = await supabaseAdmin
+          .from("profiles")
+          .select("id,display_name,email")
+          .in("id", [...courseEnrolledIds]);
+        if (!enrolledRes.error) {
+          for (const s of (enrolledRes.data || [])) {
+            const sid = String(s.id || "");
+            if (sid && !studentById.has(sid)) {
+              studentById.set(sid, { name: String(s.display_name || "Unknown"), email: String(s.email || "") });
+            }
+          }
+        }
+      }
+
+      const allowedStudentIds = new Set<string>(studentById.keys());
+      const students: Record<string, { name: string; email: string }> = Object.fromEntries(studentById);
 
       const attempts = normalizeAttempts(
         await fetchFilteredAttemptRows({ quizIds, studentIds: allowedStudentIds }),

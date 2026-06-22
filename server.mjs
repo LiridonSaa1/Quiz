@@ -6028,7 +6028,8 @@ Assistant:`
       }
       const teacherIds = await getTeacherIdCandidates(requestedUserId);
       const scopedIds = teacherIds.length > 0 ? teacherIds : [requestedUserId];
-      const teacherCourseIds = (await fetchTeacherCourseRows(scopedIds)).map((c) => String(c.id || "")).filter(Boolean);
+      const teacherCourseRowsFull = await fetchTeacherCourseRows(scopedIds, true);
+      const teacherCourseIds = teacherCourseRowsFull.map((c) => String(c.id || "")).filter(Boolean);
       let quizRows = [];
       if (teacherCourseIds.length > 0) {
         const quizzesRes = await supabaseAdmin.from("quizzes").select("*").in("course_id", teacherCourseIds);
@@ -6045,19 +6046,47 @@ Assistant:`
         acc[qid] = Number.isFinite(parsed) ? parsed : 50;
         return acc;
       }, {});
-      const studentsRes = await supabaseAdmin.from("profiles").select("id,display_name,email,teacher_id,role").in("teacher_id", scopedIds).eq("role", "student");
-      if (studentsRes.error) throw studentsRes.error;
-      const studentRows = studentsRes.data || [];
-      const allowedStudentIds = new Set(studentRows.map((s) => String(s.id || "")).filter(Boolean));
-      const students = {};
-      studentRows.forEach((s) => {
-        const sid = String(s.id || "");
-        if (!sid) return;
-        students[sid] = {
-          name: String(s.display_name || "Unknown"),
-          email: String(s.email || "")
-        };
-      });
+      const studentById = /* @__PURE__ */ new Map();
+      const linkedStudentsRes = await supabaseAdmin.from("profiles").select("id,display_name,email").in("teacher_id", scopedIds).eq("role", "student");
+      if (!linkedStudentsRes.error) {
+        for (const s of linkedStudentsRes.data || []) {
+          const sid = String(s.id || "");
+          if (sid) studentById.set(sid, { name: String(s.display_name || "Unknown"), email: String(s.email || "") });
+        }
+      }
+      const courseEnrolledIds = /* @__PURE__ */ new Set();
+      for (const c of teacherCourseRowsFull) {
+        if (Array.isArray(c.student_ids)) {
+          for (const sid of c.student_ids) {
+            const s = String(sid || "");
+            if (s && !studentById.has(s)) courseEnrolledIds.add(s);
+          }
+        }
+      }
+      const classResForResults = await supabaseAdmin.from("classes").select("student_ids").in("teacher_id", scopedIds);
+      if (!classResForResults.error && Array.isArray(classResForResults.data)) {
+        for (const cl of classResForResults.data) {
+          if (Array.isArray(cl.student_ids)) {
+            for (const sid of cl.student_ids) {
+              const s = String(sid || "");
+              if (s && !studentById.has(s)) courseEnrolledIds.add(s);
+            }
+          }
+        }
+      }
+      if (courseEnrolledIds.size > 0) {
+        const enrolledRes = await supabaseAdmin.from("profiles").select("id,display_name,email").in("id", [...courseEnrolledIds]);
+        if (!enrolledRes.error) {
+          for (const s of enrolledRes.data || []) {
+            const sid = String(s.id || "");
+            if (sid && !studentById.has(sid)) {
+              studentById.set(sid, { name: String(s.display_name || "Unknown"), email: String(s.email || "") });
+            }
+          }
+        }
+      }
+      const allowedStudentIds = new Set(studentById.keys());
+      const students = Object.fromEntries(studentById);
       const attempts = normalizeAttempts(
         await fetchFilteredAttemptRows({ quizIds, studentIds: allowedStudentIds }),
         passingScoreByQuiz
