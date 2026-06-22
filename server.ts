@@ -4971,15 +4971,54 @@ When giving instructions, number each step clearly. Be precise and technical whe
       const teacherIds = await getTeacherIdCandidates(requestedUserId);
       const scopedIds = teacherIds.length > 0 ? teacherIds : [requestedUserId];
 
-      const courseIds = (await fetchTeacherCourseRows(scopedIds)).map((c: any) => String(c.id || "")).filter(Boolean);
+      // Fetch course rows including student_ids for enrollment counting
+      const courseRowsFull = await fetchTeacherCourseRows(scopedIds, true);
+      const courseIds = courseRowsFull.map((c: any) => String(c.id || "")).filter(Boolean);
 
-      const studentsRes = await supabaseAdmin
+      // Collect student IDs from 3 sources (mirrors /api/teacher/students logic):
+      // 1) profiles.teacher_id (direct link)
+      // 2) courses.student_ids (enrollment array on each course)
+      // 3) classes.student_ids (class-level enrollment)
+      const studentIds = new Set<string>();
+
+      // Source 1: profiles linked by teacher_id
+      const linkedStudentsRes = await supabaseAdmin
         .from("profiles")
         .select("id")
         .in("teacher_id", scopedIds)
         .eq("role", "student");
-      if (studentsRes.error) throw studentsRes.error;
-      const studentIds = new Set<string>((studentsRes.data || []).map((s: any) => String(s.id || "")).filter(Boolean));
+      if (!linkedStudentsRes.error) {
+        for (const s of (linkedStudentsRes.data || [])) {
+          const sid = String(s.id || "");
+          if (sid) studentIds.add(sid);
+        }
+      }
+
+      // Source 2: courses.student_ids enrollment arrays
+      for (const c of courseRowsFull) {
+        if (Array.isArray(c.student_ids)) {
+          for (const sid of c.student_ids) {
+            const s = String(sid || "");
+            if (s) studentIds.add(s);
+          }
+        }
+      }
+
+      // Source 3: classes.student_ids for this teacher's classes
+      const classesRes = await supabaseAdmin
+        .from("classes")
+        .select("student_ids")
+        .in("teacher_id", scopedIds);
+      if (!classesRes.error && Array.isArray(classesRes.data)) {
+        for (const cl of classesRes.data) {
+          if (Array.isArray(cl.student_ids)) {
+            for (const sid of cl.student_ids) {
+              const s = String(sid || "");
+              if (s) studentIds.add(s);
+            }
+          }
+        }
+      }
 
       let quizRows: any[] = [];
       if (courseIds.length > 0) {

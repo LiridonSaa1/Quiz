@@ -6124,10 +6124,35 @@ Assistant:`
       if (cachedTeacherDashboard) return res.json(cachedTeacherDashboard);
       const teacherIds = await getTeacherIdCandidates(requestedUserId);
       const scopedIds = teacherIds.length > 0 ? teacherIds : [requestedUserId];
-      const courseIds = (await fetchTeacherCourseRows(scopedIds)).map((c) => String(c.id || "")).filter(Boolean);
-      const studentsRes = await supabaseAdmin.from("profiles").select("id").in("teacher_id", scopedIds).eq("role", "student");
-      if (studentsRes.error) throw studentsRes.error;
-      const studentIds = new Set((studentsRes.data || []).map((s) => String(s.id || "")).filter(Boolean));
+      const courseRowsFull = await fetchTeacherCourseRows(scopedIds, true);
+      const courseIds = courseRowsFull.map((c) => String(c.id || "")).filter(Boolean);
+      const studentIds = /* @__PURE__ */ new Set();
+      const linkedStudentsRes = await supabaseAdmin.from("profiles").select("id").in("teacher_id", scopedIds).eq("role", "student");
+      if (!linkedStudentsRes.error) {
+        for (const s of linkedStudentsRes.data || []) {
+          const sid = String(s.id || "");
+          if (sid) studentIds.add(sid);
+        }
+      }
+      for (const c of courseRowsFull) {
+        if (Array.isArray(c.student_ids)) {
+          for (const sid of c.student_ids) {
+            const s = String(sid || "");
+            if (s) studentIds.add(s);
+          }
+        }
+      }
+      const classesRes = await supabaseAdmin.from("classes").select("student_ids").in("teacher_id", scopedIds);
+      if (!classesRes.error && Array.isArray(classesRes.data)) {
+        for (const cl of classesRes.data) {
+          if (Array.isArray(cl.student_ids)) {
+            for (const sid of cl.student_ids) {
+              const s = String(sid || "");
+              if (s) studentIds.add(s);
+            }
+          }
+        }
+      }
       let quizRows = [];
       if (courseIds.length > 0) {
         const quizzesRes = await supabaseAdmin.from("quizzes").select("*").in("course_id", courseIds);
