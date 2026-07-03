@@ -97,6 +97,17 @@ export default function Login() {
   }, [navigate]);
 
   useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const emailParam = params.get('email');
+    const pwParam = params.get('pw');
+    if (emailParam) setEmail(emailParam);
+    if (pwParam) {
+      setPassword(pwParam);
+      sessionStorage.setItem('firstLoginHint', '1');
+    }
+  }, []);
+
+  useEffect(() => {
     const loadMaintenanceMode = async () => {
       const enabled = await fetchRuntimeMaintenance();
       setMaintenanceMode(Boolean(enabled));

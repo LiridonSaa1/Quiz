@@ -6,7 +6,7 @@ import jwt from "jsonwebtoken";
 import { isMissingCoursesStudentIdsError } from "./src/lib/schemaErrors.js";
 import { canAccessTeacherCourses, isAdmin, isAdminSeedAllowed } from "./src/lib/routeAuth.js";
 import { generateFixSuggestion } from "./src/lib/ai/generateFixSuggestion.js";
-import { isEmailConfigured, sendEmail, renderVerificationEmail, renderCredentialEmail } from "./src/lib/email.js";
+import { isEmailConfigured, sendEmail, renderVerificationEmail, renderCredentialEmail, renderInvoiceEmail } from "./src/lib/email.js";
 import { notifyEvent, type NotifyContext, type NotifyEventKey } from "./src/lib/notifyEvents.js";
 import { HEADWAY_FULL_DATA, buildUnitQuestions as buildHwUnitQuestions, type HUnit } from "./src/lib/headwayData.js";
 import { getQuestionsForSection, getTopicsForLevel, HEADWAY_QUESTIONS } from "./src/lib/headwayQuestions.js";
@@ -3642,7 +3642,7 @@ When giving instructions, number each step clearly. Be precise and technical whe
       const baseUrl = process.env.REPLIT_DEV_DOMAIN
         ? `https://${process.env.REPLIT_DEV_DOMAIN}`
         : (settings?.general?.website || 'http://localhost:5000');
-      const loginUrl = `${baseUrl}/login`;
+      const loginUrl = `${baseUrl}/login?email=${encodeURIComponent(opts.email)}&pw=${encodeURIComponent(opts.password)}`;
 
       const plainText = [
         `Përshëndetje ${opts.name},`,
@@ -9329,7 +9329,7 @@ Rules:
 
   app.post('/api/admin/student-payments', async (req, res) => {
     try {
-      const { student_id, month_year, amount = 0, notes = '' } = req.body || {};
+      const { student_id, month_year, amount = 0, notes = '', send_invoice = true } = req.body || {};
       if (!student_id) return res.status(400).json({ error: 'student_id is required' });
       const monthYear = month_year || new Date().toISOString().slice(0, 7);
 
@@ -9366,7 +9366,24 @@ Rules:
       }
       await supabaseAdmin.from('notifications').insert(notifs).then(() => {});
 
-      res.json({ success: true, id: paymentId });
+      // Send invoice email to student (fire-and-forget)
+      if (send_invoice && student.email && isEmailConfigured()) {
+        const settings: any = await getConfigSection('settings').catch(() => ({}));
+        const brandName: string = settings?.general?.school_name || 'QuizMaster';
+        const paidAt = new Date().toISOString();
+        const tpl = renderInvoiceEmail({
+          studentName,
+          amount: Number(amount) || 0,
+          monthLabel,
+          notes: notes || undefined,
+          paidAt,
+          brandName,
+        });
+        sendEmail({ to: student.email, toName: studentName, subject: tpl.subject, htmlContent: tpl.htmlContent, textContent: tpl.textContent })
+          .catch((e: any) => console.error('[invoice-email] failed:', e.message));
+      }
+
+      res.json({ success: true, id: paymentId, invoice_sent: !!(send_invoice && student.email && isEmailConfigured()) });
     } catch (e: any) {
       res.status(500).json({ error: e.message || 'Failed to record payment' });
     }

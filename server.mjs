@@ -396,6 +396,75 @@ function renderCredentialEmail(opts) {
 </html>`;
   return { subject, htmlContent, textContent };
 }
+function renderInvoiceEmail(opts) {
+  const brand = (opts.brandName || "QuizMaster").trim();
+  const subject = `Fatur\xEB pagese \u2014 ${opts.monthLabel} | ${brand}`;
+  const amountStr = opts.amount > 0 ? `\u20AC${opts.amount.toFixed(2)}` : "\u2014";
+  let dateStr = opts.paidAt.slice(0, 10);
+  try {
+    dateStr = new Date(opts.paidAt).toLocaleDateString("sq-AL", { day: "2-digit", month: "long", year: "numeric" });
+  } catch {
+  }
+  const textContent = [
+    `Fatur\xEB Pagese \u2014 ${brand}`,
+    ``,
+    `I nderuar/e ${opts.studentName},`,
+    `Pagesa juaj p\xEBr muajin ${opts.monthLabel} u konfirmua me sukses.`,
+    ``,
+    `Muaji: ${opts.monthLabel}`,
+    `Shuma: ${amountStr}`,
+    `Data: ${dateStr}`,
+    opts.notes ? `Sh\xEBnime: ${opts.notes}` : "",
+    ``,
+    `Ju faleminderit! \u2014 Ekipi i ${brand}`
+  ].filter(Boolean).join("\n");
+  const htmlContent = `<!doctype html>
+<html>
+<body style="margin:0;padding:0;background:#f1f5f9;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f1f5f9;padding:40px 16px;">
+    <tr><td align="center">
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:520px;background:#ffffff;border-radius:20px;overflow:hidden;box-shadow:0 4px 24px rgba(0,0,0,0.06);">
+        <tr><td style="background:#10b981;padding:32px 36px;">
+          <div style="font-size:22px;font-weight:800;color:#ffffff;letter-spacing:-0.02em;">${brand}</div>
+          <div style="font-size:13px;color:rgba(255,255,255,0.85);margin-top:4px;">Konfirmim Pagese \u2713</div>
+        </td></tr>
+        <tr><td style="padding:36px;">
+          <p style="margin:0 0 8px;font-size:15px;font-weight:700;color:#0f172a;">P\xEBrsh\xEBndetje, ${opts.studentName}!</p>
+          <p style="margin:0 0 24px;font-size:14px;line-height:1.6;color:#475569;">
+            Pagesa juaj p\xEBr muajin <strong>${opts.monthLabel}</strong> u konfirmua me sukses.
+          </p>
+          <div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:14px;padding:20px 24px;margin-bottom:24px;">
+            <p style="margin:0 0 14px;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:1px;color:#6b7280;">Detajet e Fatur\xEBs</p>
+            <table role="presentation" cellpadding="0" cellspacing="0" width="100%">
+              <tr>
+                <td style="padding:6px 0;font-size:13px;color:#64748b;width:110px;">\u{1F4C5} Muaji</td>
+                <td style="padding:6px 0;font-size:13px;font-weight:600;color:#0f172a;">${opts.monthLabel}</td>
+              </tr>
+              <tr>
+                <td style="padding:6px 0;font-size:13px;color:#64748b;">\u{1F4B6} Shuma</td>
+                <td style="padding:6px 0;font-size:16px;font-weight:800;color:#10b981;">${amountStr}</td>
+              </tr>
+              <tr>
+                <td style="padding:6px 0;font-size:13px;color:#64748b;">\u{1F5D3}\uFE0F Data</td>
+                <td style="padding:6px 0;font-size:13px;font-weight:600;color:#0f172a;">${dateStr}</td>
+              </tr>
+              ${opts.notes ? `<tr><td style="padding:6px 0;font-size:13px;color:#64748b;vertical-align:top;">\u{1F4DD} Sh\xEBnime</td><td style="padding:6px 0;font-size:13px;color:#374151;">${opts.notes}</td></tr>` : ""}
+            </table>
+          </div>
+          <p style="margin:0;font-size:12px;line-height:1.6;color:#94a3b8;">
+            Ruajeni k\xEBt\xEB email si d\xEBshmi pagese. N\xEBse keni pyetje, na kontaktoni.
+          </p>
+        </td></tr>
+        <tr><td style="background:#f8fafc;padding:16px 36px;border-top:1px solid #e2e8f0;">
+          <p style="margin:0;font-size:11px;color:#94a3b8;text-align:center;">D\xEBrguar nga platforma <strong>${brand}</strong> \xB7 Ju faleminderit!</p>
+        </td></tr>
+      </table>
+    </td></tr>
+  </table>
+</body>
+</html>`;
+  return { subject, htmlContent, textContent };
+}
 
 // src/lib/notifyEvents.ts
 var RECIPIENTS = {
@@ -5141,7 +5210,7 @@ Assistant:`
       const channels = settings?.notification_channels || {};
       const brandName = settings?.general?.school_name || "QuizMaster";
       const baseUrl = process.env.REPLIT_DEV_DOMAIN ? `https://${process.env.REPLIT_DEV_DOMAIN}` : settings?.general?.website || "http://localhost:5000";
-      const loginUrl = `${baseUrl}/login`;
+      const loginUrl = `${baseUrl}/login?email=${encodeURIComponent(opts.email)}&pw=${encodeURIComponent(opts.password)}`;
       const plainText = [
         `P\xEBrsh\xEBndetje ${opts.name},`,
         opts.role === "teacher" ? `Ju jeni ftuar si m\xEBsues n\xEB platform\xEBn ${brandName}.` : `Llogaria juaj si student n\xEB ${brandName} \xEBsht\xEB krijuar me sukses.`,
@@ -9598,7 +9667,7 @@ ${e?.stack || ""}`),
   });
   app.post("/api/admin/student-payments", async (req, res) => {
     try {
-      const { student_id, month_year, amount = 0, notes = "" } = req.body || {};
+      const { student_id, month_year, amount = 0, notes = "", send_invoice = true } = req.body || {};
       if (!student_id) return res.status(400).json({ error: "student_id is required" });
       const monthYear = month_year || (/* @__PURE__ */ new Date()).toISOString().slice(0, 7);
       const { data: student, error: sErr } = await supabaseAdmin.from("profiles").select("id, display_name, email, teacher_id").eq("id", student_id).single();
@@ -9627,7 +9696,21 @@ ${e?.stack || ""}`),
       }
       await supabaseAdmin.from("notifications").insert(notifs).then(() => {
       });
-      res.json({ success: true, id: paymentId });
+      if (send_invoice && student.email && isEmailConfigured()) {
+        const settings = await getConfigSection("settings").catch(() => ({}));
+        const brandName = settings?.general?.school_name || "QuizMaster";
+        const paidAt = (/* @__PURE__ */ new Date()).toISOString();
+        const tpl = renderInvoiceEmail({
+          studentName,
+          amount: Number(amount) || 0,
+          monthLabel,
+          notes: notes || void 0,
+          paidAt,
+          brandName
+        });
+        sendEmail({ to: student.email, toName: studentName, subject: tpl.subject, htmlContent: tpl.htmlContent, textContent: tpl.textContent }).catch((e) => console.error("[invoice-email] failed:", e.message));
+      }
+      res.json({ success: true, id: paymentId, invoice_sent: !!(send_invoice && student.email && isEmailConfigured()) });
     } catch (e) {
       res.status(500).json({ error: e.message || "Failed to record payment" });
     }

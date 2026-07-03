@@ -30,6 +30,7 @@ export default function AdminStudentPayments() {
   const [selectedStudent, setSelectedStudent] = useState<StudentRow | null>(null);
   const [formAmount, setFormAmount] = useState("0");
   const [formNotes, setFormNotes] = useState("");
+  const [sendInvoice, setSendInvoice] = useState(true);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -62,6 +63,7 @@ export default function AdminStudentPayments() {
     setSelectedStudent(s);
     setFormAmount(s.payment?.amount?.toString() || "0");
     setFormNotes(s.payment?.notes || "");
+    setSendInvoice(true);
     setShowModal(true);
   };
 
@@ -77,11 +79,16 @@ export default function AdminStudentPayments() {
           month_year: currentMonth,
           amount: Number(formAmount) || 0,
           notes: formNotes,
+          send_invoice: sendInvoice,
         }),
       });
       const json = await res.json();
       if (!json.success) throw new Error(json.error || "Failed");
-      toast.success(`Pagesa e ${selectedStudent.name} u shënua!`);
+      toast.success(
+        json.invoice_sent
+          ? `Pagesa e ${selectedStudent.name} u shënua! Fatura u dërgua me email.`
+          : `Pagesa e ${selectedStudent.name} u shënua!`
+      );
       setShowModal(false);
       load();
     } catch (e: any) {
@@ -306,7 +313,19 @@ export default function AdminStudentPayments() {
                 />
               </div>
             </div>
-            <div className="flex gap-3 mt-6">
+              <label className="flex items-center gap-3 cursor-pointer select-none p-3 bg-emerald-50 border border-emerald-200 rounded-xl hover:bg-emerald-100 transition">
+                <input
+                  type="checkbox"
+                  checked={sendInvoice}
+                  onChange={(e) => setSendInvoice(e.target.checked)}
+                  className="w-4 h-4 accent-emerald-600 rounded"
+                />
+                <div>
+                  <p className="text-sm font-medium text-slate-800">Dërgo faturë me email</p>
+                  <p className="text-xs text-slate-500">Studenti do të marrë faturën e pagesës direkt në email</p>
+                </div>
+              </label>
+            <div className="flex gap-3 mt-4">
               <button
                 onClick={() => setShowModal(false)}
                 className="flex-1 px-4 py-2.5 border border-slate-200 rounded-xl text-sm font-medium text-slate-700 hover:bg-slate-50 transition"

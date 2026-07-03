@@ -1,10 +1,10 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import { supabase } from '../../supabase';
 import {
   User, Mail, Shield, Save, Loader2, Lock, Eye, EyeOff,
   Camera, CheckCircle2, AlertTriangle, BookOpen, Award,
-  HelpCircle, TrendingUp, Phone, Globe, FileText, Sparkles,
+  HelpCircle, TrendingUp, Phone, Globe, FileText, Sparkles, X, KeyRound,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import StudentLayout from '../../components/layout/StudentLayout';
@@ -54,6 +54,22 @@ export default function StudentProfile() {
   const [passwords, setPasswords] = useState({ next: '', confirm: '' });
   const [showPass, setShowPass] = useState({ next: false, confirm: false });
   const [changingPass, setChangingPass] = useState(false);
+  const [showFirstLoginHint, setShowFirstLoginHint] = useState(false);
+  const securityRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (sessionStorage.getItem('firstLoginHint') === '1') {
+      setShowFirstLoginHint(true);
+      setTimeout(() => {
+        securityRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      }, 700);
+    }
+  }, []);
+
+  const dismissHint = () => {
+    setShowFirstLoginHint(false);
+    sessionStorage.removeItem('firstLoginHint');
+  };
 
   const updateField = (key: keyof ProfileData, val: string) => {
     setProfile((p) => ({ ...p, [key]: val }));
@@ -168,6 +184,7 @@ export default function StudentProfile() {
     else {
       toast.success(t('security.toasts.updated'));
       setPasswords({ next: '', confirm: '' });
+      dismissHint();
     }
     setChangingPass(false);
   };
@@ -361,7 +378,28 @@ export default function StudentProfile() {
               </div>
             </div>
 
-            <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
+            <div ref={securityRef}>
+            {showFirstLoginHint && (
+              <div className="mb-3 flex items-start gap-3 p-4 bg-blue-50 border-2 border-blue-400 rounded-2xl shadow-lg shadow-blue-200/60 animate-pulse">
+                <div className="flex-shrink-0 w-9 h-9 rounded-xl bg-blue-600 flex items-center justify-center">
+                  <KeyRound className="w-5 h-5 text-white" />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="font-bold text-blue-900 text-sm">Ndërroni fjalëkalimin tuaj!</p>
+                  <p className="text-xs text-blue-700 mt-0.5 leading-relaxed">Ky është kyçja juaj e parë. Vendosni fjalëkalim të ri personale këtu poshtë për sigurinë e llogarisë suaj.</p>
+                  <button
+                    onClick={() => { dismissHint(); securityRef.current?.querySelector('input')?.focus(); }}
+                    className="mt-2 text-xs font-semibold text-blue-700 underline underline-offset-2 hover:text-blue-900"
+                  >
+                    👆 Kliko këtu për të filluar
+                  </button>
+                </div>
+                <button onClick={dismissHint} className="text-blue-400 hover:text-blue-600 flex-shrink-0 mt-0.5">
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+            )}
+            <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden" style={showFirstLoginHint ? { outline: '2px solid #3b82f6', outlineOffset: '2px' } : {}}>
               <div className="px-5 py-4 border-b border-slate-100 flex items-center gap-2">
                 <Lock className="w-5 h-5 text-emerald-600" />
                 <h2 className="font-bold text-slate-900">{t('student.profile.security')}</h2>
@@ -426,6 +464,7 @@ export default function StudentProfile() {
                   {t('student.profile.passwordRules')}
                 </div>
               </div>
+            </div>
             </div>
           </div>
         </div>
