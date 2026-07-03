@@ -18160,11 +18160,17 @@ async function runPaymentDeadlineReminders({ force = false } = {}): Promise<{ se
     return { sent: 0, skipped: 0, monthYear };
   }
 
-  const settings: any = await getConfigSection('settings').catch(() => ({}));
-  const brandName: string = settings?.general?.school_name || 'QuizMaster';
-  const baseUrl = process.env.REPLIT_DEV_DOMAIN
+  // Fetch settings directly (getConfigSection is scoped inside createApp)
+  let brandName = 'QuizMaster';
+  let baseUrl = process.env.REPLIT_DEV_DOMAIN
     ? `https://${process.env.REPLIT_DEV_DOMAIN}`
-    : (settings?.general?.website || 'http://localhost:5000');
+    : 'http://localhost:5000';
+  try {
+    const cfgRes = await supabaseAdmin.from('platform_config').select('value').eq('section', 'settings').maybeSingle();
+    const settings: any = cfgRes.data?.value ?? {};
+    if (settings?.general?.school_name) brandName = settings.general.school_name;
+    if (!process.env.REPLIT_DEV_DOMAIN && settings?.general?.website) baseUrl = settings.general.website;
+  } catch { /* use defaults */ }
   const loginUrl = `${baseUrl}/login`;
 
   const [yr, mo] = monthYear.split('-');

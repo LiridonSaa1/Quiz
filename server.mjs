@@ -3360,8 +3360,8 @@ async function createApp(options = {}) {
   app.get("/manifest.json", async (_req, res) => {
     try {
       const [branding, settings] = await Promise.all([
-        getConfigSection2("branding").catch(() => null),
-        getConfigSection2("settings").catch(() => null)
+        getConfigSection("branding").catch(() => null),
+        getConfigSection("settings").catch(() => null)
       ]);
       const b = branding || {};
       const s = settings || {};
@@ -3402,7 +3402,7 @@ async function createApp(options = {}) {
   });
   app.get("/api/pwa/icon.svg", async (_req, res) => {
     try {
-      const branding = await getConfigSection2("branding").catch(() => null);
+      const branding = await getConfigSection("branding").catch(() => null);
       const b = branding || {};
       const raw = typeof b.logoText === "string" ? b.logoText.trim().toUpperCase() : "";
       const logoText = raw.slice(0, 3) || "QM";
@@ -4291,7 +4291,7 @@ Assistant:`
   const CONFIG_SECTIONS = /* @__PURE__ */ new Set(["settings", "branding", "domain", "roles"]);
   const CONFIG_CACHE_TTL_MS = 3e4;
   const configSectionCache = /* @__PURE__ */ new Map();
-  const getConfigSection2 = async (section) => {
+  const getConfigSection = async (section) => {
     const cached = configSectionCache.get(section);
     if (cached && Date.now() < cached.expiresAt) {
       return cached.value;
@@ -4325,7 +4325,7 @@ Assistant:`
     const allTrue = { student: true, teacher: true, admin: true };
     const allFalse = { student: false, teacher: false, admin: false };
     try {
-      const settings = await getConfigSection2("settings");
+      const settings = await getConfigSection("settings");
       const notifs = settings?.notifications;
       if (!notifs || typeof notifs !== "object") return allTrue;
       const v2 = notifs[settingsKey];
@@ -4535,7 +4535,7 @@ Assistant:`
   });
   app.get("/api/platform/features", async (_req, res) => {
     try {
-      const settings = await getConfigSection2("settings");
+      const settings = await getConfigSection("settings");
       res.json({ success: true, features: extractPublicFeatureFlags(settings) });
     } catch (e) {
       if (isPlatformConfigMissing(e)) {
@@ -4560,8 +4560,8 @@ Assistant:`
     };
     try {
       const [branding, settings] = await Promise.all([
-        getConfigSection2("branding").catch(() => null),
-        getConfigSection2("settings").catch(() => null)
+        getConfigSection("branding").catch(() => null),
+        getConfigSection("settings").catch(() => null)
       ]);
       const b = branding || {};
       const s = settings || {};
@@ -4584,7 +4584,7 @@ Assistant:`
   });
   app.get("/api/platform/runtime", async (_req, res) => {
     try {
-      const settings = await getConfigSection2("settings");
+      const settings = await getConfigSection("settings");
       const features = extractPublicFeatureFlags(settings);
       const maintenanceMode = Boolean(
         settings && typeof settings === "object" && settings.advanced && typeof settings.advanced === "object" && settings.advanced.maintenance
@@ -4611,8 +4611,8 @@ Assistant:`
   app.get("/api/platform/init", async (_req, res) => {
     try {
       const [settings, branding] = await Promise.all([
-        getConfigSection2("settings").catch(() => null),
-        getConfigSection2("branding").catch(() => null)
+        getConfigSection("settings").catch(() => null),
+        getConfigSection("branding").catch(() => null)
       ]);
       const s = settings || {};
       const b = branding || {};
@@ -4782,7 +4782,7 @@ Assistant:`
     try {
       const caller = await assertAuthenticated(req, res);
       if (!caller) return;
-      const roles = await getConfigSection2("roles");
+      const roles = await getConfigSection("roles");
       const perms = roles && typeof roles === "object" && roles.perms && typeof roles.perms === "object" && roles.perms[caller.role] && typeof roles.perms[caller.role] === "object" ? roles.perms[caller.role] : {};
       res.json({
         success: true,
@@ -4805,7 +4805,7 @@ Assistant:`
       if (!CONFIG_SECTIONS.has(section)) {
         return res.status(400).json({ error: "Unsupported config section" });
       }
-      const value = await getConfigSection2(section);
+      const value = await getConfigSection(section);
       res.json({ success: true, section, value });
     } catch (e) {
       if (isPlatformConfigMissing(e)) {
@@ -4833,7 +4833,7 @@ Assistant:`
       let nextMaintenance = null;
       if (section === "settings") {
         try {
-          const prev = await getConfigSection2("settings");
+          const prev = await getConfigSection("settings");
           prevMaintenance = Boolean(prev?.advanced?.maintenance);
         } catch {
         }
@@ -5272,7 +5272,7 @@ Assistant:`
   });
   const sendUserCredentials = async (opts) => {
     try {
-      const settings = await getConfigSection2("settings");
+      const settings = await getConfigSection("settings");
       const channels = settings?.notification_channels || {};
       const brandName = settings?.general?.school_name || "QuizMaster";
       const baseUrl = process.env.REPLIT_DEV_DOMAIN ? `https://${process.env.REPLIT_DEV_DOMAIN}` : settings?.general?.website || "http://localhost:5000";
@@ -9763,7 +9763,7 @@ ${e?.stack || ""}`),
       await supabaseAdmin.from("notifications").insert(notifs).then(() => {
       });
       if (send_invoice && student.email && isEmailConfigured()) {
-        const settings = await getConfigSection2("settings").catch(() => ({}));
+        const settings = await getConfigSection("settings").catch(() => ({}));
         const brandName = settings?.general?.school_name || "QuizMaster";
         const paidAt = (/* @__PURE__ */ new Date()).toISOString();
         const tpl = renderInvoiceEmail({
@@ -16992,9 +16992,15 @@ async function runPaymentDeadlineReminders({ force = false } = {}) {
   if (!force && dayOfMonth < 5) {
     return { sent: 0, skipped: 0, monthYear };
   }
-  const settings = await getConfigSection("settings").catch(() => ({}));
-  const brandName = settings?.general?.school_name || "QuizMaster";
-  const baseUrl = process.env.REPLIT_DEV_DOMAIN ? `https://${process.env.REPLIT_DEV_DOMAIN}` : settings?.general?.website || "http://localhost:5000";
+  let brandName = "QuizMaster";
+  let baseUrl = process.env.REPLIT_DEV_DOMAIN ? `https://${process.env.REPLIT_DEV_DOMAIN}` : "http://localhost:5000";
+  try {
+    const cfgRes = await supabaseAdmin.from("platform_config").select("value").eq("section", "settings").maybeSingle();
+    const settings = cfgRes.data?.value ?? {};
+    if (settings?.general?.school_name) brandName = settings.general.school_name;
+    if (!process.env.REPLIT_DEV_DOMAIN && settings?.general?.website) baseUrl = settings.general.website;
+  } catch {
+  }
   const loginUrl = `${baseUrl}/login`;
   const [yr, mo] = monthYear.split("-");
   const monthLabel = new Date(Number(yr), Number(mo) - 1, 1).toLocaleString("default", { month: "long", year: "numeric" });
