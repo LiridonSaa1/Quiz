@@ -1,7 +1,6 @@
 // server.ts
 import "dotenv/config";
 import dns from "dns";
-import AdmZip from "adm-zip";
 import jwt from "jsonwebtoken";
 
 // src/lib/schemaErrors.ts
@@ -453,6 +452,67 @@ function renderInvoiceEmail(opts) {
           </div>
           <p style="margin:0;font-size:12px;line-height:1.6;color:#94a3b8;">
             Ruajeni k\xEBt\xEB email si d\xEBshmi pagese. N\xEBse keni pyetje, na kontaktoni.
+          </p>
+        </td></tr>
+        <tr><td style="background:#f8fafc;padding:16px 36px;border-top:1px solid #e2e8f0;">
+          <p style="margin:0;font-size:11px;color:#94a3b8;text-align:center;">D\xEBrguar nga platforma <strong>${brand}</strong> \xB7 Ju faleminderit!</p>
+        </td></tr>
+      </table>
+    </td></tr>
+  </table>
+</body>
+</html>`;
+  return { subject, htmlContent, textContent };
+}
+function renderPaymentReminderEmail(opts) {
+  const brand = (opts.brandName || "QuizMaster").trim();
+  const subject = `\u23F0 Kujtues pagese \u2014 ${opts.monthLabel} | ${brand}`;
+  const daysLate = Math.max(0, opts.dayOfMonth - 5);
+  const urgency = daysLate >= 10 ? "Urgjente" : daysLate >= 5 ? "Afati po afrohet" : "Kujtues mujor";
+  const textContent = [
+    `${urgency} \u2014 ${brand}`,
+    ``,
+    `I nderuar/e ${opts.studentName},`,
+    `Ju kujtojm\xEB se pagesa juaj p\xEBr muajin ${opts.monthLabel} \xEBsht\xEB e papaguar.`,
+    ``,
+    `Ju lutemi kontaktoni administratorin tuaj sa m\xEB par\xEB.`,
+    ``,
+    `Ju faleminderit! \u2014 Ekipi i ${brand}`
+  ].join("\n");
+  const accentColor = daysLate >= 10 ? "#ef4444" : daysLate >= 5 ? "#f97316" : "#f59e0b";
+  const bgColor = daysLate >= 10 ? "#fef2f2" : daysLate >= 5 ? "#fff7ed" : "#fefce8";
+  const borderColor = daysLate >= 10 ? "#fecaca" : daysLate >= 5 ? "#fed7aa" : "#fde68a";
+  const loginBtn = opts.loginUrl ? `
+          <div style="text-align:center;margin-bottom:20px;">
+            <a href="${opts.loginUrl}" style="display:inline-block;background:${accentColor};color:#ffffff;font-size:14px;font-weight:700;text-decoration:none;padding:13px 28px;border-radius:12px;">
+              \u{1F517} Ky\xE7u dhe shiko detajet
+            </a>
+          </div>` : "";
+  const htmlContent = `<!doctype html>
+<html>
+<body style="margin:0;padding:0;background:#f1f5f9;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f1f5f9;padding:40px 16px;">
+    <tr><td align="center">
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:520px;background:#ffffff;border-radius:20px;overflow:hidden;box-shadow:0 4px 24px rgba(0,0,0,0.06);">
+        <tr><td style="background:${accentColor};padding:28px 36px;">
+          <div style="font-size:22px;font-weight:800;color:#ffffff;letter-spacing:-0.02em;">${brand}</div>
+          <div style="font-size:13px;color:rgba(255,255,255,0.85);margin-top:4px;">${urgency} \u23F0</div>
+        </td></tr>
+        <tr><td style="padding:36px;">
+          <p style="margin:0 0 8px;font-size:15px;font-weight:700;color:#0f172a;">P\xEBrsh\xEBndetje, ${opts.studentName}!</p>
+          <p style="margin:0 0 24px;font-size:14px;line-height:1.6;color:#475569;">
+            Ju kujtojm\xEB se pagesa juaj mujore p\xEBr <strong>${opts.monthLabel}</strong> ende nuk \xEBsht\xEB regjistruar.
+          </p>
+          <div style="background:${bgColor};border:1px solid ${borderColor};border-radius:14px;padding:18px 22px;margin-bottom:24px;">
+            <p style="margin:0;font-size:13px;color:#92400e;line-height:1.6;">
+              \u{1F4C5} <strong>Afati:</strong> dita e 5-t\xEB e muajit<br>
+              \u{1F4B6} <strong>Muaji:</strong> ${opts.monthLabel}<br>
+              \u{1F4CC} <strong>Statusi:</strong> E papaguar
+            </p>
+          </div>
+          ${loginBtn}
+          <p style="margin:0;font-size:12px;line-height:1.6;color:#94a3b8;">
+            N\xEBse pagesa tashm\xEB \xEBsht\xEB b\xEBr\xEB, ju lutemi kontaktoni administratorin. Ky email d\xEBrgohet automatikisht nga sistemi.
           </p>
         </td></tr>
         <tr><td style="background:#f8fafc;padding:16px 36px;border-top:1px solid #e2e8f0;">
@@ -2546,6 +2606,12 @@ function mimeForExt(ext) {
 }
 async function processZipEntries(zipBuffer, zipName, zipDriveId, type, level, job, courseId) {
   const unitNum = detectUnitNumber(zipName);
+  let AdmZip;
+  try {
+    AdmZip = (await import("adm-zip")).default;
+  } catch {
+    throw new Error(`adm-zip package not installed \u2014 run: npm install adm-zip`);
+  }
   let zip;
   try {
     zip = new AdmZip(zipBuffer);
@@ -3294,8 +3360,8 @@ async function createApp(options = {}) {
   app.get("/manifest.json", async (_req, res) => {
     try {
       const [branding, settings] = await Promise.all([
-        getConfigSection("branding").catch(() => null),
-        getConfigSection("settings").catch(() => null)
+        getConfigSection2("branding").catch(() => null),
+        getConfigSection2("settings").catch(() => null)
       ]);
       const b = branding || {};
       const s = settings || {};
@@ -3336,7 +3402,7 @@ async function createApp(options = {}) {
   });
   app.get("/api/pwa/icon.svg", async (_req, res) => {
     try {
-      const branding = await getConfigSection("branding").catch(() => null);
+      const branding = await getConfigSection2("branding").catch(() => null);
       const b = branding || {};
       const raw = typeof b.logoText === "string" ? b.logoText.trim().toUpperCase() : "";
       const logoText = raw.slice(0, 3) || "QM";
@@ -4225,7 +4291,7 @@ Assistant:`
   const CONFIG_SECTIONS = /* @__PURE__ */ new Set(["settings", "branding", "domain", "roles"]);
   const CONFIG_CACHE_TTL_MS = 3e4;
   const configSectionCache = /* @__PURE__ */ new Map();
-  const getConfigSection = async (section) => {
+  const getConfigSection2 = async (section) => {
     const cached = configSectionCache.get(section);
     if (cached && Date.now() < cached.expiresAt) {
       return cached.value;
@@ -4259,7 +4325,7 @@ Assistant:`
     const allTrue = { student: true, teacher: true, admin: true };
     const allFalse = { student: false, teacher: false, admin: false };
     try {
-      const settings = await getConfigSection("settings");
+      const settings = await getConfigSection2("settings");
       const notifs = settings?.notifications;
       if (!notifs || typeof notifs !== "object") return allTrue;
       const v2 = notifs[settingsKey];
@@ -4469,7 +4535,7 @@ Assistant:`
   });
   app.get("/api/platform/features", async (_req, res) => {
     try {
-      const settings = await getConfigSection("settings");
+      const settings = await getConfigSection2("settings");
       res.json({ success: true, features: extractPublicFeatureFlags(settings) });
     } catch (e) {
       if (isPlatformConfigMissing(e)) {
@@ -4494,8 +4560,8 @@ Assistant:`
     };
     try {
       const [branding, settings] = await Promise.all([
-        getConfigSection("branding").catch(() => null),
-        getConfigSection("settings").catch(() => null)
+        getConfigSection2("branding").catch(() => null),
+        getConfigSection2("settings").catch(() => null)
       ]);
       const b = branding || {};
       const s = settings || {};
@@ -4518,7 +4584,7 @@ Assistant:`
   });
   app.get("/api/platform/runtime", async (_req, res) => {
     try {
-      const settings = await getConfigSection("settings");
+      const settings = await getConfigSection2("settings");
       const features = extractPublicFeatureFlags(settings);
       const maintenanceMode = Boolean(
         settings && typeof settings === "object" && settings.advanced && typeof settings.advanced === "object" && settings.advanced.maintenance
@@ -4545,8 +4611,8 @@ Assistant:`
   app.get("/api/platform/init", async (_req, res) => {
     try {
       const [settings, branding] = await Promise.all([
-        getConfigSection("settings").catch(() => null),
-        getConfigSection("branding").catch(() => null)
+        getConfigSection2("settings").catch(() => null),
+        getConfigSection2("branding").catch(() => null)
       ]);
       const s = settings || {};
       const b = branding || {};
@@ -4716,7 +4782,7 @@ Assistant:`
     try {
       const caller = await assertAuthenticated(req, res);
       if (!caller) return;
-      const roles = await getConfigSection("roles");
+      const roles = await getConfigSection2("roles");
       const perms = roles && typeof roles === "object" && roles.perms && typeof roles.perms === "object" && roles.perms[caller.role] && typeof roles.perms[caller.role] === "object" ? roles.perms[caller.role] : {};
       res.json({
         success: true,
@@ -4739,7 +4805,7 @@ Assistant:`
       if (!CONFIG_SECTIONS.has(section)) {
         return res.status(400).json({ error: "Unsupported config section" });
       }
-      const value = await getConfigSection(section);
+      const value = await getConfigSection2(section);
       res.json({ success: true, section, value });
     } catch (e) {
       if (isPlatformConfigMissing(e)) {
@@ -4767,7 +4833,7 @@ Assistant:`
       let nextMaintenance = null;
       if (section === "settings") {
         try {
-          const prev = await getConfigSection("settings");
+          const prev = await getConfigSection2("settings");
           prevMaintenance = Boolean(prev?.advanced?.maintenance);
         } catch {
         }
@@ -5206,7 +5272,7 @@ Assistant:`
   });
   const sendUserCredentials = async (opts) => {
     try {
-      const settings = await getConfigSection("settings");
+      const settings = await getConfigSection2("settings");
       const channels = settings?.notification_channels || {};
       const brandName = settings?.general?.school_name || "QuizMaster";
       const baseUrl = process.env.REPLIT_DEV_DOMAIN ? `https://${process.env.REPLIT_DEV_DOMAIN}` : settings?.general?.website || "http://localhost:5000";
@@ -9697,7 +9763,7 @@ ${e?.stack || ""}`),
       await supabaseAdmin.from("notifications").insert(notifs).then(() => {
       });
       if (send_invoice && student.email && isEmailConfigured()) {
-        const settings = await getConfigSection("settings").catch(() => ({}));
+        const settings = await getConfigSection2("settings").catch(() => ({}));
         const brandName = settings?.general?.school_name || "QuizMaster";
         const paidAt = (/* @__PURE__ */ new Date()).toISOString();
         const tpl = renderInvoiceEmail({
@@ -9713,6 +9779,17 @@ ${e?.stack || ""}`),
       res.json({ success: true, id: paymentId, invoice_sent: !!(send_invoice && student.email && isEmailConfigured()) });
     } catch (e) {
       res.status(500).json({ error: e.message || "Failed to record payment" });
+    }
+  });
+  app.post("/api/admin/student-payments/send-reminders", async (req, res) => {
+    try {
+      const caller = await assertAuthenticated(req, res);
+      if (!caller) return;
+      if (!isAdmin(caller)) return res.status(403).json({ error: "Admin only" });
+      const result = await runPaymentDeadlineReminders({ force: true });
+      res.json({ success: true, ...result });
+    } catch (e) {
+      res.status(500).json({ error: e.message || "Failed to send reminders" });
     }
   });
   app.delete("/api/admin/student-payments/:id", async (req, res) => {
@@ -16907,6 +16984,53 @@ async function startServer() {
     });
   }
 }
+var _reminderSentThisMonth = /* @__PURE__ */ new Set();
+async function runPaymentDeadlineReminders({ force = false } = {}) {
+  const now = /* @__PURE__ */ new Date();
+  const dayOfMonth = now.getDate();
+  const monthYear = now.toISOString().slice(0, 7);
+  if (!force && dayOfMonth < 5) {
+    return { sent: 0, skipped: 0, monthYear };
+  }
+  const settings = await getConfigSection("settings").catch(() => ({}));
+  const brandName = settings?.general?.school_name || "QuizMaster";
+  const baseUrl = process.env.REPLIT_DEV_DOMAIN ? `https://${process.env.REPLIT_DEV_DOMAIN}` : settings?.general?.website || "http://localhost:5000";
+  const loginUrl = `${baseUrl}/login`;
+  const [yr, mo] = monthYear.split("-");
+  const monthLabel = new Date(Number(yr), Number(mo) - 1, 1).toLocaleString("default", { month: "long", year: "numeric" });
+  const { data: allStudents, error: sErr } = await supabaseAdmin.from("profiles").select("id, display_name, email").eq("role", "student").eq("status", "active");
+  if (sErr || !allStudents) return { sent: 0, skipped: 0, monthYear };
+  const { data: paidRows } = await supabaseAdmin.from("student_monthly_payments").select("student_id").eq("month_year", monthYear);
+  const paidSet = new Set((paidRows || []).map((r) => r.student_id));
+  const unpaid = allStudents.filter((s) => !paidSet.has(s.id) && s.email);
+  let sent = 0;
+  let skipped = 0;
+  if (!isEmailConfigured()) {
+    console.log(`[payment-reminder] Email not configured \u2014 skipping ${unpaid.length} reminders`);
+    return { sent: 0, skipped: unpaid.length, monthYear };
+  }
+  for (const student of unpaid) {
+    const cacheKey = `${student.id}:${monthYear}`;
+    if (!force && _reminderSentThisMonth.has(cacheKey)) {
+      skipped++;
+      continue;
+    }
+    const studentName = student.display_name || student.email || "Student";
+    const tpl = renderPaymentReminderEmail({ studentName, monthLabel, dayOfMonth, brandName, loginUrl });
+    try {
+      await sendEmail({ to: student.email, toName: studentName, subject: tpl.subject, htmlContent: tpl.htmlContent, textContent: tpl.textContent });
+      _reminderSentThisMonth.add(cacheKey);
+      sent++;
+    } catch (e) {
+      console.error(`[payment-reminder] Failed to email ${student.email}:`, e.message);
+      skipped++;
+    }
+  }
+  if (sent > 0 || skipped > 0) {
+    console.log(`[payment-reminder] ${monthYear}: sent=${sent}, skipped=${skipped}`);
+  }
+  return { sent, skipped, monthYear };
+}
 async function runAutoPublishQuizzes() {
   try {
     const now = (/* @__PURE__ */ new Date()).toISOString();
@@ -17023,6 +17147,10 @@ if (!process.env.VERCEL) {
     void flushFailedTelegramAlerts();
   }, TELEGRAM_RETRY_INTERVAL_MS);
   void flushFailedTelegramAlerts();
+  setInterval(() => {
+    void runPaymentDeadlineReminders();
+  }, 6 * 60 * 60 * 1e3);
+  void runPaymentDeadlineReminders();
   process.on("unhandledRejection", (reason) => {
     const details = serializeUnknownError(reason);
     console.error("[runtime] unhandledRejection:", details);

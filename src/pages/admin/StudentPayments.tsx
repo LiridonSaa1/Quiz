@@ -4,7 +4,7 @@ import { authFetch, apiUrl } from "../../lib/apiUrl";
 import { toast } from "sonner";
 import {
   Users, CheckCircle2, XCircle, Search, ChevronLeft, ChevronRight,
-  Plus, Trash2, RefreshCw, Euro, Calendar,
+  Plus, Trash2, RefreshCw, Euro, Calendar, Bell,
 } from "lucide-react";
 import { cn } from "../../lib/utils";
 import { format, addMonths, subMonths } from "date-fns";
@@ -26,6 +26,7 @@ export default function AdminStudentPayments() {
   const [search, setSearch] = useState("");
   const [filter, setFilter] = useState<"all" | "paid" | "unpaid">("all");
   const [submitting, setSubmitting] = useState<string | null>(null);
+  const [sendingReminders, setSendingReminders] = useState(false);
   const [showModal, setShowModal] = useState(false);
   const [selectedStudent, setSelectedStudent] = useState<StudentRow | null>(null);
   const [formAmount, setFormAmount] = useState("0");
@@ -139,6 +140,26 @@ export default function AdminStudentPayments() {
           >
             <RefreshCw className="w-4 h-4" />
             Rifresko
+          </button>
+          <button
+            onClick={async () => {
+              setSendingReminders(true);
+              try {
+                const res = await authFetch(apiUrl("/api/admin/student-payments/send-reminders"), { method: "POST" });
+                const json = await res.json();
+                if (!json.success) throw new Error(json.error || "Failed");
+                toast.success(`Kujtuese dërguar: ${json.sent} studentëve (${json.skipped} anashkaluar)`);
+              } catch (e: any) {
+                toast.error(e.message || "Dërgimi dështoi");
+              } finally {
+                setSendingReminders(false);
+              }
+            }}
+            disabled={sendingReminders}
+            className="flex items-center gap-2 px-4 py-2 bg-amber-500 text-white rounded-xl text-sm font-medium hover:bg-amber-600 transition disabled:opacity-50"
+          >
+            <Bell className="w-4 h-4" />
+            {sendingReminders ? "Duke dërguar..." : "Dërgo Kujtues"}
           </button>
         </div>
 

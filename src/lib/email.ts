@@ -310,3 +310,77 @@ export function renderInvoiceEmail(opts: {
 
   return { subject, htmlContent, textContent };
 }
+
+/** Renders a payment deadline reminder email for a student (Albanian). */
+export function renderPaymentReminderEmail(opts: {
+  studentName: string;
+  monthLabel: string;
+  dayOfMonth: number;
+  brandName?: string;
+  loginUrl?: string;
+}) {
+  const brand = (opts.brandName || 'QuizMaster').trim();
+  const subject = `⏰ Kujtues pagese — ${opts.monthLabel} | ${brand}`;
+  const daysLate = Math.max(0, opts.dayOfMonth - 5);
+  const urgency = daysLate >= 10 ? 'Urgjente' : daysLate >= 5 ? 'Afati po afrohet' : 'Kujtues mujor';
+
+  const textContent = [
+    `${urgency} — ${brand}`,
+    ``,
+    `I nderuar/e ${opts.studentName},`,
+    `Ju kujtojmë se pagesa juaj për muajin ${opts.monthLabel} është e papaguar.`,
+    ``,
+    `Ju lutemi kontaktoni administratorin tuaj sa më parë.`,
+    ``,
+    `Ju faleminderit! — Ekipi i ${brand}`,
+  ].join('\n');
+
+  const accentColor = daysLate >= 10 ? '#ef4444' : daysLate >= 5 ? '#f97316' : '#f59e0b';
+  const bgColor    = daysLate >= 10 ? '#fef2f2' : daysLate >= 5 ? '#fff7ed' : '#fefce8';
+  const borderColor= daysLate >= 10 ? '#fecaca' : daysLate >= 5 ? '#fed7aa' : '#fde68a';
+
+  const loginBtn = opts.loginUrl ? `
+          <div style="text-align:center;margin-bottom:20px;">
+            <a href="${opts.loginUrl}" style="display:inline-block;background:${accentColor};color:#ffffff;font-size:14px;font-weight:700;text-decoration:none;padding:13px 28px;border-radius:12px;">
+              🔗 Kyçu dhe shiko detajet
+            </a>
+          </div>` : '';
+
+  const htmlContent = `<!doctype html>
+<html>
+<body style="margin:0;padding:0;background:#f1f5f9;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f1f5f9;padding:40px 16px;">
+    <tr><td align="center">
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:520px;background:#ffffff;border-radius:20px;overflow:hidden;box-shadow:0 4px 24px rgba(0,0,0,0.06);">
+        <tr><td style="background:${accentColor};padding:28px 36px;">
+          <div style="font-size:22px;font-weight:800;color:#ffffff;letter-spacing:-0.02em;">${brand}</div>
+          <div style="font-size:13px;color:rgba(255,255,255,0.85);margin-top:4px;">${urgency} ⏰</div>
+        </td></tr>
+        <tr><td style="padding:36px;">
+          <p style="margin:0 0 8px;font-size:15px;font-weight:700;color:#0f172a;">Përshëndetje, ${opts.studentName}!</p>
+          <p style="margin:0 0 24px;font-size:14px;line-height:1.6;color:#475569;">
+            Ju kujtojmë se pagesa juaj mujore për <strong>${opts.monthLabel}</strong> ende nuk është regjistruar.
+          </p>
+          <div style="background:${bgColor};border:1px solid ${borderColor};border-radius:14px;padding:18px 22px;margin-bottom:24px;">
+            <p style="margin:0;font-size:13px;color:#92400e;line-height:1.6;">
+              📅 <strong>Afati:</strong> dita e 5-të e muajit<br>
+              💶 <strong>Muaji:</strong> ${opts.monthLabel}<br>
+              📌 <strong>Statusi:</strong> E papaguar
+            </p>
+          </div>
+          ${loginBtn}
+          <p style="margin:0;font-size:12px;line-height:1.6;color:#94a3b8;">
+            Nëse pagesa tashmë është bërë, ju lutemi kontaktoni administratorin. Ky email dërgohet automatikisht nga sistemi.
+          </p>
+        </td></tr>
+        <tr><td style="background:#f8fafc;padding:16px 36px;border-top:1px solid #e2e8f0;">
+          <p style="margin:0;font-size:11px;color:#94a3b8;text-align:center;">Dërguar nga platforma <strong>${brand}</strong> · Ju faleminderit!</p>
+        </td></tr>
+      </table>
+    </td></tr>
+  </table>
+</body>
+</html>`;
+
+  return { subject, htmlContent, textContent };
+}

@@ -1,12 +1,12 @@
 import "dotenv/config";
 import dns from "dns";
 dns.setDefaultResultOrder("ipv4first");
-import AdmZip from "adm-zip";
+// adm-zip loaded lazily in processZipBuffer() to avoid hard build dep on Render
 import jwt from "jsonwebtoken";
 import { isMissingCoursesStudentIdsError } from "./src/lib/schemaErrors.js";
 import { canAccessTeacherCourses, isAdmin, isAdminSeedAllowed } from "./src/lib/routeAuth.js";
 import { generateFixSuggestion } from "./src/lib/ai/generateFixSuggestion.js";
-import { isEmailConfigured, sendEmail, renderVerificationEmail, renderCredentialEmail, renderInvoiceEmail } from "./src/lib/email.js";
+import { isEmailConfigured, sendEmail, renderVerificationEmail, renderCredentialEmail, renderInvoiceEmail, renderPaymentReminderEmail } from "./src/lib/email.js";
 import { notifyEvent, type NotifyContext, type NotifyEventKey } from "./src/lib/notifyEvents.js";
 import { HEADWAY_FULL_DATA, buildUnitQuestions as buildHwUnitQuestions, type HUnit } from "./src/lib/headwayData.js";
 import { getQuestionsForSection, getTopicsForLevel, HEADWAY_QUESTIONS } from "./src/lib/headwayQuestions.js";
@@ -180,7 +180,9 @@ async function processZipEntries(
   courseId?: string
 ): Promise<void> {
   const unitNum = detectUnitNumber(zipName);
-  let zip: InstanceType<typeof AdmZip>;
+  let AdmZip: any;
+  try { AdmZip = (await import('adm-zip')).default; } catch { throw new Error(`adm-zip package not installed — run: npm install adm-zip`); }
+  let zip: any;
   try {
     zip = new AdmZip(zipBuffer);
   } catch (e: any) {
@@ -9389,6 +9391,19 @@ Rules:
     }
   });
 
+  // Manual trigger: POST /api/admin/student-payments/send-reminders
+  app.post('/api/admin/student-payments/send-reminders', async (req, res) => {
+    try {
+      const caller = await assertAuthenticated(req, res);
+      if (!caller) return;
+      if (!isAdmin(caller)) return res.status(403).json({ error: 'Admin only' });
+      const result = await runPaymentDeadlineReminders({ force: true });
+      res.json({ success: true, ...result });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message || 'Failed to send reminders' });
+    }
+  });
+
   app.delete('/api/admin/student-payments/:id', async (req, res) => {
     try {
       const { id } = req.params;
@@ -18131,6 +18146,76 @@ async function startServer() {
   }
 }
 
+// ─── Payment deadline reminders ────────────────────────────────────────────────
+// Sends reminder emails to unpaid students on/after the 5th of each month.
+// Called by the daily scheduler and also via the admin API endpoint.
+const _reminderSentThisMonth = new Set<string>(); // key = "userId:YYYY-MM"
+
+async function runPaymentDeadlineReminders({ force = false } = {}): Promise<{ sent: number; skipped: number; monthYear: string }> {
+  const now = new Date();
+  const dayOfMonth = now.getDate();
+  const monthYear = now.toISOString().slice(0, 7);
+
+  if (!force && dayOfMonth < 5) {
+    return { sent: 0, skipped: 0, monthYear };
+  }
+
+  const settings: any = await getConfigSection('settings').catch(() => ({}));
+  const brandName: string = settings?.general?.school_name || 'QuizMaster';
+  const baseUrl = process.env.REPLIT_DEV_DOMAIN
+    ? `https://${process.env.REPLIT_DEV_DOMAIN}`
+    : (settings?.general?.website || 'http://localhost:5000');
+  const loginUrl = `${baseUrl}/login`;
+
+  const [yr, mo] = monthYear.split('-');
+  const monthLabel = new Date(Number(yr), Number(mo) - 1, 1).toLocaleString('default', { month: 'long', year: 'numeric' });
+
+  // Fetch all students
+  const { data: allStudents, error: sErr } = await supabaseAdmin
+    .from('profiles')
+    .select('id, display_name, email')
+    .eq('role', 'student')
+    .eq('status', 'active');
+  if (sErr || !allStudents) return { sent: 0, skipped: 0, monthYear };
+
+  // Fetch paid student IDs for this month
+  const { data: paidRows } = await supabaseAdmin
+    .from('student_monthly_payments')
+    .select('student_id')
+    .eq('month_year', monthYear);
+  const paidSet = new Set((paidRows || []).map((r: any) => r.student_id));
+
+  const unpaid = allStudents.filter((s: any) => !paidSet.has(s.id) && s.email);
+  let sent = 0;
+  let skipped = 0;
+
+  if (!isEmailConfigured()) {
+    console.log(`[payment-reminder] Email not configured — skipping ${unpaid.length} reminders`);
+    return { sent: 0, skipped: unpaid.length, monthYear };
+  }
+
+  for (const student of unpaid) {
+    const cacheKey = `${student.id}:${monthYear}`;
+    if (!force && _reminderSentThisMonth.has(cacheKey)) { skipped++; continue; }
+
+    const studentName = student.display_name || student.email || 'Student';
+    const tpl = renderPaymentReminderEmail({ studentName, monthLabel, dayOfMonth, brandName, loginUrl });
+    try {
+      await sendEmail({ to: student.email, toName: studentName, subject: tpl.subject, htmlContent: tpl.htmlContent, textContent: tpl.textContent });
+      _reminderSentThisMonth.add(cacheKey);
+      sent++;
+    } catch (e: any) {
+      console.error(`[payment-reminder] Failed to email ${student.email}:`, e.message);
+      skipped++;
+    }
+  }
+
+  if (sent > 0 || skipped > 0) {
+    console.log(`[payment-reminder] ${monthYear}: sent=${sent}, skipped=${skipped}`);
+  }
+  return { sent, skipped, monthYear };
+}
+
 async function runAutoPublishQuizzes() {
   try {
     const now = new Date().toISOString();
@@ -18280,6 +18365,10 @@ if (!process.env.VERCEL) {
     void flushFailedTelegramAlerts();
   }, TELEGRAM_RETRY_INTERVAL_MS);
   void flushFailedTelegramAlerts();
+
+  // Payment deadline reminders — run every 6 hours; emails only go out on/after 5th of month
+  setInterval(() => { void runPaymentDeadlineReminders(); }, 6 * 60 * 60 * 1000);
+  void runPaymentDeadlineReminders();
 
   process.on("unhandledRejection", (reason) => {
     const details = serializeUnknownError(reason);
