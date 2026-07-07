@@ -45,6 +45,7 @@ interface Assignment {
   created_at: string;
   course?: { title: string } | null;
   class_name?: string | null;
+  submissions_count?: number;
 }
 
 type FileEntry = { name: string; url: string; size: number; mime_type: string };
@@ -610,13 +611,19 @@ export default function TeacherAssignments() {
                           </span>
                         </div>
                       </div>
-                      {a.status === 'published' && (
+                      {(a.status === 'published' || a.status === 'closed') && (
                         <button
                           type="button"
                           onClick={() => setSubmissionsFor(a)}
                           className="mt-3 w-full inline-flex items-center justify-center gap-2 py-2 rounded-xl text-xs font-bold bg-indigo-50 text-indigo-700 hover:bg-indigo-100 transition-colors"
                         >
-                          <Users className="w-3.5 h-3.5" />{t('teacher.assignments.viewSubmissions')}
+                          <Users className="w-3.5 h-3.5" />
+                          {t('teacher.assignments.viewSubmissions')}
+                          {(a.submissions_count ?? 0) > 0 && (
+                            <span className="ml-1 px-1.5 py-0.5 rounded-full bg-indigo-200 text-indigo-800 text-[10px] font-bold">
+                              {a.submissions_count}
+                            </span>
+                          )}
                         </button>
                       )}
                     </div>

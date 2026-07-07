@@ -15492,10 +15492,25 @@ ${shortContent}`;
       } catch {
       }
       try {
-        const result = caller.role === "teacher" ? await poolQuery(
-          `SELECT * FROM assignments WHERE teacher_id = ANY($1::uuid[]) ORDER BY created_at DESC`,
-          [scopedIds]
-        ) : await poolQuery(`SELECT * FROM assignments ORDER BY created_at DESC`);
+        const baseQuery = caller.role === "teacher" ? `SELECT a.*, COALESCE(s.cnt, 0)::int AS submissions_count
+             FROM assignments a
+             LEFT JOIN (
+               SELECT assignment_id, COUNT(*) AS cnt
+               FROM assignment_submissions
+               WHERE status IN ('submitted','graded')
+               GROUP BY assignment_id
+             ) s ON s.assignment_id = a.id
+             WHERE a.teacher_id = ANY($1::uuid[])
+             ORDER BY a.created_at DESC` : `SELECT a.*, COALESCE(s.cnt, 0)::int AS submissions_count
+             FROM assignments a
+             LEFT JOIN (
+               SELECT assignment_id, COUNT(*) AS cnt
+               FROM assignment_submissions
+               WHERE status IN ('submitted','graded')
+               GROUP BY assignment_id
+             ) s ON s.assignment_id = a.id
+             ORDER BY a.created_at DESC`;
+        const result = caller.role === "teacher" ? await poolQuery(baseQuery, [scopedIds]) : await poolQuery(baseQuery);
         console.log(`[assignments] GET via poolQuery: ${result.rows.length} rows (role=${caller.role})`);
         return res.json({ success: true, assignments: result.rows });
       } catch (sqlErr) {
