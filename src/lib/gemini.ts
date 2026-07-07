@@ -6,8 +6,7 @@ const IMAGE_IMPORT_NOTE_MAX_CHARS = 4000;
 const getApiKey = (): string => {
   const replitKey = (process.env.AI_INTEGRATIONS_GEMINI_API_KEY as string | undefined) || '';
   const processKey = (process.env.GEMINI_API_KEY as string | undefined) || '';
-  const viteKey = import.meta.env?.VITE_GEMINI_API_KEY || '';
-  return String(replitKey || processKey || viteKey).trim();
+  return String(replitKey || processKey).trim();
 };
 
 const getBaseUrl = (): string | undefined => {
@@ -37,7 +36,7 @@ const getOptionalClient = () => {
 async function ask(prompt: string): Promise<string> {
   const ai = getClient();
   const res = await ai.models.generateContent({
-    model: 'gemini-2.0-flash',
+    model: 'gemini-2.5-flash',
     contents: prompt,
   });
   return res.text ?? '';
@@ -767,6 +766,70 @@ export interface AIQuestion {
   points: number;
 }
 
+export type AIQuestionType =
+  | 'multiple-choice'
+  | 'multiple-answer'
+  | 'true-false'
+  | 'fill-in-the-blank'
+  | 'short-answer'
+  | 'long-answer'
+  | 'matching'
+  | 'ordering'
+  | 'word-bank'
+  | 'sentence-building'
+  | 'drag-drop'
+  | 'cloze'
+  | 'listening'
+  | 'audio-fill-blank'
+  | 'dictation'
+  | 'speaking'
+  | 'pronunciation'
+  | 'reading-comprehension';
+
+export interface AIGeneratedQuestion {
+  type: AIQuestionType;
+  text: string;
+  options?: { id: string; text: string }[];
+  correctAnswer?: string | string[];
+  explanation?: string;
+  points?: number;
+  pairs?: { left: string; right: string }[];
+  items?: string[];
+  correctOrder?: string[];
+  wordBank?: string[];
+  words?: string[];
+  passage?: string;
+  audioTranscript?: string;
+  blanks?: string[];
+}
+
+export const AI_QUESTION_TYPE_LABELS: Record<AIQuestionType, string> = {
+  'multiple-choice': 'Multiple Choice',
+  'multiple-answer': 'Multiple Answer',
+  'true-false': 'True / False',
+  'fill-in-the-blank': 'Fill in the Blank',
+  'short-answer': 'Short Answer',
+  'long-answer': 'Essay',
+  'matching': 'Matching',
+  'ordering': 'Ordering',
+  'word-bank': 'Word Bank',
+  'sentence-building': 'Sentence Building',
+  'drag-drop': 'Drag & Drop',
+  'cloze': 'Cloze Test',
+  'listening': 'Listening Questions',
+  'audio-fill-blank': 'Audio Fill in Blank',
+  'dictation': 'Dictation',
+  'speaking': 'Speaking',
+  'pronunciation': 'Pronunciation Check',
+  'reading-comprehension': 'Reading Comprehension',
+};
+
+export const DEFAULT_AI_QUESTION_TYPES: AIQuestionType[] = [
+  'multiple-choice',
+  'true-false',
+  'fill-in-the-blank',
+];
+
 export async function generateQuizQuestions(contentInput: string, explicitCount?: number): Promise<AIQuestion[]> {
   const cleaned = collapseWhitespace(contentInput);
   if (!cleaned) throw new Error('Please provide source content first.');
@@ -811,7 +874,7 @@ Content:
 """${clipped}"""`;
 
     const res = await aiClient.models.generateContent({
-      model: 'gemini-2.0-flash',
+      model: 'gemini-2.5-flash',
       contents: prompt,
     });
 
@@ -821,6 +884,188 @@ Content:
     return normalized.map(toBuilderQuestion);
   } catch {
     return fallback.map(toBuilderQuestion);
+  }
+}
+
+function buildTypeSchemaDescription(types: AIQuestionType[]): string {
+  const schemas: Record<AIQuestionType, string> = {
+    'multiple-choice': `{"type":"multiple-choice","question":"...","options":["A","B","C","D"],"correct_answer":"A","explanation":"..."}`,
+    'multiple-answer': `{"type":"multiple-answer","question":"...","options":["A","B","C","D"],"correct_answers":["A","C"],"explanation":"..."}`,
+    'true-false': `{"type":"true-false","question":"...","correct_answer":"True","explanation":"..."}`,
+    'fill-in-the-blank': `{"type":"fill-in-the-blank","question":"The ___ is the powerhouse of the cell.","correct_answer":"mitochondria","explanation":"..."}`,
+    'short-answer': `{"type":"short-answer","question":"...","correct_answer":"brief answer","explanation":"..."}`,
+    'long-answer': `{"type":"long-answer","question":"Explain in detail...","explanation":"sample answer or rubric hint"}`,
+    'matching': `{"type":"matching","question":"Match each word to its definition:","pairs":[{"left":"apple","right":"a red fruit"},{"left":"book","right":"pages bound together"}],"explanation":"..."}`,
+    'ordering': `{"type":"ordering","question":"Put these steps in order:","items":["Step C","Step A","Step B"],"correct_order":["Step A","Step B","Step C"],"explanation":"..."}`,
+    'word-bank': `{"type":"word-bank","question":"Choose the correct word: The ___ shines brightly.","word_bank":["sun","moon","rain","cloud"],"correct_answer":"sun","explanation":"..."}`,
+    'sentence-building': `{"type":"sentence-building","question":"Arrange the words to form a correct sentence:","words":["is","The","sky","blue"],"correct_answer":"The sky is blue","explanation":"..."}`,
+    'drag-drop': `{"type":"drag-drop","question":"Drag to put in correct order:","items":["Item C","Item A","Item B"],"correct_order":["Item A","Item B","Item C"],"explanation":"..."}`,
+    'cloze': `{"type":"cloze","question":"Complete the passage:","passage":"The ___ (1) rises in the east and sets in the ___ (2). It gives us light and ___ (3).","blanks":["sun","west","warmth"],"explanation":"..."}`,
+    'listening': `{"type":"listening","question":"[Listening] A teacher explains...","audio_transcript":"Full transcript of what would be heard","options":["A","B","C","D"],"correct_answer":"A","explanation":"..."}`,
+    'audio-fill-blank': `{"type":"audio-fill-blank","question":"Listen and fill in the blank: 'The capital of France is ___.'","audio_transcript":"The capital of France is Paris.","correct_answer":"Paris","explanation":"..."}`,
+    'dictation': `{"type":"dictation","question":"Listen carefully and write what you hear.","audio_transcript":"The quick brown fox jumps over the lazy dog.","correct_answer":"The quick brown fox jumps over the lazy dog.","explanation":"..."}`,
+    'speaking': `{"type":"speaking","question":"Describe your favourite holiday in 3-4 sentences.","explanation":"Students should mention location, activities, and feelings."}`,
+    'pronunciation': `{"type":"pronunciation","question":"Say the following word clearly:","correct_answer":"necessary","explanation":"Stress on first syllable: NE-ces-sa-ry"}`,
+    'reading-comprehension': `{"type":"reading-comprehension","question":"Read the passage and answer:","passage":"Long text passage here...","options":["A","B","C","D"],"correct_answer":"A","explanation":"..."}`,
+  };
+  return types.map((t) => `- ${AI_QUESTION_TYPE_LABELS[t]}: ${schemas[t]}`).join('\n');
+}
+
+export async function generateQuizQuestionsWithTypes(
+  contentInput: string,
+  selectedTypes: AIQuestionType[],
+  explicitCount?: number,
+): Promise<AIGeneratedQuestion[]> {
+  const cleaned = collapseWhitespace(contentInput);
+  if (!cleaned) throw new Error('Please provide source content first.');
+
+  const types = selectedTypes.length > 0 ? selectedTypes : DEFAULT_AI_QUESTION_TYPES;
+
+  const count =
+    Number.isFinite(explicitCount) && typeof explicitCount === 'number'
+      ? Math.max(3, Math.min(20, Math.round(explicitCount)))
+      : Math.max(types.length, autoQuestionCount(cleaned));
+
+  const clipped = cleaned.length > QUIZ_PROMPT_MAX_CHARS ? cleaned.slice(0, QUIZ_PROMPT_MAX_CHARS) : cleaned;
+  const typeLabels = types.map((t) => AI_QUESTION_TYPE_LABELS[t]).join(', ');
+  const schemaDesc = buildTypeSchemaDescription(types);
+  const fallbackMcq = buildFallbackQuizJson(clipped, count).map(toBuilderQuestion);
+
+  const aiClient = getOptionalClient();
+  if (!aiClient) {
+    return fallbackMcq.map((q) => ({
+      type: 'multiple-choice' as AIQuestionType,
+      text: q.text,
+      options: q.options,
+      correctAnswer: q.correctAnswer,
+      explanation: q.explanation,
+      points: q.points,
+    }));
+  }
+
+  try {
+    const prompt = `You are an expert English language teacher creating quiz questions for a modern LMS platform.
+
+Task: Generate exactly ${count} quiz questions based ONLY on the content below.
+
+Selected question types: ${typeLabels}
+Distribute the questions evenly across these types (roughly ${Math.ceil(count / types.length)} per type).
+
+Rules:
+1) Use ONLY the content below — no external knowledge.
+2) Keep language clear and appropriate for English learners.
+3) Each question must test a specific piece of knowledge from the content.
+4) Avoid duplicate or very similar questions.
+5) For fill-in-the-blank: use ___ to mark the blank in the question text.
+6) For matching: provide at least 3 pairs (max 5).
+7) For ordering: provide 3–5 items in shuffled order; correct_order is the right sequence.
+8) For word-bank: provide 4 words including 1 correct answer.
+9) For sentence-building: provide 3–6 words shuffled; correct_answer is the full correct sentence.
+10) For multiple-answer: at least 2 correct answers, total 4 options.
+11) For multiple-choice: exactly 4 options, exactly 1 correct.
+12) Always include an "explanation" field with a brief rationale.
+
+JSON schemas by type:
+${schemaDesc}
+
+Return ONLY a valid JSON array (no markdown, no extra text):
+[
+  ...questions
+]
+
+Content:
+"""${clipped}"""`;
+
+    const res = await aiClient.models.generateContent({
+      model: 'gemini-2.5-flash',
+      contents: prompt,
+    });
+
+    const raw = res.text ?? '';
+    const parsed = extractJson(raw);
+    if (!Array.isArray(parsed) || parsed.length === 0) {
+      return fallbackMcq.map((q) => ({
+        type: 'multiple-choice' as AIQuestionType,
+        text: q.text,
+        options: q.options,
+        correctAnswer: q.correctAnswer,
+        explanation: q.explanation,
+        points: q.points,
+      }));
+    }
+
+    const out: AIGeneratedQuestion[] = [];
+    for (const raw of parsed) {
+      if (!raw || typeof raw !== 'object') continue;
+      const type = String(raw.type || 'multiple-choice') as AIQuestionType;
+      const text = String(raw.question || raw.text || '').trim();
+      if (!text) continue;
+
+      const explanation = String(raw.explanation || '').trim();
+
+      if (type === 'multiple-choice') {
+        const opts = Array.isArray(raw.options) ? raw.options.map(String) : [];
+        if (opts.length < 2) continue;
+        const options = opts.slice(0, 4).map((t, i) => ({ id: String(i + 1), text: t }));
+        const correct = String(raw.correct_answer || opts[0]);
+        const correctId = options.find((o) => o.text === correct)?.id || options[0].id;
+        out.push({ type, text, options, correctAnswer: correctId, explanation, points: 1 });
+      } else if (type === 'multiple-answer') {
+        const opts = Array.isArray(raw.options) ? raw.options.map(String) : [];
+        if (opts.length < 2) continue;
+        const options = opts.slice(0, 4).map((t, i) => ({ id: String(i + 1), text: t }));
+        const correctTexts: string[] = Array.isArray(raw.correct_answers) ? raw.correct_answers.map(String) : [String(raw.correct_answer || opts[0])];
+        const correctIds = correctTexts.map((ct) => options.find((o) => o.text === ct)?.id).filter(Boolean) as string[];
+        out.push({ type, text, options, correctAnswer: correctIds.length > 0 ? correctIds : [options[0].id], explanation, points: 1 });
+      } else if (type === 'true-false') {
+        const correct = String(raw.correct_answer || 'True');
+        const options = [{ id: '1', text: 'True' }, { id: '2', text: 'False' }];
+        const correctId = correct.toLowerCase().startsWith('t') ? '1' : '2';
+        out.push({ type, text, options, correctAnswer: correctId, explanation, points: 1 });
+      } else if (type === 'fill-in-the-blank') {
+        out.push({ type, text, correctAnswer: String(raw.correct_answer || '').trim(), explanation, points: 1 });
+      } else if (type === 'short-answer') {
+        out.push({ type, text, correctAnswer: String(raw.correct_answer || '').trim(), explanation, points: 1 });
+      } else if (type === 'long-answer') {
+        out.push({ type, text, explanation, points: 2 });
+      } else if (type === 'matching') {
+        const pairs: { left: string; right: string }[] = Array.isArray(raw.pairs)
+          ? raw.pairs.map((p: any) => ({ left: String(p.left || ''), right: String(p.right || '') })).filter((p: any) => p.left && p.right)
+          : [];
+        if (pairs.length < 2) continue;
+        out.push({ type, text, pairs, explanation, points: pairs.length });
+      } else if (type === 'ordering') {
+        const items: string[] = Array.isArray(raw.items) ? raw.items.map(String) : [];
+        const correctOrder: string[] = Array.isArray(raw.correct_order) ? raw.correct_order.map(String) : items;
+        if (items.length < 2) continue;
+        out.push({ type, text, items, correctOrder, explanation, points: 1 });
+      } else if (type === 'word-bank') {
+        const wordBank: string[] = Array.isArray(raw.word_bank) ? raw.word_bank.map(String) : [];
+        out.push({ type, text, wordBank, correctAnswer: String(raw.correct_answer || '').trim(), explanation, points: 1 });
+      } else if (type === 'sentence-building') {
+        const words: string[] = Array.isArray(raw.words) ? raw.words.map(String) : [];
+        if (words.length < 2) continue;
+        out.push({ type, text, words, correctAnswer: String(raw.correct_answer || words.join(' ')).trim(), explanation, points: 1 });
+      }
+    }
+
+    return out.length > 0 ? out : fallbackMcq.map((q) => ({
+      type: 'multiple-choice' as AIQuestionType,
+      text: q.text,
+      options: q.options,
+      correctAnswer: q.correctAnswer,
+      explanation: q.explanation,
+      points: q.points,
+    }));
+  } catch {
+    return fallbackMcq.map((q) => ({
+      type: 'multiple-choice' as AIQuestionType,
+      text: q.text,
+      options: q.options,
+      correctAnswer: q.correctAnswer,
+      explanation: q.explanation,
+      points: q.points,
+    }));
   }
 }
 

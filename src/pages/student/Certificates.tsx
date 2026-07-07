@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { supabase } from '../../supabase';
 import StudentLayout from '../../components/layout/StudentLayout';
 import { motion, AnimatePresence } from 'motion/react';
@@ -36,18 +37,21 @@ const CERT_GRADIENTS = [
 ];
 
 export default function StudentCertificates() {
+  const { t } = useTranslation();
   const [certs, setCerts] = useState<Certificate[]>([]);
   const [loading, setLoading] = useState(true);
   const [studentName, setStudentName] = useState('Student');
 
-  const renderCertificateHtml = (cert: Certificate) => {
+  const renderCertificateHtml = (cert: Certificate, t: any) => {
     const accent = '#6d28d9';
     const bg = '#ffffff';
+    const gradeLabel = t('common.grade');
+    const scoreLabel = t('common.score');
     const gradeHtml = cert.grade
-      ? `<div style="padding:8px 14px;border:1px solid #c4b5fd;border-radius:999px;background:#f5f3ff;color:${accent};font-size:12px;font-weight:700;">Grade: ${cert.grade}</div>`
+      ? `<div style="padding:8px 14px;border:1px solid #c4b5fd;border-radius:999px;background:#f5f3ff;color:${accent};font-size:12px;font-weight:700;">${gradeLabel}: ${cert.grade}</div>`
       : '';
     const scoreHtml = cert.score != null
-      ? `<div style="padding:8px 14px;border:1px solid #c4b5fd;border-radius:999px;background:#f5f3ff;color:${accent};font-size:12px;font-weight:700;">Score: ${cert.score}%</div>`
+      ? `<div style="padding:8px 14px;border:1px solid #c4b5fd;border-radius:999px;background:#f5f3ff;color:${accent};font-size:12px;font-weight:700;">${scoreLabel}: ${cert.score}%</div>`
       : '';
 
     return `<!doctype html>
@@ -65,8 +69,8 @@ export default function StudentCertificates() {
   </head>
   <body>
     <div class="toolbar">
-      <button class="primary" onclick="window.print()">Print / Save PDF</button>
-      <button onclick="window.close()">Close</button>
+      <button class="primary" onclick="window.print()">${t('certificates.printSavePdf')}</button>
+      <button onclick="window.close()">${t('certificates.close')}</button>
     </div>
     <div style="max-width:960px;margin:0 auto;background:${bg};border:2px solid ${accent};border-radius:20px;padding:48px;position:relative;box-shadow:0 24px 60px rgba(15,23,42,0.18);">
       <div style="position:absolute;inset:10px;border:1px solid ${accent};opacity:0.35;border-radius:16px;pointer-events:none;"></div>
@@ -75,10 +79,10 @@ export default function StudentCertificates() {
       <div style="position:absolute;bottom:18px;left:18px;width:42px;height:42px;border-bottom:3px solid ${accent};border-left:3px solid ${accent};border-radius:10px;"></div>
       <div style="position:absolute;bottom:18px;right:18px;width:42px;height:42px;border-bottom:3px solid ${accent};border-right:3px solid ${accent};border-radius:10px;"></div>
       <div style="text-align:center;position:relative;">
-        <div style="display:inline-flex;align-items:center;gap:10px;padding:6px 14px;border-radius:999px;background:rgba(255,255,255,0.75);border:1px solid rgba(15,23,42,0.12);font-size:11px;letter-spacing:0.18em;text-transform:uppercase;color:${accent};font-weight:800;">Certificate of Achievement</div>
-        <div style="margin-top:14px;font-size:12px;color:#475569;letter-spacing:0.08em;text-transform:uppercase;">Presented To</div>
+        <div style="display:inline-flex;align-items:center;gap:10px;padding:6px 14px;border-radius:999px;background:rgba(255,255,255,0.75);border:1px solid rgba(15,23,42,0.12);font-size:11px;letter-spacing:0.18em;text-transform:uppercase;color:${accent};font-weight:800;">${t('certificates.certificateOfAchievement')}</div>
+        <div style="margin-top:14px;font-size:12px;color:#475569;letter-spacing:0.08em;text-transform:uppercase;">${t('certificates.presentedTo')}</div>
         <h1 style="margin:10px 0 0 0;font-size:56px;line-height:1.08;color:#0f172a;font-family:Georgia,'Times New Roman',serif;">${studentName}</h1>
-        <div style="margin-top:14px;font-size:13px;color:#64748b;">for successful completion of</div>
+        <div style="margin-top:14px;font-size:13px;color:#64748b;">${t('certificates.forCompletion')}</div>
         <h2 style="margin:10px auto 0 auto;font-size:36px;line-height:1.15;color:${accent};font-family:Georgia,'Times New Roman',serif;max-width:1080px;word-break:break-word;overflow-wrap:anywhere;">${cert.title}</h2>
         ${cert.courseTitle ? `<div style="margin-top:8px;color:#475569;">${cert.courseTitle}</div>` : ''}
         <div style="display:flex;gap:32px;justify-content:center;margin-top:24px;">${gradeHtml}${scoreHtml}</div>
@@ -89,11 +93,11 @@ export default function StudentCertificates() {
           </div>
           <div style="display:flex;flex-direction:column;align-items:center;gap:8px;">
             <div style="width:84px;height:84px;border-radius:999px;background:radial-gradient(circle at 30% 30%, #8b5cf6,#4c1d95);box-shadow:inset 0 0 0 3px rgba(255,255,255,0.55),0 10px 24px rgba(15,23,42,0.22);display:flex;align-items:center;justify-content:center;color:#fff;font-size:30px;font-weight:800;">★</div>
-            <div style="font-size:11px;color:#64748b;letter-spacing:0.08em;text-transform:uppercase;">Verified</div>
+            <div style="font-size:11px;color:#64748b;letter-spacing:0.08em;text-transform:uppercase;">${t('certificates.verified')}</div>
           </div>
           <div style="text-align:right;">
             <div style="width:180px;border-top:2px solid #94a3b8;margin-left:auto;"></div>
-            <div style="font-size:11px;color:#64748b;margin-top:6px;">Authorized Signature</div>
+            <div style="font-size:11px;color:#64748b;margin-top:6px;">${t('certificates.authorizedSignature')}</div>
           </div>
         </div>
       </div>
@@ -105,18 +109,18 @@ export default function StudentCertificates() {
 
   const downloadCertificate = (cert: Certificate) => {
     if (cert.status !== 'issued') {
-      toast.error('Only issued certificates can be downloaded.');
+      toast.error(t('certificates.onlyIssuedDownload'));
       return;
     }
 
     const win = window.open('', '_blank', 'width=1200,height=900');
     if (!win) {
-      toast.error('Pop-up blocked. Please allow pop-ups for certificate download.');
+      toast.error(t('certificates.popupBlocked'));
       return;
     }
 
     win.document.open();
-    win.document.write(renderCertificateHtml(cert));
+    win.document.write(renderCertificateHtml(cert, t));
     win.document.close();
   };
 
@@ -173,11 +177,11 @@ export default function StudentCertificates() {
             <div>
               <div className="inline-flex items-center gap-2 bg-white/10 border border-white/20 rounded-full px-3 py-1.5 mb-3">
                 <Award className="w-3.5 h-3.5 text-yellow-300" />
-                <span className="text-white/80 text-xs font-semibold">Certificates</span>
+                <span className="text-white/80 text-xs font-semibold">{t('nav.certificates')}</span>
               </div>
-              <h1 className="text-3xl font-black text-white">My Certificates</h1>
+              <h1 className="text-3xl font-black text-white">{t('certificates.myCertificates')}</h1>
               <p className="text-slate-400 text-sm mt-1">
-                {issued.length} certificate{issued.length !== 1 ? 's' : ''} earned
+                {t('certificates.earned', { count: issued.length })}
               </p>
             </div>
             <motion.div animate={{ rotate: [0, 5, -5, 0] }} transition={{ duration: 3, repeat: Infinity, ease: 'easeInOut' }}
@@ -198,8 +202,8 @@ export default function StudentCertificates() {
               className="w-20 h-20 bg-yellow-50 rounded-3xl flex items-center justify-center mb-5 shadow-lg">
               <Award className="w-10 h-10 text-yellow-400" />
             </motion.div>
-            <h3 className="text-xl font-black text-slate-900 mb-2">No certificates yet</h3>
-            <p className="text-slate-400 text-sm max-w-xs">Complete courses and pass quizzes to earn certificates!</p>
+            <h3 className="text-xl font-black text-slate-900 mb-2">{t('certificates.noCertificatesYet')}</h3>
+            <p className="text-slate-400 text-sm max-w-xs">{t('certificates.completeCourses')}</p>
           </motion.div>
         ) : (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
@@ -227,12 +231,12 @@ export default function StudentCertificates() {
                     </motion.div>
                     {cert.status === 'revoked' && (
                       <div className="absolute top-3 right-3 bg-red-500/90 text-white text-[10px] font-bold px-2 py-1 rounded-lg flex items-center gap-1">
-                        <XCircle className="w-3 h-3" /> Revoked
+                        <XCircle className="w-3 h-3" /> {t('certificates.revoked')}
                       </div>
                     )}
                     {cert.status === 'issued' && (
                       <div className="absolute top-3 right-3 bg-white/20 backdrop-blur-sm text-white text-[10px] font-bold px-2 py-1 rounded-lg flex items-center gap-1 border border-white/30">
-                        <CheckCircle2 className="w-3 h-3" /> Issued
+                        <CheckCircle2 className="w-3 h-3" /> {t('certificates.issued')}
                       </div>
                     )}
                   </div>
@@ -274,7 +278,7 @@ export default function StudentCertificates() {
                       )}
                     >
                       <Download className="w-4 h-4" />
-                      Download Certificate
+                      {t('certificates.downloadCertificate')}
                     </button>
                   </div>
                 </motion.div>

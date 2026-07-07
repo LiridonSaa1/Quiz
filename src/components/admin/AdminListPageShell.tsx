@@ -1,4 +1,5 @@
 import React, { useEffect } from 'react';
+import { useTranslation } from 'react-i18next';
 import { motion, useMotionValue, useSpring, useTransform } from 'motion/react';
 import { ChevronRight } from 'lucide-react';
 import { cn } from '../../lib/utils';
@@ -38,6 +39,7 @@ export const ADMIN_LIST_ITEM_CARD =
   'rounded-2xl border border-slate-100 bg-white p-4 sm:p-5 shadow-sm hover:shadow-md hover:border-indigo-100/70 transition-all';
 
 export function AdminListFilterBar({ children }: { children: React.ReactNode }) {
+  const { t } = useTranslation();
   return (
     <motion.div
       initial={{ opacity: 0, y: 12 }}
@@ -49,7 +51,7 @@ export function AdminListFilterBar({ children }: { children: React.ReactNode }) 
         backdropFilter: 'blur(12px)',
       }}
     >
-      <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mr-1">Filters</p>
+      <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mr-1">{t('common.filter')}</p>
       {children}
     </motion.div>
   );
@@ -81,6 +83,7 @@ export function AdminListPageShell({
   filterBar,
   children,
 }: AdminListPageShellProps) {
+  const { t } = useTranslation();
   return (
     <div
       className="min-h-screen -mx-3 sm:-mx-4 md:-mx-6 lg:-mx-8 -mt-6"

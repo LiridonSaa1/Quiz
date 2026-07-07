@@ -5,6 +5,7 @@ import {
   Check, UserPlus
 } from 'lucide-react';
 import { toast } from 'sonner';
+import { useTranslation } from 'react-i18next';
 import { supabase } from '../supabase';
 import { cn } from '../lib/utils';
 import { authFetch } from '../lib/apiUrl';
@@ -40,6 +41,7 @@ const generatePassword = () => {
 const STEPS = ['Account', 'Personal', 'Academic'];
 
 export default function AddStudentModal({ onClose, onSuccess, accentColor = 'violet' }: Props) {
+  const { t } = useTranslation();
   const [step, setStep] = useState(0);
   const [submitting, setSubmitting] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
@@ -54,7 +56,7 @@ export default function AddStudentModal({ onClose, onSuccess, accentColor = 'vio
     currentLevel: '',
     classId: '',
   });
-  const [classes, setClasses] = useState<Array<{ id: string; name: string }>>([]);
+  const [classes, setClasses] = useState<Array<{ id: string; name: string; capacity: number; enrolled: number }>>([]);
 
   const accent = {
     ring: accentColor === 'violet' ? 'focus:ring-violet-500' : 'focus:ring-emerald-500',
@@ -68,7 +70,7 @@ export default function AddStudentModal({ onClose, onSuccess, accentColor = 'vio
   };
 
   const set = (key: keyof FormData, val: string) => setForm(f => ({ ...f, [key]: val }));
-  const copyPassword = () => { navigator.clipboard.writeText(form.password); toast.success('Password copied'); };
+  const copyPassword = () => { navigator.clipboard.writeText(form.password); toast.success(t('modals.addStudent.passwordCopied')); };
 
   const canGoNext = () => {
     if (step === 0) return form.name.trim() !== '' && form.email.trim() !== '' && form.password.trim() !== '';
@@ -85,18 +87,28 @@ export default function AddStudentModal({ onClose, onSuccess, accentColor = 'vio
       const json = await res.json().catch(() => ({}));
       if (!json?.success || !Array.isArray(json.classes)) return;
       setClasses(
-        json.classes.map((c: any) => ({
-          id: String(c.id),
-          name: String(c.name || 'Untitled class'),
-        }))
+        json.classes.map((c: any) => {
+          const cap = c.capacity != null && c.capacity !== '' ? Number(c.capacity) : 30;
+          const enrolled = Array.isArray(c.student_ids)
+            ? [...new Set(c.student_ids.map((s: unknown) => String(s)).filter(Boolean))].length
+            : (c.enrollment_count ?? 0);
+          return { id: String(c.id), name: String(c.name || 'Untitled class'), capacity: cap, enrolled };
+        })
       );
     };
     void loadClasses();
   }, []);
 
+  const selectedClass = classes.find(c => c.id === form.classId);
+  const selectedClassFull = selectedClass ? selectedClass.enrolled >= selectedClass.capacity : false;
+
   const handleSubmit = async () => {
     if (!form.name || !form.email || !form.password) {
-      toast.error('Name, email, and password are required');
+      toast.error(t('modals.addStudent.nameEmailPasswordRequired'));
+      return;
+    }
+    if (form.classId && selectedClassFull) {
+      toast.error(`This class is full (${selectedClass!.enrolled}/${selectedClass!.capacity}). No free spots available.`);
       return;
     }
     setSubmitting(true);
@@ -118,12 +130,12 @@ export default function AddStudentModal({ onClose, onSuccess, accentColor = 'vio
         }),
       });
       const json = await res.json();
-      if (!res.ok || !json.success) throw new Error(json.error || 'Failed to create student');
-      toast.success('Student created successfully');
+      if (!res.ok || !json.success) throw new Error(json.error || t('modals.addStudent.failedToCreateStudent'));
+      toast.success(t('modals.addStudent.studentCreatedSuccess'));
       onSuccess();
       onClose();
     } catch (err: any) {
-      toast.error(err.message || 'Failed to create student');
+      toast.error(err.message || t('modals.addStudent.failedToCreateStudent'));
     } finally {
       setSubmitting(false);
     }
@@ -133,8 +145,8 @@ export default function AddStudentModal({ onClose, onSuccess, accentColor = 'vio
   const labelCls = 'block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5';
 
   return (
-    <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[60] flex items-center justify-center p-4">
-      <div className="bg-white w-full max-w-lg rounded-2xl shadow-2xl overflow-hidden">
+    <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[60] flex items-center justify-center p-4" style={{ paddingTop: 'max(1rem, env(safe-area-inset-top))', paddingBottom: 'max(1rem, env(safe-area-inset-bottom))' }}>
+      <div className="bg-white w-full max-w-lg rounded-2xl shadow-2xl overflow-hidden flex flex-col" style={{ maxHeight: 'min(90dvh, 700px)' }}>
 
         {/* Header */}
         <div className={`px-6 pt-6 pb-5 bg-gradient-to-r ${accent.header} border-b border-slate-100`}>
@@ -142,9 +154,9 @@ export default function AddStudentModal({ onClose, onSuccess, accentColor = 'vio
             <div>
               <h2 className="text-lg font-bold text-slate-900 flex items-center gap-2">
                 <UserPlus className="w-5 h-5" />
-                Add New Student
+                {t('modals.addStudent.title')}
               </h2>
-              <p className="text-xs text-slate-500 mt-0.5">Fill in the details to create a student account.</p>
+              <p className="text-xs text-slate-500 mt-0.5">{t('modals.addStudent.subtitle')}</p>
             </div>
             <button onClick={onClose} className="p-2 hover:bg-white/60 rounded-xl transition-all -mt-1 -mr-2">
               <X className="w-5 h-5 text-slate-400" />
@@ -175,40 +187,40 @@ export default function AddStudentModal({ onClose, onSuccess, accentColor = 'vio
         </div>
 
         {/* Body */}
-        <div className="p-6 space-y-4 min-h-[280px]">
+        <div className="p-6 space-y-4 min-h-[220px] overflow-y-auto flex-1">
 
           {/* Step 0 — Account */}
           {step === 0 && (
             <>
               <div className="grid grid-cols-2 gap-4">
                 <div className="col-span-2">
-                  <label className={labelCls}>Full Name <span className="text-red-400 normal-case font-normal">*</span></label>
+                  <label className={labelCls}>{t('modals.addStudent.fullName')} <span className="text-red-400 normal-case font-normal">*</span></label>
                   <div className="relative">
                     <User className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
                     <input
                       type="text" required
                       value={form.name}
                       onChange={e => set('name', e.target.value)}
-                      placeholder="e.g. Jane Doe"
+                      placeholder={t('modals.addStudent.placeholder')}
                       className={`${inputCls} pl-9`}
                     />
                   </div>
                 </div>
                 <div className="col-span-2">
-                  <label className={labelCls}>Email Address <span className="text-red-400 normal-case font-normal">*</span></label>
+                  <label className={labelCls}>{t('modals.addStudent.emailAddress')} <span className="text-red-400 normal-case font-normal">*</span></label>
                   <div className="relative">
                     <Mail className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
                     <input
                       type="email" required
                       value={form.email}
                       onChange={e => set('email', e.target.value)}
-                      placeholder="jane@example.com"
+                      placeholder={t('modals.addStudent.emailPlaceholder')}
                       className={`${inputCls} pl-9`}
                     />
                   </div>
                 </div>
                 <div className="col-span-2">
-                  <label className={labelCls}>Temporary Password <span className="text-red-400 normal-case font-normal">*</span></label>
+                  <label className={labelCls}>{t('modals.addStudent.temporaryPassword')} <span className="text-red-400 normal-case font-normal">*</span></label>
                   <div className="flex gap-2">
                     <div className="relative flex-1">
                       <input
@@ -222,16 +234,16 @@ export default function AddStudentModal({ onClose, onSuccess, accentColor = 'vio
                         {showPassword ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
                       </button>
                     </div>
-                    <button type="button" onClick={copyPassword} title="Copy password"
+                    <button type="button" onClick={copyPassword} title={t('modals.addStudent.passwordCopied')}
                       className="p-2.5 bg-slate-100 hover:bg-slate-200 border border-slate-200 rounded-xl transition-all">
                       <Copy className="w-4 h-4 text-slate-500" />
                     </button>
-                    <button type="button" onClick={() => set('password', generatePassword())} title="Regenerate"
+                    <button type="button" onClick={() => set('password', generatePassword())} title={t('modals.addStudent.regenerate')}
                       className="p-2.5 bg-slate-100 hover:bg-slate-200 border border-slate-200 rounded-xl transition-all">
                       <RotateCcw className="w-4 h-4 text-slate-500" />
                     </button>
                   </div>
-                  <p className="text-[11px] text-slate-400 mt-1.5">Share this with the student — they can change it after first login.</p>
+                  <p className="text-[11px] text-slate-400 mt-1.5">{t('modals.addStudent.sharePassword')}</p>
                 </div>
               </div>
             </>
@@ -241,20 +253,20 @@ export default function AddStudentModal({ onClose, onSuccess, accentColor = 'vio
           {step === 1 && (
             <div className="grid grid-cols-2 gap-4">
               <div className="col-span-2">
-                <label className={labelCls}>Phone Number <span className="text-slate-300 normal-case font-normal">(optional)</span></label>
+                <label className={labelCls}>{t('modals.addStudent.phoneNumber')} <span className="text-slate-300 normal-case font-normal">{t('modals.addStudent.optional')}</span></label>
                 <div className="relative">
                   <Phone className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
                   <input
                     type="tel"
                     value={form.phone}
                     onChange={e => set('phone', e.target.value)}
-                    placeholder="+1 555 000 0000"
+                    placeholder={t('modals.addStudent.phonePlaceholder')}
                     className={`${inputCls} pl-9`}
                   />
                 </div>
               </div>
               <div>
-                <label className={labelCls}>Date of Birth <span className="text-slate-300 normal-case font-normal">(optional)</span></label>
+                <label className={labelCls}>{t('modals.addStudent.dateOfBirth')} <span className="text-slate-300 normal-case font-normal">{t('modals.addStudent.optional')}</span></label>
                 <div className="relative">
                   <Calendar className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
                   <input
@@ -266,13 +278,13 @@ export default function AddStudentModal({ onClose, onSuccess, accentColor = 'vio
                 </div>
               </div>
               <div>
-                <label className={labelCls}>Gender <span className="text-slate-300 normal-case font-normal">(optional)</span></label>
+                <label className={labelCls}>{t('modals.addStudent.gender')} <span className="text-slate-300 normal-case font-normal">{t('modals.addStudent.optional')}</span></label>
                 <select
                   value={form.gender}
                   onChange={e => set('gender', e.target.value)}
                   className={inputCls}
                 >
-                  <option value="">Select gender</option>
+                  <option value="">{t('modals.addStudent.selectGender')}</option>
                   {GENDERS.map(g => <option key={g} value={g}>{g}</option>)}
                 </select>
               </div>
@@ -283,7 +295,7 @@ export default function AddStudentModal({ onClose, onSuccess, accentColor = 'vio
           {step === 2 && (
             <div className="grid grid-cols-2 gap-4">
               <div className="col-span-2">
-                <label className={labelCls}>Preferred Language <span className="text-slate-300 normal-case font-normal">(optional)</span></label>
+                <label className={labelCls}>{t('modals.addStudent.preferredLanguage')} <span className="text-slate-300 normal-case font-normal">{t('modals.addStudent.optional')}</span></label>
                 <div className="relative">
                   <Globe className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
                   <select
@@ -291,13 +303,13 @@ export default function AddStudentModal({ onClose, onSuccess, accentColor = 'vio
                     onChange={e => set('preferredLanguage', e.target.value)}
                     className={`${inputCls} pl-9`}
                   >
-                    <option value="">Select language</option>
+                    <option value="">{t('modals.addStudent.selectLanguage')}</option>
                     {LANGUAGES.map(l => <option key={l} value={l}>{l}</option>)}
                   </select>
                 </div>
               </div>
               <div className="col-span-2">
-                <label className={labelCls}>Current Level <span className="text-slate-300 normal-case font-normal">(optional)</span></label>
+                <label className={labelCls}>{t('modals.addStudent.currentLevel')} <span className="text-slate-300 normal-case font-normal">{t('modals.addStudent.optional')}</span></label>
                 <div className="relative">
                   <BarChart3 className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
                   <select
@@ -305,42 +317,59 @@ export default function AddStudentModal({ onClose, onSuccess, accentColor = 'vio
                     onChange={e => set('currentLevel', e.target.value)}
                     className={`${inputCls} pl-9`}
                   >
-                    <option value="">Select level</option>
+                    <option value="">{t('modals.addStudent.selectLevel')}</option>
                     {LEVELS.map(l => <option key={l} value={l}>{l}</option>)}
                   </select>
                 </div>
               </div>
               <div className="col-span-2">
                 <label className={labelCls}>
-                  Class {classes.length > 0 ? <span className="text-red-400 normal-case font-normal">*</span> : <span className="text-slate-300 normal-case font-normal">(optional)</span>}
+                  {t('modals.addStudent.class')} {classes.length > 0 ? <span className="text-red-400 normal-case font-normal">*</span> : <span className="text-slate-300 normal-case font-normal">{t('modals.addStudent.optional')}</span>}
                 </label>
                 <select
                   value={form.classId}
                   onChange={e => set('classId', e.target.value)}
-                  className={inputCls}
+                  className={cn(inputCls, selectedClassFull ? 'border-red-300 focus:ring-red-400' : '')}
                 >
-                  <option value="">{classes.length > 0 ? 'Select class' : 'No class available'}</option>
-                  {classes.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                  <option value="">{classes.length > 0 ? t('modals.addStudent.selectClass') : t('modals.addStudent.noClassAvailable')}</option>
+                  {classes.map(c => {
+                    const isFull = c.enrolled >= c.capacity;
+                    return (
+                      <option key={c.id} value={c.id}>
+                        {c.name} ({c.enrolled}/{c.capacity}){isFull ? ' — Full' : ''}
+                      </option>
+                    );
+                  })}
                 </select>
+                {selectedClassFull && (
+                  <p className="mt-1.5 text-xs text-red-500 font-medium flex items-center gap-1">
+                    <span>⚠</span> This class is full — no free spots available.
+                  </p>
+                )}
+                {selectedClass && !selectedClassFull && (
+                  <p className="mt-1.5 text-xs text-emerald-600 font-medium">
+                    {selectedClass.capacity - selectedClass.enrolled} spot{selectedClass.capacity - selectedClass.enrolled !== 1 ? 's' : ''} available ({selectedClass.enrolled}/{selectedClass.capacity})
+                  </p>
+                )}
               </div>
 
               {/* Summary preview */}
               <div className="col-span-2 mt-2 bg-slate-50 rounded-xl p-4 border border-slate-100">
-                <p className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-3">Summary</p>
+                <p className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-3">{t('modals.addStudent.summary')}</p>
                 <div className="space-y-2 text-sm">
                   <div className="flex gap-2">
-                    <span className="text-slate-400 w-28 shrink-0">Name</span>
+                    <span className="text-slate-400 w-28 shrink-0">{t('modals.addStudent.nameLabel')}</span>
                     <span className="font-semibold text-slate-800">{form.name || '—'}</span>
                   </div>
                   <div className="flex gap-2">
-                    <span className="text-slate-400 w-28 shrink-0">Email</span>
+                    <span className="text-slate-400 w-28 shrink-0">{t('modals.addStudent.emailLabel')}</span>
                     <span className="font-semibold text-slate-800">{form.email || '—'}</span>
                   </div>
-                  {form.phone && <div className="flex gap-2"><span className="text-slate-400 w-28 shrink-0">Phone</span><span className="font-semibold text-slate-800">{form.phone}</span></div>}
-                  {form.gender && <div className="flex gap-2"><span className="text-slate-400 w-28 shrink-0">Gender</span><span className="font-semibold text-slate-800">{form.gender}</span></div>}
-                  {form.preferredLanguage && <div className="flex gap-2"><span className="text-slate-400 w-28 shrink-0">Language</span><span className="font-semibold text-slate-800">{form.preferredLanguage}</span></div>}
-                  {form.currentLevel && <div className="flex gap-2"><span className="text-slate-400 w-28 shrink-0">Level</span><span className="font-semibold text-slate-800">{form.currentLevel}</span></div>}
-                  {form.classId && <div className="flex gap-2"><span className="text-slate-400 w-28 shrink-0">Class</span><span className="font-semibold text-slate-800">{classes.find(c => c.id === form.classId)?.name || form.classId}</span></div>}
+                  {form.phone && <div className="flex gap-2"><span className="text-slate-400 w-28 shrink-0">{t('modals.addStudent.phoneLabel')}</span><span className="font-semibold text-slate-800">{form.phone}</span></div>}
+                  {form.gender && <div className="flex gap-2"><span className="text-slate-400 w-28 shrink-0">{t('modals.addStudent.genderLabel')}</span><span className="font-semibold text-slate-800">{form.gender}</span></div>}
+                  {form.preferredLanguage && <div className="flex gap-2"><span className="text-slate-400 w-28 shrink-0">{t('modals.addStudent.languageLabel')}</span><span className="font-semibold text-slate-800">{form.preferredLanguage}</span></div>}
+                  {form.currentLevel && <div className="flex gap-2"><span className="text-slate-400 w-28 shrink-0">{t('modals.addStudent.levelLabel')}</span><span className="font-semibold text-slate-800">{form.currentLevel}</span></div>}
+                  {form.classId && <div className="flex gap-2"><span className="text-slate-400 w-28 shrink-0">{t('modals.addStudent.classLabel')}</span><span className="font-semibold text-slate-800">{classes.find(c => c.id === form.classId)?.name || form.classId}</span></div>}
                 </div>
               </div>
             </div>
@@ -348,7 +377,7 @@ export default function AddStudentModal({ onClose, onSuccess, accentColor = 'vio
         </div>
 
         {/* Footer */}
-        <div className="px-6 pb-6 flex gap-3">
+        <div className="px-6 pb-6 flex gap-3 shrink-0 border-t border-slate-100 pt-4">
           {step > 0 && (
             <button
               type="button"
@@ -356,7 +385,7 @@ export default function AddStudentModal({ onClose, onSuccess, accentColor = 'vio
               className="flex items-center gap-2 px-4 py-2.5 bg-slate-100 text-slate-600 rounded-xl font-semibold text-sm hover:bg-slate-200 transition-all"
             >
               <ChevronLeft className="w-4 h-4" />
-              Back
+              {t('common.back')}
             </button>
           )}
           <button
@@ -364,7 +393,7 @@ export default function AddStudentModal({ onClose, onSuccess, accentColor = 'vio
             onClick={onClose}
             className="px-4 py-2.5 bg-slate-100 text-slate-600 rounded-xl font-semibold text-sm hover:bg-slate-200 transition-all"
           >
-            Cancel
+            {t('common.cancel')}
           </button>
           <div className="flex-1" />
           {step < STEPS.length - 1 ? (
@@ -373,7 +402,7 @@ export default function AddStudentModal({ onClose, onSuccess, accentColor = 'vio
               onClick={() => { if (canGoNext()) setStep(s => s + 1); else toast.error('Please fill in the required fields.'); }}
               className={`flex items-center gap-2 px-5 py-2.5 ${accent.btn} text-white rounded-xl font-semibold text-sm transition-all shadow-lg`}
             >
-              Next
+              {t('common.next')}
               <ChevronRight className="w-4 h-4" />
             </button>
           ) : (
@@ -384,7 +413,7 @@ export default function AddStudentModal({ onClose, onSuccess, accentColor = 'vio
               variant="primary"
               size="sm"
             >
-              Create Student
+              {t('modals.addStudent.createStudent')}
             </LoadingButton>
           )}
         </div>

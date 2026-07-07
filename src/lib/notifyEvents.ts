@@ -263,12 +263,20 @@ function renderContent(role: Role, event: NotifyEventKey, ctx: NotifyContext): {
   }
 }
 
+export interface RoleEnabled {
+  student: boolean;
+  teacher: boolean;
+  admin: boolean;
+}
+
 export interface NotifyDeps {
   /**
-   * Reads the admin's notifications toggle from `platform_config.settings.notifications[settingsKey]`.
-   * Should default to `true` when the section doesn't exist yet (so events fire out of the box).
+   * Reads the admin's per-role notification toggle from
+   * `platform_config.settings.notifications[settingsKey]`.
+   * Returns per-role booleans; defaults all to `true` when the section
+   * doesn't exist yet so events fan out on a fresh install.
    */
-  isEventEnabled: (settingsKey: string) => Promise<boolean>;
+  isEventEnabled: (settingsKey: string) => Promise<RoleEnabled>;
 }
 
 export async function notifyEvent(
@@ -278,10 +286,22 @@ export async function notifyEvent(
   ctx: NotifyContext,
 ): Promise<void> {
   try {
-    const enabled = await deps.isEventEnabled(SETTINGS_KEY[event]);
-    if (!enabled) return;
+    // Per-role enabled flags — the admin can toggle each role independently.
+    const roleEnabled = await deps.isEventEnabled(SETTINGS_KEY[event]);
 
-    const recipients = RECIPIENTS[event];
+    // The hardcoded RECIPIENTS matrix is the "ceiling" (e.g. maintenanceAlert
+    // never goes to students regardless of toggle). The per-role settings from
+    // admin → Notifications can only narrow this down, not expand it.
+    const baseRecipients = RECIPIENTS[event];
+    const recipients: Record<Role, boolean> = {
+      student: baseRecipients.student && roleEnabled.student,
+      teacher: baseRecipients.teacher && roleEnabled.teacher,
+      admin:   baseRecipients.admin   && roleEnabled.admin,
+    };
+
+    // Bail out early if no role is enabled at all.
+    if (!recipients.student && !recipients.teacher && !recipients.admin) return;
+
     const seen = new Set<string>();
     const rows: Array<Record<string, unknown>> = [];
 
@@ -297,7 +317,6 @@ export async function notifyEvent(
         message,
         type: TYPE_MAP[event],
         action_url: ACTION_URLS[event][role],
-        read: false,
       });
     };
 
@@ -336,26 +355,28 @@ export async function notifyEvent(
 
     if (rows.length === 0) return;
 
-    const { error } = await admin.from("notifications").insert(rows);
-    if (error) {
-      // Some Supabase deployments don't have the `action_url` column on
-      // `notifications` (or the PostgREST schema cache hasn't picked it up).
-      // Retry without that field so the bell still fires — the link target is
-      // a nice-to-have, not core to the notification.
+    // Resilient insert: strip columns the live DB doesn't have and retry.
+    // Older Supabase instances may be missing `title`, `read`, and/or `action_url`.
+    let insertRows: Record<string, unknown>[] = rows as Record<string, unknown>[];
+    let lastError: string | null = null;
+    for (let attempt = 0; attempt < 4; attempt++) {
+      const { error } = await admin.from("notifications").insert(insertRows);
+      if (!error) { lastError = null; break; }
       const msg = String(error.message || "");
-      if (/action_url/i.test(msg)) {
-        const trimmed = rows.map((r) => {
-          const { action_url, ...rest } = r as { action_url?: unknown } & Record<string, unknown>;
-          void action_url;
-          return rest;
+      lastError = msg;
+      const missingCol = msg.match(/Could not find the '(\w+)' column/)?.[1];
+      if (missingCol && ["title", "read", "action_url"].includes(missingCol)) {
+        insertRows = insertRows.map((r) => {
+          const copy = { ...r };
+          delete copy[missingCol];
+          return copy;
         });
-        const retry = await admin.from("notifications").insert(trimmed);
-        if (retry.error) {
-          console.warn(`[notify:${event}] insert failed (retry):`, retry.error.message);
-        }
       } else {
-        console.warn(`[notify:${event}] insert failed:`, msg);
+        break;
       }
+    }
+    if (lastError) {
+      console.warn(`[notify:${event}] insert failed (retry):`, lastError);
     }
   } catch (err: any) {
     console.warn(`[notify:${event}] dispatch failed:`, err?.message || err);

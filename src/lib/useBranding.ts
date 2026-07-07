@@ -4,6 +4,7 @@ import { apiUrl } from './apiUrl';
 export interface BrandingPayload {
   logoUrl: string | null;
   faviconUrl: string | null;
+  logoText: string | null;
   schoolName: string;
   colors: Record<string, string> | null;
   typography: Record<string, string> | null;
@@ -14,6 +15,7 @@ export interface BrandingPayload {
 const DEFAULT_BRANDING: BrandingPayload = {
   logoUrl: null,
   faviconUrl: null,
+  logoText: null,
   schoolName: 'QuizMaster',
   colors: null,
   typography: null,
@@ -90,6 +92,7 @@ const fetchBranding = async (): Promise<BrandingPayload> => {
       const next: BrandingPayload = {
         logoUrl: json.logoUrl ?? null,
         faviconUrl: json.faviconUrl ?? null,
+        logoText: typeof json.logoText === 'string' ? json.logoText : null,
         schoolName: typeof json.schoolName === 'string' ? json.schoolName : 'QuizMaster',
         colors: json.colors ?? null,
         typography: json.typography ?? null,

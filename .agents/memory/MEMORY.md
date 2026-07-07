@@ -1,0 +1,1 @@
+- [Render deployment — use Express server, not static serve](render-deployment.md) — Vite production build OOMs; `npx serve -s dist` exposes mockup sandbox when dist is missing

@@ -1,0 +1,274 @@
+Krijo një auditim të plotë dhe profesional për të gjithë platformën LMS/ERP me rolet: Admin, Teacher dhe Student.
+Kontrollo çdo pjesë të sistemit për bugs, performance issues, security problems, scalability problems dhe UX issues që mund të shfaqen kur platforma përdoret nga shumë përdorues njëkohësisht.
+
+Kontrolli duhet të përfshijë:
+
+## 1. Authentication & Authorization
+
+* Testo login/logout/reset password
+* Kontrollo session handling
+* Kontrollo role permissions:
+
+  * Admin nuk duhet të ketë kufizime
+  * Teacher nuk duhet të ketë akses në të dhënat e teacherëve tjerë
+  * Student nuk duhet të ketë akses në admin routes
+* Kontrollo route protection frontend + backend
+* Testo token expiration dhe unauthorized requests
+* Kontrollo horizontal privilege escalation
+
+## 2. Database & Scalability
+
+* Analizo query performance
+* Gjej N+1 queries
+* Kontrollo indexes në tables të mëdha
+* Simulo:
+
+  * 100+
+  * 1,000+
+  * 10,000+ users online
+* Kontrollo memory leaks
+* Kontrollo slow queries
+* Kontrollo pagination në:
+
+  * students
+  * teachers
+  * courses
+  * enrollments
+  * notifications
+  * reports
+* Verifiko që asnjë page nuk ngarkon të gjitha records menjëherë
+
+## 3. Real-Time Features
+
+Kontrollo:
+
+* Live quizzes
+* Notifications
+* Messaging/chat
+* Attendance
+* Progress updates
+* Live classroom/video sessions
+
+Verifiko:
+
+* race conditions
+* duplicate events
+* websocket reconnect
+* stale state problems
+* concurrent submissions
+
+## 4. Forms & Validation
+
+Kontrollo çdo:
+
+* create form
+* update form
+* delete modal
+* bulk action
+* upload form
+
+Verifiko:
+
+* loading states
+* disabled buttons gjatë submit
+* duplicate submit prevention
+* backend validation
+* frontend validation
+* empty states
+* error handling
+* success handling
+* network timeout handling
+
+## 5. File Upload & Media
+
+Testo:
+
+* image upload
+* PDF upload
+* video upload
+* certificates
+* assignments
+
+Kontrollo:
+
+* max file size
+* invalid file types
+* upload security
+* failed uploads
+* CDN/storage optimization
+* compression
+* lazy loading
+
+## 6. Performance Audit
+
+Kontrollo:
+
+* initial load speed
+* bundle size
+* lazy loading
+* code splitting
+* caching
+* unnecessary rerenders
+* API overfetching
+* duplicated requests
+* image optimization
+* memory usage
+* CPU spikes
+
+Simulo përdorim intensiv:
+
+* shumë tabs open
+* rapid clicks
+* refresh loops
+* slow internet
+* mobile devices low-end
+
+## 7. Mobile & Responsive Audit
+
+Kontrollo çdo page në:
+
+* mobile
+* tablet
+* desktop
+* PWA mode
+
+Verifiko:
+
+* sidebar behavior
+* modals
+* dropdowns
+* tables
+* forms
+* overflow issues
+* keyboard overlap mobile
+* Safari iPhone bugs
+* Android Chrome bugs
+* install PWA behavior
+
+## 8. Security Audit
+
+Kontrollo:
+
+* XSS
+* CSRF
+* SQL Injection
+* rate limiting
+* brute force protection
+* file upload vulnerabilities
+* hidden routes
+* exposed APIs
+* sensitive data exposure
+* console errors
+* localStorage security
+* token leaks
+
+## 9. Notifications & Background Jobs
+
+Kontrollo:
+
+* email queue
+* push notifications
+* scheduled jobs
+* cron jobs
+* failed jobs retry
+* duplicate notifications
+* queue overload
+* notification delays
+
+## 10. Multi-Tenant Safety
+
+Nëse platforma është multi-tenant:
+
+* kontrollo tenant isolation
+* database separation
+* file separation
+* cache separation
+* subdomain routing
+* tenant middleware
+* tenant switching bugs
+
+## 11. UX/UI Consistency
+
+Kontrollo:
+
+* spacing consistency
+* typography
+* button states
+* hover states
+* loading skeletons
+* dark/light mode
+* accessibility
+* toast messages
+* confirm dialogs
+* translations
+* placeholder texts
+* empty states
+
+## 12. API Audit
+
+Kontrollo:
+
+* response times
+* duplicated API calls
+* failed request handling
+* caching headers
+* pagination
+* filtering
+* sorting
+* debounce/search optimization
+* websocket fallback
+
+## 13. Logging & Monitoring
+
+Verifiko:
+
+* error logging
+* frontend error tracking
+* backend logs
+* failed API logs
+* queue logs
+* audit logs
+* suspicious activity detection
+
+## 14. Stress Testing
+
+Bëj stress tests për:
+
+* login system
+* live quizzes
+* enrollments
+* assignment submissions
+* certificate generation
+* report exports
+* notifications system
+
+Simulo:
+
+* spike traffic
+* concurrent requests
+* database overload
+* websocket overload
+
+## 15. Final Report
+
+Në fund gjenero:
+
+* listën e bugs
+* security risks
+* performance bottlenecks
+* scalability risks
+* UX problems
+* critical issues priority
+* recommendations
+* optimization suggestions
+* estimated impact në production
+
+Për çdo problem:
+
+* trego shkakun
+* trego risk level
+* trego si reprodukohet
+* trego si rregullohet
+* sugjero best practice solution
+
+Kontrollo të gjithë platformën si production-ready SaaS me shumë përdorues aktivë njëkohësisht dhe identifiko çdo problem që mund të shkaktojë crash, slowdowns, data leaks ose experience të keqe për userat.

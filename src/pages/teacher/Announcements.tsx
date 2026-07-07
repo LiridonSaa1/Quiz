@@ -1,7 +1,8 @@
 import React, { useEffect, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import TeacherLayout from '../../components/layout/TeacherLayout';
 import { toast } from 'sonner';
-import { motion } from 'motion/react';
+import { motion, AnimatePresence } from 'motion/react';
 import {
   AdminListFilterBar,
   AdminListPageShell,
@@ -155,7 +156,7 @@ function BrevoStatusBanner() {
   const check = async () => {
     setChecking(true);
     try {
-      const res = await authFetch('/api/admin/brevo/status');
+      const res = await authFetch('/api/teacher/brevo/status');
       const json = await res.json();
       setStatus(json);
     } catch { setStatus({ configured: false, connected: false, reason: 'Could not reach server' }); }
@@ -212,6 +213,7 @@ function BrevoStatusBanner() {
 }
 
 export default function TeacherAnnouncements() {
+  const { t } = useTranslation();
   const [announcements, setAnnouncements] = useState<Announcement[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
@@ -223,6 +225,8 @@ export default function TeacherAnnouncements() {
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState<string | null>(null);
   const [resending, setResending] = useState<string | null>(null);
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+  const annToDelete = announcements.find(a => a.id === confirmDeleteId);
   const [classes, setClasses] = useState<ClassOption[]>([]);
   const [selectedClassIds, setSelectedClassIds] = useState<string[]>([]);
   const [userSearch, setUserSearch] = useState('');
@@ -239,11 +243,11 @@ export default function TeacherAnnouncements() {
   const fetchAll = async () => {
     setLoading(true);
     try {
-      const res = await authFetch('/api/admin/announcements');
+      const res = await authFetch('/api/teacher/announcements');
       const json = await res.json();
       if (json.success) setAnnouncements(json.announcements || []);
-      else toast.error(json.error || 'Failed to load announcements');
-    } catch { toast.error('Failed to load announcements'); }
+      else toast.error(json.error || t('errors.loadFailed'));
+    } catch { toast.error(t('errors.loadFailed')); }
     finally { setLoading(false); }
   };
 
@@ -333,7 +337,7 @@ export default function TeacherAnnouncements() {
   };
 
   const generateWithAI = async () => {
-    if (!form.title.trim() && !form.ann_type) { toast.error('Add a title or type first so AI has context'); return; }
+    if (!form.title.trim() && !form.ann_type) { toast.error(t('announcements.addTitleOrType')); return; }
     setAiGenerating(true);
     try {
       const prompt = `Write a professional school announcement for a teacher with the following details:
@@ -348,15 +352,15 @@ Write a warm, professional message (2-3 paragraphs). Start with a friendly greet
         body: JSON.stringify({ message: prompt, role: 'teacher', page: 'Announcements' }),
       });
       const json = await res.json();
-      if (json.reply) { set('content', json.reply); toast.success('AI generated your announcement!'); }
-      else toast.error(json.error || 'AI generation failed');
-    } catch { toast.error('AI generation failed. Check your GEMINI_API_KEY.'); }
+      if (json.reply) { set('content', json.reply); toast.success(t('announcements.aiGeneratedContent')); }
+      else toast.error(json.error || t('announcements.aiGenerationFailed'));
+    } catch { toast.error(t('announcements.aiGenerationError')); }
     finally { setAiGenerating(false); }
   };
 
   const handleSave = async (overrideStatus?: AnnStatus) => {
-    if (!form.title.trim()) { toast.error('Title is required'); return; }
-    if (!form.content.trim()) { toast.error('Content is required'); return; }
+    if (!form.title.trim()) { toast.error(t('announcements.titleRequired')); return; }
+    if (!form.content.trim()) { toast.error(t('announcements.contentRequired')); return; }
     setSaving(true);
     try {
       const status = overrideStatus ?? form.status;
@@ -369,12 +373,12 @@ Write a warm, professional message (2-3 paragraphs). Start with a friendly greet
         class_ids: selectedClassIds,
         student_ids: selectedUsers.map(u => u.id),
       };
-      const url = editing ? `/api/admin/announcements/${editing.id}` : '/api/admin/announcements';
+      const url = editing ? `/api/teacher/announcements/${editing.id}` : '/api/teacher/announcements';
       const method = editing ? 'PATCH' : 'POST';
       const res = await authFetch(url, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
       const json = await res.json();
       if (!json.success) throw new Error(json.error);
-      toast.success(editing ? 'Announcement updated' : status === 'published' ? 'Announcement published!' : 'Draft saved');
+      toast.success(editing ? t('announcements.announcementUpdated') : status === 'published' ? t('announcements.announcementPublished') : t('announcements.draftSaved'));
       setShowModal(false);
       fetchAll();
     } catch (e: unknown) { toast.error((e as Error).message || 'Save failed'); }
@@ -382,13 +386,14 @@ Write a warm, professional message (2-3 paragraphs). Start with a friendly greet
   };
 
   const handleDelete = async (id: string) => {
-    if (!confirm('Delete this announcement?')) return;
+    if (!id) return;
+    setConfirmDeleteId(null);
     setDeleting(id);
     try {
-      const res = await authFetch(`/api/admin/announcements/${id}`, { method: 'DELETE' });
+      const res = await authFetch(`/api/teacher/announcements/${id}`, { method: 'DELETE' });
       const json = await res.json();
       if (!json.success) throw new Error(json.error);
-      toast.success('Announcement deleted');
+      toast.success(t('announcements.announcementDeleted'));
       setAnnouncements(p => p.filter(x => x.id !== id));
     } catch (e: unknown) { toast.error((e as Error).message || 'Delete failed'); }
     finally { setDeleting(null); }
@@ -396,13 +401,13 @@ Write a warm, professional message (2-3 paragraphs). Start with a friendly greet
 
   const quickPublish = async (a: Announcement) => {
     try {
-      const res = await authFetch(`/api/admin/announcements/${a.id}`, {
+      const res = await authFetch(`/api/teacher/announcements/${a.id}`, {
         method: 'PATCH', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ status: 'published' }),
       });
       const json = await res.json();
       if (!json.success) throw new Error(json.error);
-      toast.success('Published!');
+      toast.success(t('announcements.announcementPublished'));
       fetchAll();
     } catch (e: unknown) { toast.error((e as Error).message); }
   };
@@ -411,7 +416,7 @@ Write a warm, professional message (2-3 paragraphs). Start with a friendly greet
     if (!confirm('Resend notifications for this announcement?')) return;
     setResending(a.id);
     try {
-      const res = await authFetch(`/api/admin/announcements/${a.id}/resend`, { method: 'POST' });
+      const res = await authFetch(`/api/teacher/announcements/${a.id}/resend`, { method: 'POST' });
       const json = await res.json();
       if (!json.success) throw new Error(json.error);
       toast.success(`Notifications resent to ${json.count ?? 'all'} recipients`);
@@ -534,7 +539,7 @@ Write a warm, professional message (2-3 paragraphs). Start with a friendly greet
                             <button type="button" onClick={() => openEdit(ann)} className="p-1.5 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-all">
                               <Pencil className="w-4 h-4" />
                             </button>
-                            <button type="button" onClick={() => handleDelete(ann.id)} disabled={deleting === ann.id}
+                            <button type="button" onClick={() => setConfirmDeleteId(ann.id)} disabled={deleting === ann.id}
                               className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-all disabled:opacity-40">
                               <Trash2 className="w-4 h-4" />
                             </button>
@@ -767,6 +772,51 @@ Write a warm, professional message (2-3 paragraphs). Start with a friendly greet
           </div>
         </div>
       )}
+      <AnimatePresence>
+        {confirmDeleteId && (
+          <motion.div
+            initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+            className="fixed inset-0 z-50 flex items-center justify-center p-4"
+            style={{ background: 'rgba(15,10,40,0.55)', backdropFilter: 'blur(6px)' }}
+          >
+            <motion.div
+              initial={{ scale: 0.9, opacity: 0, y: 16 }}
+              animate={{ scale: 1, opacity: 1, y: 0 }}
+              exit={{ scale: 0.9, opacity: 0, y: 16 }}
+              transition={{ type: 'spring', stiffness: 340, damping: 28 }}
+              className="bg-white rounded-2xl shadow-2xl p-6 w-full max-w-sm"
+            >
+              <div className="flex flex-col items-center text-center gap-3 mb-5">
+                <div className="w-14 h-14 rounded-2xl flex items-center justify-center shadow-lg shadow-red-500/30"
+                  style={{ background: 'linear-gradient(135deg,#fca5a5,#ef4444)' }}>
+                  <Trash2 className="w-7 h-7 text-white" />
+                </div>
+                <div>
+                  <p className="font-bold text-slate-800 text-lg">Delete announcement?</p>
+                  <p className="text-slate-500 text-sm mt-1">This action cannot be undone.</p>
+                </div>
+                {annToDelete && (
+                  <span className="px-3 py-1 rounded-full text-sm font-semibold bg-red-50 text-red-700 border border-red-200">
+                    {annToDelete.title}
+                  </span>
+                )}
+              </div>
+              <div className="flex gap-3">
+                <button type="button" onClick={() => setConfirmDeleteId(null)}
+                  className="flex-1 py-2.5 rounded-xl text-sm font-semibold text-slate-600 bg-slate-100 hover:bg-slate-200 transition-all">
+                  Cancel
+                </button>
+                <button type="button" onClick={() => confirmDeleteId && handleDelete(confirmDeleteId)}
+                  disabled={!!deleting}
+                  className="flex-1 py-2.5 rounded-xl text-sm font-bold text-white shadow-lg shadow-red-500/30 transition-all disabled:opacity-60 active:scale-95"
+                  style={{ background: 'linear-gradient(135deg,#ef4444,#dc2626)' }}>
+                  {deleting ? <Loader2 className="w-4 h-4 animate-spin mx-auto" /> : 'Yes, delete'}
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </TeacherLayout>
   );
 }

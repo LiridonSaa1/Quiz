@@ -1,9 +1,10 @@
 import React, { useState, useMemo, useEffect, useCallback } from "react";
+import { useTranslation } from 'react-i18next';
 import AdminLayout from "../../components/layout/AdminLayout";
 import { cn } from "../../lib/utils";
 import { format } from "date-fns";
 import { toast } from "sonner";
-import { apiUrl, readApiError } from "../../lib/apiUrl";
+import { apiUrl, authFetch, readApiError } from "../../lib/apiUrl";
 import {
   Receipt,
   CheckCircle2,
@@ -547,6 +548,7 @@ function printInvoice(inv: Invoice, brand: InvoiceBrandProfile) {
 }
 
 export default function AdminInvoices() {
+  const { t } = useTranslation();
   const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [brand, setBrand] = useState<InvoiceBrandProfile>(DEFAULT_BRAND);
   const [loading, setLoading] = useState(true);
@@ -559,7 +561,7 @@ export default function AdminInvoices() {
   const fetchInvoices = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await fetch(apiUrl("/api/admin/invoices"));
+      const res = await authFetch("/api/admin/invoices");
       if (!res.ok) throw new Error(await readApiError(res));
       const json = await res.json();
       if (!json.success) throw new Error(json.error || "Failed to load invoices");
@@ -580,8 +582,8 @@ export default function AdminInvoices() {
     (async () => {
       try {
         const [settingsRes, brandingRes] = await Promise.all([
-          fetch(apiUrl("/api/admin/config/settings")),
-          fetch(apiUrl("/api/admin/config/branding")),
+          authFetch("/api/admin/config/settings"),
+          authFetch("/api/admin/config/branding"),
         ]);
         const [settingsJson, brandingJson] = await Promise.all([
           settingsRes.json(),
@@ -904,7 +906,7 @@ export default function AdminInvoices() {
       {/* Invoice Preview Modal */}
       {selected && (
         <div
-          className="fixed inset-0 bg-black/40 backdrop-blur-sm z-50 flex items-start justify-center p-4 overflow-y-auto"
+          className="fixed inset-0 lg:left-60 bg-black/40 backdrop-blur-sm z-50 flex items-start justify-center p-4 overflow-y-auto"
           onClick={() => setSelected(null)}
         >
           <div

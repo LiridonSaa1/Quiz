@@ -1,4 +1,4 @@
-modules = ["nodejs-20", "web", "bash"]
+modules = ["web", "nodejs-22"]
 [agent]
 expertMode = true
 stack = "BEST_EFFORT_FALLBACK"
@@ -23,21 +23,21 @@ args = "Start application"
 name = "Start application"
 author = "agent"
 
+[workflows.workflow.metadata]
+outputType = "webview"
+
 [[workflows.workflow.tasks]]
 task = "shell.exec"
 args = "npm run dev"
 waitForPort = 5000
 
-[workflows.workflow.metadata]
-outputType = "webview"
-
 [[ports]]
 localPort = 5000
-externalPort = 5000
+externalPort = 80
 
 [[ports]]
 localPort = 5001
-externalPort = 3001
+externalPort = 3002
 
 [[ports]]
 localPort = 23636
@@ -49,7 +49,7 @@ externalPort = 80
 
 [deployment]
 deploymentTarget = "autoscale"
-run = ["node", "dist/server.js"]
+run = ["npm", "run", "start"]
 build = ["npm", "run", "build"]
 
 [userenv]

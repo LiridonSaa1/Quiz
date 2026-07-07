@@ -1,7 +1,10 @@
 import React, { useEffect, useState, useMemo, useCallback, useRef } from 'react';
+import { useTranslation } from 'react-i18next';
+import { useSearchParams } from 'react-router-dom';
 import * as XLSX from 'xlsx';
 import { supabase } from '../../supabase';
 import TeacherLayout from '../../components/layout/TeacherLayout';
+import GenderAvatar from '../../components/ui/GenderAvatar';
 import { motion } from 'motion/react';
 import {
   AdminListFilterBar,
@@ -14,7 +17,7 @@ import {
 import {
   BarChart3, Search, Download, ChevronDown, ChevronUp,
   CheckCircle2, XCircle, TrendingUp, FileText, Clock,
-  Trophy, Flame, Activity, ClipboardList,
+  Trophy, Flame, Activity, ClipboardList, Layers,
 } from 'lucide-react';
 import {
   AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip,
@@ -57,12 +60,28 @@ const avatarColor = (s: string) => {
   return AVATAR_COLORS[Math.abs(h) % AVATAR_COLORS.length];
 };
 
+type MainTab = 'quizzes' | 'assignments';
+
+interface UiSubmission {
+  id: string;
+  assignmentId: string;
+  studentId: string;
+  grade: number | null;
+  status: string;
+  submittedAt: string | null;
+}
+
 export default function TeacherResults() {
+  const { t } = useTranslation();
+  const [searchParams] = useSearchParams();
   const [attempts, setAttempts] = useState<UiAttempt[]>([]);
   const [quizzes, setQuizzes] = useState<Record<string, string>>({});
   const [students, setStudents] = useState<Record<string, { name: string; email: string }>>({});
+  const [assignmentSubmissions, setAssignmentSubmissions] = useState<UiSubmission[]>([]);
+  const [assignments, setAssignments] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
-  const [search, setSearch] = useState('');
+  const [mainTab, setMainTab] = useState<MainTab>('quizzes');
+  const [search, setSearch] = useState(() => searchParams.get('student') || '');
   const [tab, setTab] = useState<TabFilter>('all');
   const [selectedQuiz, setSelectedQuiz] = useState('all');
   const [sortBy, setSortBy] = useState<SortField>('date');
@@ -84,6 +103,14 @@ export default function TeacherResults() {
       setQuizzes((json?.quizzes && typeof json.quizzes === 'object') ? json.quizzes : {});
       setStudents((json?.students && typeof json.students === 'object') ? json.students : {});
       setAttempts(Array.isArray(json?.attempts) ? json.attempts : []);
+      setAssignmentSubmissions(Array.isArray(json?.assignmentSubmissions) ? json.assignmentSubmissions : []);
+      setAssignments((json?.assignments && typeof json.assignments === 'object') ? json.assignments : {});
+      // Auto-switch to assignments tab if no quiz attempts but has submissions
+      if (!Array.isArray(json?.attempts) || json.attempts.length === 0) {
+        if (Array.isArray(json?.assignmentSubmissions) && json.assignmentSubmissions.length > 0) {
+          setMainTab('assignments');
+        }
+      }
     } catch (error: any) {
       toast.error(error?.message || 'Failed to load results');
     } finally {
@@ -249,13 +276,125 @@ export default function TeacherResults() {
           : 'from-rose-400 to-red-500';
 
   const statItems = [
-    { label: 'Total attempts', value: stats.total, gradient: 'from-indigo-500 to-violet-600', shadow: 'shadow-indigo-500/25', icon: FileText },
-    { label: 'Completed', value: stats.completed, gradient: 'from-blue-500 to-cyan-600', shadow: 'shadow-blue-500/25', icon: ClipboardList },
-    { label: 'Pass rate %', value: stats.passRate, gradient: 'from-emerald-500 to-teal-600', shadow: 'shadow-emerald-500/25', icon: Trophy },
-    { label: 'Avg score %', value: stats.avgScore, gradient: 'from-violet-500 to-purple-600', shadow: 'shadow-violet-500/25', icon: TrendingUp },
-    { label: 'Best score %', value: stats.highScore, gradient: 'from-amber-500 to-orange-600', shadow: 'shadow-amber-500/25', icon: BarChart3 },
-    { label: 'Avg time (min)', value: stats.avgDuration || 0, gradient: 'from-sky-500 to-indigo-600', shadow: 'shadow-sky-500/25', icon: Clock },
+    { label: t('teacher.results.totalAttempts'), value: stats.total, gradient: 'from-indigo-500 to-violet-600', shadow: 'shadow-indigo-500/25', icon: FileText },
+    { label: t('teacher.results.completed'), value: stats.completed, gradient: 'from-blue-500 to-cyan-600', shadow: 'shadow-blue-500/25', icon: ClipboardList },
+    { label: t('teacher.results.passRate'), value: stats.passRate, gradient: 'from-emerald-500 to-teal-600', shadow: 'shadow-emerald-500/25', icon: Trophy },
+    { label: t('teacher.results.avgScore'), value: stats.avgScore, gradient: 'from-violet-500 to-purple-600', shadow: 'shadow-violet-500/25', icon: TrendingUp },
+    { label: t('teacher.results.bestScore'), value: stats.highScore, gradient: 'from-amber-500 to-orange-600', shadow: 'shadow-amber-500/25', icon: BarChart3 },
+    { label: t('teacher.results.avgTime'), value: stats.avgDuration || 0, gradient: 'from-sky-500 to-indigo-600', shadow: 'shadow-sky-500/25', icon: Clock },
   ];
+
+  // ── Section performance state ─────────────────────────────────────────────
+  const [sectionData, setSectionData] = useState<{ sections: any[]; questions: any[] } | null>(null);
+  const [sectionDataLoading, setSectionDataLoading] = useState(false);
+
+  // Fetch sections + questions when a specific quiz is selected
+  useEffect(() => {
+    if (selectedQuiz === 'all') { setSectionData(null); return; }
+    let cancelled = false;
+    (async () => {
+      setSectionDataLoading(true);
+      try {
+        const [secRes, qRes] = await Promise.all([
+          authFetch(`/api/teacher/quizzes/${encodeURIComponent(selectedQuiz)}/sections`),
+          authFetch(`/api/teacher/quizzes/${encodeURIComponent(selectedQuiz)}/questions`),
+        ]);
+        if (cancelled) return;
+        const secJson = secRes.ok ? await secRes.json().catch(() => ({})) : {};
+        const qJson = qRes.ok ? await qRes.json().catch(() => ({})) : {};
+        setSectionData({
+          sections: Array.isArray(secJson?.sections) ? secJson.sections : [],
+          questions: Array.isArray(qJson?.questions) ? qJson.questions : [],
+        });
+      } catch { setSectionData(null); }
+      finally { if (!cancelled) setSectionDataLoading(false); }
+    })();
+    return () => { cancelled = true; };
+  }, [selectedQuiz]);
+
+  // ── Per-section performance (computed from attempts + section data) ────────
+  const sectionReport = useMemo(() => {
+    if (!sectionData || sectionData.sections.length === 0) return null;
+    const { sections, questions } = sectionData;
+
+    // Grading helpers (mirrors QuizResults.tsx logic)
+    const normalizeAns = (value: unknown): string => {
+      if (value === null || value === undefined) return '';
+      if (typeof value === 'number' || typeof value === 'boolean') return String(value);
+      if (Array.isArray(value)) return value.length === 1 ? normalizeAns(value[0]) : value.map(normalizeAns).join('|');
+      if (typeof value === 'object') {
+        const c = value as Record<string, unknown>;
+        if (c.id !== undefined) return normalizeAns(c.id);
+        if (c.value !== undefined) return normalizeAns(c.value);
+        if (c.answer !== undefined) return normalizeAns(c.answer);
+        return JSON.stringify(c);
+      }
+      const raw = String(value).trim();
+      try { const p = JSON.parse(raw); if (p !== raw) return normalizeAns(p); } catch { }
+      return raw;
+    };
+
+    const GRADABLE = new Set(['multiple-choice', 'true-false', 'image', 'video', 'reading', 'open-text', 'fill-in-the-blank']);
+
+    const isCorrect = (q: any, studentAnswerRaw: unknown): boolean => {
+      const qType = String(q.type || '').trim().toLowerCase();
+      const student = normalizeAns(studentAnswerRaw);
+      const correct = normalizeAns(q.correct_answer);
+      if (qType === 'open-text' || qType === 'fill-in-the-blank') {
+        return correct.toLowerCase().split(',').map((k: string) => k.trim()).filter(Boolean).some((k: string) => student.toLowerCase().includes(k));
+      }
+      if (Array.isArray(q.options) && q.options.length > 0) {
+        const selOpt = q.options.find((o: any) => normalizeAns(o.id) === student);
+        const selText = selOpt ? normalizeAns(selOpt.text) : student;
+        const corrOpt = q.options.find((o: any) => normalizeAns(o.id) === correct);
+        const corrText = corrOpt ? normalizeAns(corrOpt.text) : correct;
+        return student === correct || selText === correct || student === corrText || selText === corrText;
+      }
+      return student === correct;
+    };
+
+    const quizAttempts = attempts.filter(
+      (a) => a.quizId === selectedQuiz && a.status === 'completed'
+    );
+
+    return sections.map((sec: any) => {
+      const secQs = questions.filter((q: any) => q.section_id === sec.id && GRADABLE.has(String(q.type || '').toLowerCase()));
+      const totalPts = secQs.reduce((s: number, q: any) => s + (Number(q.points) || 0), 0);
+
+      let totalEarned = 0;
+      let totalCorrect = 0;
+      let totalPossible = 0;
+
+      quizAttempts.forEach((attempt) => {
+        const answers = (attempt as any).answers || {};
+        secQs.forEach((q: any) => {
+          if (isCorrect(q, answers[q.id])) {
+            totalEarned += Number(q.points) || 0;
+            totalCorrect++;
+          }
+          totalPossible += Number(q.points) || 0;
+        });
+      });
+
+      const totalAnswered = quizAttempts.length * secQs.length;
+      const avgPct = totalPossible > 0 ? Math.round((totalEarned / totalPossible) * 100) : null;
+      const passRate = totalAnswered > 0 ? Math.round((totalCorrect / totalAnswered) * 100) : null;
+
+      return {
+        id: sec.id,
+        title: sec.title,
+        type: sec.type || 'general',
+        instructions: sec.instructions,
+        questionCount: secQs.length,
+        avgPct,
+        passRate,
+        totalCorrect,
+        totalAnswered,
+        attemptCount: quizAttempts.length,
+        totalPts,
+      };
+    });
+  }, [sectionData, attempts, selectedQuiz]);
 
   const [exportOpen, setExportOpen] = useState(false);
   const exportRef = useRef<HTMLDivElement>(null);
@@ -337,10 +476,10 @@ export default function TeacherResults() {
   return (
     <TeacherLayout>
       <AdminListPageShell
-        breadcrumbPortalLabel="Teacher Portal"
-        breadcrumbLabel="Results"
-        title="Quiz Results"
-        description="Review attempts, scores, and trends for quizzes linked to your courses."
+        breadcrumbPortalLabel={t('nav.teacherPortal')}
+        breadcrumbLabel={t('teacher.results.title')}
+        title={t('teacher.results.title')}
+        description={t('teacher.results.description')}
         statsGridClassName="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-4"
         stats={statItems}
         action={
@@ -354,18 +493,18 @@ export default function TeacherResults() {
               style={{ background: 'linear-gradient(135deg, #818cf8 0%, #a78bfa 100%)', boxShadow: '0 8px 32px rgba(139,92,246,0.45), 0 2px 8px rgba(0,0,0,0.15)' }}
             >
               <Download className="w-4 h-4" />
-              Export <ChevronDown className="w-3.5 h-3.5" />
+              {t('teacher.results.export')} <ChevronDown className="w-3.5 h-3.5" />
             </motion.button>
             {exportOpen && (
               <div className="absolute right-0 top-full mt-2 w-48 bg-white rounded-2xl shadow-2xl border border-slate-100 overflow-hidden z-50">
                 <button onClick={exportCsv} className="flex items-center gap-2.5 w-full px-4 py-3 text-sm font-semibold text-slate-700 hover:bg-slate-50 transition">
-                  <FileText className="w-4 h-4 text-emerald-500" /> CSV
+                  <FileText className="w-4 h-4 text-emerald-500" /> {t('teacher.results.exportCSV')}
                 </button>
                 <button onClick={exportExcel} className="flex items-center gap-2.5 w-full px-4 py-3 text-sm font-semibold text-slate-700 hover:bg-slate-50 transition border-t border-slate-100">
-                  <BarChart3 className="w-4 h-4 text-indigo-500" /> Excel (.xlsx)
+                  <BarChart3 className="w-4 h-4 text-indigo-500" /> {t('teacher.results.exportExcel')}
                 </button>
                 <button onClick={exportPdf} className="flex items-center gap-2.5 w-full px-4 py-3 text-sm font-semibold text-slate-700 hover:bg-slate-50 transition border-t border-slate-100">
-                  <Download className="w-4 h-4 text-red-500" /> PDF (Print)
+                  <Download className="w-4 h-4 text-red-500" /> {t('teacher.results.exportPDF')}
                 </button>
               </div>
             )}
@@ -378,7 +517,7 @@ export default function TeacherResults() {
               <input
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
-                placeholder="Search student, email, or quiz..."
+                placeholder={t('teacher.results.searchPlaceholder')}
                 className={ADMIN_LIST_SEARCH_INPUT}
               />
             </div>
@@ -387,10 +526,10 @@ export default function TeacherResults() {
               onChange={(e) => setTab(e.target.value as TabFilter)}
               className={ADMIN_LIST_SELECT}
             >
-              <option value="all">All ({attempts.length})</option>
-              <option value="passed">Passed ({attempts.filter((a) => a.passed).length})</option>
+              <option value="all">{t('teacher.results.all')} ({attempts.length})</option>
+              <option value="passed">{t('teacher.results.passed')} ({attempts.filter((a) => a.passed).length})</option>
               <option value="failed">
-                Failed ({attempts.filter((a) => !a.passed && a.status === 'completed').length})
+                {t('teacher.results.failed')} ({attempts.filter((a) => !a.passed && a.status === 'completed').length})
               </option>
             </select>
             {quizOptions.length > 0 && (
@@ -399,7 +538,7 @@ export default function TeacherResults() {
                 onChange={(e) => setSelectedQuiz(e.target.value)}
                 className={ADMIN_LIST_SELECT}
               >
-                <option value="all">All quizzes</option>
+                <option value="all">{t('teacher.results.allQuizzes')}</option>
                 {quizOptions.map(([id, title]) => (
                   <option key={id} value={id}>
                     {title}
@@ -416,17 +555,127 @@ export default function TeacherResults() {
               }}
               className={ADMIN_LIST_SELECT}
             >
-              <option value="date:desc">Newest first</option>
-              <option value="date:asc">Oldest first</option>
-              <option value="score:desc">Score high → low</option>
-              <option value="score:asc">Score low → high</option>
-              <option value="student:asc">Student A–Z</option>
-              <option value="quiz:asc">Quiz A–Z</option>
+              <option value="date:desc">{t('teacher.results.newestFirst')}</option>
+              <option value="date:asc">{t('teacher.results.oldestFirst')}</option>
+              <option value="score:desc">{t('teacher.results.scoreHighLow')}</option>
+              <option value="score:asc">{t('teacher.results.scoreLowHigh')}</option>
+              <option value="student:asc">{t('teacher.results.studentAZ')}</option>
+              <option value="quiz:asc">{t('teacher.results.quizAZ')}</option>
             </select>
           </AdminListFilterBar>
         }
       >
-        {!loading && attempts.length > 0 && (
+        {/* Main tab switcher: Quizzes vs Assignments */}
+        <div className="flex items-center gap-1 mb-6 bg-slate-100 rounded-2xl p-1 w-fit">
+          <button
+            type="button"
+            onClick={() => setMainTab('quizzes')}
+            className={cn(
+              'px-5 py-2 rounded-xl text-sm font-semibold transition-all',
+              mainTab === 'quizzes'
+                ? 'bg-white text-indigo-700 shadow-sm'
+                : 'text-slate-500 hover:text-slate-700',
+            )}
+          >
+            Quizzes {attempts.length > 0 && <span className="ml-1.5 text-xs text-slate-400">({attempts.length})</span>}
+          </button>
+          <button
+            type="button"
+            onClick={() => setMainTab('assignments')}
+            className={cn(
+              'px-5 py-2 rounded-xl text-sm font-semibold transition-all',
+              mainTab === 'assignments'
+                ? 'bg-white text-emerald-700 shadow-sm'
+                : 'text-slate-500 hover:text-slate-700',
+            )}
+          >
+            Assignments {assignmentSubmissions.length > 0 && <span className="ml-1.5 text-xs text-slate-400">({assignmentSubmissions.length})</span>}
+          </button>
+        </div>
+
+        {/* ── Assignments panel ──────────────────────────────────────────── */}
+        {mainTab === 'assignments' && (
+          <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
+            <div className="h-1 bg-gradient-to-r from-emerald-400 to-teal-500" />
+            {loading ? (
+              <div className="p-8 flex items-center justify-center text-slate-400 text-sm">Loading…</div>
+            ) : assignmentSubmissions.length === 0 ? (
+              <div className="flex flex-col items-center justify-center py-20 gap-2 text-slate-400">
+                <ClipboardList className="w-10 h-10 opacity-30" />
+                <p className="text-sm font-medium">No assignment submissions yet</p>
+                <p className="text-xs text-slate-400 max-w-sm text-center">
+                  Assignment submissions from your students will appear here once they submit their work.
+                </p>
+              </div>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b border-slate-100">
+                      <th className="text-left px-5 py-3.5 font-semibold text-slate-500 text-xs uppercase tracking-wide">Student</th>
+                      <th className="text-left px-5 py-3.5 font-semibold text-slate-500 text-xs uppercase tracking-wide">Assignment</th>
+                      <th className="text-left px-5 py-3.5 font-semibold text-slate-500 text-xs uppercase tracking-wide">Status</th>
+                      <th className="text-left px-5 py-3.5 font-semibold text-slate-500 text-xs uppercase tracking-wide">Grade</th>
+                      <th className="text-left px-5 py-3.5 font-semibold text-slate-500 text-xs uppercase tracking-wide">Submitted</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {assignmentSubmissions
+                      .filter((s) => {
+                        if (!search.trim()) return true;
+                        const q = search.trim().toLowerCase();
+                        const student = students[s.studentId];
+                        const asgTitle = assignments[s.assignmentId] || '';
+                        return (
+                          (student?.name || '').toLowerCase().includes(q) ||
+                          (student?.email || '').toLowerCase().includes(q) ||
+                          asgTitle.toLowerCase().includes(q)
+                        );
+                      })
+                      .map((sub) => {
+                        const student = students[sub.studentId];
+                        const asgTitle = assignments[sub.assignmentId] || 'Assignment';
+                        const statusColor =
+                          sub.status === 'graded' ? 'bg-emerald-100 text-emerald-700' :
+                          sub.status === 'submitted' ? 'bg-blue-100 text-blue-700' :
+                          'bg-amber-100 text-amber-700';
+                        return (
+                          <tr key={sub.id} className="border-b border-slate-50 hover:bg-slate-50 transition-colors">
+                            <td className="px-5 py-3.5">
+                              <div className="font-semibold text-slate-800">{student?.name || sub.studentId}</div>
+                              {student?.email && <div className="text-xs text-slate-400">{student.email}</div>}
+                            </td>
+                            <td className="px-5 py-3.5 text-slate-700">{asgTitle}</td>
+                            <td className="px-5 py-3.5">
+                              <span className={cn('px-2 py-0.5 rounded-full text-xs font-semibold capitalize', statusColor)}>
+                                {sub.status}
+                              </span>
+                            </td>
+                            <td className="px-5 py-3.5">
+                              {sub.grade != null
+                                ? <span className="font-bold text-slate-800">{sub.grade}%</span>
+                                : <span className="text-slate-400 text-xs">Not graded</span>
+                              }
+                            </td>
+                            <td className="px-5 py-3.5 text-xs text-slate-500">
+                              {sub.submittedAt
+                                ? format(new Date(sub.submittedAt), 'MMM d, yyyy')
+                                : '—'}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                  </tbody>
+                </table>
+                <div className="px-5 py-3 border-t border-slate-100 text-xs text-slate-400">
+                  {assignmentSubmissions.length} submission{assignmentSubmissions.length !== 1 ? 's' : ''}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {mainTab === 'quizzes' && !loading && attempts.length > 0 && (
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8">
             <div className="lg:col-span-2 bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
               <div
@@ -438,8 +687,8 @@ export default function TeacherResults() {
               <div className="p-6">
                 <div className="flex items-center justify-between mb-5">
                   <div>
-                    <h2 className="text-base font-bold text-slate-900">Activity trend</h2>
-                    <p className="text-xs text-slate-400 mt-0.5">Attempts over the last 7 days</p>
+                    <h2 className="text-base font-bold text-slate-900">{t('teacher.results.activityTrend')}</h2>
+                    <p className="text-xs text-slate-400 mt-0.5">{t('teacher.results.attemptsLast7Days')}</p>
                   </div>
                   <Activity className="w-5 h-5 text-indigo-400" />
                 </div>
@@ -483,12 +732,12 @@ export default function TeacherResults() {
               <div className="p-6">
                 <div className="flex items-center gap-2 mb-1">
                   <Flame className="w-4 h-4 text-orange-500" />
-                  <h2 className="text-base font-bold text-slate-900">Top quizzes</h2>
+                  <h2 className="text-base font-bold text-slate-900">{t('teacher.results.topQuizzes')}</h2>
                 </div>
-                <p className="text-xs text-slate-400 mb-4">By attempt volume</p>
+                <p className="text-xs text-slate-400 mb-4">{t('teacher.results.byAttemptVolume')}</p>
                 <div className="space-y-3">
                   {quizBreakdown.length === 0 ? (
-                    <p className="text-slate-400 text-sm text-center py-6">No breakdown yet</p>
+                    <p className="text-slate-400 text-sm text-center py-6">{t('teacher.results.noBreakdown')}</p>
                   ) : (
                     quizBreakdown.map((q, i) => (
                       <div key={q.id} className="flex items-center gap-3">
@@ -513,7 +762,7 @@ export default function TeacherResults() {
                                 style={{ width: `${Math.min(q.avgScore, 100)}%` }}
                               />
                             </div>
-                            <span className="text-[10px] text-slate-500 font-medium shrink-0">{q.avgScore}% avg</span>
+                            <span className="text-[10px] text-slate-500 font-medium shrink-0">{q.avgScore}% {t('teacher.results.avg')}</span>
                           </div>
                         </div>
                         <span className="text-xs font-bold text-slate-600 shrink-0">{q.count}</span>
@@ -526,7 +775,118 @@ export default function TeacherResults() {
           </div>
         )}
 
-        <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
+        {/* ── Section Performance Report ──────────────────────────────────── */}
+        {mainTab === 'quizzes' && selectedQuiz !== 'all' && (sectionDataLoading || (sectionReport && sectionReport.length > 0)) && (
+          <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden mb-6">
+            <div
+              className="h-1"
+              style={{ background: 'linear-gradient(90deg, #7c3aed, #a78bfa)' }}
+            />
+            <div className="p-6">
+              <div className="flex items-center gap-2 mb-5">
+                <div className="w-8 h-8 rounded-xl bg-violet-50 flex items-center justify-center">
+                  <Layers className="w-4 h-4 text-violet-600" />
+                </div>
+                <div>
+                  <h2 className="text-base font-bold text-slate-900">Section Performance</h2>
+                  <p className="text-xs text-slate-400">
+                    Class averages across {attempts.filter(a => a.quizId === selectedQuiz && a.status === 'completed').length} completed attempt(s) — {quizzes[selectedQuiz] || 'selected quiz'}
+                  </p>
+                </div>
+              </div>
+
+              {sectionDataLoading ? (
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                  {Array(3).fill(0).map((_, i) => (
+                    <div key={i} className="h-24 rounded-2xl bg-slate-100 animate-pulse" />
+                  ))}
+                </div>
+              ) : sectionReport && sectionReport.length > 0 ? (
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                  {sectionReport.map((sec) => {
+                    const typeColors: Record<string, { badge: string; bar: string; ring: string }> = {
+                      grammar:    { badge: 'bg-violet-100 text-violet-700',  bar: '#7c3aed', ring: 'ring-violet-100' },
+                      listening:  { badge: 'bg-amber-100 text-amber-700',    bar: '#d97706', ring: 'ring-amber-100' },
+                      reading:    { badge: 'bg-blue-100 text-blue-700',      bar: '#2563eb', ring: 'ring-blue-100' },
+                      writing:    { badge: 'bg-emerald-100 text-emerald-700',bar: '#059669', ring: 'ring-emerald-100' },
+                      vocabulary: { badge: 'bg-pink-100 text-pink-700',      bar: '#db2777', ring: 'ring-pink-100' },
+                      general:    { badge: 'bg-slate-100 text-slate-600',    bar: '#6366f1', ring: 'ring-slate-100' },
+                    };
+                    const c = typeColors[sec.type] || typeColors.general;
+                    const pct = sec.avgPct ?? 0;
+                    const barColor = pct >= 70 ? '#10b981' : pct >= 40 ? '#f59e0b' : '#ef4444';
+
+                    return (
+                      <motion.div
+                        key={sec.id}
+                        initial={{ opacity: 0, y: 8 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        className={cn('rounded-2xl border p-4 space-y-3 ring-2', c.ring)}
+                        style={{ borderColor: c.bar + '30' }}
+                      >
+                        {/* Header */}
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <span className="text-sm font-bold text-slate-900 truncate">{sec.title}</span>
+                              <span className={cn('text-[10px] font-bold px-2 py-0.5 rounded-full capitalize shrink-0', c.badge)}>
+                                {sec.type}
+                              </span>
+                            </div>
+                            <p className="text-[11px] text-slate-400 mt-0.5">{sec.questionCount} question{sec.questionCount !== 1 ? 's' : ''}</p>
+                          </div>
+                          {sec.avgPct !== null && (
+                            <div className="text-right shrink-0">
+                              <div className="text-xl font-black" style={{ color: barColor }}>
+                                {sec.avgPct}%
+                              </div>
+                              <div className="text-[10px] text-slate-400">class avg</div>
+                            </div>
+                          )}
+                        </div>
+
+                        {/* Progress bar */}
+                        {sec.avgPct !== null && (
+                          <div className="w-full h-2 bg-slate-100 rounded-full overflow-hidden">
+                            <motion.div
+                              initial={{ width: 0 }}
+                              animate={{ width: `${sec.avgPct}%` }}
+                              transition={{ duration: 0.7, ease: 'easeOut' }}
+                              className="h-full rounded-full"
+                              style={{ background: barColor }}
+                            />
+                          </div>
+                        )}
+
+                        {/* Stats row */}
+                        <div className="flex items-center gap-3 text-xs text-slate-500">
+                          {sec.totalAnswered > 0 ? (
+                            <>
+                              <span className="flex items-center gap-1">
+                                <CheckCircle2 className="w-3 h-3 text-emerald-500" />
+                                {sec.totalCorrect}/{sec.totalAnswered} correct
+                              </span>
+                              {sec.passRate !== null && (
+                                <span className="flex items-center gap-1 ml-auto">
+                                  <Trophy className="w-3 h-3 text-amber-500" />
+                                  {sec.passRate}% pass rate
+                                </span>
+                              )}
+                            </>
+                          ) : (
+                            <span className="text-slate-400 italic">No attempts yet</span>
+                          )}
+                        </div>
+                      </motion.div>
+                    );
+                  })}
+                </div>
+              ) : null}
+            </div>
+          </div>
+        )}
+
+        {mainTab === 'quizzes' && <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
           {loading ? (
             <div className={ADMIN_LIST_CARD_GRID}>
               {Array(6).fill(0).map((_, i) => (
@@ -536,17 +896,17 @@ export default function TeacherResults() {
           ) : filtered.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-20 px-6 text-slate-400">
               <BarChart3 className="w-12 h-12 mb-3 opacity-30" />
-              <p className="font-medium text-slate-600">No results found</p>
+              <p className="font-medium text-slate-600">{t('teacher.results.noResults')}</p>
               <p className="text-sm mt-1 text-center max-w-md">
                 {search || tab !== 'all' || selectedQuiz !== 'all'
-                  ? 'Try adjusting filters or search.'
-                  : 'Results appear when students complete quizzes for your courses.'}
+                  ? t('teacher.results.adjustFilters')
+                  : t('teacher.results.resultsAppearWhen')}
               </p>
             </div>
           ) : (
             <>
               <div className="px-4 sm:px-6 py-3 border-b border-slate-100 flex flex-wrap items-center gap-2 text-xs text-slate-500">
-                <span className="font-semibold uppercase tracking-wider">Sort by column</span>
+                <span className="font-semibold uppercase tracking-wider">{t('teacher.results.sortByColumn')}</span>
                 {(['student', 'quiz', 'score', 'duration', 'date'] as SortField[]).map((col) => (
                   <button
                     key={col}
@@ -559,7 +919,7 @@ export default function TeacherResults() {
                         : 'border-slate-200 bg-white text-slate-600 hover:border-indigo-100',
                     )}
                   >
-                    {col === 'student' ? 'Student' : col === 'quiz' ? 'Quiz' : col === 'score' ? 'Score' : col === 'duration' ? 'Time' : 'Date'}
+                    {col === 'student' ? t('teacher.results.columnStudent') : col === 'quiz' ? t('teacher.results.columnQuiz') : col === 'score' ? t('teacher.results.columnScore') : col === 'duration' ? t('teacher.results.columnTime') : t('teacher.results.columnDate')}
                     <SortIcon col={col} />
                   </button>
                 ))}
@@ -571,23 +931,10 @@ export default function TeacherResults() {
                   const st = students[attempt.studentId];
                   const studentName = st?.name || 'Unknown Student';
                   const quizName = quizzes[attempt.quizId] || 'Unknown Quiz';
-                  const initials = studentName
-                    .split(' ')
-                    .map((w) => w[0])
-                    .join('')
-                    .slice(0, 2)
-                    .toUpperCase();
                   return (
-                    <div key={attempt.id} className={ADMIN_LIST_ITEM_CARD}>
+                    <div key={attempt.id} className={ADMIN_LIST_ITEM_CARD} style={{ borderLeftWidth: '4px', borderLeftColor: attempt.passed ? '#10b981' : attempt.status === 'completed' ? '#f43f5e' : '#f59e0b' }}>
                       <div className="flex items-start gap-3">
-                        <div
-                          className={cn(
-                            'w-11 h-11 rounded-xl bg-gradient-to-br flex items-center justify-center text-white text-xs font-bold shrink-0 shadow-sm',
-                            avatarColor(studentName),
-                          )}
-                        >
-                          {initials}
-                        </div>
+                        <GenderAvatar name={studentName} />
                         <div className="min-w-0 flex-1">
                           <p className="font-semibold text-slate-900 text-sm truncate">{studentName}</p>
                           {st?.email && <p className="text-xs text-slate-400 truncate">{st.email}</p>}
@@ -599,7 +946,7 @@ export default function TeacherResults() {
                       </div>
                       <div className="mt-4 space-y-3 text-xs border-t border-slate-100 pt-3">
                         <div className="flex items-center gap-2">
-                          <span className="text-slate-400 font-semibold uppercase tracking-wider w-16 shrink-0">Score</span>
+                          <span className="text-slate-400 font-semibold uppercase tracking-wider w-16 shrink-0">{t('teacher.results.score')}</span>
                           <div className="flex-1 flex items-center gap-2 min-w-0">
                             <div className="flex-1 h-2 bg-slate-100 rounded-full overflow-hidden">
                               <div
@@ -612,7 +959,7 @@ export default function TeacherResults() {
                         </div>
                         {attempt.totalQuestions != null && attempt.totalQuestions > 0 && (
                           <p className="text-[11px] text-slate-400 pl-16">
-                            {attempt.correctAnswers ?? '—'}/{attempt.totalQuestions} correct
+                            {attempt.correctAnswers ?? '—'}/{attempt.totalQuestions} {t('teacher.results.correct')}
                           </p>
                         )}
                         <div className="flex flex-wrap items-center gap-2 justify-between">
@@ -633,7 +980,7 @@ export default function TeacherResults() {
                             ) : (
                               <Clock className="w-3.5 h-3.5" />
                             )}
-                            {attempt.passed ? 'Passed' : attempt.status === 'completed' ? 'Failed' : 'In progress'}
+                            {attempt.passed ? t('teacher.results.passed') : attempt.status === 'completed' ? t('teacher.results.failed') : t('teacher.results.inProgress')}
                           </span>
                           <div className="flex items-center gap-3 text-slate-500">
                             {duration != null && (
@@ -656,7 +1003,7 @@ export default function TeacherResults() {
               </div>
               <div className="px-5 py-3 border-t border-slate-100 bg-slate-50/60 text-xs text-slate-500 flex flex-wrap items-center justify-between gap-2">
                 <span>
-                  Showing {filtered.length} of {attempts.length} attempts
+                  {t('teacher.results.showing', { count: filtered.length, total: attempts.length })}
                 </span>
                 {(tab !== 'all' || selectedQuiz !== 'all' || search.trim()) && (
                   <button
@@ -668,13 +1015,13 @@ export default function TeacherResults() {
                     }}
                     className="text-indigo-600 font-semibold hover:underline"
                   >
-                    Clear filters
+                    {t('teacher.results.clearFilters')}
                   </button>
                 )}
               </div>
             </>
           )}
-        </div>
+        </div>}
       </AdminListPageShell>
     </TeacherLayout>
   );

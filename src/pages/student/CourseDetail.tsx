@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Link, useParams } from 'react-router-dom';
 import { supabase } from '../../supabase';
 import StudentLayout from '../../components/layout/StudentLayout';
@@ -49,6 +50,7 @@ const saveProgress = (studentId: string, courseId: string, state: ProgressState)
 };
 
 export default function StudentCourseDetail() {
+  const { t } = useTranslation();
   const { courseId = '' } = useParams();
   const [loading, setLoading] = useState(true);
   const [studentId, setStudentId] = useState('');
@@ -121,7 +123,7 @@ export default function StudentCourseDetail() {
               ...moduleRows,
               {
                 id: '__ungrouped',
-                title: 'Ungrouped lessons',
+                title: t('lessons.ungroupedLessons'),
                 order: Number.MAX_SAFE_INTEGER,
                 course_id: courseId,
               },
@@ -205,7 +207,7 @@ export default function StudentCourseDetail() {
       <div className="space-y-6">
         <Link to="/student/courses" className="inline-flex items-center gap-2 text-sm font-semibold text-slate-500 hover:text-slate-700">
           <ArrowLeft className="w-4 h-4" />
-          Back to courses
+          {t('common.back')}
         </Link>
 
         {loading ? (
@@ -216,37 +218,37 @@ export default function StudentCourseDetail() {
         ) : !course ? (
           <div className="bg-white rounded-3xl border border-slate-100 p-10 text-center">
             <BookOpen className="w-8 h-8 text-slate-300 mx-auto mb-3" />
-            <h2 className="text-lg font-bold text-slate-900">Course not available</h2>
-            <p className="text-sm text-slate-500 mt-1">You do not have access to this course.</p>
+            <h2 className="text-lg font-bold text-slate-900">{t('student.courseDetail.notAvailable')}</h2>
+            <p className="text-sm text-slate-500 mt-1">{t('errors.noAccess')}</p>
           </div>
         ) : (
           <>
             <div className="bg-white rounded-3xl border border-slate-100 p-6">
               <div className="flex items-start justify-between gap-4">
                 <div>
-                  <h1 className="text-2xl font-black text-slate-900">{course.title || 'Untitled Course'}</h1>
-                  <p className="text-sm text-slate-500 mt-1">{course.description || 'Continue your learning journey.'}</p>
+                  <h1 className="text-2xl font-black text-slate-900">{course.title || t('student.courseDetail.untitled')}</h1>
+                  <p className="text-sm text-slate-500 mt-1">{course.description || t('student.courseDetail.continueJourney')}</p>
                 </div>
                 <Link
                   to={`/student/lessons?courseId=${encodeURIComponent(courseId)}`}
                   className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-slate-900 text-white text-sm font-semibold hover:bg-slate-800"
                 >
                   <Play className="w-4 h-4" />
-                  Continue
+                  {t('student.courses.continue')}
                 </Link>
               </div>
 
               <div className="mt-5 grid grid-cols-1 sm:grid-cols-3 gap-3">
                 <div className="rounded-2xl border border-slate-100 p-4">
-                  <p className="text-xs text-slate-400 font-semibold">Progress</p>
+                  <p className="text-xs text-slate-400 font-semibold">{t('student.progress.progress')}</p>
                   <p className="text-xl font-black text-slate-900 mt-1">{progressPct}%</p>
                 </div>
                 <div className="rounded-2xl border border-slate-100 p-4">
-                  <p className="text-xs text-slate-400 font-semibold">Lessons</p>
+                  <p className="text-xs text-slate-400 font-semibold">{t('nav.lessons')}</p>
                   <p className="text-xl font-black text-slate-900 mt-1">{completedCount}/{totalLessons}</p>
                 </div>
                 <div className="rounded-2xl border border-slate-100 p-4">
-                  <p className="text-xs text-slate-400 font-semibold">Last visited</p>
+                  <p className="text-xs text-slate-400 font-semibold">{t('student.courseDetail.lastVisited')}</p>
                   <p className="text-sm font-semibold text-slate-700 mt-1">{lastVisitedAt ? new Date(lastVisitedAt).toLocaleString() : '—'}</p>
                 </div>
               </div>
@@ -255,17 +257,17 @@ export default function StudentCourseDetail() {
             <div className="space-y-4">
               {modules.length === 0 ? (
                 <div className="bg-white rounded-3xl border border-slate-100 p-8 text-center text-slate-500">
-                  No modules published yet for this course.
+                  {t('modules.noModules')}
                 </div>
               ) : (
                 modules.map((module) => {
                   const moduleLessons = lessonsByModule[module.id] || [];
                   return (
                     <div key={module.id} className="bg-white rounded-3xl border border-slate-100 p-5">
-                      <h3 className="text-base font-black text-slate-900">{module.title || 'Module'}</h3>
+                      <h3 className="text-base font-black text-slate-900">{module.title || t('modules.moduleName')}</h3>
                       <div className="mt-3 space-y-2">
                         {moduleLessons.length === 0 ? (
-                          <p className="text-sm text-slate-400">No lessons in this module.</p>
+                          <p className="text-sm text-slate-400">{t('lessons.noLessons')}</p>
                         ) : (
                           moduleLessons.map((lesson) => {
                             const done = completedLessonIds.includes(lesson.id);
@@ -286,7 +288,7 @@ export default function StudentCourseDetail() {
                                     {lesson.title}
                                   </p>
                                   <p className="text-xs text-slate-400 mt-0.5">
-                                    Lesson {lesson.order || 0} {lesson.duration_minutes ? `· ${lesson.duration_minutes} min` : ''}
+                                    {t('lessons.title')} {lesson.order || 0} {lesson.duration_minutes ? `· ${lesson.duration_minutes}m` : ''}
                                   </p>
                                 </div>
                                 <div className="flex items-center gap-2">

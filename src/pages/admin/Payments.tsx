@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
+import { useTranslation } from 'react-i18next';
 import AdminLayout from "../../components/layout/AdminLayout";
 import { cn } from "../../lib/utils";
 import { format, subMonths } from "date-fns";
@@ -17,9 +18,11 @@ import {
   CreditCard,
   Banknote,
   ReceiptText,
+  Pencil,
+  Trash2,
 } from "lucide-react";
 import { toast } from "sonner";
-import { apiUrl, readApiError } from "../../lib/apiUrl";
+import { apiUrl, authFetch, readApiError } from "../../lib/apiUrl";
 
 type PaymentStatus = "completed" | "pending" | "failed" | "refunded";
 type PaymentMethod = "card" | "bank" | "paypal" | "cash";
@@ -123,6 +126,7 @@ const fmtCurrency = (n: number) =>
   );
 
 export default function AdminPayments() {
+  const { t } = useTranslation();
   const [payments, setPayments] = useState<Payment[]>([]);
   const [teacherOptions, setTeacherOptions] = useState<TeacherOption[]>([]);
   const [studentOptions, setStudentOptions] = useState<StudentOption[]>([]);
@@ -136,6 +140,9 @@ export default function AdminPayments() {
     "all",
   );
   const [selected, setSelected] = useState<Payment | null>(null);
+  const [editing, setEditing] = useState<Payment | null>(null);
+  const [showDelete, setShowDelete] = useState<Payment | null>(null);
+  const [deleting, setDeleting] = useState(false);
   const [showRegister, setShowRegister] = useState(false);
   const [form, setForm] = useState({
     teacher_id: "",
@@ -152,7 +159,7 @@ export default function AdminPayments() {
   const fetchData = async () => {
     setLoading(true);
     try {
-      const res = await fetch(apiUrl("/api/admin/payments"));
+      const res = await authFetch("/api/admin/payments");
       if (!res.ok) throw new Error(await readApiError(res));
       const json = await res.json();
       if (!json.success) throw new Error(json.error || "Failed to load payments");
@@ -235,6 +242,77 @@ export default function AdminPayments() {
     setShowRegister(true);
   };
 
+  const openEditModal = (p: Payment) => {
+    setForm({
+      teacher_id: p.teacher_id || "",
+      student_id: p.student_id || "",
+      amount: String(p.amount),
+      currency: p.currency || "EUR",
+      status: p.status,
+      method: p.method,
+      payment_date: p.payment_date
+        ? format(new Date(p.payment_date), "yyyy-MM-dd")
+        : format(new Date(), "yyyy-MM-dd"),
+      description: p.description || "",
+      reference: p.reference || "",
+    });
+    setEditing(p);
+  };
+
+  const handleUpdatePayment = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editing) return;
+    if (!form.amount || Number(form.amount) <= 0) {
+      return toast.error("Amount must be greater than 0");
+    }
+    setSaving(true);
+    try {
+      const res = await authFetch(`/api/admin/payments/${editing.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          amount: Number(form.amount),
+          currency: form.currency,
+          status: form.status,
+          method: form.method,
+          payment_date: form.payment_date,
+          description: form.description.trim(),
+          reference: form.reference.trim(),
+        }),
+      });
+      if (!res.ok) throw new Error(await readApiError(res));
+      const json = await res.json();
+      if (!json.success) throw new Error(json.error || "Failed to update payment");
+      toast.success("Payment updated");
+      setEditing(null);
+      await fetchData();
+    } catch (e: any) {
+      toast.error(e.message || "Failed to update payment");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleDeletePayment = async () => {
+    if (!showDelete) return;
+    setDeleting(true);
+    try {
+      const res = await authFetch(`/api/admin/payments/${showDelete.id}`, {
+        method: "DELETE",
+      });
+      if (!res.ok) throw new Error(await readApiError(res));
+      const json = await res.json();
+      if (!json.success) throw new Error(json.error || "Failed to delete payment");
+      toast.success("Payment deleted");
+      setShowDelete(null);
+      await fetchData();
+    } catch (e: any) {
+      toast.error(e.message || "Failed to delete payment");
+    } finally {
+      setDeleting(false);
+    }
+  };
+
   const handleCreatePayment = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!form.teacher_id) return toast.error("Please select a teacher");
@@ -246,7 +324,7 @@ export default function AdminPayments() {
 
     setSaving(true);
     try {
-      const res = await fetch(apiUrl("/api/admin/payments"), {
+      const res = await authFetch("/api/admin/payments", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -498,12 +576,29 @@ export default function AdminPayments() {
                           </span>
                         </td>
                         <td className="px-5 py-4 text-right">
-                          <button
-                            onClick={() => setSelected(p)}
-                            className="p-1.5 rounded-lg hover:bg-indigo-50 text-slate-400 hover:text-indigo-600 transition-colors"
-                          >
-                            <Eye className="w-4 h-4" />
-                          </button>
+                          <div className="flex items-center justify-end gap-1">
+                            <button
+                              onClick={() => setSelected(p)}
+                              className="p-1.5 rounded-lg hover:bg-indigo-50 text-slate-400 hover:text-indigo-600 transition-colors"
+                              title="View details"
+                            >
+                              <Eye className="w-4 h-4" />
+                            </button>
+                            <button
+                              onClick={() => openEditModal(p)}
+                              className="p-1.5 rounded-lg hover:bg-amber-50 text-slate-400 hover:text-amber-600 transition-colors"
+                              title="Edit payment"
+                            >
+                              <Pencil className="w-4 h-4" />
+                            </button>
+                            <button
+                              onClick={() => setShowDelete(p)}
+                              className="p-1.5 rounded-lg hover:bg-rose-50 text-slate-400 hover:text-rose-600 transition-colors"
+                              title="Delete payment"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          </div>
                         </td>
                       </tr>
                     );
@@ -535,11 +630,11 @@ export default function AdminPayments() {
       {/* Detail Modal */}
       {selected && (
         <div
-          className="fixed inset-0 bg-black/40 backdrop-blur-sm z-50 flex items-center justify-center p-4"
+          className="fixed inset-0 lg:left-60 bg-black/40 backdrop-blur-sm z-50 flex items-center justify-center p-4"
           onClick={() => setSelected(null)}
         >
           <div
-            className="bg-white rounded-2xl shadow-2xl w-full max-w-md"
+            className="bg-white rounded-2xl shadow-2xl w-full max-w-md max-h-[90vh] overflow-y-auto"
             onClick={(e) => e.stopPropagation()}
           >
             <div className="p-6 border-b border-slate-100 flex items-center justify-between">
@@ -598,14 +693,200 @@ export default function AdminPayments() {
         </div>
       )}
 
+      {/* Edit Payment Modal */}
+      {editing && (
+        <div
+          className="fixed inset-0 lg:left-60 bg-black/40 backdrop-blur-sm z-50 flex items-center justify-center p-4"
+          onClick={() => setEditing(null)}
+        >
+          <div
+            className="bg-white rounded-2xl shadow-2xl w-full max-w-xl max-h-[90vh] overflow-y-auto"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="p-6 border-b border-slate-100 flex items-center justify-between">
+              <div>
+                <h2 className="text-lg font-bold text-slate-900">Edit Payment</h2>
+                <p className="text-xs text-slate-500 mt-0.5 font-mono">
+                  {editing.reference || `PAY-${editing.id.slice(0, 8)}`}
+                </p>
+              </div>
+              <button
+                onClick={() => setEditing(null)}
+                className="p-2 rounded-xl hover:bg-slate-100 text-slate-400 hover:text-slate-600 transition-colors"
+              >
+                <XCircle className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleUpdatePayment} className="p-6 space-y-4">
+              <div className="bg-slate-50 rounded-xl px-4 py-3 text-sm text-slate-500">
+                <span className="font-semibold text-slate-700">{editing.student_name}</span>
+                {" · "}
+                <span>{editing.teacher_name}</span>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-xs font-semibold text-slate-500 mb-1.5">Amount</label>
+                  <input
+                    type="number"
+                    min="0.01"
+                    step="0.01"
+                    value={form.amount}
+                    onChange={(e) => setForm((prev) => ({ ...prev, amount: e.target.value }))}
+                    className="w-full px-3 py-2.5 text-sm border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-400"
+                    required
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-slate-500 mb-1.5">Date</label>
+                  <input
+                    type="date"
+                    value={form.payment_date}
+                    onChange={(e) => setForm((prev) => ({ ...prev, payment_date: e.target.value }))}
+                    className="w-full px-3 py-2.5 text-sm border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-400"
+                    required
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div>
+                  <label className="block text-xs font-semibold text-slate-500 mb-1.5">Method</label>
+                  <select
+                    value={form.method}
+                    onChange={(e) => setForm((prev) => ({ ...prev, method: e.target.value as PaymentMethod }))}
+                    className="w-full px-3 py-2.5 text-sm border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-400 bg-white"
+                  >
+                    <option value="bank">Bank Transfer</option>
+                    <option value="card">Credit Card</option>
+                    <option value="paypal">PayPal</option>
+                    <option value="cash">Cash</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-slate-500 mb-1.5">Status</label>
+                  <select
+                    value={form.status}
+                    onChange={(e) => setForm((prev) => ({ ...prev, status: e.target.value as PaymentStatus }))}
+                    className="w-full px-3 py-2.5 text-sm border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-400 bg-white"
+                  >
+                    <option value="completed">Completed</option>
+                    <option value="pending">Pending</option>
+                    <option value="failed">Failed</option>
+                    <option value="refunded">Refunded</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-slate-500 mb-1.5">Currency</label>
+                  <input
+                    value={form.currency}
+                    onChange={(e) => setForm((prev) => ({ ...prev, currency: e.target.value.toUpperCase() }))}
+                    className="w-full px-3 py-2.5 text-sm border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-400"
+                    maxLength={5}
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-xs font-semibold text-slate-500 mb-1.5">Reference</label>
+                  <input
+                    value={form.reference}
+                    onChange={(e) => setForm((prev) => ({ ...prev, reference: e.target.value }))}
+                    className="w-full px-3 py-2.5 text-sm border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-400"
+                    placeholder="Optional payment reference"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-slate-500 mb-1.5">Description</label>
+                  <input
+                    value={form.description}
+                    onChange={(e) => setForm((prev) => ({ ...prev, description: e.target.value }))}
+                    className="w-full px-3 py-2.5 text-sm border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-400"
+                    placeholder="What is this payment for?"
+                  />
+                </div>
+              </div>
+
+              <div className="pt-2 flex items-center justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => setEditing(null)}
+                  className="px-4 py-2.5 text-sm font-semibold text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-xl transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={saving}
+                  className="px-4 py-2.5 text-sm font-semibold text-white bg-indigo-600 hover:bg-indigo-700 rounded-xl transition-colors disabled:opacity-60"
+                >
+                  {saving ? "Saving..." : "Save Changes"}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Delete Confirmation Modal */}
+      {showDelete && (
+        <div
+          className="fixed inset-0 lg:left-60 bg-black/40 backdrop-blur-sm z-50 flex items-center justify-center p-4"
+          onClick={() => setShowDelete(null)}
+        >
+          <div
+            className="bg-white rounded-2xl shadow-2xl w-full max-w-sm"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="p-6">
+              <div className="flex items-center gap-4 mb-4">
+                <div className="p-3 rounded-full bg-rose-100">
+                  <Trash2 className="w-5 h-5 text-rose-600" />
+                </div>
+                <div>
+                  <h2 className="text-base font-bold text-slate-900">Delete Payment</h2>
+                  <p className="text-xs text-slate-400 font-mono mt-0.5">
+                    {showDelete.reference || `PAY-${showDelete.id.slice(0, 8)}`}
+                  </p>
+                </div>
+              </div>
+              <p className="text-sm text-slate-600 mb-1">
+                Are you sure you want to delete the payment of{" "}
+                <span className="font-semibold text-slate-900">{fmtCurrency(showDelete.amount)}</span>{" "}
+                from <span className="font-semibold text-slate-900">{showDelete.student_name}</span>?
+              </p>
+              <p className="text-xs text-slate-400 mb-6">This action cannot be undone.</p>
+              <div className="flex items-center justify-end gap-2">
+                <button
+                  onClick={() => setShowDelete(null)}
+                  disabled={deleting}
+                  className="px-4 py-2.5 text-sm font-semibold text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-xl transition-colors disabled:opacity-60"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleDeletePayment}
+                  disabled={deleting}
+                  className="px-4 py-2.5 text-sm font-semibold text-white bg-rose-600 hover:bg-rose-700 rounded-xl transition-colors disabled:opacity-60"
+                >
+                  {deleting ? "Deleting..." : "Delete Payment"}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Register Payment Modal */}
       {showRegister && (
         <div
-          className="fixed inset-0 bg-black/40 backdrop-blur-sm z-50 flex items-center justify-center p-4"
+          className="fixed inset-0 lg:left-60 bg-black/40 backdrop-blur-sm z-50 flex items-center justify-center p-4"
           onClick={() => setShowRegister(false)}
         >
           <div
-            className="bg-white rounded-2xl shadow-2xl w-full max-w-xl"
+            className="bg-white rounded-2xl shadow-2xl w-full max-w-xl max-h-[90vh] overflow-y-auto"
             onClick={(e) => e.stopPropagation()}
           >
             <div className="p-6 border-b border-slate-100 flex items-center justify-between">

@@ -1,0 +1,170 @@
+Analyze the Oxford Headway Test Builder structure from:
+https://elt.oup.com/student/headway/preint4/testbuilder?cc=global&selLanguage=en
+
+Create a quiz system inside the platform that works and looks similar to the OUP Headway Test Builder experience.
+
+GOALS:
+
+1. QUIZ STRUCTURE
+Build a complete quiz engine with:
+- Quiz title
+- Quiz description
+- Units/modules relation
+- Lessons relation
+- Question groups
+- Multiple choice questions
+- Fill in the blanks
+- Matching exercises
+- True/False questions
+- Listening questions
+- Reading comprehension questions
+- Writing tasks
+- Score calculation
+- Timer support
+- Quiz progress tracking
+- Auto grading for objective questions
+
+========================================
+2. SAME EXPERIENCE AS OUP TEST BUILDER
+========================================
+
+The UI/UX should feel similar to:
+https://elt.oup.com/student/headway/preint4/testbuilder?cc=global&selLanguage=en
+
+Include:
+- clean modern layout
+- left/right navigation
+- section-based quizzes
+- progress indicator
+- question pagination
+- responsive design
+- audio support
+- interactive answering
+- instant feedback (optional)
+- submit confirmation
+- results page
+
+========================================
+3. DATABASE STORAGE
+========================================
+
+Store everything inside database tables.
+
+Main table:
+quizzes
+
+Related tables:
+- quiz_sections
+- quiz_questions
+- quiz_answers
+- quiz_attempts
+- quiz_results
+- quiz_audio
+- quiz_files
+
+Each quiz must store:
+- course_id
+- module_id
+- lesson_id
+- teacher_id
+- title
+- instructions
+- duration
+- total_points
+- passing_score
+- quiz_type
+- status
+- difficulty_level
+
+Questions must store:
+- question type
+- question text
+- correct answer
+- answer options
+- points
+- explanation
+- order index
+
+========================================
+4. AUDIO & MEDIA SUPPORT
+========================================
+
+Allow quizzes to include:
+- MP3 audio
+- videos
+- PDFs
+- images
+
+Especially for listening exercises:
+- audio player
+- replay button
+- waveform/progress bar
+- restricted replay if needed
+
+========================================
+5. QUIZ CREATOR PANEL
+========================================
+
+Inside Teacher Dashboard create:
+Teacher → Quizzes
+
+Teachers must be able to:
+- create quizzes manually
+- import quizzes automatically
+- edit questions
+- reorder questions
+- upload audio/video
+- assign quizzes to courses/classes
+- preview quiz before publishing
+
+========================================
+6. STUDENT QUIZ EXPERIENCE
+========================================
+
+Students should:
+- start quiz
+- continue unfinished quiz
+- see timer
+- answer interactively
+- submit answers
+- see score/results
+- review answers if allowed
+
+Track:
+- attempt history
+- scores
+- completion percentage
+- time spent
+
+========================================
+7. IMPORT SYSTEM
+========================================
+
+If quizzes are imported from OUP Headway:
+- preserve original structure
+- preserve section grouping
+- preserve listening activities
+- auto attach to correct unit/module
+
+========================================
+8. PERFORMANCE & SCALABILITY
+========================================
+
+Optimize for:
+- large number of students
+- live quiz sessions
+- concurrent quiz attempts
+- fast loading
+- async saving
+- auto-save answers
+
+Avoid:
+- duplicate questions
+- duplicated media
+- unnecessary requests
+
+========================================
+9. FINAL RESULT
+========================================
+
+The final quiz system should feel like a professional English learning platform similar to Oxford Headway Test Builder, fully integrated into the platform and fully stored inside the database.

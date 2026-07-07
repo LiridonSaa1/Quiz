@@ -1,4 +1,5 @@
 import React, { useEffect, useState, useCallback } from 'react';
+import { useTranslation } from 'react-i18next';
 import { supabase } from '../../supabase';
 import TeacherLayout from '../../components/layout/TeacherLayout';
 import LoadingButton from '../../components/ui/LoadingButton';
@@ -28,6 +29,13 @@ import {
   AlignLeft,
   Calendar,
   RefreshCw,
+  Layers,
+  Mic,
+  Headphones,
+  Volume2,
+  GripVertical,
+  LayoutList,
+  PenLine,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { Quiz, Question, Course, QuestionType } from '../../types';
@@ -39,11 +47,10 @@ import { FormPageSkeleton } from '../../components/ui/Skeleton';
 import { AIPanel, AITriggerButton } from '../../components/AIPanel';
 import type { AIPanelAttachment } from '../../components/AIPanel';
 import {
-  generateQuizQuestions,
   importQuizQuestionsFromImages,
   importQuizQuestionsFromText,
 } from '../../lib/gemini';
-import type { ImportedQuizQuestion } from '../../lib/gemini';
+import type { ImportedQuizQuestion, AIQuestionType } from '../../lib/gemini';
 import { motion, AnimatePresence } from 'motion/react';
 import { isDirectVideoFileUrl, isLikelyVideoLink, toEmbedVideoUrl } from '../../lib/quizMedia';
 import { questionBodyFromRow } from '../../lib/questionText';
@@ -53,6 +60,16 @@ const QUIZ_MEDIA_BUCKET = 'quiz-media';
 type QuizSettingsExtended = NonNullable<Quiz['settings']> & {
   introMediaUrl?: string;
   introMediaType?: 'video' | 'image';
+};
+
+type SectionDraft = {
+  _tempId: string;
+  id?: string;
+  title: string;
+  type: string;
+  instructions: string;
+  audio_url: string;
+  order_index: number;
 };
 
 const defaultSettings = (): QuizSettingsExtended => ({
@@ -134,8 +151,10 @@ function mapCourseRows(rows: unknown[] | null | undefined): Course[] {
 function toDbQuestionType(t: string | undefined): string {
   const x = (t || 'open-text').toLowerCase();
   const allowed = new Set([
-    'multiple-choice', 'true-false', 'open-text', 'fill-in-the-blank', 'matching', 'ordering',
+    'multiple-choice', 'multiple-answer', 'true-false', 'open-text', 'fill-in-the-blank',
+    'short-answer', 'long-answer', 'matching', 'ordering', 'word-bank', 'sentence-building',
     'image', 'video', 'reading', 'instruction',
+    'drag-drop', 'cloze', 'listening', 'audio-fill-blank', 'dictation', 'speaking', 'pronunciation', 'reading-comprehension',
   ]);
   if (allowed.has(x)) return x;
   return 'open-text';
@@ -188,6 +207,7 @@ function resolveImportedCorrectAnswerId(
 }
 
 export default function QuizBuilder() {
+  const { t } = useTranslation();
   const { quizId } = useParams();
   const navigate = useNavigate();
   const [aiOpen, setAiOpen] = useState(false);
@@ -197,6 +217,8 @@ export default function QuizBuilder() {
   const [questionMediaTab, setQuestionMediaTab] = useState<Record<number, 'url' | 'upload'>>({});
   const [uploading, setUploading] = useState<null | 'intro' | number>(null);
   const [saving, setSaving] = useState(false);
+  const [regenerating, setRegenerating] = useState(false);
+  const [showRegenConfirm, setShowRegenConfirm] = useState(false);
   const [autoPublish, setAutoPublish] = useState(false);
   const [publishAt, setPublishAt] = useState('');
 
@@ -210,6 +232,10 @@ export default function QuizBuilder() {
   });
 
   const [questions, setQuestions] = useState<Partial<Question>[]>([]);
+  const [quizSections, setQuizSections] = useState<SectionDraft[]>([]);
+  const [addingSection, setAddingSection] = useState(false);
+  const [newSectionForm, setNewSectionForm] = useState({ title: '', type: 'general', instructions: '', audio_url: '' });
+  const [questionSectionMap, setQuestionSectionMap] = useState<Record<number, string>>({});
 
   const setSettings = useCallback((patch: Partial<QuizSettingsExtended>) => {
     setQuizData((prev) => ({
@@ -315,30 +341,67 @@ export default function QuizBuilder() {
             questionRows = questionsData ?? [];
           }
 
-          setQuestions(questionRows.map((q) => ({
-            id: q.id,
-            quizId: q.quiz_id,
-            type: q.type,
-            text: questionBodyFromRow(q as Record<string, unknown>),
-            mediaUrl: q.media_url,
-            mediaType: q.media_type,
-            readingPassage: q.reading_passage,
-            options: q.options,
-            correctAnswer: q.correct_answer,
-            points: q.points,
-            explanation: q.explanation,
-            orderIndex: (q as { order?: number; order_index?: number }).order_index ?? (q as { order?: number }).order,
-          } as Question)));
+          setQuestions(questionRows.map((q) => {
+            const rawOptions = q.options;
+            const safeOptions: Array<{ id: string; text: string }> | undefined = Array.isArray(rawOptions)
+              ? rawOptions.map((opt: unknown, i: number) => {
+                  if (opt && typeof opt === 'object' && 'id' in opt && 'text' in opt) {
+                    return { id: String((opt as { id: unknown }).id ?? i), text: String((opt as { text: unknown }).text ?? '') };
+                  }
+                  return { id: String(i + 1), text: String(opt ?? '') };
+                })
+              : undefined;
+            return {
+              id: q.id,
+              quizId: q.quiz_id,
+              type: q.type,
+              text: questionBodyFromRow(q as Record<string, unknown>),
+              mediaUrl: q.media_url,
+              mediaType: q.media_type,
+              readingPassage: q.reading_passage,
+              options: safeOptions,
+              correctAnswer: q.correct_answer,
+              points: q.points,
+              explanation: q.explanation,
+              orderIndex: (q as { order?: number; order_index?: number }).order_index ?? (q as { order?: number }).order,
+            } as Question;
+          }));
+
+          // Restore question → section mapping from DB data
+          const secMap: Record<number, string> = {};
+          questionRows.forEach((q: any, idx: number) => {
+            if (q.section_id) secMap[idx] = q.section_id;
+          });
+          setQuestionSectionMap(secMap);
+
+          // Fetch sections (graceful — quiz_sections table may not exist yet)
+          try {
+            const secRes = await authFetch(`/api/teacher/quizzes/${encodeURIComponent(quizId)}/sections`);
+            if (secRes.ok) {
+              const secJson = await secRes.json().catch(() => ({}));
+              if (Array.isArray(secJson?.sections) && secJson.sections.length > 0) {
+                setQuizSections(secJson.sections.map((s: any) => ({
+                  _tempId: String(s.id || `loaded-${s.order_index}`),
+                  id: s.id,
+                  title: s.title,
+                  type: s.type || 'general',
+                  instructions: s.instructions || '',
+                  audio_url: s.audio_url || '',
+                  order_index: s.order_index,
+                })));
+              }
+            }
+          } catch { /* quiz_sections table may not exist yet */ }
         }
       } catch {
-        toast.error('Failed to fetch data');
+        toast.error(t('common.error'));
       } finally {
         setLoading(false);
       }
     };
 
     fetchData();
-  }, [quizId]);
+  }, [quizId, t]);
 
   const appendImportedQuestions = useCallback((incoming: ImportedQuizQuestion[], sourceLabel: string) => {
     const existingTexts = new Set(
@@ -409,14 +472,14 @@ export default function QuizBuilder() {
     }
 
     if (!mapped.length) {
-      throw new Error(`No new questions were imported from ${sourceLabel}.`);
+      throw new Error(t('quizzes.noQuestionsFromContent'));
     }
 
     setQuestions((prev) => [...prev, ...mapped]);
-    toast.success(`Added ${mapped.length} question${mapped.length === 1 ? '' : 's'} from ${sourceLabel}.`);
-  }, [questions]);
+    toast.success(mapped.length === 1 ? t('quizzes.questionImported', { count: mapped.length, source: sourceLabel }) : t('quizzes.questionImportedPlural', { count: mapped.length, source: sourceLabel }));
+  }, [questions, t]);
 
-  const handleQuestionIntake = async (input: string, attachments: AIPanelAttachment[] = []) => {
+  const handleQuestionIntake = async (input: string, attachments: AIPanelAttachment[] = [], selectedTypes?: AIQuestionType[]) => {
     const imageFiles = attachments
       .filter((attachment) => attachment.kind === 'image')
       .map((attachment) => attachment.file);
@@ -433,11 +496,6 @@ export default function QuizBuilder() {
       return;
     }
 
-    const generated = await generateQuizQuestions(input);
-    if (!generated.length) {
-      throw new Error('No questions could be generated from this content. Please add more source text.');
-    }
-
     const existingTexts = new Set(
       questions
         .map((q) => String(q.text || '').trim().toLowerCase())
@@ -446,44 +504,123 @@ export default function QuizBuilder() {
 
     const mapped: Partial<Question>[] = [];
 
-    for (const q of generated) {
-      const text = String(q.text || '').trim();
-      if (!text) continue;
-      const key = text.toLowerCase();
-      if (existingTexts.has(key)) continue;
-      existingTexts.add(key);
-
-      const safeOptions = Array.isArray(q.options)
-        ? q.options
-            .slice(0, 4)
-            .map((opt, idx) => ({ id: String(idx + 1), text: String(opt?.text || `Option ${idx + 1}`) }))
-        : [];
-
-      while (safeOptions.length < 4) {
-        safeOptions.push({
-          id: String(safeOptions.length + 1),
-          text: `Option ${safeOptions.length + 1}`,
-        });
-      }
-
-      const correctAnswer = safeOptions.some((opt) => opt.id === q.correctAnswer) ? q.correctAnswer : safeOptions[0].id;
-
-      mapped.push({
-        type: 'multiple-choice',
-        text,
-        options: safeOptions,
-        correctAnswer,
-        explanation: typeof q.explanation === 'string' ? q.explanation : '',
-        points: Number.isFinite(q.points) ? Math.max(1, Number(q.points)) : 1,
+    if (selectedTypes && selectedTypes.length > 0) {
+      const aiRes = await authFetch('/api/teacher/ai/generate-questions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ content: input, questionTypes: selectedTypes }),
       });
+      if (!aiRes.ok) { const err = await readApiError(aiRes); throw new Error(err); }
+      const { questions: generated } = await aiRes.json() as { questions: any[] };
+      if (!generated.length) throw new Error(t('quizzes.noQuestionsFromContent'));
+
+      for (const q of generated) {
+        const text = String(q.text || '').trim();
+        if (!text) continue;
+        const key = text.toLowerCase();
+        if (existingTexts.has(key)) continue;
+        existingTexts.add(key);
+
+        const base = {
+          text,
+          explanation: typeof q.explanation === 'string' ? q.explanation : '',
+          points: Number.isFinite(q.points) ? Math.max(1, Number(q.points)) : 1,
+        };
+
+        if (q.type === 'multiple-choice' || q.type === 'true-false') {
+          const safeOptions = Array.isArray(q.options) ? q.options.map((opt, idx) => ({
+            id: String(idx + 1),
+            text: String(opt?.text || `Option ${idx + 1}`),
+          })) : [];
+          if (q.type === 'multiple-choice') {
+            while (safeOptions.length < 4) safeOptions.push({ id: String(safeOptions.length + 1), text: `Option ${safeOptions.length + 1}` });
+          }
+          const correctAnswer = Array.isArray(q.correctAnswer) ? q.correctAnswer[0] : (q.correctAnswer as string | undefined);
+          mapped.push({ ...base, type: q.type, options: safeOptions, correctAnswer: safeOptions.some((o) => o.id === correctAnswer) ? correctAnswer : safeOptions[0]?.id });
+        } else if (q.type === 'multiple-answer') {
+          const safeOptions = Array.isArray(q.options) ? q.options.map((opt, idx) => ({
+            id: String(idx + 1),
+            text: String(opt?.text || `Option ${idx + 1}`),
+          })) : [];
+          while (safeOptions.length < 2) safeOptions.push({ id: String(safeOptions.length + 1), text: `Option ${safeOptions.length + 1}` });
+          const correctAnswers = Array.isArray(q.correctAnswer) ? q.correctAnswer : (q.correctAnswer ? [q.correctAnswer as string] : [safeOptions[0]?.id]);
+          mapped.push({ ...base, type: 'multiple-answer' as QuestionType, options: safeOptions, correctAnswer: JSON.stringify(correctAnswers) });
+        } else if (q.type === 'fill-in-the-blank' || q.type === 'short-answer') {
+          mapped.push({ ...base, type: q.type as QuestionType, correctAnswer: String(q.correctAnswer || '') });
+        } else if (q.type === 'long-answer') {
+          mapped.push({ ...base, type: 'long-answer' as QuestionType, points: Math.max(2, base.points) });
+        } else if (q.type === 'matching') {
+          const pairs = Array.isArray(q.pairs) ? q.pairs : [];
+          mapped.push({ ...base, type: 'matching' as QuestionType, options: pairs.map((p, i) => ({ id: String(i + 1), text: p.left })) as any, correctAnswer: JSON.stringify(pairs), points: pairs.length });
+        } else if (q.type === 'ordering') {
+          const items = Array.isArray(q.items) ? q.items : [];
+          const correctOrder = Array.isArray(q.correctOrder) ? q.correctOrder : items;
+          mapped.push({ ...base, type: 'ordering' as QuestionType, options: items.map((item, i) => ({ id: String(i + 1), text: item })) as any, correctAnswer: JSON.stringify(correctOrder) });
+        } else if (q.type === 'word-bank') {
+          const wordBank = Array.isArray(q.wordBank) ? q.wordBank : [];
+          mapped.push({ ...base, type: 'word-bank' as QuestionType, options: wordBank.map((w, i) => ({ id: String(i + 1), text: w })) as any, correctAnswer: String(q.correctAnswer || '') });
+        } else if (q.type === 'sentence-building') {
+          const words = Array.isArray(q.words) ? q.words : [];
+          mapped.push({ ...base, type: 'sentence-building' as QuestionType, options: words.map((w, i) => ({ id: String(i + 1), text: w })) as any, correctAnswer: String(q.correctAnswer || '') });
+        } else if (q.type === 'drag-drop') {
+          const items = Array.isArray(q.items) ? q.items : [];
+          const correctOrder = Array.isArray(q.correctOrder) ? q.correctOrder : items;
+          mapped.push({ ...base, type: 'drag-drop' as QuestionType, options: items.map((item, i) => ({ id: String(i + 1), text: item })) as any, correctAnswer: JSON.stringify(correctOrder) });
+        } else if (q.type === 'cloze') {
+          const blanks = Array.isArray(q.blanks) ? q.blanks : (q.correctAnswer ? [String(q.correctAnswer)] : []);
+          mapped.push({ ...base, type: 'cloze' as QuestionType, readingPassage: String((q as any).passage || ''), correctAnswer: JSON.stringify(blanks) });
+        } else if (q.type === 'listening') {
+          const safeOptions = Array.isArray(q.options) ? q.options.map((opt, idx) => ({ id: String(idx + 1), text: String(opt?.text || `Option ${idx + 1}`) })) : [];
+          while (safeOptions.length < 4) safeOptions.push({ id: String(safeOptions.length + 1), text: `Option ${safeOptions.length + 1}` });
+          const correctAnswer = Array.isArray(q.correctAnswer) ? q.correctAnswer[0] : (q.correctAnswer as string | undefined);
+          mapped.push({ ...base, type: 'listening' as QuestionType, options: safeOptions, correctAnswer: safeOptions.some((o) => o.id === correctAnswer) ? correctAnswer : safeOptions[0]?.id, readingPassage: String((q as any).audioTranscript || '') });
+        } else if (q.type === 'audio-fill-blank') {
+          mapped.push({ ...base, type: 'audio-fill-blank' as QuestionType, correctAnswer: String(q.correctAnswer || ''), readingPassage: String((q as any).audioTranscript || '') });
+        } else if (q.type === 'dictation') {
+          mapped.push({ ...base, type: 'dictation' as QuestionType, correctAnswer: String(q.correctAnswer || (q as any).audioTranscript || ''), readingPassage: String((q as any).audioTranscript || '') });
+        } else if (q.type === 'speaking') {
+          mapped.push({ ...base, type: 'speaking' as QuestionType, points: Math.max(2, base.points) });
+        } else if (q.type === 'pronunciation') {
+          mapped.push({ ...base, type: 'pronunciation' as QuestionType, correctAnswer: String(q.correctAnswer || '') });
+        } else if (q.type === 'reading-comprehension') {
+          const safeOptions = Array.isArray(q.options) ? q.options.map((opt, idx) => ({ id: String(idx + 1), text: String(opt?.text || `Option ${idx + 1}`) })) : [];
+          while (safeOptions.length < 4) safeOptions.push({ id: String(safeOptions.length + 1), text: `Option ${safeOptions.length + 1}` });
+          const correctAnswer = Array.isArray(q.correctAnswer) ? q.correctAnswer[0] : (q.correctAnswer as string | undefined);
+          mapped.push({ ...base, type: 'reading-comprehension' as QuestionType, options: safeOptions, correctAnswer: safeOptions.some((o) => o.id === correctAnswer) ? correctAnswer : safeOptions[0]?.id, readingPassage: String((q as any).passage || '') });
+        }
+      }
+    } else {
+      const aiRes = await authFetch('/api/teacher/ai/generate-questions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ content: input, questionTypes: ['multiple-choice'] }),
+      });
+      if (!aiRes.ok) { const err = await readApiError(aiRes); throw new Error(err); }
+      const { questions: generated } = await aiRes.json() as { questions: any[] };
+      if (!generated.length) throw new Error(t('quizzes.noQuestionsFromContent'));
+
+      for (const q of generated) {
+        const text = String(q.text || '').trim();
+        if (!text) continue;
+        const key = text.toLowerCase();
+        if (existingTexts.has(key)) continue;
+        existingTexts.add(key);
+
+        const safeOptions = Array.isArray(q.options)
+          ? q.options.slice(0, 4).map((opt, idx) => ({ id: String(idx + 1), text: String(opt?.text || `Option ${idx + 1}`) }))
+          : [];
+        while (safeOptions.length < 4) safeOptions.push({ id: String(safeOptions.length + 1), text: `Option ${safeOptions.length + 1}` });
+        const correctAnswer = safeOptions.some((opt) => opt.id === q.correctAnswer) ? q.correctAnswer : safeOptions[0].id;
+        mapped.push({ type: 'multiple-choice', text, options: safeOptions, correctAnswer, explanation: typeof q.explanation === 'string' ? q.explanation : '', points: Number.isFinite(q.points) ? Math.max(1, Number(q.points)) : 1 });
+      }
     }
 
     if (!mapped.length) {
-      throw new Error('No new unique questions were generated. Try adding more content detail.');
+      throw new Error(t('quizzes.noNewQuestionsGenerated'));
     }
 
     setQuestions((prev) => [...prev, ...mapped]);
-    toast.success(`Added ${mapped.length} AI-generated multiple-choice questions.`);
+    toast.success(t('quizzes.aiGeneratedQuestions', { count: mapped.length }));
   };
 
   const addQuestion = (type: QuestionType) => {
@@ -495,19 +632,32 @@ export default function QuizBuilder() {
     const newQuestion: Partial<Question> = {
       type,
       text: '',
-      points: type === 'instruction' ? 0 : 1,
+      points: type === 'instruction' ? 0 : type === 'long-answer' ? 2 : type === 'matching' ? 3 : 1,
       mediaType: type === 'video' ? 'video' : type === 'image' ? 'image' : undefined,
       options: needsChoiceOptions
-        ? [
-            { id: '1', text: 'Option 1' },
-            { id: '2', text: 'Option 2' },
-          ]
+        ? [{ id: '1', text: 'Option 1' }, { id: '2', text: 'Option 2' }]
         : type === 'true-false'
-          ? [
-              { id: '1', text: 'True' },
-              { id: '2', text: 'False' },
-            ]
-          : undefined,
+          ? [{ id: '1', text: 'True' }, { id: '2', text: 'False' }]
+          : type === 'multiple-answer' || type === 'listening' || type === 'reading-comprehension'
+            ? [{ id: '1', text: 'Option A' }, { id: '2', text: 'Option B' }, { id: '3', text: 'Option C' }, { id: '4', text: 'Option D' }]
+            : type === 'matching'
+              ? [{ id: '1', text: 'Item 1' }, { id: '2', text: 'Item 2' }, { id: '3', text: 'Item 3' }]
+              : type === 'ordering' || type === 'drag-drop'
+                ? [{ id: '1', text: 'Step 1' }, { id: '2', text: 'Step 2' }, { id: '3', text: 'Step 3' }]
+                : type === 'word-bank'
+                  ? [{ id: '1', text: 'word1' }, { id: '2', text: 'word2' }, { id: '3', text: 'word3' }, { id: '4', text: 'word4' }]
+                  : type === 'sentence-building'
+                    ? [{ id: '1', text: 'Word' }, { id: '2', text: 'two' }, { id: '3', text: 'three' }]
+                    : undefined,
+      correctAnswer: type === 'multiple-answer'
+        ? JSON.stringify([])
+        : type === 'matching'
+          ? JSON.stringify([{ left: 'Item 1', right: '' }, { left: 'Item 2', right: '' }, { left: 'Item 3', right: '' }])
+          : type === 'ordering' || type === 'drag-drop'
+            ? JSON.stringify(['Step 1', 'Step 2', 'Step 3'])
+            : type === 'cloze'
+              ? JSON.stringify(['answer1', 'answer2'])
+              : undefined,
     };
     setQuestions([...questions, newQuestion]);
   };
@@ -515,6 +665,57 @@ export default function QuizBuilder() {
   const removeQuestion = (index: number) => {
     setQuestions(questions.filter((_, i) => i !== index));
     setQuestionMediaTab({});
+  };
+
+  const handleRegenerate = async () => {
+    if (!quizId) return;
+    setShowRegenConfirm(false);
+    setRegenerating(true);
+    try {
+      const res = await authFetch(`/api/teacher/quizzes/${encodeURIComponent(quizId)}/regenerate-questions`, {
+        method: 'POST',
+      });
+      if (!res.ok) {
+        const err = await readApiError(res);
+        throw new Error(err);
+      }
+      const json = await res.json();
+      toast.success(`Regenerated ${json.questionCount} new AI questions!`);
+      // Reload questions from server
+      const qRes = await authFetch(`/api/teacher/quizzes/${encodeURIComponent(quizId)}/questions`);
+      if (qRes.ok) {
+        const qJson = await qRes.json();
+        const rows: any[] = Array.isArray(qJson) ? qJson : (qJson.questions ?? []);
+        setQuestions(rows.map((q: any) => {
+          const optObjects: Array<{ id: string; text: string }> = Array.isArray(q.options)
+            ? q.options.map((o: any, idx: number) =>
+                typeof o === 'string' ? { id: String(idx + 1), text: o } : o
+              )
+            : [];
+          // Resolve correctAnswer: prefer 1-based index string matching opt.id;
+          // fall back to finding by text (handles old rows stored before this fix).
+          const rawCA = q.correct_answer ?? '';
+          const idMatch = optObjects.find(opt => opt.id === rawCA);
+          const textMatch = !idMatch ? optObjects.find(opt => opt.text === rawCA) : null;
+          const correctAnswer = idMatch ? idMatch.id : (textMatch ? textMatch.id : rawCA);
+          return {
+            id: q.id,
+            quizId: q.quiz_id,
+            type: (q.type || 'multiple-choice') as QuestionType,
+            text: q.text || q.question_text || '',
+            options: optObjects,
+            correctAnswer,
+            explanation: q.explanation ?? '',
+            points: q.points ?? 1,
+            order: q.order ?? 0,
+          };
+        }));
+      }
+    } catch (e: unknown) {
+      toast.error(e instanceof Error ? e.message : 'Failed to regenerate questions');
+    } finally {
+      setRegenerating(false);
+    }
   };
 
   const updateQuestion = (index: number, data: Partial<Question>) => {
@@ -531,11 +732,11 @@ export default function QuizBuilder() {
     if (!session) return;
     const introType = (quizData.settings as QuizSettingsExtended)?.introMediaType || 'video';
     if (introType === 'video' && !file.type.startsWith('video/')) {
-      toast.error('Choose a video file for intro, or switch intro type to Image.');
+      toast.error(t('quizzes.youtube'));
       return;
     }
     if (introType === 'image' && !file.type.startsWith('image/')) {
-      toast.error('Choose an image file.');
+      toast.error(t('quizzes.imageUrl'));
       return;
     }
     setUploading('intro');
@@ -543,9 +744,9 @@ export default function QuizBuilder() {
       const folder = quizId ? `quiz-${quizId}-intro` : `draft-intro`;
       const url = await uploadQuizAsset(file, session.user.id, folder);
       setSettings({ introMediaUrl: url });
-      toast.success('Intro media uploaded');
+      toast.success(t('quizzes.uploaded'));
     } catch (err: unknown) {
-      toast.error(err instanceof Error ? err.message : 'Upload failed');
+      toast.error(err instanceof Error ? err.message : t('quizzes.uploadFailed'));
     } finally {
       setUploading(null);
     }
@@ -560,11 +761,11 @@ export default function QuizBuilder() {
     const q = questions[index];
     const expectVideo = q.type === 'video';
     if (expectVideo && !file.type.startsWith('video/')) {
-      toast.error('Upload a video file, or paste a link instead.');
+      toast.error(t('quizzes.youtube'));
       return;
     }
     if (q.type === 'image' && !file.type.startsWith('image/')) {
-      toast.error('Upload an image file, or paste an image URL.');
+      toast.error(t('quizzes.imageUrl'));
       return;
     }
     setUploading(index);
@@ -575,9 +776,9 @@ export default function QuizBuilder() {
         mediaUrl: url,
         mediaType: expectVideo ? 'video' : 'image',
       });
-      toast.success('Media uploaded');
+      toast.success(t('quizzes.uploaded'));
     } catch (err: unknown) {
-      toast.error(err instanceof Error ? err.message : 'Upload failed');
+      toast.error(err instanceof Error ? err.message : t('quizzes.uploadFailed'));
     } finally {
       setUploading(null);
     }
@@ -587,7 +788,7 @@ export default function QuizBuilder() {
     const { data: { session } } = await supabase.auth.getSession();
     if (!session) return;
     if (!quizData.title || !quizData.courseId) {
-      toast.error('Please fill in quiz title and select a course');
+      toast.error(t('quizzes.fillAllRequiredFields'));
       return;
     }
 
@@ -633,7 +834,27 @@ export default function QuizBuilder() {
       }
 
       const quizIdForQuestions = currentQuizId || quizId;
-      if (!quizIdForQuestions) throw new Error('Missing quiz id');
+      if (!quizIdForQuestions) throw new Error(t('common.error'));
+
+      // Sync sections first → get real DB IDs for question section_id assignment
+      let sectionIdMap: Record<string, string> = {};
+      if (quizSections.length > 0) {
+        try {
+          const syncRes = await authFetch(
+            `/api/teacher/quizzes/${encodeURIComponent(quizIdForQuestions)}/sections/sync`,
+            { method: 'POST', body: JSON.stringify({ sections: quizSections.map((s, idx) => ({ ...s, order_index: idx })) }) }
+          );
+          if (syncRes.ok) {
+            const syncJson = await syncRes.json().catch(() => ({}));
+            if (Array.isArray(syncJson?.sections)) {
+              quizSections.forEach((sec, idx) => {
+                const realId = syncJson.sections[idx]?.id;
+                if (realId) sectionIdMap[sec._tempId] = realId;
+              });
+            }
+          }
+        } catch { /* quiz_sections table may not exist yet */ }
+      }
 
       const questionsPayload = questions.map((q, idx) => ({
         quiz_id: quizIdForQuestions,
@@ -647,6 +868,9 @@ export default function QuizBuilder() {
         points: q.type === 'instruction' ? 0 : (q.points ?? 1),
         explanation: q.explanation,
         order: idx,
+        section_id: questionSectionMap[idx]
+          ? (sectionIdMap[questionSectionMap[idx]] || questionSectionMap[idx] || null)
+          : null,
       }));
 
       const saveQ = await authFetch(
@@ -679,6 +903,7 @@ export default function QuizBuilder() {
   }
 
   return (
+    <>
     <TeacherLayout>
       <div
         className="min-h-screen -mx-4 sm:-mx-6 lg:-mx-8 -mt-7"
@@ -735,7 +960,36 @@ export default function QuizBuilder() {
                   </div>
                 </div>
                 <div className="flex flex-wrap items-center gap-3 shrink-0">
-                  <AITriggerButton onClick={() => setAiOpen(true)} label="AI / Import" />
+                  <button
+                    type="button"
+                    onClick={() => setAiOpen(true)}
+                    className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-bold text-white transition-all active:scale-[0.98] shadow-xl shadow-violet-900/40 border border-white/20"
+                    style={{ background: 'linear-gradient(135deg, #7c3aed 0%, #4f46e5 100%)' }}
+                  >
+                    <Sparkles className="w-4 h-4" />
+                    Generate Questions
+                  </button>
+                  {quizId && (quizData.settings as any)?.smartTestMeta && (
+                    <motion.button
+                      type="button"
+                      onClick={() => setShowRegenConfirm(true)}
+                      disabled={regenerating}
+                      whileHover={{ scale: 1.04, y: -1 }}
+                      whileTap={{ scale: 0.97 }}
+                      className="inline-flex items-center gap-2 px-4 py-2.5 rounded-2xl font-bold text-sm text-white transition-all disabled:opacity-60"
+                      style={{
+                        background: regenerating
+                          ? 'rgba(16,185,129,0.5)'
+                          : 'linear-gradient(135deg, #10b981 0%, #059669 100%)',
+                        boxShadow: '0 4px 16px rgba(16,185,129,0.35)',
+                      }}
+                    >
+                      {regenerating
+                        ? <Loader2 className="w-4 h-4 animate-spin" />
+                        : <RefreshCw className="w-4 h-4" />}
+                      {regenerating ? 'Regenerating…' : 'Regenerate AI'}
+                    </motion.button>
+                  )}
                   <LoadingButton
                     type="button"
                     onClick={() => void handleSave()}
@@ -759,16 +1013,17 @@ export default function QuizBuilder() {
               open={aiOpen}
               onClose={() => setAiOpen(false)}
               label="AI + Question Import"
-              description="Paste lesson text, upload a quiz .txt, or attach screenshots. Text and image import now work without an API key."
-              placeholder='Paste lesson text, transcript, or fully written quiz questions here...'
-              buttonLabel="Process Questions"
-              loadingLabel="Processing..."
+              description="Select question types, paste your lesson text, and let AI generate a mixed quiz."
+              placeholder='Paste lesson text, transcript, or quiz content here...'
+              buttonLabel="Generate Questions"
+              loadingLabel="Generating..."
               allowTextFileUpload
               fileUploadLabel="Upload quiz/text file"
               fileUploadHint="Supported: .txt, .md, .srt, .vtt, .json, .csv"
               allowImageUpload
               imageUploadLabel="Upload screenshot/photo"
-              imageUploadHint="Use screenshots of question sheets, worksheets, or textbook pages. OCR runs locally, no API key needed."
+              imageUploadHint="Use screenshots of question sheets, worksheets, or textbook pages."
+              showQuestionTypeSelector
               onSubmit={handleQuestionIntake}
             />
 
@@ -1039,6 +1294,126 @@ export default function QuizBuilder() {
                   </div>
                 </div>
 
+                {/* Sections panel */}
+                <div className="rounded-2xl border border-white/60 shadow-sm p-5 space-y-3 bg-white/90 backdrop-blur-md">
+                  <div className="flex items-center justify-between">
+                    <h2 className="text-base font-bold text-slate-900 flex items-center gap-2">
+                      <Layers className="w-5 h-5 text-violet-500" />
+                      Sections
+                    </h2>
+                    <button
+                      type="button"
+                      onClick={() => setAddingSection(!addingSection)}
+                      className="w-7 h-7 flex items-center justify-center rounded-xl bg-violet-50 text-violet-600 hover:bg-violet-100 transition-colors"
+                    >
+                      <Plus className="w-4 h-4" />
+                    </button>
+                  </div>
+
+                  {quizSections.length === 0 && !addingSection && (
+                    <p className="text-xs text-slate-400 italic">No sections yet. Add sections to organise your quiz into parts (Grammar, Listening, etc.).</p>
+                  )}
+
+                  {quizSections.map((sec, idx) => (
+                    <div key={sec._tempId} className="flex items-center gap-2 rounded-xl border border-slate-100 bg-slate-50 px-3 py-2">
+                      <span className="text-[10px] font-bold text-violet-600 capitalize bg-violet-50 px-1.5 py-0.5 rounded-md shrink-0">{sec.type}</span>
+                      <span className="text-sm font-medium text-slate-700 flex-1 truncate">{sec.title}</span>
+                      {sec.audio_url && <span title="Has audio" className="text-amber-500 text-xs">♪</span>}
+                      <button
+                        type="button"
+                        onClick={() => setQuizSections(quizSections.filter((_, i) => i !== idx))}
+                        className="text-slate-400 hover:text-red-500 transition-colors shrink-0"
+                      >
+                        <X className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  ))}
+
+                  {addingSection && (
+                    <div className="space-y-2 rounded-xl border border-violet-100 bg-violet-50/40 p-3">
+                      <input
+                        type="text"
+                        value={newSectionForm.title}
+                        onChange={(e) => setNewSectionForm({ ...newSectionForm, title: e.target.value })}
+                        className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-violet-400"
+                        placeholder="Section title (e.g. Grammar)"
+                      />
+                      <select
+                        value={newSectionForm.type}
+                        onChange={(e) => setNewSectionForm({ ...newSectionForm, type: e.target.value })}
+                        className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-violet-400"
+                      >
+                        {['general', 'grammar', 'listening', 'reading', 'writing', 'vocabulary'].map((tp) => (
+                          <option key={tp} value={tp}>{tp.charAt(0).toUpperCase() + tp.slice(1)}</option>
+                        ))}
+                      </select>
+                      <textarea
+                        value={newSectionForm.instructions}
+                        onChange={(e) => setNewSectionForm({ ...newSectionForm, instructions: e.target.value })}
+                        rows={2}
+                        className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-violet-400 resize-none"
+                        placeholder="Instructions for students (optional)"
+                      />
+                      <input
+                        type="url"
+                        value={newSectionForm.audio_url}
+                        onChange={(e) => setNewSectionForm({ ...newSectionForm, audio_url: e.target.value })}
+                        className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-violet-400"
+                        placeholder="Audio URL (optional, for listening sections)"
+                      />
+                      <div className="flex gap-2">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (!newSectionForm.title.trim()) return;
+                            setQuizSections([
+                              ...quizSections,
+                              {
+                                _tempId: `draft-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+                                ...newSectionForm,
+                                order_index: quizSections.length,
+                              },
+                            ]);
+                            setNewSectionForm({ title: '', type: 'general', instructions: '', audio_url: '' });
+                            setAddingSection(false);
+                          }}
+                          className="flex-1 py-2 rounded-xl bg-violet-600 text-white text-xs font-bold hover:bg-violet-700 transition-colors"
+                        >
+                          Add Section
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setAddingSection(false)}
+                          className="py-2 px-3 rounded-xl border border-slate-200 text-xs font-semibold text-slate-600 hover:bg-slate-50 transition-colors"
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                {/* AI Generate card — always visible */}
+                <button
+                  type="button"
+                  onClick={() => setAiOpen(true)}
+                  className="w-full rounded-2xl p-5 text-white text-left space-y-2 transition-all hover:opacity-90 active:scale-[0.98] shadow-lg"
+                  style={{ background: 'linear-gradient(135deg,#7c3aed 0%,#4f46e5 60%,#2563eb 100%)' }}
+                >
+                  <div className="flex items-center gap-2.5">
+                    <div className="w-8 h-8 rounded-xl bg-white/20 flex items-center justify-center">
+                      <Sparkles className="w-4 h-4" />
+                    </div>
+                    <span className="font-extrabold text-base">Generate Questions with AI</span>
+                  </div>
+                  <p className="text-white/70 text-xs leading-relaxed">
+                    Select question types → paste your text → AI builds the quiz for you. Supports MCQ, cloze, matching, listening, speaking and 15 more.
+                  </p>
+                  <div className="inline-flex items-center gap-1.5 bg-white/20 rounded-lg px-3 py-1.5 text-xs font-bold mt-1">
+                    <Sparkles className="w-3.5 h-3.5" /> Open AI Generator
+                  </div>
+                </button>
+
                 <div
                   className="rounded-2xl p-5 text-white space-y-4"
                   style={{
@@ -1046,18 +1421,32 @@ export default function QuizBuilder() {
                   }}
                 >
                   <h3 className="font-bold text-sm flex items-center gap-2">
-                    <Plus className="w-4 h-4" /> Add questions
+                    <Plus className="w-4 h-4" /> Add questions manually
                   </h3>
                   <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
                     {[
                       { type: 'multiple-choice' as const, label: 'MCQ', icon: CheckSquare },
+                      { type: 'multiple-answer' as const, label: 'Multi ✓', icon: CheckSquare },
                       { type: 'true-false' as const, label: 'T / F', icon: Circle },
-                      { type: 'open-text' as const, label: 'Open', icon: Type },
-                      { type: 'fill-in-the-blank' as const, label: 'Blank', icon: TextCursorInput },
-                      { type: 'instruction' as const, label: 'Text only', icon: AlignLeft },
+                      { type: 'fill-in-the-blank' as const, label: 'Fill Blank', icon: TextCursorInput },
+                      { type: 'cloze' as const, label: 'Cloze', icon: LayoutList },
+                      { type: 'short-answer' as const, label: 'Short Ans', icon: Type },
+                      { type: 'long-answer' as const, label: 'Essay', icon: AlignLeft },
+                      { type: 'matching' as const, label: 'Matching', icon: Layers },
+                      { type: 'ordering' as const, label: 'Ordering', icon: Shuffle },
+                      { type: 'drag-drop' as const, label: 'Drag & Drop', icon: GripVertical },
+                      { type: 'word-bank' as const, label: 'Word Bank', icon: FileText },
+                      { type: 'sentence-building' as const, label: 'Sentence', icon: TextCursorInput },
+                      { type: 'reading-comprehension' as const, label: 'Reading', icon: BookOpen },
+                      { type: 'listening' as const, label: 'Listening', icon: Headphones },
+                      { type: 'audio-fill-blank' as const, label: 'Audio Blank', icon: Volume2 },
+                      { type: 'dictation' as const, label: 'Dictation', icon: PenLine },
+                      { type: 'speaking' as const, label: 'Speaking', icon: Mic },
+                      { type: 'pronunciation' as const, label: 'Pronunciat.', icon: Mic },
                       { type: 'image' as const, label: 'Image', icon: ImageIcon },
                       { type: 'video' as const, label: 'Video', icon: Video },
-                      { type: 'reading' as const, label: 'Reading', icon: BookOpen },
+                      { type: 'open-text' as const, label: 'Open', icon: Type },
+                      { type: 'instruction' as const, label: 'Text only', icon: AlignLeft },
                     ].map((item) => (
                       <button
                         key={item.type}
@@ -1085,8 +1474,8 @@ export default function QuizBuilder() {
                         animate={{ opacity: 1, y: 0 }}
                         className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden"
                       >
-                        <div className="p-4 bg-gradient-to-r from-slate-50 to-indigo-50/30 border-b border-slate-100 flex items-center justify-between gap-3">
-                          <div className="flex items-center gap-3 min-w-0">
+                        <div className="p-4 bg-gradient-to-r from-slate-50 to-indigo-50/30 border-b border-slate-100 flex items-center gap-3">
+                          <div className="flex items-center gap-3 min-w-0 flex-1">
                             <span className="w-9 h-9 rounded-xl bg-gradient-to-br from-violet-600 to-indigo-600 text-white flex items-center justify-center font-bold text-sm shrink-0">
                               {index + 1}
                             </span>
@@ -1094,6 +1483,18 @@ export default function QuizBuilder() {
                               {String(q.type || '').replace(/-/g, ' ')}
                             </span>
                           </div>
+                          {quizSections.length > 0 && (
+                            <select
+                              value={questionSectionMap[index] || ''}
+                              onChange={(e) => setQuestionSectionMap((prev) => ({ ...prev, [index]: e.target.value }))}
+                              className="text-xs text-slate-500 border border-slate-200 rounded-lg px-2 py-1 bg-white focus:outline-none focus:ring-1 focus:ring-violet-400 max-w-[130px] shrink-0"
+                            >
+                              <option value="">No section</option>
+                              {quizSections.map((sec) => (
+                                <option key={sec._tempId} value={sec._tempId}>{sec.title}</option>
+                              ))}
+                            </select>
+                          )}
                           <button
                             type="button"
                             onClick={() => removeQuestion(index)}
@@ -1217,8 +1618,8 @@ export default function QuizBuilder() {
                             <div className="space-y-3">
                               <label className="block text-xs font-semibold text-slate-600">Answer options</label>
                               <div className="space-y-2">
-                                {q.options?.map((opt, optIndex) => (
-                                  <div key={opt.id} className="flex items-center gap-2 group/opt">
+                                {(Array.isArray(q.options) ? q.options : []).map((opt, optIndex) => (
+                                  <div key={opt.id ?? optIndex} className="flex items-center gap-2 group/opt">
                                     <button
                                       type="button"
                                       onClick={() => updateQuestion(index, { correctAnswer: opt.id })}
@@ -1233,19 +1634,20 @@ export default function QuizBuilder() {
                                     </button>
                                     <input
                                       type="text"
-                                      value={opt.text}
+                                      value={opt.text ?? ''}
                                       onChange={(e) => {
-                                        const newOpts = [...q.options!];
+                                        const safeOpts = Array.isArray(q.options) ? q.options : [];
+                                        const newOpts = [...safeOpts];
                                         newOpts[optIndex] = { ...opt, text: e.target.value };
                                         updateQuestion(index, { options: newOpts });
                                       }}
                                       className="flex-1 px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-violet-400"
                                     />
-                                    {q.type === 'multiple-choice' && q.options!.length > 2 && (
+                                    {q.type === 'multiple-choice' && Array.isArray(q.options) && q.options.length > 2 && (
                                       <button
                                         type="button"
                                         onClick={() => {
-                                          const newOpts = q.options!.filter((_, i) => i !== optIndex);
+                                          const newOpts = (Array.isArray(q.options) ? q.options : []).filter((_, i) => i !== optIndex);
                                           updateQuestion(index, { options: newOpts });
                                         }}
                                         className="p-2 text-slate-400 hover:text-red-600 opacity-0 group-hover/opt:opacity-100 transition-all"
@@ -1259,7 +1661,8 @@ export default function QuizBuilder() {
                                   <button
                                     type="button"
                                     onClick={() => {
-                                      const newOpts = [...q.options!, { id: Math.random().toString(36).slice(2, 11), text: `Option ${q.options!.length + 1}` }];
+                                      const safeOpts = Array.isArray(q.options) ? q.options : [];
+                                      const newOpts = [...safeOpts, { id: Math.random().toString(36).slice(2, 11), text: `Option ${safeOpts.length + 1}` }];
                                       updateQuestion(index, { options: newOpts });
                                     }}
                                     className="text-xs font-bold text-violet-600 hover:text-violet-700 flex items-center gap-1.5 pl-9 pt-1"
@@ -1289,6 +1692,334 @@ export default function QuizBuilder() {
                                     : 'e.g. photosynthesis, chlorophyll'
                                 }
                               />
+                            </div>
+                          )}
+
+                          {(q.type === 'short-answer' || q.type === 'long-answer') && (
+                            <div>
+                              <label className="block text-xs font-semibold text-slate-600 mb-1.5">
+                                {q.type === 'short-answer' ? 'Model answer / keywords' : 'Model answer or rubric hints'}
+                              </label>
+                              <textarea
+                                rows={q.type === 'long-answer' ? 4 : 2}
+                                value={typeof q.correctAnswer === 'string' ? q.correctAnswer : ''}
+                                onChange={(e) => updateQuestion(index, { correctAnswer: e.target.value })}
+                                className="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-violet-400 resize-none"
+                                placeholder={q.type === 'short-answer' ? 'Expected answer...' : 'Sample answer or grading rubric hints...'}
+                              />
+                            </div>
+                          )}
+
+                          {q.type === 'multiple-answer' && (
+                            <div className="space-y-3">
+                              <label className="block text-xs font-semibold text-slate-600">Answer options <span className="text-violet-600">(tick all correct)</span></label>
+                              {(() => {
+                                let correctIds: string[] = [];
+                                try { correctIds = JSON.parse(String(q.correctAnswer || '[]')); } catch { correctIds = []; }
+                                return (
+                                  <div className="space-y-2">
+                                    {(Array.isArray(q.options) ? q.options : []).map((opt, optIndex) => {
+                                      const isCorrect = correctIds.includes(opt.id);
+                                      return (
+                                        <div key={opt.id ?? optIndex} className="flex items-center gap-2 group/opt">
+                                          <button
+                                            type="button"
+                                            onClick={() => {
+                                              const next = isCorrect ? correctIds.filter((id) => id !== opt.id) : [...correctIds, opt.id];
+                                              updateQuestion(index, { correctAnswer: JSON.stringify(next.length ? next : [opt.id]) });
+                                            }}
+                                            className={cn(
+                                              'w-7 h-7 rounded-lg border-2 flex items-center justify-center transition-all shrink-0',
+                                              isCorrect ? 'border-emerald-500 bg-emerald-500 text-white' : 'border-slate-200 hover:border-slate-400'
+                                            )}
+                                          >
+                                            {isCorrect && <CheckCircle2 className="w-4 h-4" />}
+                                          </button>
+                                          <input
+                                            type="text"
+                                            value={opt.text ?? ''}
+                                            onChange={(e) => {
+                                              const newOpts = [...(Array.isArray(q.options) ? q.options : [])];
+                                              newOpts[optIndex] = { ...opt, text: e.target.value };
+                                              updateQuestion(index, { options: newOpts });
+                                            }}
+                                            className="flex-1 px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-violet-400"
+                                          />
+                                          {Array.isArray(q.options) && q.options.length > 2 && (
+                                            <button type="button" onClick={() => { const newOpts = (Array.isArray(q.options) ? q.options : []).filter((_, i) => i !== optIndex); updateQuestion(index, { options: newOpts }); }} className="p-2 text-slate-400 hover:text-red-600 opacity-0 group-hover/opt:opacity-100 transition-all"><X className="w-4 h-4" /></button>
+                                          )}
+                                        </div>
+                                      );
+                                    })}
+                                    <button type="button" onClick={() => { const safeOpts = Array.isArray(q.options) ? q.options : []; updateQuestion(index, { options: [...safeOpts, { id: Math.random().toString(36).slice(2, 11), text: `Option ${safeOpts.length + 1}` }] }); }} className="text-xs font-bold text-violet-600 hover:text-violet-700 flex items-center gap-1.5 pl-9 pt-1"><Plus className="w-4 h-4" /> Add option</button>
+                                  </div>
+                                );
+                              })()}
+                            </div>
+                          )}
+
+                          {q.type === 'matching' && (
+                            <div className="space-y-3">
+                              <label className="block text-xs font-semibold text-slate-600">Matching pairs</label>
+                              {(() => {
+                                let pairs: { left: string; right: string }[] = [];
+                                try { pairs = JSON.parse(String(q.correctAnswer || '[]')); } catch { pairs = []; }
+                                if (!pairs.length && Array.isArray(q.options)) {
+                                  pairs = (q.options as any[]).map((o: any) => ({ left: String(o.text || ''), right: '' }));
+                                }
+                                return (
+                                  <div className="space-y-2">
+                                    {pairs.map((pair, pIdx) => (
+                                      <div key={pIdx} className="flex items-center gap-2">
+                                        <input type="text" value={pair.left} onChange={(e) => { const n = [...pairs]; n[pIdx] = { ...n[pIdx], left: e.target.value }; updateQuestion(index, { correctAnswer: JSON.stringify(n), options: n.map((p, i) => ({ id: String(i + 1), text: p.left })) as any }); }} className="flex-1 px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-violet-400" placeholder="Left side" />
+                                        <span className="text-slate-400 font-bold shrink-0">↔</span>
+                                        <input type="text" value={pair.right} onChange={(e) => { const n = [...pairs]; n[pIdx] = { ...n[pIdx], right: e.target.value }; updateQuestion(index, { correctAnswer: JSON.stringify(n), options: n.map((p, i) => ({ id: String(i + 1), text: p.left })) as any }); }} className="flex-1 px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-violet-400" placeholder="Right side" />
+                                        {pairs.length > 2 && <button type="button" onClick={() => { const n = pairs.filter((_, i) => i !== pIdx); updateQuestion(index, { correctAnswer: JSON.stringify(n), options: n.map((p, i) => ({ id: String(i + 1), text: p.left })) as any }); }} className="p-1 text-slate-400 hover:text-red-500 transition-colors"><X className="w-3.5 h-3.5" /></button>}
+                                      </div>
+                                    ))}
+                                    <button type="button" onClick={() => { const n = [...pairs, { left: '', right: '' }]; updateQuestion(index, { correctAnswer: JSON.stringify(n), options: n.map((p, i) => ({ id: String(i + 1), text: p.left })) as any }); }} className="text-xs font-bold text-violet-600 hover:text-violet-700 flex items-center gap-1.5 pt-1"><Plus className="w-4 h-4" /> Add pair</button>
+                                  </div>
+                                );
+                              })()}
+                            </div>
+                          )}
+
+                          {q.type === 'ordering' && (
+                            <div className="space-y-3">
+                              <label className="block text-xs font-semibold text-slate-600">Items in correct order <span className="text-slate-400 text-[10px]">(students will see them shuffled)</span></label>
+                              {(() => {
+                                let correctOrder: string[] = [];
+                                try { correctOrder = JSON.parse(String(q.correctAnswer || '[]')); } catch { correctOrder = []; }
+                                if (!correctOrder.length && Array.isArray(q.options)) correctOrder = (q.options as any[]).map((o: any) => String(o.text || ''));
+                                return (
+                                  <div className="space-y-2">
+                                    {correctOrder.map((item, oIdx) => (
+                                      <div key={oIdx} className="flex items-center gap-2">
+                                        <span className="w-6 h-6 rounded-md bg-violet-100 text-violet-700 text-xs font-bold flex items-center justify-center shrink-0">{oIdx + 1}</span>
+                                        <input type="text" value={item} onChange={(e) => { const n = [...correctOrder]; n[oIdx] = e.target.value; updateQuestion(index, { correctAnswer: JSON.stringify(n), options: n.map((t, i) => ({ id: String(i + 1), text: t })) as any }); }} className="flex-1 px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-violet-400" placeholder={`Item ${oIdx + 1}`} />
+                                        {correctOrder.length > 2 && <button type="button" onClick={() => { const n = correctOrder.filter((_, i) => i !== oIdx); updateQuestion(index, { correctAnswer: JSON.stringify(n), options: n.map((t, i) => ({ id: String(i + 1), text: t })) as any }); }} className="p-1 text-slate-400 hover:text-red-500 transition-colors"><X className="w-3.5 h-3.5" /></button>}
+                                      </div>
+                                    ))}
+                                    <button type="button" onClick={() => { const n = [...correctOrder, '']; updateQuestion(index, { correctAnswer: JSON.stringify(n), options: n.map((t, i) => ({ id: String(i + 1), text: t })) as any }); }} className="text-xs font-bold text-violet-600 hover:text-violet-700 flex items-center gap-1.5 pt-1"><Plus className="w-4 h-4" /> Add item</button>
+                                  </div>
+                                );
+                              })()}
+                            </div>
+                          )}
+
+                          {q.type === 'word-bank' && (
+                            <div className="space-y-3">
+                              <div>
+                                <label className="block text-xs font-semibold text-slate-600 mb-1.5">Correct answer <span className="text-slate-400 text-[10px]">(the blank should be filled with this)</span></label>
+                                <input type="text" value={typeof q.correctAnswer === 'string' ? q.correctAnswer : ''} onChange={(e) => updateQuestion(index, { correctAnswer: e.target.value })} className="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-violet-400" placeholder="Correct word" />
+                              </div>
+                              <div>
+                                <label className="block text-xs font-semibold text-slate-600 mb-1.5">Word bank options <span className="text-slate-400 text-[10px]">(include the correct word)</span></label>
+                                <div className="space-y-2">
+                                  {(Array.isArray(q.options) ? q.options : []).map((opt, optIndex) => (
+                                    <div key={opt.id ?? optIndex} className="flex items-center gap-2">
+                                      <input type="text" value={opt.text ?? ''} onChange={(e) => { const newOpts = [...(Array.isArray(q.options) ? q.options : [])]; newOpts[optIndex] = { ...opt, text: e.target.value }; updateQuestion(index, { options: newOpts }); }} className="flex-1 px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-violet-400" placeholder={`Word ${optIndex + 1}`} />
+                                      {Array.isArray(q.options) && q.options.length > 2 && <button type="button" onClick={() => { const newOpts = (Array.isArray(q.options) ? q.options : []).filter((_, i) => i !== optIndex); updateQuestion(index, { options: newOpts }); }} className="p-1 text-slate-400 hover:text-red-500 transition-colors"><X className="w-3.5 h-3.5" /></button>}
+                                    </div>
+                                  ))}
+                                  <button type="button" onClick={() => { const safeOpts = Array.isArray(q.options) ? q.options : []; updateQuestion(index, { options: [...safeOpts, { id: Math.random().toString(36).slice(2, 11), text: '' }] }); }} className="text-xs font-bold text-violet-600 hover:text-violet-700 flex items-center gap-1.5 pt-1"><Plus className="w-4 h-4" /> Add word</button>
+                                </div>
+                              </div>
+                            </div>
+                          )}
+
+                          {q.type === 'sentence-building' && (
+                            <div className="space-y-3">
+                              <div>
+                                <label className="block text-xs font-semibold text-slate-600 mb-1.5">Correct sentence</label>
+                                <input type="text" value={typeof q.correctAnswer === 'string' ? q.correctAnswer : ''} onChange={(e) => updateQuestion(index, { correctAnswer: e.target.value })} className="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-violet-400" placeholder="The sky is blue" />
+                              </div>
+                              <div>
+                                <label className="block text-xs font-semibold text-slate-600 mb-1.5">Words for student to arrange <span className="text-slate-400 text-[10px]">(will be shuffled)</span></label>
+                                <div className="space-y-2">
+                                  {(Array.isArray(q.options) ? q.options : []).map((opt, optIndex) => (
+                                    <div key={opt.id ?? optIndex} className="flex items-center gap-2">
+                                      <input type="text" value={opt.text ?? ''} onChange={(e) => { const newOpts = [...(Array.isArray(q.options) ? q.options : [])]; newOpts[optIndex] = { ...opt, text: e.target.value }; updateQuestion(index, { options: newOpts }); }} className="flex-1 px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-violet-400" placeholder={`Word ${optIndex + 1}`} />
+                                      {Array.isArray(q.options) && q.options.length > 2 && <button type="button" onClick={() => { const newOpts = (Array.isArray(q.options) ? q.options : []).filter((_, i) => i !== optIndex); updateQuestion(index, { options: newOpts }); }} className="p-1 text-slate-400 hover:text-red-500 transition-colors"><X className="w-3.5 h-3.5" /></button>}
+                                    </div>
+                                  ))}
+                                  <button type="button" onClick={() => { const safeOpts = Array.isArray(q.options) ? q.options : []; updateQuestion(index, { options: [...safeOpts, { id: Math.random().toString(36).slice(2, 11), text: '' }] }); }} className="text-xs font-bold text-violet-600 hover:text-violet-700 flex items-center gap-1.5 pt-1"><Plus className="w-4 h-4" /> Add word</button>
+                                </div>
+                              </div>
+                            </div>
+                          )}
+
+                          {q.type === 'drag-drop' && (
+                            <div className="space-y-3">
+                              <div className="flex items-center gap-2 text-xs text-violet-700 bg-violet-50 border border-violet-200 rounded-lg px-3 py-2">
+                                <GripVertical className="w-4 h-4 shrink-0" />
+                                Students drag items into the correct order. Enter them in the correct sequence below.
+                              </div>
+                              {(() => {
+                                let correctOrder: string[] = [];
+                                try { correctOrder = JSON.parse(String(q.correctAnswer || '[]')); } catch { correctOrder = []; }
+                                if (!correctOrder.length && Array.isArray(q.options)) correctOrder = (q.options as any[]).map((o: any) => String(o.text || ''));
+                                return (
+                                  <div className="space-y-2">
+                                    {correctOrder.map((item, oIdx) => (
+                                      <div key={oIdx} className="flex items-center gap-2">
+                                        <GripVertical className="w-4 h-4 text-slate-300 shrink-0" />
+                                        <span className="w-6 h-6 rounded-md bg-violet-100 text-violet-700 text-xs font-bold flex items-center justify-center shrink-0">{oIdx + 1}</span>
+                                        <input type="text" value={item} onChange={(e) => { const n = [...correctOrder]; n[oIdx] = e.target.value; updateQuestion(index, { correctAnswer: JSON.stringify(n), options: n.map((t, i) => ({ id: String(i + 1), text: t })) as any }); }} className="flex-1 px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-violet-400" placeholder={`Item ${oIdx + 1}`} />
+                                        {correctOrder.length > 2 && <button type="button" onClick={() => { const n = correctOrder.filter((_, i) => i !== oIdx); updateQuestion(index, { correctAnswer: JSON.stringify(n), options: n.map((t, i) => ({ id: String(i + 1), text: t })) as any }); }} className="p-1 text-slate-400 hover:text-red-500 transition-colors"><X className="w-3.5 h-3.5" /></button>}
+                                      </div>
+                                    ))}
+                                    <button type="button" onClick={() => { const n = [...correctOrder, '']; updateQuestion(index, { correctAnswer: JSON.stringify(n), options: n.map((t, i) => ({ id: String(i + 1), text: t })) as any }); }} className="text-xs font-bold text-violet-600 hover:text-violet-700 flex items-center gap-1.5 pt-1"><Plus className="w-4 h-4" /> Add item</button>
+                                  </div>
+                                );
+                              })()}
+                            </div>
+                          )}
+
+                          {q.type === 'cloze' && (
+                            <div className="space-y-3">
+                              <div>
+                                <label className="block text-xs font-semibold text-slate-600 mb-1.5">
+                                  Passage with blanks <span className="text-slate-400 text-[10px]">(use ___ for each blank)</span>
+                                </label>
+                                <textarea
+                                  rows={4}
+                                  value={typeof q.readingPassage === 'string' ? q.readingPassage : ''}
+                                  onChange={(e) => updateQuestion(index, { readingPassage: e.target.value })}
+                                  className="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-violet-400 resize-none"
+                                  placeholder="The ___ is the powerhouse of the cell. It produces ___ through a process called ___."
+                                />
+                              </div>
+                              <div>
+                                <label className="block text-xs font-semibold text-slate-600 mb-1.5">Answers for each blank <span className="text-slate-400 text-[10px]">(in order)</span></label>
+                                {(() => {
+                                  let blanks: string[] = [];
+                                  try { blanks = JSON.parse(String(q.correctAnswer || '[]')); } catch { blanks = []; }
+                                  return (
+                                    <div className="space-y-2">
+                                      {blanks.map((blank, bIdx) => (
+                                        <div key={bIdx} className="flex items-center gap-2">
+                                          <span className="w-6 h-6 rounded-md bg-emerald-100 text-emerald-700 text-xs font-bold flex items-center justify-center shrink-0">{bIdx + 1}</span>
+                                          <input type="text" value={blank} onChange={(e) => { const n = [...blanks]; n[bIdx] = e.target.value; updateQuestion(index, { correctAnswer: JSON.stringify(n) }); }} className="flex-1 px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-violet-400" placeholder={`Answer ${bIdx + 1}`} />
+                                          {blanks.length > 1 && <button type="button" onClick={() => { const n = blanks.filter((_, i) => i !== bIdx); updateQuestion(index, { correctAnswer: JSON.stringify(n) }); }} className="p-1 text-slate-400 hover:text-red-500 transition-colors"><X className="w-3.5 h-3.5" /></button>}
+                                        </div>
+                                      ))}
+                                      <button type="button" onClick={() => { const n = [...blanks, '']; updateQuestion(index, { correctAnswer: JSON.stringify(n) }); }} className="text-xs font-bold text-violet-600 hover:text-violet-700 flex items-center gap-1.5 pt-1"><Plus className="w-4 h-4" /> Add blank answer</button>
+                                    </div>
+                                  );
+                                })()}
+                              </div>
+                            </div>
+                          )}
+
+                          {(q.type === 'listening' || q.type === 'reading-comprehension') && (
+                            <div className="space-y-3">
+                              <div>
+                                <label className="block text-xs font-semibold text-slate-600 mb-1.5">
+                                  {q.type === 'listening' ? '🎧 Audio transcript / script' : '📖 Reading passage'}
+                                </label>
+                                <textarea
+                                  rows={4}
+                                  value={typeof q.readingPassage === 'string' ? q.readingPassage : ''}
+                                  onChange={(e) => updateQuestion(index, { readingPassage: e.target.value })}
+                                  className="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-violet-400 resize-none"
+                                  placeholder={q.type === 'listening' ? 'Paste the audio transcript here so the question makes sense...' : 'Paste the reading text here...'}
+                                />
+                              </div>
+                              {q.type === 'listening' && (
+                                <div>
+                                  <label className="block text-xs font-semibold text-slate-600 mb-1.5">Audio URL <span className="text-slate-400 text-[10px]">(optional — paste a direct audio link)</span></label>
+                                  <input type="url" value={typeof q.mediaUrl === 'string' ? q.mediaUrl : ''} onChange={(e) => updateQuestion(index, { mediaUrl: e.target.value })} className="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-violet-400" placeholder="https://..." />
+                                </div>
+                              )}
+                              <div>
+                                <label className="block text-xs font-semibold text-slate-600 mb-1.5">Answer options</label>
+                                <div className="space-y-2">
+                                  {(Array.isArray(q.options) ? q.options : []).map((opt, optIndex) => {
+                                    const isCorrect = q.correctAnswer === opt.id;
+                                    return (
+                                      <div key={opt.id ?? optIndex} className="flex items-center gap-2 group/opt">
+                                        <button type="button" onClick={() => updateQuestion(index, { correctAnswer: opt.id })} className={cn('w-7 h-7 rounded-lg border-2 flex items-center justify-center transition-all shrink-0', isCorrect ? 'border-emerald-500 bg-emerald-500 text-white' : 'border-slate-200 hover:border-slate-400')}>{isCorrect && <CheckCircle2 className="w-4 h-4" />}</button>
+                                        <input type="text" value={opt.text ?? ''} onChange={(e) => { const newOpts = [...(Array.isArray(q.options) ? q.options : [])]; newOpts[optIndex] = { ...opt, text: e.target.value }; updateQuestion(index, { options: newOpts }); }} className="flex-1 px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-violet-400" />
+                                        {Array.isArray(q.options) && q.options.length > 2 && <button type="button" onClick={() => { const newOpts = (Array.isArray(q.options) ? q.options : []).filter((_, i) => i !== optIndex); updateQuestion(index, { options: newOpts }); }} className="p-2 text-slate-400 hover:text-red-600 opacity-0 group-hover/opt:opacity-100 transition-all"><X className="w-4 h-4" /></button>}
+                                      </div>
+                                    );
+                                  })}
+                                  <button type="button" onClick={() => { const safeOpts = Array.isArray(q.options) ? q.options : []; updateQuestion(index, { options: [...safeOpts, { id: Math.random().toString(36).slice(2, 11), text: `Option ${safeOpts.length + 1}` }] }); }} className="text-xs font-bold text-violet-600 hover:text-violet-700 flex items-center gap-1.5 pl-9 pt-1"><Plus className="w-4 h-4" /> Add option</button>
+                                </div>
+                              </div>
+                            </div>
+                          )}
+
+                          {q.type === 'audio-fill-blank' && (
+                            <div className="space-y-3">
+                              <div className="flex items-center gap-2 text-xs text-blue-700 bg-blue-50 border border-blue-200 rounded-lg px-3 py-2">
+                                <Volume2 className="w-4 h-4 shrink-0" />
+                                Student listens to audio and fills in the missing word or phrase.
+                              </div>
+                              <div>
+                                <label className="block text-xs font-semibold text-slate-600 mb-1.5">Audio URL <span className="text-slate-400 text-[10px]">(paste a direct link to the audio)</span></label>
+                                <input type="url" value={typeof q.mediaUrl === 'string' ? q.mediaUrl : ''} onChange={(e) => updateQuestion(index, { mediaUrl: e.target.value })} className="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-violet-400" placeholder="https://..." />
+                              </div>
+                              <div>
+                                <label className="block text-xs font-semibold text-slate-600 mb-1.5">Audio transcript <span className="text-slate-400 text-[10px]">(shown after submission)</span></label>
+                                <input type="text" value={typeof q.readingPassage === 'string' ? q.readingPassage : ''} onChange={(e) => updateQuestion(index, { readingPassage: e.target.value })} className="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-violet-400" placeholder="The capital of France is Paris." />
+                              </div>
+                              <div>
+                                <label className="block text-xs font-semibold text-slate-600 mb-1.5">Correct answer</label>
+                                <input type="text" value={typeof q.correctAnswer === 'string' ? q.correctAnswer : ''} onChange={(e) => updateQuestion(index, { correctAnswer: e.target.value })} className="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-violet-400" placeholder="Paris" />
+                              </div>
+                            </div>
+                          )}
+
+                          {q.type === 'dictation' && (
+                            <div className="space-y-3">
+                              <div className="flex items-center gap-2 text-xs text-indigo-700 bg-indigo-50 border border-indigo-200 rounded-lg px-3 py-2">
+                                <PenLine className="w-4 h-4 shrink-0" />
+                                Student listens to the audio and types exactly what they hear.
+                              </div>
+                              <div>
+                                <label className="block text-xs font-semibold text-slate-600 mb-1.5">Audio URL <span className="text-slate-400 text-[10px]">(the sentence to be dictated)</span></label>
+                                <input type="url" value={typeof q.mediaUrl === 'string' ? q.mediaUrl : ''} onChange={(e) => updateQuestion(index, { mediaUrl: e.target.value })} className="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-violet-400" placeholder="https://..." />
+                              </div>
+                              <div>
+                                <label className="block text-xs font-semibold text-slate-600 mb-1.5">Correct transcription <span className="text-slate-400 text-[10px]">(what the student should write)</span></label>
+                                <textarea rows={2} value={typeof q.correctAnswer === 'string' ? q.correctAnswer : ''} onChange={(e) => updateQuestion(index, { correctAnswer: e.target.value })} className="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-violet-400 resize-none" placeholder="The quick brown fox jumps over the lazy dog." />
+                              </div>
+                            </div>
+                          )}
+
+                          {q.type === 'speaking' && (
+                            <div className="space-y-3">
+                              <div className="flex items-center gap-2 text-xs text-rose-700 bg-rose-50 border border-rose-200 rounded-lg px-3 py-2">
+                                <Mic className="w-4 h-4 shrink-0" />
+                                Student records an audio response. Add rubric hints in the explanation field below.
+                              </div>
+                              <div>
+                                <label className="block text-xs font-semibold text-slate-600 mb-1.5">Speaking prompt <span className="text-slate-400 text-[10px]">(what the student should talk about)</span></label>
+                                <textarea rows={3} value={typeof q.text === 'string' ? q.text : ''} onChange={(e) => updateQuestion(index, { text: e.target.value })} className="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-violet-400 resize-none" placeholder="Describe your favourite holiday in 3-4 sentences. Mention the place, what you did, and how you felt." />
+                              </div>
+                              <div>
+                                <label className="block text-xs font-semibold text-slate-600 mb-1.5">Sample answer / rubric hints</label>
+                                <textarea rows={2} value={typeof q.explanation === 'string' ? q.explanation : ''} onChange={(e) => updateQuestion(index, { explanation: e.target.value })} className="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-violet-400 resize-none" placeholder="e.g. Student should use past tense, mention a location, and express feelings..." />
+                              </div>
+                            </div>
+                          )}
+
+                          {q.type === 'pronunciation' && (
+                            <div className="space-y-3">
+                              <div className="flex items-center gap-2 text-xs text-purple-700 bg-purple-50 border border-purple-200 rounded-lg px-3 py-2">
+                                <Mic className="w-4 h-4 shrink-0" />
+                                Student records themselves pronouncing the target word or phrase.
+                              </div>
+                              <div>
+                                <label className="block text-xs font-semibold text-slate-600 mb-1.5">Word or phrase to pronounce</label>
+                                <input type="text" value={typeof q.correctAnswer === 'string' ? q.correctAnswer : ''} onChange={(e) => updateQuestion(index, { correctAnswer: e.target.value })} className="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-violet-400" placeholder="necessary" />
+                              </div>
+                              <div>
+                                <label className="block text-xs font-semibold text-slate-600 mb-1.5">Pronunciation guide <span className="text-slate-400 text-[10px]">(shown to student)</span></label>
+                                <input type="text" value={typeof q.explanation === 'string' ? q.explanation : ''} onChange={(e) => updateQuestion(index, { explanation: e.target.value })} className="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-violet-400" placeholder="NE-ces-sa-ry — stress on first syllable" />
+                              </div>
                             </div>
                           )}
 
@@ -1336,11 +2067,25 @@ export default function QuizBuilder() {
                     );
                   })
                 ) : (
-                  <div className="py-24 text-center bg-white rounded-2xl border border-dashed border-indigo-200 shadow-sm">
-                    <FileText className="w-14 h-14 text-indigo-200 mx-auto mb-4" />
-                    <h3 className="text-lg font-bold text-slate-800 mb-1">No questions yet</h3>
-                    <p className="text-slate-500 text-sm max-w-sm mx-auto mb-6">
-                      Use <span className="font-semibold text-slate-700">Add questions</span> on the left: MCQ, true/false, open-ended, fill-in-the-blank, <span className="font-semibold text-slate-700">Text only</span> (passages / directions), reading, image, or video. Image and video questions support links and uploads to Storage.
+                  <div className="py-16 text-center bg-white rounded-2xl border border-dashed border-indigo-200 shadow-sm">
+                    <div className="w-16 h-16 mx-auto mb-5 rounded-2xl flex items-center justify-center" style={{ background: 'linear-gradient(135deg,#7c3aed,#4f46e5)' }}>
+                      <Sparkles className="w-8 h-8 text-white" />
+                    </div>
+                    <h3 className="text-xl font-extrabold text-slate-800 mb-2">No questions yet</h3>
+                    <p className="text-slate-500 text-sm max-w-sm mx-auto mb-8">
+                      Let AI build your quiz instantly — just paste your lesson text or topic. Or add questions manually from the sidebar.
+                    </p>
+                    <button
+                      type="button"
+                      onClick={() => setAiOpen(true)}
+                      className="inline-flex items-center gap-2.5 px-6 py-3 rounded-2xl text-sm font-bold text-white shadow-xl shadow-violet-300/40 transition-all hover:scale-105 active:scale-[0.98] mb-4"
+                      style={{ background: 'linear-gradient(135deg,#7c3aed 0%,#4f46e5 100%)' }}
+                    >
+                      <Sparkles className="w-5 h-5" />
+                      Generate Questions with AI
+                    </button>
+                    <p className="text-xs text-slate-400">
+                      Supports 20 question types — MCQ, matching, cloze, listening, speaking, and more
                     </p>
                   </div>
                 )}
@@ -1350,6 +2095,71 @@ export default function QuizBuilder() {
         </div>
       </div>
     </TeacherLayout>
+
+      {/* ── Regenerate AI Confirmation Modal ── */}
+      <AnimatePresence>
+        {showRegenConfirm && (
+          <motion.div
+            className="fixed inset-0 z-50 flex items-center justify-center p-4"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+          >
+            <motion.div
+              className="absolute inset-0 bg-black/50 backdrop-blur-sm"
+              onClick={() => setShowRegenConfirm(false)}
+            />
+            <motion.div
+              className="relative bg-white rounded-3xl shadow-2xl max-w-md w-full p-8 space-y-5"
+              initial={{ scale: 0.92, opacity: 0, y: 20 }}
+              animate={{ scale: 1, opacity: 1, y: 0 }}
+              exit={{ scale: 0.92, opacity: 0, y: 20 }}
+              transition={{ type: 'spring', stiffness: 300, damping: 25 }}
+            >
+              <div className="flex items-start gap-4">
+                <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-emerald-400 to-teal-500 flex items-center justify-center shrink-0 shadow-lg shadow-emerald-200">
+                  <RefreshCw className="w-6 h-6 text-white" />
+                </div>
+                <div>
+                  <h2 className="text-xl font-extrabold text-slate-900 leading-tight">Regenerate AI Questions?</h2>
+                  <p className="text-sm text-slate-500 mt-1 leading-relaxed">
+                    This will <span className="font-semibold text-slate-700">replace all current questions</span> with freshly generated AI ones. This action cannot be undone.
+                  </p>
+                </div>
+              </div>
+
+              <div className="rounded-2xl bg-amber-50 border border-amber-200 px-4 py-3 flex items-start gap-3">
+                <Sparkles className="w-4 h-4 text-amber-500 mt-0.5 shrink-0" />
+                <p className="text-xs text-amber-700 leading-relaxed">
+                  New questions are shuffled from the original topic bank so each regeneration gives different variations.
+                </p>
+              </div>
+
+              <div className="flex gap-3 pt-1">
+                <button
+                  type="button"
+                  onClick={() => setShowRegenConfirm(false)}
+                  className="flex-1 py-3 rounded-2xl border border-slate-200 text-sm font-semibold text-slate-600 hover:bg-slate-50 transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void handleRegenerate()}
+                  className="flex-1 py-3 rounded-2xl text-sm font-bold text-white transition-all"
+                  style={{
+                    background: 'linear-gradient(135deg, #10b981 0%, #059669 100%)',
+                    boxShadow: '0 4px 16px rgba(16,185,129,0.35)',
+                  }}
+                >
+                  Yes, Regenerate
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </>
   );
 }
 

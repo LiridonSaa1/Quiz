@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { supabase } from '../../supabase';
 import StudentLayout from '../../components/layout/StudentLayout';
 import { motion } from 'motion/react';
@@ -28,6 +29,7 @@ function AnimatedCounter({ value, suffix = '' }: { value: number; suffix?: strin
 const CHART_COLORS = ['#6366f1', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#06b6d4'];
 
 export default function StudentProgress() {
+  const { t } = useTranslation();
   const [attempts, setAttempts] = useState<any[]>([]);
   const [courses, setCourses] = useState<any[]>([]);
   const [quizMap, setQuizMap] = useState<Record<string, { title: string; courseId: string }>>({});
@@ -153,10 +155,10 @@ export default function StudentProgress() {
   });
 
   const statCards = [
-    { label: 'Quizzes Taken', value: completed.length, suffix: '', icon: Zap, color: 'from-blue-500 to-indigo-500' },
-    { label: 'Average Score', value: avgScore, suffix: '%', icon: Target, color: 'from-violet-500 to-purple-500' },
-    { label: 'Pass Rate', value: passRate, suffix: '%', icon: CheckCircle2, color: 'from-emerald-500 to-teal-500' },
-    { label: 'Best Score', value: best, suffix: '%', icon: Trophy, color: 'from-amber-500 to-orange-500' },
+    { label: t('student.progress.quizzesTaken'), value: completed.length, suffix: '', icon: Zap, color: 'from-blue-500 to-indigo-500' },
+    { label: t('student.progress.averageScore'), value: avgScore, suffix: '%', icon: Target, color: 'from-violet-500 to-purple-500' },
+    { label: t('student.progress.passRate'), value: passRate, suffix: '%', icon: CheckCircle2, color: 'from-emerald-500 to-teal-500' },
+    { label: t('student.progress.bestScore'), value: best, suffix: '%', icon: Trophy, color: 'from-amber-500 to-orange-500' },
   ];
 
   return (
@@ -170,10 +172,10 @@ export default function StudentProgress() {
           <div className="relative z-10">
             <div className="inline-flex items-center gap-2 bg-white/10 border border-white/20 rounded-full px-3 py-1.5 mb-3">
               <TrendingUp className="w-3.5 h-3.5 text-blue-300" />
-              <span className="text-white/80 text-xs font-semibold">My Progress</span>
+              <span className="text-white/80 text-xs font-semibold">{t('student.progress.myProgress')}</span>
             </div>
-            <h1 className="text-3xl font-black text-white">Learning Progress</h1>
-            <p className="text-slate-400 text-sm mt-1">Track your performance across all courses.</p>
+            <h1 className="text-3xl font-black text-white">{t('student.progress.learningProgress')}</h1>
+            <p className="text-slate-400 text-sm mt-1">{t('student.progress.trackPerformance')}</p>
           </div>
         </motion.div>
 
@@ -208,7 +210,7 @@ export default function StudentProgress() {
                 className="bg-white rounded-3xl border border-slate-100 shadow-sm p-6">
                 <div className="flex items-center gap-2 mb-6">
                   <div className="w-8 h-8 bg-blue-50 rounded-xl flex items-center justify-center"><TrendingUp className="w-4 h-4 text-blue-600" /></div>
-                  <h2 className="font-bold text-slate-900">Score Trend (Last 14 Days)</h2>
+                  <h2 className="font-bold text-slate-900">{t('student.progress.lastFourteenDays')}</h2>
                 </div>
                 <ResponsiveContainer width="100%" height={200}>
                   <AreaChart data={trendData}>
@@ -234,7 +236,7 @@ export default function StudentProgress() {
                 className="bg-white rounded-3xl border border-slate-100 shadow-sm p-6">
                 <div className="flex items-center gap-2 mb-6">
                   <div className="w-8 h-8 bg-emerald-50 rounded-xl flex items-center justify-center"><BarChart2 className="w-4 h-4 text-emerald-600" /></div>
-                  <h2 className="font-bold text-slate-900">Average Score per Course</h2>
+                  <h2 className="font-bold text-slate-900">{t('student.progress.averageScorePerCourse')}</h2>
                 </div>
                 <ResponsiveContainer width="100%" height={180}>
                   <BarChart data={courseStats} barCategoryGap="30%">
@@ -258,8 +260,8 @@ export default function StudentProgress() {
                   className="w-16 h-16 bg-blue-50 rounded-3xl flex items-center justify-center mb-4 shadow-lg">
                   <TrendingUp className="w-8 h-8 text-blue-400" />
                 </motion.div>
-                <p className="text-slate-600 font-bold">No data yet</p>
-                <p className="text-slate-400 text-sm mt-1">Complete some quizzes to see your progress.</p>
+                <p className="text-slate-600 font-bold">{t('student.progress.noDataYet')}</p>
+                <p className="text-slate-400 text-sm mt-1">{t('student.progress.completeQuizzesToSee')}</p>
               </motion.div>
             )}
           </>

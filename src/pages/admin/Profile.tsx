@@ -5,6 +5,7 @@ import { toast } from 'sonner';
 import LoadingButton from '../../components/ui/LoadingButton';
 import { supabase } from '../../supabase';
 import { authFetch } from '../../lib/apiUrl';
+import { useTranslation } from 'react-i18next';
 import {
   User, Mail, Phone, MapPin, Calendar, Camera,
   Save, Briefcase, Globe, Twitter, Linkedin, Github,
@@ -22,6 +23,7 @@ const AVATAR_GRADIENTS = [
 ];
 
 export default function AdminProfile() {
+  const { t } = useTranslation();
   const [saving, setSaving] = useState(false);
   const [loading, setLoading] = useState(true);
   const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
@@ -104,7 +106,7 @@ export default function AdminProfile() {
           });
         }
       } catch (e: any) {
-        toast.error(e?.message || 'Failed to load profile');
+        toast.error(e?.message || t('profile.toasts.saveFailed'));
       } finally {
         setLoading(false);
       }
@@ -130,13 +132,13 @@ export default function AdminProfile() {
     reader.onload = () => {
       const dataUrl = typeof reader.result === 'string' ? reader.result : null;
       if (!dataUrl) {
-        toast.error('Failed to read avatar image.');
+        toast.error(t('profile.toasts.avatarFailed'));
         return;
       }
       setAvatarUrl(dataUrl);
-      toast.success('Avatar updated.');
+      toast.success(t('profile.toasts.avatarUpdated'));
     };
-    reader.onerror = () => toast.error('Failed to read avatar image.');
+    reader.onerror = () => toast.error(t('profile.toasts.avatarFailed'));
     reader.readAsDataURL(file);
   };
 
@@ -146,7 +148,7 @@ export default function AdminProfile() {
       const { data: authData, error: authErr } = await supabase.auth.getSession();
       if (authErr) throw authErr;
       const userId = authData.session?.user?.id;
-      if (!userId) throw new Error('You are not authenticated.');
+      if (!userId) throw new Error(t('profile.toasts.notAuthenticated'));
 
       const res = await authFetch('/api/admin/profile', {
         method: 'PUT',
@@ -167,10 +169,10 @@ export default function AdminProfile() {
         }),
       });
       const json = await res.json();
-      if (!res.ok || !json?.success) throw new Error(json?.error || 'Failed to save profile');
-      toast.success('Profile saved successfully.');
+      if (!res.ok || !json?.success) throw new Error(json?.error || t('profile.toasts.saveFailed'));
+      toast.success(t('profile.toasts.saveSuccess'));
     } catch (e: any) {
-      toast.error(e?.message || 'Failed to save profile');
+      toast.error(e?.message || t('profile.toasts.saveFailed'));
     } finally {
       setSaving(false);
     }
@@ -185,8 +187,8 @@ export default function AdminProfile() {
         {/* Header */}
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
           <div>
-            <h1 className="text-2xl font-bold text-slate-900">Profile</h1>
-            <p className="text-sm text-slate-500 mt-0.5">Manage your personal information and preferences</p>
+            <h1 className="text-2xl font-bold text-slate-900">{t('profile.adminProfile')}</h1>
+            <p className="text-sm text-slate-500 mt-0.5">{t('profile.adminProfileDesc')}</p>
           </div>
           <LoadingButton
             onClick={handleSave}
@@ -194,7 +196,7 @@ export default function AdminProfile() {
             icon={<Save className="w-4 h-4" />}
             className="bg-indigo-600 hover:bg-indigo-700 px-4 py-2.5"
           >
-            Save Profile
+            {t('common.saveChanges')}
           </LoadingButton>
         </div>
 
@@ -227,13 +229,13 @@ export default function AdminProfile() {
               <p className="text-sm text-slate-500 mt-0.5">{form.title}</p>
               <span className="mt-2 inline-flex items-center gap-1.5 px-2.5 py-1 bg-violet-100 text-violet-700 rounded-full text-xs font-semibold">
                 <CheckCircle2 className="w-3 h-3" />
-                Administrator
+                {t('profile.administrator')}
               </span>
 
               {/* Avatar gradient picker */}
               {!avatarUrl && (
                 <div className="mt-4 w-full">
-                  <p className="text-xs font-semibold text-slate-400 uppercase tracking-wide mb-2">Avatar Color</p>
+                  <p className="text-xs font-semibold text-slate-400 uppercase tracking-wide mb-2">{t('profile.avatarColor')}</p>
                   <div className="flex justify-center gap-2 flex-wrap">
                     {AVATAR_GRADIENTS.map((g, i) => (
                       <button
@@ -252,21 +254,21 @@ export default function AdminProfile() {
 
               {avatarUrl && (
                 <button onClick={() => setAvatarUrl(null)} className="mt-3 text-xs text-rose-500 hover:underline font-medium">
-                  Remove photo
+                  {t('profile.removePhoto')}
                 </button>
               )}
 
               {/* Quick info */}
               <div className="mt-5 w-full space-y-2.5 text-left border-t border-slate-100 pt-4">
                 {[
-                  { icon: Mail, value: form.email || 'No email' },
-                  { icon: Phone, value: form.phone || 'No phone' },
-                  { icon: MapPin, value: form.location || 'No location' },
+                  { icon: Mail, value: form.email || t('profile.noEmail') },
+                  { icon: Phone, value: form.phone || t('profile.noPhone') },
+                  { icon: MapPin, value: form.location || t('profile.noLocation') },
                   {
                     icon: Calendar,
                     value: accountInfo.createdAt
-                      ? `Joined ${format(new Date(accountInfo.createdAt), 'MMM yyyy')}`
-                      : 'Joined —',
+                      ? `${t('profile.joined')} ${format(new Date(accountInfo.createdAt), 'MMM yyyy')}`
+                      : `${t('profile.joined')} —`,
                   },
                 ].map(({ icon: Icon, value }) => (
                   <div key={value} className="flex items-center gap-2.5 text-xs text-slate-500">
@@ -279,12 +281,12 @@ export default function AdminProfile() {
 
             {/* Social links */}
             <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-5">
-              <h3 className="text-sm font-bold text-slate-900 mb-4">Social Links</h3>
+              <h3 className="text-sm font-bold text-slate-900 mb-4">{t('profile.socialLinks')}</h3>
               <div className="space-y-3">
-                <SocialField icon={Twitter} label="Twitter" value={form.twitter} onChange={set('twitter')} placeholder="@username" color="text-sky-500" />
-                <SocialField icon={Linkedin} label="LinkedIn" value={form.linkedin} onChange={set('linkedin')} placeholder="linkedin.com/in/you" color="text-blue-600" />
-                <SocialField icon={Github} label="GitHub" value={form.github} onChange={set('github')} placeholder="github.com/you" color="text-slate-700" />
-                <SocialField icon={Globe} label="Website" value={form.website} onChange={set('website')} placeholder="yoursite.com" color="text-indigo-500" />
+                <SocialField icon={Twitter} label={t('profile.twitter')} value={form.twitter} onChange={set('twitter')} placeholder="@username" color="text-sky-500" />
+                <SocialField icon={Linkedin} label={t('profile.linkedIn')} value={form.linkedin} onChange={set('linkedin')} placeholder="linkedin.com/in/you" color="text-blue-600" />
+                <SocialField icon={Github} label={t('profile.gitHub')} value={form.github} onChange={set('github')} placeholder="github.com/you" color="text-slate-700" />
+                <SocialField icon={Globe} label={t('profile.website')} value={form.website} onChange={set('website')} placeholder="yoursite.com" color="text-indigo-500" />
               </div>
             </div>
           </div>
@@ -292,54 +294,54 @@ export default function AdminProfile() {
           {/* Right — Edit form */}
           <div className="lg:col-span-2 space-y-5">
             {/* Personal info */}
-            <FormCard title="Personal Information" icon={User}>
+            <FormCard title={t('profile.personalInfo')} icon={User}>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <Field label="Full Name">
+                <Field label={t('profile.fullName')}>
                   <input value={form.display_name} onChange={set('display_name')} className={inputCls} />
                 </Field>
-                <Field label="Email Address">
+                <Field label={t('profile.emailAddress')}>
                   <input type="email" value={form.email} onChange={set('email')} className={inputCls} />
                 </Field>
-                <Field label="Phone Number">
+                <Field label={t('profile.phoneNumber')}>
                   <input type="tel" value={form.phone} onChange={set('phone')} className={inputCls} />
                 </Field>
-                <Field label="Location">
-                  <input value={form.location} onChange={set('location')} className={inputCls} placeholder="City, Country" />
+                <Field label={t('profile.location')}>
+                  <input value={form.location} onChange={set('location')} className={inputCls} placeholder={t('profile.cityCountry')} />
                 </Field>
               </div>
             </FormCard>
 
             {/* Professional info */}
-            <FormCard title="Professional Information" icon={Briefcase}>
+            <FormCard title={t('profile.professionalInfo')} icon={Briefcase}>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <Field label="Job Title">
+                <Field label={t('profile.jobTitle')}>
                   <input value={form.title} onChange={set('title')} className={inputCls} />
                 </Field>
-                <Field label="Department">
+                <Field label={t('profile.department')}>
                   <input value={form.department} onChange={set('department')} className={inputCls} />
                 </Field>
               </div>
               <div className="mt-4">
-                <Field label="Bio">
+                <Field label={t('profile.bioLabel')}>
                   <textarea
                     value={form.bio}
                     onChange={set('bio')}
                     rows={3}
                     className={inputCls + ' resize-none'}
-                    placeholder="Write a short bio about yourself…"
+                    placeholder={t('profile.bioPlaceholder')}
                   />
                 </Field>
               </div>
             </FormCard>
 
             {/* Activity summary */}
-            <FormCard title="Activity Summary" icon={CheckCircle2}>
+            <FormCard title={t('profile.activitySummary')} icon={CheckCircle2}>
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
                 {[
-                  { label: 'Courses Managed', value: String(activitySummary.coursesManaged) },
-                  { label: 'Students',         value: String(activitySummary.students) },
-                  { label: 'Teachers',         value: String(activitySummary.teachers) },
-                  { label: 'Certificates',     value: String(activitySummary.certificates) },
+                  { label: t('profile.coursesManagedLabel'), value: String(activitySummary.coursesManaged) },
+                  { label: t('profile.studentsLabel'),         value: String(activitySummary.students) },
+                  { label: t('profile.teachersLabel'),         value: String(activitySummary.teachers) },
+                  { label: t('profile.certificatesLabel'),     value: String(activitySummary.certificates) },
                 ].map(({ label, value }) => (
                   <div key={label} className="bg-slate-50 rounded-xl p-4 text-center">
                     <p className="text-2xl font-bold text-indigo-600">{value}</p>
@@ -351,21 +353,21 @@ export default function AdminProfile() {
               <div className="mt-4 border-t border-slate-100 pt-4 space-y-2">
                 {[
                   [
-                    'Account Created',
+                    t('profile.accountCreated'),
                     accountInfo.createdAt
                       ? format(new Date(accountInfo.createdAt), 'MMMM d, yyyy')
                       : '—',
                   ],
                   [
-                    'Last Login',
+                    t('profile.lastLogin'),
                     accountInfo.lastLoginAt
                       ? format(new Date(accountInfo.lastLoginAt), 'MMMM d, yyyy · h:mm a')
                       : '—',
                   ],
-                  ['Role', accountInfo.role ? accountInfo.role : '—'],
-                  ['Account Status', accountInfo.status || 'active'],
+                  [t('profile.role'), accountInfo.role ? accountInfo.role : '—'],
+                  [t('profile.accountStatus'), accountInfo.status || 'active'],
                 ].map(([k, v]) => (
-                  <div key={k} className="flex justify-between items-center text-sm">
+                  <div key={String(k)} className="flex justify-between items-center text-sm">
                     <span className="text-slate-400">{k}</span>
                     <span className={cn('font-semibold', String(v).toLowerCase() === 'active' ? 'text-emerald-600' : 'text-slate-700')}>{v}</span>
                   </div>

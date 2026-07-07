@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { useTranslation } from 'react-i18next';
 import { X, ChevronLeft, ChevronRight, CheckCircle2, Navigation } from 'lucide-react';
 import { Tour, TourStep } from '../lib/tourDefinitions';
 import { useNavigate } from 'react-router-dom';
@@ -20,6 +21,7 @@ const COLOR_MAP: Record<string, { ring: string; badge: string; btn: string; dot:
 };
 
 export default function GuidedTour({ tour, onClose }: GuidedTourProps) {
+  const { t } = useTranslation();
   const [step, setStep] = useState(0);
   const [animating, setAnimating] = useState(false);
   const navigate = useNavigate();
@@ -73,7 +75,7 @@ export default function GuidedTour({ tour, onClose }: GuidedTourProps) {
             <div>
               <div className="flex items-center gap-2 mb-1">
                 <span className={`text-xs font-semibold px-2.5 py-0.5 rounded-full ${colors.badge}`}>
-                  Step {step + 1} of {tour.steps.length}
+                  {t('guidedTour.stepOf', { step: step + 1, total: tour.steps.length })}
                 </span>
               </div>
               <h2 className="text-lg font-bold text-slate-900">{tour.title}</h2>
@@ -140,7 +142,7 @@ export default function GuidedTour({ tour, onClose }: GuidedTourProps) {
               )}
             >
               <Navigation className="w-4 h-4" />
-              {current.actionLabel || 'Go There Now'}
+              {current.actionLabel || t('guidedTour.goThere')}
             </button>
           )}
         </div>
@@ -151,7 +153,7 @@ export default function GuidedTour({ tour, onClose }: GuidedTourProps) {
             onClick={onClose}
             className="text-xs text-slate-400 hover:text-slate-600 transition-colors"
           >
-            Skip tour
+            {t('guidedTour.skipTour')}
           </button>
           <div className="flex gap-2">
             <button
@@ -170,7 +172,7 @@ export default function GuidedTour({ tour, onClose }: GuidedTourProps) {
                 )}
               >
                 <CheckCircle2 className="w-4 h-4" />
-                Done!
+                {t('guidedTour.done')}
               </button>
             ) : (
               <button
@@ -180,7 +182,7 @@ export default function GuidedTour({ tour, onClose }: GuidedTourProps) {
                   colors.btn
                 )}
               >
-                Next
+                {t('guidedTour.next')}
                 <ChevronRight className="w-4 h-4" />
               </button>
             )}

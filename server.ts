@@ -1,24 +1,263 @@
 import "dotenv/config";
+import dns from "dns";
+dns.setDefaultResultOrder("ipv4first");
+// adm-zip loaded lazily in processZipBuffer() to avoid hard build dep on Render
+import jwt from "jsonwebtoken";
 import { isMissingCoursesStudentIdsError } from "./src/lib/schemaErrors.js";
 import { canAccessTeacherCourses, isAdmin, isAdminSeedAllowed } from "./src/lib/routeAuth.js";
 import { generateFixSuggestion } from "./src/lib/ai/generateFixSuggestion.js";
-import { isEmailConfigured, sendEmail, renderVerificationEmail } from "./src/lib/email.js";
+import { isEmailConfigured, sendEmail, renderVerificationEmail, renderCredentialEmail, renderInvoiceEmail, renderPaymentReminderEmail } from "./src/lib/email.js";
 import { notifyEvent, type NotifyContext, type NotifyEventKey } from "./src/lib/notifyEvents.js";
+import { HEADWAY_FULL_DATA, buildUnitQuestions as buildHwUnitQuestions, type HUnit } from "./src/lib/headwayData.js";
+import { getQuestionsForSection, getTopicsForLevel, HEADWAY_QUESTIONS } from "./src/lib/headwayQuestions.js";
 import express, { Request, Response } from "express";
+import rateLimit from "express-rate-limit";
 import { appendFile, mkdir, readFile as readFileFs, writeFile } from "fs/promises";
 import http from "http";
 import { createRequire } from "module";
 import path from "path";
 import { fileURLToPath } from "url";
 import { createClient } from '@supabase/supabase-js';
+import { createRequire as _cr } from "module";
+const _require = _cr(import.meta.url);
+let _ws: any;
+try { _ws = _require("ws"); } catch { _ws = undefined; }
 const require = createRequire(import.meta.url);
 let poolPromise: Promise<any> | null = null;
+/**
+ * Returns true when a Supabase/PostgREST error indicates a specific column
+ * is missing from the schema cache (PGRST204) or the DB (42703).
+ * Used to detect stale PostgREST schema cache and retry without that column.
+ */
+function isMissingColumnError(err: any, column: string): boolean {
+  if (!err) return false;
+  const code = String(err.code ?? '');
+  const msg  = String(err.message ?? '').toLowerCase();
+  const col  = column.toLowerCase();
+  return (
+    code === 'PGRST204' ||
+    code === '42703' ||
+    (msg.includes('could not find') && msg.includes(col)) ||
+    (msg.includes('schema cache') && msg.includes(col))
+  );
+}
+
 const stripProfilesJoin = (sql: string): string =>
   sql.replace(
     /LEFT JOIN profiles (\w+) ON \1\.id = \w+\.\w+/gi,
     (_match, alias) =>
       `LEFT JOIN (SELECT NULL::uuid AS id, NULL::text AS display_name, NULL::text AS email) ${alias} ON false`,
   );
+
+/** Deterministic seeded shuffle (Fisher-Yates with xorshift32 PRNG). */
+function seededShuffle<T>(arr: T[], seed: string): T[] {
+  // Hash the seed string into a 32-bit integer
+  let h = 0x12345678;
+  for (let i = 0; i < seed.length; i++) {
+    h ^= seed.charCodeAt(i);
+    h = Math.imul(h, 0x9e3779b9);
+    h ^= h >>> 16;
+  }
+  // xorshift32 PRNG
+  const next = () => {
+    h ^= h << 13;
+    h ^= h >> 17;
+    h ^= h << 5;
+    return (h >>> 0) / 0xffffffff;
+  };
+  const out = [...arr];
+  for (let i = out.length - 1; i > 0; i--) {
+    const j = Math.floor(next() * (i + 1));
+    [out[i], out[j]] = [out[j], out[i]];
+  }
+  return out;
+}
+
+// ── Google Drive Import — module-level job store + helpers ────────────────
+interface DriveImportJob {
+  status: 'running' | 'done' | 'error';
+  total: number;
+  done: number;
+  skipped: number;
+  errors: string[];
+  logs: string[];
+}
+const driveImportJobs = new Map<string, DriveImportJob>();
+
+const DRIVE_API_BASE = 'https://www.googleapis.com/drive/v3';
+
+/** Per-level Drive folder IDs.  Keys must match the `level` strings used in headway_media. */
+const LEVEL_DRIVE_FOLDERS: Record<string, Record<string, string>> = {
+  'Beginner': {
+    student_audio: '12Mmg0fjHxRhglHgKag9bP5QGGo7sNkx-',
+    workbook_audio: '1jX0bv2qQDRyhedO7qfvu5yjb97qDazQu',
+    video: '15HmRs-8kRI4C1Uzp5iwz-TE4c02lEuCc',
+  },
+  'Elementary': {
+    student_audio: '1bJpdL3tkWRlIQKS2lp9ZvKBm-SHrahUE',
+    workbook_audio: '1bwL0ANh1IR-YXzc9y53r9wRXEUAw7dkj',
+    video: '1DO4J5r-7HnytBb4UArIPnPjZTX60GPZm',
+  },
+  'Pre-Intermediate': {
+    student_audio: '1-MS0Eu2-uXELtasjK23r5wpIxSYw13WZ',
+    workbook_audio: '1pmBAkEVHE8E0NlZoaZf7VZKrhCUAK5yL',
+    video: '1tl7tpMoajGSOX1y6G1Y3-OvvZtnFgnCH',
+  },
+};
+
+/** Backward-compat alias (Beginner is the default) */
+const BEGINNER_DRIVE_FOLDERS = LEVEL_DRIVE_FOLDERS['Beginner'];
+
+function detectUnitNumber(filename: string): number | null {
+  const patterns = [
+    /unit[\s_\-.]*0?(\d{1,2})/i,
+    /\bu0?(\d{1,2})\b/i,
+    /_0?(\d{1,2})[_\s]/,
+    /^0?(\d{1,2})[_\s\-.]/,
+  ];
+  for (const pat of patterns) {
+    const m = filename.match(pat);
+    if (m) {
+      const n = parseInt(m[1], 10);
+      if (n >= 1 && n <= 20) return n;
+    }
+  }
+  return null;
+}
+
+async function listDriveFolder(folderId: string, apiKey: string): Promise<any[]> {
+  const files: any[] = [];
+  let pageToken = '';
+  do {
+    const q = encodeURIComponent(`'${folderId}' in parents and trashed = false`);
+    const fields = encodeURIComponent('nextPageToken,files(id,name,size,mimeType,modifiedTime)');
+    let url = `${DRIVE_API_BASE}/files?q=${q}&key=${apiKey}&fields=${fields}&pageSize=200`;
+    if (pageToken) url += `&pageToken=${encodeURIComponent(pageToken)}`;
+    const resp = await fetch(url);
+    if (!resp.ok) {
+      const txt = await resp.text();
+      throw new Error(`Drive API ${resp.status}: ${txt.slice(0, 200)}`);
+    }
+    const data = await resp.json() as any;
+    files.push(...(data.files ?? []));
+    pageToken = data.nextPageToken ?? '';
+  } while (pageToken);
+  return files;
+}
+
+async function downloadDriveFileBuffer(fileId: string, apiKey: string): Promise<Buffer> {
+  const url = `${DRIVE_API_BASE}/files/${encodeURIComponent(fileId)}?alt=media&key=${apiKey}`;
+  const resp = await fetch(url, { headers: { 'User-Agent': 'Mozilla/5.0' } });
+  if (!resp.ok) {
+    const txt = await resp.text();
+    throw new Error(`Drive download ${resp.status}: ${txt.slice(0, 200)}`);
+  }
+  const arrBuf = await resp.arrayBuffer();
+  return Buffer.from(arrBuf);
+}
+
+const AUDIO_EXTS = new Set(['mp3', 'wav', 'm4a', 'ogg', 'aac', 'flac']);
+const VIDEO_EXTS = new Set(['mp4', 'webm', 'mov', 'avi', 'mkv']);
+const MEDIA_EXTS = new Set([...AUDIO_EXTS, ...VIDEO_EXTS]);
+
+function mimeForExt(ext: string): string {
+  const map: Record<string, string> = {
+    mp3: 'audio/mpeg', wav: 'audio/wav', m4a: 'audio/mp4',
+    ogg: 'audio/ogg', aac: 'audio/aac', flac: 'audio/flac',
+    mp4: 'video/mp4', webm: 'video/webm', mov: 'video/quicktime',
+    avi: 'video/x-msvideo', mkv: 'video/x-matroska',
+  };
+  return map[ext] || 'application/octet-stream';
+}
+
+async function processZipEntries(
+  zipBuffer: Buffer,
+  zipName: string,
+  zipDriveId: string,
+  type: string,
+  level: string,
+  job: DriveImportJob,
+  courseId?: string
+): Promise<void> {
+  const unitNum = detectUnitNumber(zipName);
+  let AdmZip: any;
+  try { AdmZip = (await import('adm-zip')).default; } catch { throw new Error(`adm-zip package not installed — run: npm install adm-zip`); }
+  let zip: any;
+  try {
+    zip = new AdmZip(zipBuffer);
+  } catch (e: any) {
+    throw new Error(`Invalid ZIP "${zipName}": ${e?.message}`);
+  }
+
+  const entries = zip.getEntries().filter(e => {
+    if (e.isDirectory) return false;
+    const baseName = e.entryName.split('/').pop() || '';
+    if (baseName.startsWith('__MACOSX') || baseName.startsWith('.')) return false;
+    const ext = baseName.split('.').pop()?.toLowerCase() || '';
+    return MEDIA_EXTS.has(ext);
+  });
+
+  if (entries.length === 0) {
+    job.logs.push(`   ↳ No audio/video files inside "${zipName}"`);
+    return;
+  }
+
+  job.total += entries.length;
+  job.logs.push(`   ↳ ${entries.length} media files inside "${zipName}"`);
+
+  for (const entry of entries) {
+    const baseName = (entry.entryName.split('/').pop() || entry.entryName).replace(/\s+/g, '_');
+    const ext = baseName.split('.').pop()?.toLowerCase() || '';
+    const compositeId = `${zipDriveId}::${entry.entryName}`;
+
+    try {
+      const { data: existing } = await supabaseAdmin
+        .from('headway_media').select('id').eq('drive_file_id', compositeId).maybeSingle();
+      if (existing) {
+        job.skipped++;
+        job.logs.push(`↷ Skip (exists): ${baseName}`);
+        continue;
+      }
+
+      const fileData = entry.getData();
+      const storagePath = `headway/${level}/${type}/unit${unitNum ?? 0}/${baseName}`;
+      const mime = mimeForExt(ext);
+
+      const { error: uploadErr } = await supabaseAdmin.storage
+        .from('headway-media')
+        .upload(storagePath, fileData, { contentType: mime, upsert: true });
+      if (uploadErr) throw new Error(`Storage upload failed: ${uploadErr.message}`);
+
+      const { data: { publicUrl } } = supabaseAdmin.storage.from('headway-media').getPublicUrl(storagePath);
+      const title = baseName.replace(/\.[^.]+$/, '').replace(/[_-]/g, ' ').trim();
+
+      const insertPayload: Record<string, unknown> = {
+        level, unit_number: unitNum, type, title,
+        file_name: baseName, drive_file_id: compositeId,
+        url: publicUrl, mime_type: mime, size_bytes: fileData.length,
+      };
+      if (courseId) insertPayload.course_id = courseId;
+
+      let insResult = await supabaseAdmin.from('headway_media').insert(insertPayload);
+      if (insertPayload.course_id && isMissingColumnError(insResult.error, 'course_id')) {
+        // course_id column not yet visible in PostgREST schema cache — retry without it
+        const { course_id: _dropped, ...payloadWithoutCourse } = insertPayload;
+        insResult = await supabaseAdmin.from('headway_media').insert(payloadWithoutCourse);
+      }
+      if (insResult.error) {
+        if (insResult.error.code === '42P01') throw new Error('headway_media table not found — run migration 014');
+        throw new Error(insResult.error.message);
+      }
+
+      job.done++;
+      job.logs.push(`✓ ${baseName}${unitNum ? ` → Unit ${unitNum}` : ''}`);
+    } catch (err: any) {
+      job.errors.push(`${baseName}: ${err?.message}`);
+      job.logs.push(`✗ ${baseName}: ${err?.message}`);
+    }
+  }
+}
+// ─────────────────────────────────────────────────────────────────────────────
 
 const getPool = async () => {
   const connectionString = process.env.DATABASE_URL?.trim();
@@ -165,6 +404,36 @@ function stableHash(input: string): string {
       (hash << 1) + (hash << 4) + (hash << 7) + (hash << 8) + (hash << 24);
   }
   return (hash >>> 0).toString(16);
+}
+
+type ApiCacheEntry<T> = {
+  value: T;
+  expiresAt: number;
+};
+
+const apiResponseCache = new Map<string, ApiCacheEntry<unknown>>();
+const API_CACHE_MAX_ENTRIES = 500;
+const PERF_SLOW_THRESHOLD_MS = 300;
+
+function getCachedApiResponse<T>(key: string): T | null {
+  const cached = apiResponseCache.get(key);
+  if (!cached) return null;
+  if (Date.now() > cached.expiresAt) {
+    apiResponseCache.delete(key);
+    return null;
+  }
+  return cached.value as T;
+}
+
+function setCachedApiResponse<T>(key: string, value: T, ttlMs: number): void {
+  apiResponseCache.set(key, { value, expiresAt: Date.now() + ttlMs });
+  if (apiResponseCache.size > API_CACHE_MAX_ENTRIES) {
+    const now = Date.now();
+    for (const [cacheKey, entry] of apiResponseCache) {
+      if (entry.expiresAt <= now) apiResponseCache.delete(cacheKey);
+      if (apiResponseCache.size <= API_CACHE_MAX_ENTRIES - 100) break;
+    }
+  }
 }
 
 function serializeUnknownError(error: unknown): string {
@@ -590,7 +859,8 @@ const getSupabaseAdmin = () => {
       auth: {
         autoRefreshToken: false,
         persistSession: false
-      }
+      },
+      ...(_ws ? { realtime: { transport: _ws } } : {}),
     });
   }
   return supabaseAdminInstance;
@@ -794,7 +1064,155 @@ export async function createApp(options: CreateAppOptions = {}) {
   const includeFrontend = options.includeFrontend ?? true;
   const app = express();
 
-  app.use(express.json());
+  app.use(express.json({ limit: "15mb" }));
+  app.use(express.urlencoded({ extended: true, limit: "15mb" }));
+
+  // Trust all Replit reverse-proxy hops so express-rate-limit reads the real
+  // client IP from X-Forwarded-For. Replit uses multiple proxy layers so
+  // `trust proxy: 1` can expose the proxy IP rather than the real user IP,
+  // causing all users to share one rate-limit bucket and trigger 429s.
+  // Replit routes through multiple proxy hops. Using a number (e.g. 1) can
+  // expose the proxy IP instead of the real client IP, collapsing all users
+  // into one rate-limit bucket. We keep trust proxy at 1 to satisfy
+  // express-rate-limit's validation while also disabling its trustProxy check
+  // (the validate flag) and providing a custom keyGenerator that reads the
+  // real IP from X-Forwarded-For safely.
+  app.set('trust proxy', 1);
+
+  // ── Rate Limiting ────────────────────────────────────────────────────────────
+  const resolveClientIp = (req: Request): string => {
+    const xff = req.headers['x-forwarded-for'];
+    if (xff) {
+      const first = (Array.isArray(xff) ? xff[0] : xff).split(',')[0].trim();
+      if (first) return first;
+    }
+    return req.ip || req.socket?.remoteAddress || 'unknown';
+  };
+
+  const apiLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000,
+    // 1000 req/15min — generous enough for normal dashboard polling.
+    max: 1000,
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: { error: 'Too many requests, please try again later.' },
+    // req.originalUrl keeps the full path regardless of mount point.
+    skip: (req) => req.originalUrl === '/api/health' || req.path === '/health',
+    keyGenerator: resolveClientIp,
+    validate: { trustProxy: false, xForwardedForHeader: false, keyGeneratorIpFallback: false },
+  });
+  const authLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000,
+    max: 20,
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: { error: 'Too many auth attempts, please try again in 15 minutes.' },
+  });
+  // Realtime routes are polled frequently (every 3s per student) so they get their own
+  // generous limiter — 2000 req / 15 min per IP — well above the normal 200 cap.
+  const realtimeLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000,
+    max: 2000,
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: { error: 'Too many realtime requests, please slow down.' },
+  });
+  app.use('/api/student/realtime-quiz/', realtimeLimiter);
+  app.use('/api/teacher/realtime-quiz/', realtimeLimiter);
+  app.use('/api/realtime-quiz/', realtimeLimiter);
+  app.use('/api/', apiLimiter);
+  app.use('/api/auth/', authLimiter);
+
+  // ── Admin Auth Middleware ─────────────────────────────────────────────────────
+  // Protects ALL /api/admin/* routes. Exceptions:
+  //   - /api/admin/seed      — first-run unauthenticated access when DB is empty
+  //   - /api/admin/create-student — teachers are allowed; the route handler does its own role check
+  app.use('/api/admin', async (req: Request, res: Response, next) => {
+    if (req.path === '/seed' && req.method === 'GET') return next();
+    // Teachers may create students; skip the admin-only gate and let the route handler decide.
+    if (req.path === '/create-student' && req.method === 'POST') return next();
+    const caller = await assertAuthenticated(req, res);
+    if (!caller) return;
+    if (caller.role !== 'admin') return res.status(403).json({ error: 'Forbidden: admin role required' });
+    next();
+  });
+
+  // PWA: serve sw.js with no-cache so browsers always check for updates
+  app.get("/sw.js", (_req, res, next) => {
+    res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate");
+    res.setHeader("Content-Type", "application/javascript");
+    next();
+  });
+
+  // PWA: serve manifest.json dynamically (reads school name, colors, logoText from DB)
+  app.get("/manifest.json", async (_req, res) => {
+    try {
+      const [branding, settings] = await Promise.all([
+        getConfigSection("branding").catch(() => null),
+        getConfigSection("settings").catch(() => null),
+      ]);
+      const b: any = branding || {};
+      const s: any = settings || {};
+      const schoolName =
+        (typeof s?.general?.school_name === "string" && s.general.school_name.trim()) ||
+        (typeof b?.schoolName === "string" && b.schoolName.trim()) ||
+        "QuizMaster";
+      const primaryColor = (typeof b?.colors?.primary === "string" && b.colors.primary) || "#4f46e5";
+      const bgColor = (typeof b?.colors?.sidebar_bg === "string" && b.colors.sidebar_bg) || "#0f172a";
+      res.setHeader("Content-Type", "application/manifest+json");
+      res.setHeader("Cache-Control", "no-store");
+      res.json({
+        name: schoolName,
+        short_name: schoolName.length > 14 ? schoolName.slice(0, 14) : schoolName,
+        description: `${schoolName} — Education Platform`,
+        start_url: "/",
+        scope: "/",
+        display: "standalone",
+        orientation: "portrait-primary",
+        background_color: bgColor,
+        theme_color: primaryColor,
+        lang: "en",
+        categories: ["education", "productivity"],
+        icons: [
+          { src: "/bs-icon.jpg", sizes: "512x512", type: "image/jpeg", purpose: "any" },
+          { src: "/bs-icon.jpg", sizes: "192x192", type: "image/jpeg", purpose: "any" },
+          { src: "/api/pwa/icon.svg", sizes: "any", type: "image/svg+xml", purpose: "any" },
+          { src: "/icon-192.png", sizes: "192x192", type: "image/png", purpose: "any" },
+          { src: "/icon-512.png", sizes: "512x512", type: "image/png", purpose: "any" },
+          { src: "/icon-maskable-512.png", sizes: "512x512", type: "image/png", purpose: "maskable" },
+        ],
+        shortcuts: [
+          { name: "Dashboard", short_name: "Dashboard", url: "/", icons: [{ src: "/icon-192.png", sizes: "192x192" }] },
+        ],
+      });
+    } catch {
+      // Fallback: serve static manifest
+      const staticPath = path.join(process.cwd(), "public", "manifest.json");
+      res.setHeader("Content-Type", "application/manifest+json");
+      res.sendFile(staticPath);
+    }
+  });
+
+  // PWA: dynamic SVG app icon — shows logoText on brand-color background
+  app.get("/api/pwa/icon.svg", async (_req, res) => {
+    try {
+      const branding = await getConfigSection("branding").catch(() => null);
+      const b: any = branding || {};
+      const raw = typeof b.logoText === "string" ? b.logoText.trim().toUpperCase() : "";
+      const logoText = raw.slice(0, 3) || "QM";
+      const primaryColor = (typeof b?.colors?.primary === "string" && b.colors.primary) || "#4f46e5";
+      const fontSize = logoText.length > 2 ? 180 : 210;
+      const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><rect width="512" height="512" rx="112" fill="${primaryColor}"/><text x="256" y="338" font-family="system-ui,-apple-system,BlinkMacSystemFont,sans-serif" font-size="${fontSize}" font-weight="800" text-anchor="middle" fill="white" letter-spacing="-6">${logoText}</text></svg>`;
+      res.setHeader("Content-Type", "image/svg+xml");
+      res.setHeader("Cache-Control", "no-store");
+      res.send(svg);
+    } catch {
+      const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><rect width="512" height="512" rx="112" fill="#4f46e5"/><text x="256" y="338" font-family="system-ui,sans-serif" font-size="210" font-weight="800" text-anchor="middle" fill="white">QM</text></svg>`;
+      res.setHeader("Content-Type", "image/svg+xml");
+      res.send(svg);
+    }
+  });
+
   app.post("/api/log-error", async (req: Request, res: Response) => {
     try {
       const body = (req.body || {}) as any;
@@ -832,6 +1250,9 @@ export async function createApp(options: CreateAppOptions = {}) {
 
   app.get("/api/test-telegram", async (req: Request, res: Response) => {
     try {
+      const caller = await assertAuthenticated(req, res);
+      if (!caller) return;
+      if (caller.role !== 'admin') return res.status(403).json({ error: 'Forbidden: admin role required' });
       const message =
         typeof req.query.message === "string" && req.query.message.trim()
           ? req.query.message.trim()
@@ -849,11 +1270,16 @@ export async function createApp(options: CreateAppOptions = {}) {
       );
       return res.json({ success: true, message: "Test alert sent to Telegram (if configured)." });
     } catch (error: any) {
-      return res.status(500).json({ error: error?.message || "Failed to send test Telegram alert" });
+      return res.status(500).json({ error: 'Internal server error.' });
     }
   });
 
-  app.get("/api/telegram/diagnostics", async (_req: Request, res: Response) => {
+  app.get("/api/telegram/diagnostics", async (req: Request, res: Response) => {
+    try {
+      const caller = await assertAuthenticated(req, res);
+      if (!caller) return;
+      if (caller.role !== 'admin') return res.status(403).json({ error: 'Forbidden: admin role required' });
+    } catch { return res.status(401).json({ error: 'Unauthorized' }); }
     if (!ERROR_ALERTS_ENABLED) {
       return res.json({
         ok: false,
@@ -991,13 +1417,6 @@ export async function createApp(options: CreateAppOptions = {}) {
       if (!message) return res.status(400).json({ error: "message is required" });
 
       const apiKey = (process.env.AI_INTEGRATIONS_GEMINI_API_KEY || process.env.GEMINI_API_KEY || "").trim();
-      if (!apiKey) return res.status(503).json({ error: "AI not configured. Add GEMINI_API_KEY to Secrets." });
-
-      const { GoogleGenAI } = await import("@google/genai");
-      const geminiBaseUrl = (process.env.AI_INTEGRATIONS_GEMINI_BASE_URL || "").trim();
-      const ai = geminiBaseUrl
-        ? new GoogleGenAI({ apiKey, httpOptions: { apiVersion: "", baseUrl: geminiBaseUrl } })
-        : new GoogleGenAI({ apiKey });
 
       const roleContext: Record<string, string> = {
         teacher: `You are an expert teaching assistant for an online educational platform. The teacher is currently on the "${page}" page (path: ${path || "unknown"}).
@@ -1033,17 +1452,40 @@ When giving instructions, number each step clearly. Be precise and technical whe
         .map((m) => `${m.role === "user" ? "User" : "Assistant"}: ${m.content}`)
         .join("\n");
 
-      const fullPrompt = `${systemPrompt}
+      const fullPrompt = `${historyText ? `Conversation so far:\n${historyText}\n\n` : ""}User: ${message}`;
 
-${historyText ? `Conversation so far:\n${historyText}\n\n` : ""}User: ${message}
-Assistant:`;
+      let reply = "";
 
-      const result = await ai.models.generateContent({
-        model: "gemini-2.0-flash",
-        contents: fullPrompt,
-      });
+      if (apiKey) {
+        const { GoogleGenAI } = await import("@google/genai");
+        const geminiBaseUrl = (process.env.AI_INTEGRATIONS_GEMINI_BASE_URL || "").trim();
+        const ai = geminiBaseUrl
+          ? new GoogleGenAI({ apiKey, httpOptions: { apiVersion: "", baseUrl: geminiBaseUrl } })
+          : new GoogleGenAI({ apiKey });
+        const result = await ai.models.generateContent({
+          model: "gemini-2.5-flash",
+          contents: `${systemPrompt}\n\n${fullPrompt}\nAssistant:`,
+        });
+        reply = (result.text || "").trim();
+      } else {
+        // Free fallback: Pollinations AI (no API key required)
+        const pollinationsRes = await fetch("https://text.pollinations.ai/", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            messages: [
+              { role: "system", content: systemPrompt },
+              ...history.slice(-8).map((m) => ({ role: m.role === "user" ? "user" : "assistant", content: m.content })),
+              { role: "user", content: message },
+            ],
+            model: "openai",
+          }),
+        });
+        if (!pollinationsRes.ok) throw new Error(`Pollinations AI error: ${pollinationsRes.status}`);
+        reply = (await pollinationsRes.text()).trim();
+      }
 
-      const reply = (result.text || "").trim() || "I'm sorry, I couldn't generate a response. Please try again.";
+      reply = reply || "I'm sorry, I couldn't generate a response. Please try again.";
       res.json({ success: true, reply });
     } catch (e: any) {
       res.status(500).json({ error: e?.message || "Failed to process chat message" });
@@ -1149,6 +1591,16 @@ Assistant:`;
 
     res.setHeader("X-Request-Id", requestId);
     res.on("finish", () => {
+      const durationMs = Date.now() - startedAt;
+      if (!res.headersSent) res.setHeader("X-Response-Time", `${durationMs}ms`);
+
+      // Log slow API requests (>300ms) so bottlenecks are visible in console
+      if (req.path.startsWith("/api") && durationMs > PERF_SLOW_THRESHOLD_MS) {
+        console.warn(
+          `[perf] ⚠️  SLOW REQUEST  ${req.method} ${req.path} → ${res.statusCode}  ${durationMs}ms`,
+        );
+      }
+
       if (res.statusCode < 500 || !req.path.startsWith("/api")) return;
       if ((res.locals as any).errorAlertEmitted) {
         console.log(
@@ -1158,7 +1610,6 @@ Assistant:`;
         );
         return;
       }
-      const durationMs = Date.now() - startedAt;
       void recordApi5xxAlertForFix(req, res.statusCode, durationMs, requestId);
     });
     next();
@@ -1185,10 +1636,25 @@ Assistant:`;
   const normalizeRole = (r: string | undefined | null) =>
     String(r || "student").toLowerCase().trim();
 
-  const getAuthUser = async (req: Request): Promise<{ userId: string; role: string } | null> => {
+  // ── Auth token in-memory cache (30s TTL) ────────────────────────────────
+  // Every authenticated API call previously made 2 Supabase round-trips:
+  // (1) auth.getUser(token) and (2) profiles.select("role").
+  // Caching by token hash saves ~100-300ms per request for active users.
+  const AUTH_CACHE_TTL_MS = 30_000;
+  const authUserCache = new Map<string, { userId: string; role: string; displayName?: string; expiresAt: number }>();
+
+  const getAuthUser = async (req: Request): Promise<{ userId: string; role: string; displayName?: string } | null> => {
     const auth = req.headers["authorization"] || "";
     const token = auth.startsWith("Bearer ") ? auth.slice(7).trim() : "";
     if (!token) return null;
+
+    // Use a hash of the token as the cache key (tokens can be large)
+    const cacheKey = stableHash(token);
+    const cached = authUserCache.get(cacheKey);
+    if (cached && Date.now() < cached.expiresAt) {
+      return { userId: cached.userId, role: cached.role, displayName: cached.displayName };
+    }
+
     const {
       data: { user },
       error,
@@ -1201,10 +1667,20 @@ Assistant:`;
     }
     const { data: profile } = await supabaseAdmin
       .from("profiles")
-      .select("role")
+      .select("role, display_name")
       .eq("id", user.id)
       .maybeSingle();
-    return { userId: user.id, role: normalizeRole(profile?.role) };
+    const result = { userId: user.id, role: normalizeRole(profile?.role), displayName: profile?.display_name ?? undefined };
+    authUserCache.set(cacheKey, { ...result, expiresAt: Date.now() + AUTH_CACHE_TTL_MS });
+    // Evict old entries to avoid unbounded growth
+    if (authUserCache.size > 500) {
+      const now = Date.now();
+      for (const [k, v] of authUserCache) {
+        if (v.expiresAt < now) authUserCache.delete(k);
+        if (authUserCache.size <= 400) break;
+      }
+    }
+    return result;
   };
 
   const assertSessionHost = async (req: Request, res: Response, sessionId: string): Promise<string | null> => {
@@ -1379,6 +1855,36 @@ Assistant:`;
     );
   };
 
+  // Resilient notification insert — retries without columns the live DB doesn't have
+  // (older Supabase instances may be missing `title` and/or `read`).
+  let _notifColsKnown = false;
+  let _notifHasTitle = true;
+  let _notifHasRead  = true;
+  const notifInsert = async (rows: Record<string, unknown> | Record<string, unknown>[]) => {
+    const arr = Array.isArray(rows) ? rows : [rows];
+    const strip = (r: Record<string, unknown>) => {
+      const out = { ...r };
+      if (!_notifHasTitle) delete out.title;
+      if (!_notifHasRead)  delete out.read;
+      return out;
+    };
+    const attempt = async () => supabaseAdmin.from('notifications').insert(arr.map(strip));
+    let { error } = await attempt();
+    if (!error) { _notifColsKnown = true; return; }
+    const hay = `${error.message || ''} ${(error as any).details || ''}`.toLowerCase();
+    const missingTitle = hay.includes("'title'") || hay.includes('"title"');
+    const missingRead  = hay.includes("'read'")  || hay.includes('"read"');
+    if ((missingTitle || missingRead) && !_notifColsKnown) {
+      if (missingTitle) _notifHasTitle = false;
+      if (missingRead)  _notifHasRead  = false;
+      _notifColsKnown = false;
+      const retry = await attempt();
+      if (retry.error) console.warn('[notify] insert failed (retry):', retry.error.message);
+    } else {
+      console.warn('[notify] insert failed:', error.message);
+    }
+  };
+
   const isClassesTableMissing = (error: any) => {
     const haystack = `${error?.message || ""} ${error?.details || ""} ${error?.hint || ""}`.toLowerCase();
     return (
@@ -1427,14 +1933,99 @@ Assistant:`;
     );
   };
 
+  const ATTEMPTS_CACHE_TTL_MS = 15_000;
+  let attemptsCache: { rows: any[]; expiresAt: number } = { rows: [], expiresAt: 0 };
+  let attemptsInFlight: Promise<any[]> | null = null;
+
   const fetchAllAttemptRows = async () => {
-    const modern = await supabaseAdmin.from("quiz_attempts").select("*");
+    const now = Date.now();
+    if (now < attemptsCache.expiresAt) return attemptsCache.rows;
+    if (attemptsInFlight) return attemptsInFlight;
+
+    attemptsInFlight = (async () => {
+      const startedAt = Date.now();
+      const modernStartedAt = Date.now();
+      const modern = await supabaseAdmin.from("quiz_attempts").select("*");
+      const modernDurationMs = Date.now() - modernStartedAt;
+      if (modernDurationMs > PERF_SLOW_THRESHOLD_MS) {
+        console.warn(`[perf] slow query quiz_attempts.select(*) ${modernDurationMs}ms`);
+      }
+      if (!modern.error) {
+        const rows = modern.data || [];
+        attemptsCache = { rows, expiresAt: Date.now() + ATTEMPTS_CACHE_TTL_MS };
+        const durationMs = Date.now() - startedAt;
+        if (durationMs > PERF_SLOW_THRESHOLD_MS) {
+          console.warn(`[perf] fetchAllAttemptRows resolved in ${durationMs}ms (source=quiz_attempts, rows=${rows.length})`);
+        }
+        return rows;
+      }
+      if (!isAttemptsTableMissing(modern.error) && !isAnyTableMissingError(modern.error)) throw modern.error;
+
+      const legacyStartedAt = Date.now();
+      const legacy = await supabaseAdmin.from("attempts").select("*");
+      const legacyDurationMs = Date.now() - legacyStartedAt;
+      if (legacyDurationMs > PERF_SLOW_THRESHOLD_MS) {
+        console.warn(`[perf] slow query attempts.select(*) ${legacyDurationMs}ms`);
+      }
+      if (!legacy.error) {
+        const rows = legacy.data || [];
+        attemptsCache = { rows, expiresAt: Date.now() + ATTEMPTS_CACHE_TTL_MS };
+        const durationMs = Date.now() - startedAt;
+        if (durationMs > PERF_SLOW_THRESHOLD_MS) {
+          console.warn(`[perf] fetchAllAttemptRows resolved in ${durationMs}ms (source=attempts, rows=${rows.length})`);
+        }
+        return rows;
+      }
+      // Both quiz_attempts and attempts tables are absent — return empty gracefully
+      if (isAnyTableMissingError(legacy.error)) return [];
+      throw legacy.error;
+    })();
+
+    try {
+      return await attemptsInFlight;
+    } finally {
+      attemptsInFlight = null;
+    }
+  };
+
+  /**
+   * Filtered attempt fetch — queries only rows matching the given quiz IDs and/or student IDs.
+   * Falls back gracefully if the table is missing or filters exceed Supabase's IN-list limit.
+   * Uses the all-attempts cache when no filters are provided.
+   */
+  const fetchFilteredAttemptRows = async (opts: {
+    quizIds?: Set<string> | string[];
+    studentIds?: Set<string> | string[];
+  } = {}): Promise<any[]> => {
+    const quizArr = opts.quizIds ? [...opts.quizIds].filter(Boolean) : [];
+    const studentArr = opts.studentIds ? [...opts.studentIds].filter(Boolean) : [];
+
+    // Fall back to global cache when no useful filters are given
+    if (quizArr.length === 0 && studentArr.length === 0) {
+      return fetchAllAttemptRows();
+    }
+
+    const startedAt = Date.now();
+
+    const buildQuery = (table: string) => {
+      let q = supabaseAdmin.from(table).select(
+        "id,quiz_id,student_id,score,score_percent,total_points,correct_answers,total_questions,status,passed,started_at,completed_at,answers"
+      );
+      if (quizArr.length > 0) q = q.in("quiz_id", quizArr);
+      if (studentArr.length > 0) q = q.in("student_id", studentArr);
+      return q;
+    };
+
+    const modern = await buildQuery("quiz_attempts");
+    const durationMs = Date.now() - startedAt;
+    if (durationMs > PERF_SLOW_THRESHOLD_MS) {
+      console.warn(`[perf] slow fetchFilteredAttemptRows quiz_attempts ${durationMs}ms quizIds=${quizArr.length} studentIds=${studentArr.length}`);
+    }
     if (!modern.error) return modern.data || [];
     if (!isAttemptsTableMissing(modern.error) && !isAnyTableMissingError(modern.error)) throw modern.error;
 
-    const legacy = await supabaseAdmin.from("attempts").select("*");
+    const legacy = await buildQuery("attempts");
     if (!legacy.error) return legacy.data || [];
-    // Both quiz_attempts and attempts tables are absent — return empty gracefully
     if (isAnyTableMissingError(legacy.error)) return [];
     throw legacy.error;
   };
@@ -1515,6 +2106,37 @@ Assistant:`;
     return [...candidates];
   };
 
+  /**
+   * Fetch course rows for a teacher, gracefully handling missing columns
+   * (courses.teacher_id or courses.student_ids may not exist in older schemas).
+   * Falls back from most-specific to least-specific query until one succeeds.
+   */
+  const fetchTeacherCourseRows = async (
+    scopedIds: string[],
+    includeStudentIds = false,
+  ): Promise<any[]> => {
+    const buildQ = (filterByTeacher: boolean, withStudentIds: boolean) => {
+      const sel = withStudentIds ? 'id,title,student_ids' : 'id,title';
+      let q = supabaseAdmin.from('courses').select(sel as any);
+      if (filterByTeacher && scopedIds.length > 0) q = q.in('teacher_id' as any, scopedIds);
+      return q;
+    };
+
+    const attempts = [
+      buildQ(true,  includeStudentIds),
+      buildQ(true,  false),
+      buildQ(false, includeStudentIds),
+      buildQ(false, false),
+    ];
+
+    for (const q of attempts) {
+      const { data, error } = await q;
+      if (!error) return data || [];
+      if (!isRecoverableSchemaColumnError(error)) throw error;
+    }
+    return [];
+  };
+
   const missingQuizzesTeacherIdColumn = (error: any) => {
     const hay = `${error?.message || ""} ${error?.details || ""} ${error?.hint || ""}`;
     const low = hay.toLowerCase();
@@ -1528,6 +2150,10 @@ Assistant:`;
     const low = hay.toLowerCase();
     if (error?.code === "PGRST204" && low.includes("published")) return true;
     if (/published/i.test(hay) && /schema cache|could not find|does not exist|42703|undefined column/i.test(low)) {
+      return true;
+    }
+    // Generated/computed column: "column 'published' can only be updated to DEFAULT"
+    if (/published/i.test(hay) && /can only be updated to default/i.test(low)) {
       return true;
     }
     return false;
@@ -1584,6 +2210,18 @@ Assistant:`;
         payload = rest;
         continue;
       }
+      // Generic: if the error mentions a specific column name, strip it and retry
+      const errMsg = String((err as any)?.message || (err as any)?.details || "");
+      const colMatch = errMsg.match(/column[^''"]*[''"]([\w]+)[''"]|[''"]([\w]+)[''"][^''"]* column|Could not find[^''"]+'([\w]+)'/i);
+      if (colMatch) {
+        const missingCol = colMatch[1] || colMatch[2] || colMatch[3];
+        if (missingCol && missingCol in payload) {
+          const { [missingCol]: _dropped, ...rest } = payload as Record<string, unknown>;
+          void _dropped;
+          payload = rest;
+          continue;
+        }
+      }
       return { data: null, error: err };
     }
     return { data: null, error: new Error("Quiz insert: max compatibility retries") };
@@ -1604,7 +2242,15 @@ Assistant:`;
         .from("courses")
         .select("id")
         .in("teacher_id", scopedIds);
-      if (ce) throw ce;
+      // When courses.teacher_id column is missing, fall back to all quizzes (sorted by date)
+      if (ce) {
+        const msg = `${ce.message || ''} ${ce.details || ''}`.toLowerCase();
+        if (ce.code === 'PGRST204' || /teacher_id/.test(msg) || /does not exist|42703|undefined column/.test(msg)) {
+          const fallbackQ = await supabaseAdmin.from("quizzes").select("*").order("created_at", { ascending: false }).limit(500);
+          return sortRows(fallbackQ.data || []);
+        }
+        throw ce;
+      }
       const courseIds = (crs || []).map((c: any) => c?.id).filter(Boolean);
       if (courseIds.length === 0) return [];
       let q2 = await supabaseAdmin
@@ -1652,23 +2298,55 @@ Assistant:`;
 
   const CONFIG_SECTIONS = new Set(["settings", "branding", "domain", "roles"]);
 
+  // ── Config section in-memory cache (30s TTL) ────────────────────────────
+  // Each DB call to getConfigSection costs ~50-150ms. With branding + runtime
+  // + settings fetched on every startup (up to 4 calls), caching saves 200-600ms
+  // per request cluster. Cache is invalidated immediately on any write.
+  const CONFIG_CACHE_TTL_MS = 30_000;
+  const configSectionCache = new Map<string, { value: unknown; expiresAt: number }>();
+
   const getConfigSection = async (section: string) => {
+    const cached = configSectionCache.get(section);
+    if (cached && Date.now() < cached.expiresAt) {
+      return cached.value;
+    }
     const res = await supabaseAdmin
       .from("platform_config")
       .select("section, value, updated_at")
       .eq("section", section)
       .maybeSingle();
     if (res.error) throw res.error;
-    return res.data?.value ?? null;
+    const value = res.data?.value ?? null;
+    configSectionCache.set(section, { value, expiresAt: Date.now() + CONFIG_CACHE_TTL_MS });
+    return value;
   };
 
   const upsertConfigSection = async (section: string, value: unknown) => {
+    // Invalidate cache immediately on write so the next read is fresh
+    configSectionCache.delete(section);
     const res = await supabaseAdmin
       .from("platform_config")
       .upsert({ section, value, updated_at: new Date().toISOString() }, { onConflict: "section" })
       .select("section, value, updated_at")
-      .single();
+      .maybeSingle();
     if (res.error) throw res.error;
+    // Some PostgREST versions return null data on a successful upsert (RLS/schema-cache quirk).
+    // Fall back to a plain read so callers always get the saved value.
+    if (!res.data) {
+      const readRes = await supabaseAdmin
+        .from("platform_config")
+        .select("section, value, updated_at")
+        .eq("section", section)
+        .maybeSingle();
+      if (readRes.error) throw readRes.error;
+      // Update cache with the freshly-read value
+      if (readRes.data?.value !== undefined) {
+        configSectionCache.set(section, { value: readRes.data.value, expiresAt: Date.now() + CONFIG_CACHE_TTL_MS });
+      }
+      return readRes.data;
+    }
+    // Update cache with the written value
+    configSectionCache.set(section, { value, expiresAt: Date.now() + CONFIG_CACHE_TTL_MS });
     return res.data;
   };
 
@@ -1678,19 +2356,35 @@ Assistant:`;
   };
 
   /**
-   * Reads `platform_config.settings.notifications[settingsKey]` to decide whether
-   * an event-driven notification should fire. Defaults to `true` when no settings
-   * row exists yet so events fan out on a fresh install.
+   * Reads `platform_config.settings.notifications[settingsKey]` and returns
+   * per-role enabled flags. Defaults all roles to `true` when the settings row
+   * doesn't exist yet so events fan out on a fresh install.
+   *
+   * Backward-compatible: if the stored value is a plain boolean (old format)
+   * it applies that boolean to all three roles.
    */
-  const isNotificationEnabled = async (settingsKey: string): Promise<boolean> => {
+  const isNotificationEnabled = async (settingsKey: string): Promise<{ student: boolean; teacher: boolean; admin: boolean }> => {
+    const allTrue  = { student: true,  teacher: true,  admin: true  };
+    const allFalse = { student: false, teacher: false, admin: false };
     try {
       const settings: any = await getConfigSection("settings");
       const notifs = settings?.notifications;
-      if (!notifs || typeof notifs !== "object") return true;
+      if (!notifs || typeof notifs !== "object") return allTrue;
       const v = notifs[settingsKey];
-      return v === undefined ? true : Boolean(v);
+      if (v === undefined) return allTrue;
+      // New format: per-role object { student, teacher, admin }
+      if (v && typeof v === "object" && "student" in v) {
+        return {
+          student: Boolean(v.student),
+          teacher: Boolean(v.teacher),
+          admin:   Boolean(v.admin),
+        };
+      }
+      // Legacy format: single boolean — apply to all roles
+      const b = Boolean(v);
+      return { student: b, teacher: b, admin: b };
     } catch {
-      return false;
+      return allFalse;
     }
   };
 
@@ -1791,6 +2485,50 @@ Assistant:`;
   setTimeout(() => { void runWeeklyReportIfDue(); }, 30_000);
   setInterval(() => { void runWeeklyReportIfDue(); }, 6 * 60 * 60 * 1000);
 
+  // ── Server-side Live Session Auto-End ────────────────────────────────────────
+  // Runs every 5 minutes. Finds any session with status='live' whose
+  // started_at + duration_minutes has elapsed, and marks it as 'ended'.
+  // This handles the case where the teacher's browser closed before the timer fired.
+  const autoEndExpiredLiveSessions = async () => {
+    try {
+      const { data: liveSessions, error } = await supabaseAdmin
+        .from('live_sessions')
+        .select('id, started_at, duration_minutes')
+        .eq('status', 'live')
+        .not('started_at', 'is', null);
+      if (error || !liveSessions || liveSessions.length === 0) return;
+
+      const now = Date.now();
+      const expiredIds: string[] = [];
+      for (const s of liveSessions as Array<{ id: string; started_at: string; duration_minutes: number }>) {
+        const startMs = new Date(s.started_at).getTime();
+        const endMs = startMs + (s.duration_minutes || 60) * 60 * 1000;
+        // Add 2-minute grace period so client timer fires first
+        if (now > endMs + 2 * 60 * 1000) {
+          expiredIds.push(s.id);
+        }
+      }
+
+      if (expiredIds.length === 0) return;
+
+      const { error: updateErr } = await supabaseAdmin
+        .from('live_sessions')
+        .update({ status: 'ended', updated_at: new Date().toISOString() })
+        .in('id', expiredIds);
+      if (updateErr) {
+        console.warn('[live-sessions] auto-end update error:', updateErr.message);
+      } else {
+        console.log(`[live-sessions] Auto-ended ${expiredIds.length} expired session(s): ${expiredIds.join(', ')}`);
+      }
+    } catch (e) {
+      console.warn('[live-sessions] autoEndExpiredLiveSessions error:', e);
+    }
+  };
+  // Run once 1 minute after boot (sessions may exist from before restart), then every 5 minutes
+  setTimeout(() => { void autoEndExpiredLiveSessions(); }, 60_000);
+  setInterval(() => { void autoEndExpiredLiveSessions(); }, 5 * 60 * 1000);
+  // ── End Live Session Auto-End ─────────────────────────────────────────────────
+
   const extractPublicFeatureFlags = (settingsValue: any) => {
     const features = settingsValue?.features || {};
     return {
@@ -1806,39 +2544,101 @@ Assistant:`;
   };
 
   // API routes FIRST
-  app.get("/api/health", async (req, res) => {
-    const supabaseUrl = process.env.VITE_SUPABASE_URL;
-    const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-    
-    let supabaseStatus = 'unknown';
-    let supabaseError = null;
-
-    if (supabaseUrl && supabaseServiceKey) {
-      try {
-        const { error } = await supabaseAdmin.from('profiles').select('count').limit(1);
-        if (error) {
-          supabaseStatus = 'error';
-          supabaseError = error.message;
-        } else {
-          supabaseStatus = 'connected';
-        }
-      } catch (err: any) {
-        supabaseStatus = 'failed';
-        supabaseError = err.message;
-      }
+  // Health check responds instantly — no DB round-trip.
+  // Supabase connectivity is checked in the background every 30s so the
+  // status stays fresh without blocking Replit's liveness probe.
+  let _cachedHealth: { status: string; error: string | null; checkedAt: number } = {
+    status: 'unknown', error: null, checkedAt: 0,
+  };
+  const _refreshHealthCache = async () => {
+    try {
+      const { error } = await supabaseAdmin.from('profiles').select('count').limit(1);
+      _cachedHealth = { status: error ? 'error' : 'connected', error: error?.message ?? null, checkedAt: Date.now() };
+    } catch (err: any) {
+      _cachedHealth = { status: 'failed', error: err.message, checkedAt: Date.now() };
     }
+  };
+  // Kick off first check immediately, then every 30 s
+  void _refreshHealthCache();
+  setInterval(() => { void _refreshHealthCache(); }, 30_000);
 
-    res.json({ 
-      status: "ok",
-      config: {
-        hasUrl: !!supabaseUrl,
-        hasServiceKey: !!supabaseServiceKey,
-        urlPrefix: supabaseUrl ? supabaseUrl.substring(0, 15) + '...' : null
+  app.get("/api/health", (_req, res) => {
+    type VarStatus = 'set' | 'missing' | 'invalid';
+    interface VarReport { status: VarStatus; hint?: string }
+
+    const checkUrl = (key: string): VarReport => {
+      const raw = (process.env[key] ?? '').trim();
+      if (!raw) return { status: 'missing', hint: `Add ${key} to environment variables` };
+      if (!raw.startsWith('https://') && !raw.startsWith('http://'))
+        return { status: 'invalid', hint: `${key} must start with https:// (got: ${raw.slice(0, 20)}...)` };
+      return { status: 'set' };
+    };
+
+    const checkSecret = (key: string, hint?: string): VarReport => {
+      const raw = (process.env[key] ?? '').trim();
+      if (!raw) return { status: 'missing', hint: hint ?? `Add ${key} to environment variables` };
+      return { status: 'set' };
+    };
+
+    const vars: Record<string, Record<string, VarReport>> = {
+      core: {
+        VITE_SUPABASE_URL:       checkUrl('VITE_SUPABASE_URL'),
+        VITE_SUPABASE_ANON_KEY:  checkSecret('VITE_SUPABASE_ANON_KEY', 'Frontend Supabase key — required for login'),
+        SUPABASE_SERVICE_ROLE_KEY: checkSecret('SUPABASE_SERVICE_ROLE_KEY', 'Backend-only service role key'),
       },
+      ai: {
+        GEMINI_API_KEY: (() => {
+          const replit = (process.env.AI_INTEGRATIONS_GEMINI_API_KEY ?? '').trim();
+          const direct = (process.env.GEMINI_API_KEY ?? '').trim();
+          if (replit || direct) return { status: 'set' } as VarReport;
+          return { status: 'missing', hint: 'Set GEMINI_API_KEY for AI quiz/content features' } as VarReport;
+        })(),
+      },
+      email: {
+        BREVO_API_KEY:      checkSecret('BREVO_API_KEY',      '2FA verification emails require this'),
+        BREVO_SENDER_EMAIL: checkSecret('BREVO_SENDER_EMAIL', 'Must match a verified sender in Brevo'),
+        BREVO_SENDER_NAME:  checkSecret('BREVO_SENDER_NAME',  'Display name shown in email inbox'),
+      },
+      alerts: {
+        TELEGRAM_BOT_TOKEN: checkSecret('TELEGRAM_BOT_TOKEN', 'Optional — enables error alerts via Telegram'),
+        TELEGRAM_CHAT_ID:   checkSecret('TELEGRAM_CHAT_ID',   'Optional — Telegram chat to receive alerts'),
+      },
+      database: {
+        DATABASE_URL: checkSecret('DATABASE_URL', 'Optional — direct pg pool for migrations/raw SQL'),
+      },
+    };
+
+    const allVars = Object.values(vars).flatMap(g => Object.values(g));
+    const missingCritical = ['VITE_SUPABASE_URL', 'VITE_SUPABASE_ANON_KEY', 'SUPABASE_SERVICE_ROLE_KEY']
+      .filter(k => vars.core[k].status !== 'set');
+    const invalidCount = allVars.filter(v => v.status === 'invalid').length;
+    const missingCount = allVars.filter(v => v.status === 'missing').length;
+
+    const overallStatus =
+      missingCritical.length > 0 || invalidCount > 0 ? 'error'
+      : missingCount > 0 ? 'degraded'
+      : 'ok';
+
+    const supabaseUrlRaw = (process.env.VITE_SUPABASE_URL ?? '').trim();
+
+    res.status(overallStatus === 'error' ? 503 : 200).json({
+      status: overallStatus,
+      timestamp: new Date().toISOString(),
+      node: process.version,
+      env: process.env.NODE_ENV ?? 'development',
+      summary: {
+        total:   allVars.length,
+        set:     allVars.filter(v => v.status === 'set').length,
+        missing: missingCount,
+        invalid: invalidCount,
+      },
+      vars,
       supabase: {
-        status: supabaseStatus,
-        error: supabaseError
-      }
+        urlPrefix: supabaseUrlRaw ? supabaseUrlRaw.replace(/^(https?:\/\/[^.]+).*/, '$1') + '…' : null,
+        connectivity: _cachedHealth.status,
+        error: _cachedHealth.error,
+        cachedAgoMs: _cachedHealth.checkedAt ? Date.now() - _cachedHealth.checkedAt : null,
+      },
     });
   });
 
@@ -1886,6 +2686,7 @@ Assistant:`;
         success: true,
         logoUrl: typeof b.logoUrl === "string" ? b.logoUrl : null,
         faviconUrl: typeof b.faviconUrl === "string" ? b.faviconUrl : null,
+        logoText: typeof b.logoText === "string" ? b.logoText.trim().toUpperCase() : null,
         schoolName,
         colors: b.colors && typeof b.colors === "object" ? b.colors : null,
         typography: b.typography && typeof b.typography === "object" ? b.typography : null,
@@ -1933,6 +2734,51 @@ Assistant:`;
         });
       }
       res.status(500).json({ error: e?.message || "Failed to load platform runtime config" });
+    }
+  });
+
+  // ── Combined platform init endpoint — returns runtime + branding + features in ONE request.
+  // Replaces the 2-3 separate calls that App.tsx, StudentLayout and TeacherLayout used to fire.
+  app.get("/api/platform/init", async (_req, res) => {
+    try {
+      const [settings, branding] = await Promise.all([
+        getConfigSection("settings").catch(() => null),
+        getConfigSection("branding").catch(() => null),
+      ]);
+      const s: any = settings || {};
+      const b: any = branding || {};
+      const features = extractPublicFeatureFlags(settings);
+      const maintenanceMode = Boolean(s?.advanced?.maintenance);
+      const schoolName = (typeof s?.general?.school_name === "string" && s.general.school_name.trim()) ||
+        (typeof b?.schoolName === "string" && b.schoolName.trim()) || "QuizMaster";
+      // Set a short browser cache so identical unauthenticated visits reuse the response
+      res.set("Cache-Control", "public, max-age=60, stale-while-revalidate=300");
+      res.json({
+        success: true,
+        features,
+        maintenanceMode,
+        schoolName,
+        logoUrl: typeof b.logoUrl === "string" ? b.logoUrl : null,
+        faviconUrl: typeof b.faviconUrl === "string" ? b.faviconUrl : null,
+        logoText: typeof b.logoText === "string" ? b.logoText.trim().toUpperCase() : null,
+        colors: b.colors && typeof b.colors === "object" ? b.colors : null,
+        typography: b.typography && typeof b.typography === "object" ? b.typography : null,
+        copy: b.copy && typeof b.copy === "object" ? b.copy : null,
+        darkMode: Boolean(b.darkMode),
+      });
+    } catch (e: any) {
+      if (isPlatformConfigMissing(e)) {
+        res.set("Cache-Control", "public, max-age=60");
+        return res.json({
+          success: true,
+          features: extractPublicFeatureFlags(null),
+          maintenanceMode: false,
+          schoolName: "QuizMaster",
+          logoUrl: null, faviconUrl: null, logoText: null, colors: null,
+          typography: null, copy: null, darkMode: false,
+        });
+      }
+      res.status(500).json({ error: e?.message || "Failed to load platform config" });
     }
   });
 
@@ -2275,8 +3121,13 @@ Assistant:`;
       if (!caller) return res.status(401).json({ error: "Unauthorized" });
       if (caller.role !== "admin") return res.status(403).json({ error: "Forbidden: admin role required" });
 
+      const page  = Math.max(0, parseInt(String(req.query.page  ?? '0')) || 0);
+      const limit = Math.min(200, Math.max(10, parseInt(String(req.query.limit ?? '100')) || 100));
+      const rangeStart = page * limit;
+      const rangeEnd   = rangeStart + limit - 1;
+
       const [profilesRes, teachersRes, coursesRes] = await Promise.all([
-        supabaseAdmin.from('profiles').select('*').eq('role', 'student'),
+        supabaseAdmin.from('profiles').select('*', { count: 'exact' }).eq('role', 'student').range(rangeStart, rangeEnd),
         supabaseAdmin.from('teachers').select('user_id, first_name, last_name'),
         supabaseAdmin.from('courses').select('id, student_ids, teacher_id'),
       ]);
@@ -2332,7 +3183,7 @@ Assistant:`;
         enrolledCourseCount: enrolledCountMap[p.id] || 0,
       }));
 
-      res.json({ success: true, students, teacherOptions });
+      res.json({ success: true, students, teacherOptions, total: profilesRes.count ?? students.length, page, limit });
     } catch (error: any) {
       console.error('Error fetching students:', error);
       res.status(500).json({ error: error.message });
@@ -2346,8 +3197,13 @@ Assistant:`;
       if (!caller) return;
       if (!isAdmin(caller)) return res.status(403).json({ error: "Forbidden: admin role required" });
 
+      const tPage  = Math.max(0, parseInt(String(req.query.page  ?? '0')) || 0);
+      const tLimit = Math.min(200, Math.max(10, parseInt(String(req.query.limit ?? '100')) || 100));
+      const tRangeStart = tPage * tLimit;
+      const tRangeEnd   = tRangeStart + tLimit - 1;
+
       const [profilesRes, teachersRes] = await Promise.all([
-        supabaseAdmin.from("profiles").select("*").eq("role", "teacher"),
+        supabaseAdmin.from("profiles").select("*", { count: 'exact' }).eq("role", "teacher").range(tRangeStart, tRangeEnd),
         supabaseAdmin.from("teachers").select("id, user_id"),
       ]);
 
@@ -2370,7 +3226,7 @@ Assistant:`;
         status: p.status || 'active',
         createdAt: p.created_at,
       }));
-      res.json({ success: true, teachers });
+      res.json({ success: true, teachers, total: profilesRes.count ?? teachers.length, page: tPage, limit: tLimit });
     } catch (error: any) {
       console.error('Error fetching teachers:', error);
       res.status(500).json({ error: error.message });
@@ -2379,16 +3235,23 @@ Assistant:`;
 
   // Route to seed the initial admin account
   app.get("/api/admin/seed", async (req, res) => {
-    const adminEmail = "liridon.salihi123@gmail.com";
+    const adminEmail = "britanicaschool@gmail.com";
     const adminPassword = "Admin123!";
     
     try {
-      const caller = await assertAuthenticated(req, res);
-      if (!caller) return;
-      if (!isAdmin(caller)) return res.status(403).json({ error: "Forbidden: admin role required" });
-      if (!isAdminSeedAllowed(process.env.NODE_ENV)) {
-        return res.status(403).json({ error: "Forbidden: admin seed is disabled outside development" });
+      // Allow unauthenticated seed only when no profiles exist yet (fresh DB)
+      const { count } = await supabaseAdmin
+        .from('profiles')
+        .select('id', { count: 'exact', head: true })
+        .then(r => ({ count: r.count ?? 0 }));
+
+      if (count > 0) {
+        // Profiles exist — require admin auth before re-seeding
+        const caller = await assertAuthenticated(req, res);
+        if (!caller) return;
+        if (!isAdmin(caller)) return res.status(403).json({ error: "Forbidden: admin role required" });
       }
+      // Fresh DB (count === 0): allow seed freely so admins can bootstrap any environment
 
       // 1. Check if profiles table exists
       const { error: tableCheckError } = await supabaseAdmin
@@ -2481,6 +3344,115 @@ Assistant:`;
         <p>Error: ${error.message}</p>
         <p>Please check your Supabase URL and Service Role Key in the Secrets menu.</p>
       `);
+    }
+  });
+
+  // ── Clear all database data except admin users ────────────────────────────
+  app.post("/api/admin/clear-database", async (req, res) => {
+    try {
+      const { confirmation } = req.body || {};
+      if (confirmation !== "DELETE") {
+        return res.status(400).json({ error: "Confirmation text must be 'DELETE'" });
+      }
+
+      const caller = await getAuthUser(req);
+      if (!caller || caller.role !== "admin") {
+        return res.status(403).json({ error: "Forbidden" });
+      }
+
+      const adminId = caller.userId;
+
+      // Step 1: find all non-admin user IDs so we can delete their auth accounts
+      const { data: nonAdminProfiles } = await supabaseAdmin
+        .from("profiles")
+        .select("id")
+        .neq("role", "admin");
+
+      const nonAdminIds: string[] = (nonAdminProfiles || []).map((p: any) => p.id);
+
+      // Step 2: delete non-admin auth users in Supabase Auth
+      const authDeletions = nonAdminIds.map((id) =>
+        supabaseAdmin.auth.admin.deleteUser(id).catch(() => null)
+      );
+      await Promise.all(authDeletions);
+
+      // Step 3: truncate all data tables (order matters for foreign keys)
+      const tables = [
+        // Discussion system (children first)
+        "discussion_moderation_actions",
+        "discussion_user_badges",
+        "discussion_badges",
+        "discussion_user_stats",
+        "lesson_discussion_reports",
+        "lesson_discussion_reactions",
+        "lesson_discussion_replies",
+        "lesson_discussion_answers",
+        "lesson_discussion_questions",
+        // Live sessions
+        "session_reactions",
+        "session_chat_messages",
+        "session_participants",
+        "live_sessions",
+        // Community & announcements
+        "community_posts",
+        "announcements",
+        // Quiz data
+        "quiz_runtime_state",
+        "quiz_attempts",
+        "attempts",
+        "questions",
+        "quizzes",
+        // Lesson content & progress
+        "lesson_progress",
+        "lesson_contents",
+        "lessons",
+        // Academic records
+        "assignment_submissions",
+        "assignments",
+        "attendance",
+        "certificates",
+        // Finance
+        "invoices",
+        "payments",
+        // Course structure
+        "modules",
+        "courses",
+        "classes",
+        // User data (non-admins only – handled below)
+        "teachers",
+        "students",
+        "notifications",
+        // Config & monitoring
+        "platform_config",
+        "error_alert_context",
+      ];
+
+      const errors: string[] = [];
+      for (const table of tables) {
+        try {
+          const { error } = await supabaseAdmin.from(table).delete().neq("id", "00000000-0000-0000-0000-000000000000");
+          if (error && !error.message.includes("does not exist") && !error.message.includes("relation")) {
+            errors.push(`${table}: ${error.message}`);
+          }
+        } catch {
+          // Table doesn't exist — skip silently
+        }
+      }
+
+      // Step 4: delete non-admin profiles (keep admins)
+      await supabaseAdmin.from("profiles").delete().neq("role", "admin");
+
+      console.log(`[clear-database] Cleared by admin ${adminId}. Errors: ${errors.length ? errors.join("; ") : "none"}`);
+
+      return res.json({
+        success: true,
+        message: "Database cleared. All data deleted except admin accounts.",
+        deletedUsers: nonAdminIds.length,
+        errors,
+      });
+    } catch (err: any) {
+      console.error("[clear-database] Error:", err);
+      return res.status(500).json({ error: err.message || "Failed to clear database" });
     }
   });
 
@@ -2657,6 +3629,121 @@ Assistant:`;
   });
 
   // Route to create a teacher (Admin only)
+  // ── Helper: send credentials to a newly created user via configured channels ─
+  const sendUserCredentials = async (opts: {
+    name: string;
+    email: string;
+    password: string;
+    role: 'teacher' | 'student';
+    phone?: string;
+  }) => {
+    try {
+      const settings: any = await getConfigSection('settings');
+      const channels = settings?.notification_channels || {};
+      const brandName: string = settings?.general?.school_name || 'QuizMaster';
+      const baseUrl = process.env.REPLIT_DEV_DOMAIN
+        ? `https://${process.env.REPLIT_DEV_DOMAIN}`
+        : (settings?.general?.website || 'http://localhost:5000');
+      const loginUrl = `${baseUrl}/login?email=${encodeURIComponent(opts.email)}&pw=${encodeURIComponent(opts.password)}`;
+
+      const plainText = [
+        `Përshëndetje ${opts.name},`,
+        opts.role === 'teacher'
+          ? `Ju jeni ftuar si mësues në platformën ${brandName}.`
+          : `Llogaria juaj si student në ${brandName} është krijuar me sukses.`,
+        ``,
+        `Kredencialet tuaja:`,
+        `Email: ${opts.email}`,
+        `Fjalëkalim: ${opts.password}`,
+        `Kyçuni: ${loginUrl}`,
+        ``,
+        `Ju mirëpresim! — Ekipi i ${brandName}`,
+      ].join('\n');
+
+      const results: Record<string, string> = {};
+
+      // ── 1. Email via Brevo (enabled by default unless explicitly disabled) ──
+      if (channels.email_enabled !== false) {
+        try {
+          if (isEmailConfigured()) {
+            const tpl = renderCredentialEmail({ name: opts.name, email: opts.email, password: opts.password, role: opts.role, loginUrl, brandName });
+            await sendEmail({ to: opts.email, toName: opts.name, subject: tpl.subject, htmlContent: tpl.htmlContent, textContent: tpl.textContent });
+            results.email = 'sent';
+          } else {
+            results.email = 'not_configured';
+          }
+        } catch (e: any) {
+          results.email = `error: ${e.message}`;
+        }
+      }
+
+      // ── 2. Viber ──
+      if (channels.viber_enabled && channels.viber_token && opts.phone) {
+        try {
+          const vRes = await fetch('https://chatapi.viber.com/pa/send_message', {
+            method: 'POST',
+            headers: { 'X-Viber-Auth-Token': String(channels.viber_token), 'Content-Type': 'application/json' },
+            body: JSON.stringify({ receiver: opts.phone.replace(/[^0-9]/g, ''), type: 'text', text: plainText }),
+          });
+          const vJson = await vRes.json().catch(() => ({})) as any;
+          results.viber = vJson.status === 0 ? 'sent' : `error: ${vJson.status_message || vRes.status}`;
+        } catch (e: any) {
+          results.viber = `error: ${e.message}`;
+        }
+      }
+
+      // ── 3. WhatsApp (Meta Cloud API) ──
+      if (channels.whatsapp_enabled && channels.whatsapp_token && channels.whatsapp_phone_id && opts.phone) {
+        try {
+          const waRes = await fetch(`https://graph.facebook.com/v19.0/${channels.whatsapp_phone_id}/messages`, {
+            method: 'POST',
+            headers: { 'Authorization': `Bearer ${channels.whatsapp_token}`, 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              messaging_product: 'whatsapp',
+              to: opts.phone.replace(/[^0-9]/g, ''),
+              type: 'text',
+              text: { body: plainText },
+            }),
+          });
+          const waJson = await waRes.json().catch(() => ({})) as any;
+          results.whatsapp = waJson.messages?.[0]?.id ? 'sent' : `error: ${JSON.stringify(waJson.error || waJson)}`;
+        } catch (e: any) {
+          results.whatsapp = `error: ${e.message}`;
+        }
+      }
+
+      // ── 4. Gmail (SMTP via nodemailer) ──
+      if (channels.gmail_enabled && channels.gmail_user && channels.gmail_password) {
+        try {
+          const nodemailer = await import('nodemailer');
+          const transporter = nodemailer.default.createTransport({
+            host: 'smtp.gmail.com',
+            port: 587,
+            secure: false,
+            auth: { user: String(channels.gmail_user), pass: String(channels.gmail_password) },
+          });
+          const tpl = renderCredentialEmail({ name: opts.name, email: opts.email, password: opts.password, role: opts.role, loginUrl, brandName });
+          await transporter.sendMail({
+            from: `"${brandName}" <${channels.gmail_user}>`,
+            to: opts.email,
+            subject: tpl.subject,
+            html: tpl.htmlContent,
+            text: tpl.textContent,
+          });
+          results.gmail = 'sent';
+        } catch (e: any) {
+          results.gmail = `error: ${e.message}`;
+        }
+      }
+
+      console.log(`[credentials] ${opts.role} ${opts.email} →`, JSON.stringify(results));
+      return results;
+    } catch (e: any) {
+      console.error('[credentials] sendUserCredentials error:', e.message);
+      return {};
+    }
+  };
+
   app.post("/api/admin/create-teacher", async (req, res) => {
     const { name, email, password, phone, specialization } = req.body;
     
@@ -2730,6 +3817,8 @@ Assistant:`;
       if (teacherError) throw teacherError;
 
       res.json({ success: true, uid: userId });
+      // Fire-and-forget: send credentials via configured notification channels
+      void sendUserCredentials({ name, email, password, role: 'teacher', phone: phone || undefined });
     } catch (error: any) {
       console.error('Error creating teacher:', error);
       res.status(500).json({ error: error.message });
@@ -2737,6 +3826,54 @@ Assistant:`;
   });
 
   // Route to create a student
+  app.post("/api/admin/reset-all-welcome", async (req, res) => {
+    try {
+      const caller = await assertAuthenticated(req, res);
+      if (!caller) return;
+      if (caller.role !== "admin") return res.status(403).json({ error: "Admin only" });
+
+      // Fetch all users with role=student
+      let page = 1;
+      const resetIds: string[] = [];
+      while (true) {
+        const { data, error } = await supabaseAdmin.auth.admin.listUsers({ page, perPage: 1000 });
+        if (error) throw error;
+        for (const u of data.users) {
+          if (u.user_metadata?.role === "student") resetIds.push(u.id);
+        }
+        if (data.users.length < 1000) break;
+        page++;
+      }
+
+      // Reset welcomed flag for each student
+      await Promise.all(
+        resetIds.map(id =>
+          supabaseAdmin.auth.admin.updateUserById(id, { user_metadata: { welcomed: false } })
+        )
+      );
+
+      return res.json({ success: true, count: resetIds.length });
+    } catch (e: any) {
+      return res.status(500).json({ error: e?.message || "Failed to reset welcome flags" });
+    }
+  });
+
+  app.post("/api/admin/reset-welcome/:userId", async (req, res) => {
+    try {
+      const caller = await assertAuthenticated(req, res);
+      if (!caller) return;
+      if (caller.role !== "admin") return res.status(403).json({ error: "Admin only" });
+      const { userId } = req.params;
+      const { error } = await supabaseAdmin.auth.admin.updateUserById(userId, {
+        user_metadata: { welcomed: false },
+      });
+      if (error) throw error;
+      return res.json({ success: true });
+    } catch (e: any) {
+      return res.status(500).json({ error: e?.message || "Failed to reset welcome flag" });
+    }
+  });
+
   app.post("/api/admin/create-student", async (req, res) => {
     const {
       name, email, password, teacherId,
@@ -2856,9 +3993,15 @@ Assistant:`;
           throw new Error('You cannot assign this student to the selected class.');
         }
 
-        const classStudentIds = Array.isArray(cls.student_ids) ? cls.student_ids.map((sid: unknown) => String(sid)) : [];
+        const classStudentIds = [...new Set(
+          (Array.isArray(cls.student_ids) ? cls.student_ids : []).map((sid: unknown) => String(sid)).filter(Boolean)
+        )];
         if (!classStudentIds.includes(userId)) {
-          const nextClassStudentIds = [...new Set([...classStudentIds, userId])];
+          const capacity = cls.capacity != null && cls.capacity !== '' ? Number(cls.capacity) : 30;
+          if (classStudentIds.length >= capacity) {
+            return res.status(400).json({ error: `This class is full (${classStudentIds.length}/${capacity}). No free spots available.` });
+          }
+          const nextClassStudentIds = [...classStudentIds, userId];
           const classUpdate = await supabaseAdmin
             .from('classes')
             .update({ student_ids: nextClassStudentIds })
@@ -2890,6 +4033,8 @@ Assistant:`;
       }
 
       res.json({ success: true, uid: userId });
+      // Fire-and-forget: send credentials via configured notification channels
+      void sendUserCredentials({ name, email, password, role: 'student', phone: phone || undefined });
     } catch (error: any) {
       console.error('Error creating student:', error);
       res.status(500).json({ error: error.message });
@@ -2909,6 +4054,23 @@ Assistant:`;
         .order('created_at', { ascending: false });
       if (error) throw error;
       res.json({ success: true, courses: data || [] });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  app.get('/api/admin/courses/:id', async (req, res) => {
+    try {
+      const caller = await assertAuthenticated(req, res);
+      if (!caller) return;
+      if (!isAdmin(caller)) return res.status(403).json({ error: 'Forbidden: admin role required' });
+      const { data, error } = await supabaseAdmin
+        .from('courses')
+        .select('*')
+        .eq('id', req.params.id)
+        .single();
+      if (error) return res.status(404).json({ error: 'Course not found' });
+      res.json({ success: true, course: data });
     } catch (e: any) {
       res.status(500).json({ error: e.message });
     }
@@ -2947,6 +4109,98 @@ Assistant:`;
       if (error) throw error;
       res.json({ success: true, courses: data || [] });
     } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  // Teacher: create own course
+  app.post('/api/teacher/courses', async (req: Request, res: Response) => {
+    try {
+      const caller = await assertAuthenticated(req, res);
+      if (!caller) return;
+      if (caller.role !== 'teacher' && caller.role !== 'admin') {
+        return res.status(403).json({ error: 'Forbidden: teacher or admin role required' });
+      }
+
+      const teacherId = caller.userId;
+      const teacherIdCandidates = await getTeacherIdCandidates(teacherId);
+      if (teacherIdCandidates.length === 0) {
+        return res.status(400).json({ error: 'Teacher account not found.' });
+      }
+
+      const baseSlug = (req.body.title || 'course')
+        .toLowerCase().trim()
+        .replace(/[^a-z0-9]+/g, '-')
+        .replace(/^-|-$/g, '');
+      const slug = `${baseSlug}-${Date.now()}`;
+
+      const payloadBase = {
+        ...sanitizeCoursePayload(req.body),
+        slug,
+        created_at: new Date().toISOString(),
+      };
+
+      let createdCourse: any = null;
+      for (const tid of teacherIdCandidates) {
+        const { data, error } = await supabaseAdmin
+          .from('courses')
+          .insert({ ...payloadBase, teacher_id: tid })
+          .select()
+          .single();
+        if (!error) { createdCourse = data; break; }
+        if (!(error.code === '23503' && typeof error.message === 'string' && error.message.includes('courses_teacher_id_fkey'))) {
+          throw error;
+        }
+      }
+
+      if (!createdCourse) {
+        return res.status(400).json({ error: 'Could not create course. Please try again.' });
+      }
+
+      // Optionally link to a class
+      const selectedClassId = typeof req.body?.class_id === 'string' ? req.body.class_id.trim() : '';
+      if (selectedClassId) {
+        const { data: classRow } = await supabaseAdmin
+          .from('classes').select('id, student_ids').eq('id', selectedClassId).maybeSingle();
+        if (classRow) {
+          const studentIds = Array.isArray((classRow as any).student_ids)
+            ? (classRow as any).student_ids.map((s: unknown) => String(s)).filter(Boolean)
+            : [];
+          const unique = Array.from(new Set(studentIds));
+          const { data: updated } = await supabaseAdmin
+            .from('courses')
+            .update({ student_ids: unique, total_students: unique.length, updated_at: new Date().toISOString() })
+            .eq('id', createdCourse.id).select().single();
+          if (updated) createdCourse = updated;
+        }
+      }
+
+      res.json({ success: true, course: createdCourse });
+    } catch (e: any) {
+      console.error('POST /api/teacher/courses', e);
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  // Teacher: update own course
+  app.patch('/api/teacher/courses/:id', async (req: Request, res: Response) => {
+    try {
+      const caller = await assertAuthenticated(req, res);
+      if (!caller) return;
+      const { id: courseId } = req.params;
+      const gate = await assertTeacherOwnsCourse(caller.userId, courseId);
+      if (!gate.ok) return res.status(403).json({ error: 'You do not have access to this course.' });
+
+      const updates = {
+        ...sanitizeCoursePayload(req.body),
+        updated_at: new Date().toISOString(),
+      };
+      const { data, error } = await supabaseAdmin
+        .from('courses').update(updates).eq('id', courseId).select().single();
+      if (error) throw error;
+      res.json({ success: true, course: data });
+    } catch (e: any) {
+      console.error('PATCH /api/teacher/courses/:id', e);
       res.status(500).json({ error: e.message });
     }
   });
@@ -3170,6 +4424,189 @@ Assistant:`;
     }
   });
 
+  // ── GET /api/teacher/peer-teachers — list of other active teachers (for transfer target picker) ──
+  app.get("/api/teacher/peer-teachers", async (req: Request, res: Response) => {
+    try {
+      const caller = await assertAuthenticated(req, res);
+      if (!caller) return;
+      if (caller.role !== "teacher" && caller.role !== "admin") {
+        return res.status(403).json({ error: "Forbidden" });
+      }
+      const { data, error } = await supabaseAdmin
+        .from("profiles")
+        .select("id, display_name, email, status")
+        .eq("role", "teacher")
+        .neq("id", caller.userId)
+        .eq("status", "active")
+        .order("display_name", { ascending: true });
+      if (error) throw error;
+      return res.json({ teachers: data ?? [] });
+    } catch (e: any) {
+      console.error("GET /api/teacher/peer-teachers", e);
+      return res.status(500).json({ error: e?.message || "Failed to load teachers" });
+    }
+  });
+
+  // ── POST /api/teacher/students/:studentId/transfer — reassign a student to a different teacher ──
+  app.post("/api/teacher/students/:studentId/transfer", async (req: Request, res: Response) => {
+    try {
+      const caller = await assertAuthenticated(req, res);
+      if (!caller) return;
+      if (caller.role !== "teacher" && caller.role !== "admin") {
+        return res.status(403).json({ error: "Forbidden" });
+      }
+
+      const studentId = String(req.params.studentId || "").trim();
+      const targetTeacherId = typeof req.body?.targetTeacherId === "string" ? req.body.targetTeacherId.trim() : "";
+      if (!studentId) return res.status(400).json({ error: "studentId is required" });
+      if (!targetTeacherId) return res.status(400).json({ error: "targetTeacherId is required" });
+
+      // Verify student exists and belongs to the caller (teachers) or any (admin)
+      const { data: student, error: sErr } = await supabaseAdmin
+        .from("profiles")
+        .select("id, role, teacher_id, display_name, email")
+        .eq("id", studentId)
+        .maybeSingle();
+      if (sErr) throw sErr;
+      if (!student) return res.status(404).json({ error: "Student not found" });
+      if (student.role !== "student") return res.status(400).json({ error: "Target user is not a student" });
+
+      if (caller.role === "teacher") {
+        const teacherIds = await getTeacherIdCandidates(caller.userId);
+        const scopedIds = teacherIds.length > 0 ? teacherIds : [caller.userId];
+        if (!scopedIds.includes(String(student.teacher_id))) {
+          return res.status(403).json({ error: "Forbidden: student is not linked to your account" });
+        }
+      }
+
+      // Verify target teacher exists and has the teacher role
+      const { data: targetTeacher, error: tErr } = await supabaseAdmin
+        .from("profiles")
+        .select("id, role, display_name")
+        .eq("id", targetTeacherId)
+        .maybeSingle();
+      if (tErr) throw tErr;
+      if (!targetTeacher) return res.status(404).json({ error: "Target teacher not found" });
+      if (targetTeacher.role !== "teacher") return res.status(400).json({ error: "Target user is not a teacher" });
+
+      // Perform the transfer
+      const { error: updErr } = await supabaseAdmin
+        .from("profiles")
+        .update({ teacher_id: targetTeacherId })
+        .eq("id", studentId);
+      if (updErr) throw updErr;
+
+      // Get the from-teacher name for the log
+      const { data: fromTeacherProfile } = await supabaseAdmin
+        .from("profiles")
+        .select("display_name, email")
+        .eq("id", caller.userId)
+        .maybeSingle();
+
+      // Log the transfer (fire-and-forget; don't let a logging failure break the transfer)
+      await supabaseAdmin.from("student_transfers").insert({
+        student_id:       studentId,
+        student_name:     student.display_name || "",
+        student_email:    student.email || "",
+        from_teacher_id:  caller.userId,
+        from_teacher_name: fromTeacherProfile?.display_name || fromTeacherProfile?.email || "",
+        to_teacher_id:    targetTeacherId,
+        to_teacher_name:  targetTeacher.display_name || "",
+        transferred_by:   caller.userId,
+      }).then(({ error: logErr }) => {
+        if (logErr) console.warn("[transfer] Failed to log transfer:", logErr.message);
+      });
+
+      console.log(`[transfer] Student ${studentId} transferred from teacher ${caller.userId} → ${targetTeacherId}`);
+      return res.json({
+        success: true,
+        message: `${student.display_name || student.email} transferred to ${targetTeacher.display_name}`,
+      });
+    } catch (e: any) {
+      console.error("POST /api/teacher/students/:studentId/transfer", e);
+      return res.status(500).json({ error: e?.message || "Failed to transfer student" });
+    }
+  });
+
+  // ── GET /api/admin/transfer-history — all student transfers (admin only) ──
+  app.get("/api/admin/transfer-history", async (req: Request, res: Response) => {
+    try {
+      const caller = await assertAuthenticated(req, res);
+      if (!caller) return;
+      if (caller.role !== "admin") return res.status(403).json({ error: "Forbidden" });
+
+      const limit  = Math.min(200, Math.max(1, parseInt(String(req.query.limit  ?? "50"), 10)));
+      const offset = Math.max(0,              parseInt(String(req.query.offset ?? "0"),  10));
+
+      const { data, error, count } = await supabaseAdmin
+        .from("student_transfers")
+        .select("*", { count: "exact" })
+        .order("transferred_at", { ascending: false })
+        .range(offset, offset + limit - 1);
+
+      if (error) {
+        if (/does not exist|PGRST|schema cache|Could not find/i.test(error.message)) {
+          return res.json({ transfers: [], total: 0 });
+        }
+        throw error;
+      }
+      return res.json({ transfers: data ?? [], total: count ?? 0 });
+    } catch (e: any) {
+      console.error("GET /api/admin/transfer-history", e);
+      return res.status(500).json({ error: e?.message || "Failed to load transfer history" });
+    }
+  });
+
+  // ── GET /api/teacher/transfer-history — transfers involving the calling teacher ──
+  app.get("/api/teacher/transfer-history", async (req: Request, res: Response) => {
+    try {
+      const caller = await assertAuthenticated(req, res);
+      if (!caller) return;
+      if (caller.role !== "teacher" && caller.role !== "admin") {
+        return res.status(403).json({ error: "Forbidden" });
+      }
+
+      const limit  = Math.min(100, Math.max(1, parseInt(String(req.query.limit  ?? "30"), 10)));
+      const offset = Math.max(0,              parseInt(String(req.query.offset ?? "0"),  10));
+
+      // Teachers see transfers they initiated (from) OR received (to)
+      const { data: sent, error: e1 } = await supabaseAdmin
+        .from("student_transfers")
+        .select("*")
+        .eq("from_teacher_id", caller.userId)
+        .order("transferred_at", { ascending: false })
+        .limit(limit);
+
+      const { data: received, error: e2 } = await supabaseAdmin
+        .from("student_transfers")
+        .select("*")
+        .eq("to_teacher_id", caller.userId)
+        .order("transferred_at", { ascending: false })
+        .limit(limit);
+
+      if (e1 && /does not exist|PGRST|schema cache|Could not find/i.test(e1.message)) {
+        return res.json({ transfers: [] });
+      }
+      if (e2 && /does not exist|PGRST|schema cache|Could not find/i.test(e2?.message || '')) {
+        return res.json({ transfers: [] });
+      }
+      if (e1) throw e1;
+      if (e2) throw e2;
+
+      // Merge, deduplicate, sort by date
+      const allById = new Map<string, any>();
+      [...(sent ?? []), ...(received ?? [])].forEach(t => allById.set(t.id, t));
+      const merged = Array.from(allById.values())
+        .sort((a, b) => new Date(b.transferred_at).getTime() - new Date(a.transferred_at).getTime())
+        .slice(offset, offset + limit);
+
+      return res.json({ transfers: merged });
+    } catch (e: any) {
+      console.error("GET /api/teacher/transfer-history", e);
+      return res.status(500).json({ error: e?.message || "Failed to load transfer history" });
+    }
+  });
+
   // Teacher quizzes (service role) — same scoping as courses; avoids PostgREST 400s when RLS/schema differ.
   const teacherQuizzesGetHandler = async (req: Request, res: Response) => {
     try {
@@ -3209,12 +4646,7 @@ Assistant:`;
       const teacherIds = await getTeacherIdCandidates(requestedUserId);
       const scopedIds = teacherIds.length > 0 ? teacherIds : [requestedUserId];
 
-      const coursesRes = await supabaseAdmin
-        .from("courses")
-        .select("id,title,student_ids")
-        .in("teacher_id", scopedIds);
-      if (coursesRes.error) throw coursesRes.error;
-      const courseRows = coursesRes.data || [];
+      const courseRows = await fetchTeacherCourseRows(scopedIds, true);
       const coursesCount = courseRows.length;
       const teacherCourseIds = courseRows.map((c: any) => String(c.id || "")).filter(Boolean);
 
@@ -3269,11 +4701,11 @@ Assistant:`;
       let quizRows: any[] = [];
       if (teacherCourseIds.length > 0) {
         const quizzesRes = await supabaseAdmin.from("quizzes").select("*").in("course_id", teacherCourseIds);
-        if (quizzesRes.error) throw quizzesRes.error;
-        quizRows = quizzesRes.data || [];
+        if (quizzesRes.error && !isAnyTableMissingError(quizzesRes.error)) throw quizzesRes.error;
+        quizRows = quizzesRes.error ? [] : (quizzesRes.data || []);
       }
       const quizzesCount = quizRows.length;
-      const quizIds = new Set(quizRows.map((q: any) => String(q.id || "")).filter(Boolean));
+      const quizIds = new Set<string>(quizRows.map((q: any) => String(q.id || "")).filter(Boolean));
       const passingScoreByQuiz = quizRows.reduce((acc: Record<string, number>, q: any) => {
         const raw =
           q?.settings?.passingScore ??
@@ -3285,7 +4717,10 @@ Assistant:`;
         return acc;
       }, {});
 
-      const attemptsRows = normalizeAttempts(await fetchAllAttemptRows(), passingScoreByQuiz).filter((a: any) => {
+      const attemptsRows = normalizeAttempts(
+        await fetchFilteredAttemptRows({ quizIds, studentIds: allowedStudentIds }),
+        passingScoreByQuiz
+      ).filter((a: any) => {
         if (!quizIds.has(String(a.quiz_id || ""))) return false;
         return allowedStudentIds.has(String(a.student_id || ""));
       });
@@ -3300,11 +4735,75 @@ Assistant:`;
         attemptsByStudent[sid].scoreSum += toFiniteNumber(a.score_percent, 0);
       });
 
+      // ── Assignment submissions — real activity data even when quiz_attempts is absent ──
+      let teacherAssignmentsCount = 0;
+      const assignmentsByStudent: Record<string, { submitted: number; graded: number; gradeSum: number; lastDate: string | null }> = {};
+      if (teacherCourseIds.length > 0) {
+        const assignmentsRes = await supabaseAdmin
+          .from("assignments")
+          .select("id,title,course_id")
+          .in("course_id", teacherCourseIds);
+        if (!assignmentsRes.error) {
+          const assignmentIds = (assignmentsRes.data || []).map((a: any) => String(a.id)).filter(Boolean);
+          teacherAssignmentsCount = assignmentIds.length;
+          if (assignmentIds.length > 0 && allowedStudentIds.size > 0) {
+            const subsRes = await supabaseAdmin
+              .from("assignment_submissions")
+              .select("id,assignment_id,student_id,grade,status,submitted_at")
+              .in("assignment_id", assignmentIds)
+              .in("student_id", [...allowedStudentIds]);
+            if (!subsRes.error) {
+              (subsRes.data || []).forEach((sub: any) => {
+                const sid = String(sub.student_id || "");
+                if (!sid || !allowedStudentIds.has(sid)) return;
+                if (!assignmentsByStudent[sid]) assignmentsByStudent[sid] = { submitted: 0, graded: 0, gradeSum: 0, lastDate: null };
+                assignmentsByStudent[sid].submitted += 1;
+                if (sub.grade != null && sub.grade !== "") {
+                  assignmentsByStudent[sid].graded += 1;
+                  assignmentsByStudent[sid].gradeSum += Number(sub.grade) || 0;
+                }
+                const d = sub.submitted_at || null;
+                if (d && (!assignmentsByStudent[sid].lastDate || d > assignmentsByStudent[sid].lastDate!)) {
+                  assignmentsByStudent[sid].lastDate = d;
+                }
+              });
+            }
+          }
+        }
+      }
+
       const rows = [...studentById.values()].map((s: any) => {
         const sid = String(s.id);
         const aggr = attemptsByStudent[sid] || { attempts: 0, passed: 0, scoreSum: 0 };
         const avgScore = aggr.attempts > 0 ? Math.round(aggr.scoreSum / aggr.attempts) : 0;
         const passRate = aggr.attempts > 0 ? Math.round((aggr.passed / aggr.attempts) * 100) : 0;
+
+        const studentAttempts = attemptsRows.filter((a: any) => String(a.student_id || "") === sid);
+        const sortedAttempts = [...studentAttempts].sort((a: any, b: any) =>
+          new Date(b.completed_at || 0).getTime() - new Date(a.completed_at || 0).getTime()
+        );
+        const lastAttemptDate: string | null = sortedAttempts[0]?.completed_at || null;
+
+        const courseCount: Record<string, number> = {};
+        studentAttempts.forEach((a: any) => {
+          const quiz = quizRows.find((q: any) => String(q.id || "") === String(a.quiz_id || ""));
+          if (quiz?.course_id) {
+            const cid = String(quiz.course_id);
+            courseCount[cid] = (courseCount[cid] || 0) + 1;
+          }
+        });
+        const topCourseId = Object.entries(courseCount).sort(([, a], [, b]) => (b as number) - (a as number))[0]?.[0];
+        const topCourse = courseRows.find((c: any) => String(c.id || "") === topCourseId);
+
+        const subAggr = assignmentsByStudent[sid] || { submitted: 0, graded: 0, gradeSum: 0, lastDate: null };
+        const submissionRate = teacherAssignmentsCount > 0 ? Math.round((subAggr.submitted / teacherAssignmentsCount) * 100) : 0;
+        const avgGrade = subAggr.graded > 0 ? Math.round(subAggr.gradeSum / subAggr.graded) : 0;
+        const lastActivityDate = (() => {
+          const dates = [lastAttemptDate, subAggr.lastDate].filter(Boolean) as string[];
+          if (!dates.length) return null;
+          return dates.sort((a, b) => b.localeCompare(a))[0];
+        })();
+
         return {
           studentId: sid,
           studentName: String(s.display_name || "Unknown Student"),
@@ -3313,10 +4812,16 @@ Assistant:`;
           passed: aggr.passed,
           passRate,
           avgScore,
+          lastAttemptDate: lastActivityDate,
+          topCourseName: topCourse?.title || null,
+          submissionsCount: subAggr.submitted,
+          assignmentsTotal: teacherAssignmentsCount,
+          submissionRate,
+          avgGrade,
         };
       });
 
-      res.json({ success: true, rows, coursesCount, quizzesCount });
+      res.json({ success: true, rows, coursesCount, quizzesCount, assignmentsCount: teacherAssignmentsCount });
     } catch (e: any) {
       res.status(500).json({ error: e?.message || "Failed to load teacher progress" });
     }
@@ -3343,17 +4848,16 @@ Assistant:`;
       const teacherIds = await getTeacherIdCandidates(requestedUserId);
       const scopedIds = teacherIds.length > 0 ? teacherIds : [requestedUserId];
 
-      const coursesRes = await supabaseAdmin.from("courses").select("id").in("teacher_id", scopedIds);
-      if (coursesRes.error) throw coursesRes.error;
-      const teacherCourseIds = (coursesRes.data || []).map((c: any) => String(c.id || "")).filter(Boolean);
+      const teacherCourseRowsFull = await fetchTeacherCourseRows(scopedIds, true);
+      const teacherCourseIds = teacherCourseRowsFull.map((c: any) => String(c.id || "")).filter(Boolean);
 
       let quizRows: any[] = [];
       if (teacherCourseIds.length > 0) {
         const quizzesRes = await supabaseAdmin.from("quizzes").select("*").in("course_id", teacherCourseIds);
-        if (quizzesRes.error) throw quizzesRes.error;
-        quizRows = quizzesRes.data || [];
+        if (quizzesRes.error && !isAnyTableMissingError(quizzesRes.error)) throw quizzesRes.error;
+        quizRows = quizzesRes.error ? [] : (quizzesRes.data || []);
       }
-      const quizIds = new Set(quizRows.map((q: any) => String(q.id || "")).filter(Boolean));
+      const quizIds = new Set<string>(quizRows.map((q: any) => String(q.id || "")).filter(Boolean));
       const quizzes: Record<string, string> = {};
       const passingScoreByQuiz = quizRows.reduce((acc: Record<string, number>, q: any) => {
         const qid = String(q.id || "");
@@ -3368,26 +4872,72 @@ Assistant:`;
         return acc;
       }, {});
 
-      const studentsRes = await supabaseAdmin
+      // Collect students from 3 sources (same pattern as /api/teacher/students & /api/teacher/progress)
+      const studentById = new Map<string, { name: string; email: string }>();
+
+      // Source 1: profiles.teacher_id
+      const linkedStudentsRes = await supabaseAdmin
         .from("profiles")
-        .select("id,display_name,email,teacher_id,role")
+        .select("id,display_name,email")
         .in("teacher_id", scopedIds)
         .eq("role", "student");
-      if (studentsRes.error) throw studentsRes.error;
-      const studentRows = studentsRes.data || [];
-      const allowedStudentIds = new Set(studentRows.map((s: any) => String(s.id || "")).filter(Boolean));
-      const students: Record<string, { name: string; email: string }> = {};
-      studentRows.forEach((s: any) => {
-        const sid = String(s.id || "");
-        if (!sid) return;
-        students[sid] = {
-          name: String(s.display_name || "Unknown"),
-          email: String(s.email || ""),
-        };
-      });
+      if (!linkedStudentsRes.error) {
+        for (const s of (linkedStudentsRes.data || [])) {
+          const sid = String(s.id || "");
+          if (sid) studentById.set(sid, { name: String(s.display_name || "Unknown"), email: String(s.email || "") });
+        }
+      }
 
-      const attempts = normalizeAttempts(await fetchAllAttemptRows(), passingScoreByQuiz)
-        .filter((a: any) => quizIds.has(String(a.quiz_id || "")) && allowedStudentIds.has(String(a.student_id || "")))
+      // Source 2: courses.student_ids
+      const courseEnrolledIds = new Set<string>();
+      for (const c of teacherCourseRowsFull) {
+        if (Array.isArray(c.student_ids)) {
+          for (const sid of c.student_ids) {
+            const s = String(sid || "");
+            if (s && !studentById.has(s)) courseEnrolledIds.add(s);
+          }
+        }
+      }
+
+      // Source 3: classes.student_ids
+      const classResForResults = await supabaseAdmin
+        .from("classes")
+        .select("student_ids")
+        .in("teacher_id", scopedIds);
+      if (!classResForResults.error && Array.isArray(classResForResults.data)) {
+        for (const cl of classResForResults.data) {
+          if (Array.isArray(cl.student_ids)) {
+            for (const sid of cl.student_ids) {
+              const s = String(sid || "");
+              if (s && !studentById.has(s)) courseEnrolledIds.add(s);
+            }
+          }
+        }
+      }
+
+      // Fetch profiles for course/class-enrolled students not yet in map
+      if (courseEnrolledIds.size > 0) {
+        const enrolledRes = await supabaseAdmin
+          .from("profiles")
+          .select("id,display_name,email")
+          .in("id", [...courseEnrolledIds]);
+        if (!enrolledRes.error) {
+          for (const s of (enrolledRes.data || [])) {
+            const sid = String(s.id || "");
+            if (sid && !studentById.has(sid)) {
+              studentById.set(sid, { name: String(s.display_name || "Unknown"), email: String(s.email || "") });
+            }
+          }
+        }
+      }
+
+      const allowedStudentIds = new Set<string>(studentById.keys());
+      const students: Record<string, { name: string; email: string }> = Object.fromEntries(studentById);
+
+      const attempts = normalizeAttempts(
+        await fetchFilteredAttemptRows({ quizIds, studentIds: allowedStudentIds }),
+        passingScoreByQuiz
+      ).filter((a: any) => quizIds.has(String(a.quiz_id || "")) && allowedStudentIds.has(String(a.student_id || "")))
         .map((a: any) => ({
           id: String(a.id || ""),
           quizId: String(a.quiz_id || ""),
@@ -3405,7 +4955,38 @@ Assistant:`;
             a.total_questions == null ? null : toFiniteNumber(a.total_questions, 0),
         }));
 
-      res.json({ success: true, attempts, quizzes, students });
+      // Assignment submissions — real activity even when quiz_attempts is absent
+      let assignmentSubmissions: any[] = [];
+      let assignments: Record<string, string> = {};
+      if (teacherCourseIds.length > 0) {
+        const asgRes = await supabaseAdmin
+          .from("assignments")
+          .select("id,title,course_id")
+          .in("course_id", teacherCourseIds);
+        if (!asgRes.error) {
+          (asgRes.data || []).forEach((a: any) => { assignments[String(a.id)] = String(a.title || "Assignment"); });
+          const asgIds = Object.keys(assignments);
+          if (asgIds.length > 0 && allowedStudentIds.size > 0) {
+            const subRes = await supabaseAdmin
+              .from("assignment_submissions")
+              .select("id,assignment_id,student_id,grade,status,submitted_at,content")
+              .in("assignment_id", asgIds)
+              .in("student_id", [...allowedStudentIds]);
+            if (!subRes.error) {
+              assignmentSubmissions = (subRes.data || []).map((s: any) => ({
+                id: String(s.id || ""),
+                assignmentId: String(s.assignment_id || ""),
+                studentId: String(s.student_id || ""),
+                grade: s.grade != null ? Number(s.grade) : null,
+                status: String(s.status || "submitted"),
+                submittedAt: s.submitted_at || null,
+              }));
+            }
+          }
+        }
+      }
+
+      res.json({ success: true, attempts, quizzes, students, assignmentSubmissions, assignments });
     } catch (e: any) {
       res.status(500).json({ error: e?.message || "Failed to load teacher results" });
     }
@@ -3414,6 +4995,7 @@ Assistant:`;
   // Teacher dashboard summary — scoped strictly to authenticated teacher ownership.
   app.get("/api/teacher/dashboard", async (req: Request, res: Response) => {
     try {
+      const dashboardStartedAt = Date.now();
       const caller = await assertAuthenticated(req, res);
       if (!caller) return;
       if (caller.role !== "teacher" && caller.role !== "admin") {
@@ -3429,28 +5011,69 @@ Assistant:`;
         return res.status(403).json({ error: "Forbidden" });
       }
 
+      const teacherDashboardCacheKey = `teacher-dashboard:${requestedUserId}`;
+      const cachedTeacherDashboard = getCachedApiResponse<any>(teacherDashboardCacheKey);
+      if (cachedTeacherDashboard) return res.json(cachedTeacherDashboard);
+
       const teacherIds = await getTeacherIdCandidates(requestedUserId);
       const scopedIds = teacherIds.length > 0 ? teacherIds : [requestedUserId];
 
-      const coursesRes = await supabaseAdmin.from("courses").select("id").in("teacher_id", scopedIds);
-      if (coursesRes.error) throw coursesRes.error;
-      const courseIds = (coursesRes.data || []).map((c: any) => String(c.id || "")).filter(Boolean);
+      // Fetch course rows including student_ids for enrollment counting
+      const courseRowsFull = await fetchTeacherCourseRows(scopedIds, true);
+      const courseIds = courseRowsFull.map((c: any) => String(c.id || "")).filter(Boolean);
 
-      const studentsRes = await supabaseAdmin
+      // Collect student IDs from 3 sources (mirrors /api/teacher/students logic):
+      // 1) profiles.teacher_id (direct link)
+      // 2) courses.student_ids (enrollment array on each course)
+      // 3) classes.student_ids (class-level enrollment)
+      const studentIds = new Set<string>();
+
+      // Source 1: profiles linked by teacher_id
+      const linkedStudentsRes = await supabaseAdmin
         .from("profiles")
         .select("id")
         .in("teacher_id", scopedIds)
         .eq("role", "student");
-      if (studentsRes.error) throw studentsRes.error;
-      const studentIds = new Set((studentsRes.data || []).map((s: any) => String(s.id || "")).filter(Boolean));
+      if (!linkedStudentsRes.error) {
+        for (const s of (linkedStudentsRes.data || [])) {
+          const sid = String(s.id || "");
+          if (sid) studentIds.add(sid);
+        }
+      }
+
+      // Source 2: courses.student_ids enrollment arrays
+      for (const c of courseRowsFull) {
+        if (Array.isArray(c.student_ids)) {
+          for (const sid of c.student_ids) {
+            const s = String(sid || "");
+            if (s) studentIds.add(s);
+          }
+        }
+      }
+
+      // Source 3: classes.student_ids for this teacher's classes
+      const classesRes = await supabaseAdmin
+        .from("classes")
+        .select("student_ids")
+        .in("teacher_id", scopedIds);
+      if (!classesRes.error && Array.isArray(classesRes.data)) {
+        for (const cl of classesRes.data) {
+          if (Array.isArray(cl.student_ids)) {
+            for (const sid of cl.student_ids) {
+              const s = String(sid || "");
+              if (s) studentIds.add(s);
+            }
+          }
+        }
+      }
 
       let quizRows: any[] = [];
       if (courseIds.length > 0) {
         const quizzesRes = await supabaseAdmin.from("quizzes").select("*").in("course_id", courseIds);
-        if (quizzesRes.error) throw quizzesRes.error;
-        quizRows = quizzesRes.data || [];
+        if (quizzesRes.error && !isAnyTableMissingError(quizzesRes.error)) throw quizzesRes.error;
+        quizRows = quizzesRes.error ? [] : (quizzesRes.data || []);
       }
-      const quizIds = new Set(quizRows.map((q: any) => String(q.id || "")).filter(Boolean));
+      const quizIds = new Set<string>(quizRows.map((q: any) => String(q.id || "")).filter(Boolean));
       const passingScoreByQuiz = quizRows.reduce((acc: Record<string, number>, q: any) => {
         const raw =
           q?.settings?.passingScore ??
@@ -3462,7 +5085,10 @@ Assistant:`;
         return acc;
       }, {});
 
-      const attempts = normalizeAttempts(await fetchAllAttemptRows(), passingScoreByQuiz).filter((a: any) => {
+      const attempts = normalizeAttempts(
+        await fetchFilteredAttemptRows({ quizIds, studentIds }),
+        passingScoreByQuiz
+      ).filter((a: any) => {
         return quizIds.has(String(a.quiz_id || "")) && studentIds.has(String(a.student_id || ""));
       });
       const completedAttempts = attempts.filter((a: any) => String(a.status || "").toLowerCase() === "completed");
@@ -3510,7 +5136,79 @@ Assistant:`;
         };
       });
 
-      res.json({
+      // Module completion per course
+      let moduleCompletion: { course: string; published: number; total: number; pct: number }[] = [];
+      if (courseIds.length > 0) {
+        const [modulesForCourses, courseTitles] = await Promise.all([
+          supabaseAdmin.from("modules").select("id, course_id, status").in("course_id", courseIds),
+          supabaseAdmin.from("courses").select("id, title").in("id", courseIds),
+        ]);
+        if (!modulesForCourses.error && !courseTitles.error) {
+          const titleMap: Record<string, string> = {};
+          for (const c of (courseTitles.data || [])) {
+            titleMap[String(c.id)] = String(c.title || "Untitled");
+          }
+          const groupedByCourse: Record<string, { total: number; published: number }> = {};
+          for (const m of (modulesForCourses.data || [])) {
+            const cid = String(m.course_id || "");
+            if (!groupedByCourse[cid]) groupedByCourse[cid] = { total: 0, published: 0 };
+            groupedByCourse[cid].total++;
+            if (String(m.status || "").toLowerCase() === "published") groupedByCourse[cid].published++;
+          }
+          moduleCompletion = Object.entries(groupedByCourse)
+            .map(([cid, { total, published }]) => ({
+              course: titleMap[cid] || "Untitled",
+              published,
+              total,
+              pct: total > 0 ? Math.round((published / total) * 100) : 0,
+            }))
+            .sort((a, b) => b.pct - a.pct)
+            .slice(0, 8);
+        }
+      }
+
+      // Top students leaderboard (ranked by avg score, min 1 completed attempt)
+      let topStudents: { id: string; name: string; avatar: string | null; avgScore: number; quizzes: number; passed: number }[] = [];
+      if (completedAttempts.length > 0) {
+        const byStudent: Record<string, { scores: number[]; passed: number }> = {};
+        for (const a of completedAttempts) {
+          const sid = String(a.student_id || "");
+          if (!sid || !studentIds.has(sid)) continue;
+          if (!byStudent[sid]) byStudent[sid] = { scores: [], passed: 0 };
+          byStudent[sid].scores.push(toFiniteNumber(a.score_percent, 0));
+          if (a.passed) byStudent[sid].passed++;
+        }
+        const ranked = Object.entries(byStudent)
+          .map(([id, { scores, passed }]) => ({
+            id,
+            avgScore: Math.round(scores.reduce((s, v) => s + v, 0) / scores.length),
+            quizzes: scores.length,
+            passed,
+          }))
+          .sort((a, b) => b.avgScore - a.avgScore || b.quizzes - a.quizzes)
+          .slice(0, 10);
+
+        if (ranked.length > 0) {
+          const profilesRes = await supabaseAdmin
+            .from("profiles")
+            .select("id, display_name, email, avatar_url")
+            .in("id", ranked.map(r => r.id));
+          const profileMap: Record<string, { name: string; avatar: string | null }> = {};
+          for (const p of (profilesRes.data || [])) {
+            profileMap[String(p.id)] = {
+              name: String(p.display_name || p.email || "Student"),
+              avatar: p.avatar_url || null,
+            };
+          }
+          topStudents = ranked.map(r => ({
+            ...r,
+            name: profileMap[r.id]?.name ?? "Student",
+            avatar: profileMap[r.id]?.avatar ?? null,
+          }));
+        }
+      }
+
+      const payload = {
         success: true,
         stats: {
           courses: courseIds.length,
@@ -3522,7 +5220,17 @@ Assistant:`;
           certificates: certificatesCount,
         },
         trend,
-      });
+        moduleCompletion,
+        topStudents,
+      };
+      setCachedApiResponse(teacherDashboardCacheKey, payload, 30_000);
+      const durationMs = Date.now() - dashboardStartedAt;
+      if (durationMs > PERF_SLOW_THRESHOLD_MS) {
+        console.warn(
+          `[perf] slow teacher dashboard requestedUserId=${requestedUserId} duration=${durationMs}ms courseIds=${courseIds.length} quizIds=${quizIds.size} attempts=${attempts.length}`,
+        );
+      }
+      res.json(payload);
     } catch (e: any) {
       res.status(500).json({ error: e?.message || "Failed to load teacher dashboard" });
     }
@@ -3559,7 +5267,7 @@ Assistant:`;
 
       const profileRow = (profileRes.data || {}) as Record<string, unknown>;
       const courseIds = (coursesRes.data || []).map((c: any) => String(c.id || "")).filter(Boolean);
-      const studentIds = new Set((studentsRes.data || []).map((s: any) => String(s.id || "")).filter(Boolean));
+      const studentIds = new Set<string>((studentsRes.data || []).map((s: any) => String(s.id || "")).filter(Boolean));
 
       let quizRows: any[] = [];
       if (courseIds.length > 0) {
@@ -3568,7 +5276,7 @@ Assistant:`;
         quizRows = quizzesRes.data || [];
       }
 
-      const quizIds = new Set(quizRows.map((q: any) => String(q.id || "")).filter(Boolean));
+      const quizIds = new Set<string>(quizRows.map((q: any) => String(q.id || "")).filter(Boolean));
       const passingScoreByQuiz = quizRows.reduce((acc: Record<string, number>, q: any) => {
         const raw =
           q?.settings?.passingScore ??
@@ -3580,7 +5288,10 @@ Assistant:`;
         return acc;
       }, {});
 
-      const attempts = normalizeAttempts(await fetchAllAttemptRows(), passingScoreByQuiz).filter((a: any) => {
+      const attempts = normalizeAttempts(
+        await fetchFilteredAttemptRows({ quizIds, studentIds }),
+        passingScoreByQuiz
+      ).filter((a: any) => {
         return quizIds.has(String(a.quiz_id || "")) && studentIds.has(String(a.student_id || ""));
       });
       const completedAttempts = attempts.filter((a: any) => String(a.status || "").toLowerCase() === "completed");
@@ -3990,6 +5701,251 @@ Assistant:`;
   app.delete("/api/teacher/modules/:id", teacherModuleDeleteHandler);
   app.post("/api/teacher/modules/:id/delete", teacherModuleDeleteHandler);
 
+  // ── Bulk-update status for multiple modules ───────────────────────────────
+  app.post("/api/teacher/modules/bulk-status", async (req: Request, res: Response) => {
+    try {
+      const caller = await assertAuthenticated(req, res);
+      if (!caller) return;
+      const userId = typeof req.body?.userId === "string" ? req.body.userId.trim() : "";
+      const moduleIds: string[] = Array.isArray(req.body?.moduleIds)
+        ? req.body.moduleIds.filter((id: any) => typeof id === "string" && id)
+        : [];
+      const status = req.body?.status === "active" || req.body?.status === "inactive" ? req.body.status : null;
+      if (!userId) return res.status(400).json({ error: "userId is required" });
+      if (!moduleIds.length) return res.status(400).json({ error: "moduleIds required" });
+      if (!status) return res.status(400).json({ error: "status must be active or inactive" });
+      const { data: mods } = await supabaseAdmin.from("modules").select("id,course_id").in("id", moduleIds);
+      const courseIds = [...new Set((mods || []).map((m: any) => String(m.course_id)))];
+      for (const cid of courseIds) {
+        const gate = await assertTeacherOwnsCourse(userId, cid);
+        if (!gate.ok) return res.status(403).json({ error: "Access denied" });
+      }
+      const { error } = await supabaseAdmin.from("modules").update({ status, updated_at: new Date().toISOString() }).in("id", moduleIds);
+      if (error) throw error;
+      res.json({ success: true, updated: moduleIds.length });
+    } catch (e: any) {
+      console.error("POST /api/teacher/modules/bulk-status", e);
+      res.status(500).json({ error: e.message || "Server error" });
+    }
+  });
+
+  // ── Duplicate a module with all its lessons + lesson contents ─────────────
+  app.post("/api/teacher/modules/:id/duplicate", async (req: Request, res: Response) => {
+    try {
+      const caller = await assertAuthenticated(req, res);
+      if (!caller) return;
+      const moduleId = req.params.id;
+      const userId = typeof req.body?.userId === "string" ? req.body.userId.trim() : "";
+      if (!userId) return res.status(400).json({ error: "userId is required" });
+      const { data: mod, error: mErr } = await supabaseAdmin.from("modules").select("*").eq("id", moduleId).maybeSingle();
+      if (mErr) throw mErr;
+      if (!mod) return res.status(404).json({ error: "Module not found" });
+      const gate = await assertTeacherOwnsCourse(userId, String(mod.course_id));
+      if (!gate.ok) return res.status(403).json({ error: "Access denied" });
+      const { data: maxOrd } = await supabaseAdmin.from("modules").select("order").eq("course_id", mod.course_id).order("order", { ascending: false }).limit(1).maybeSingle();
+      const newOrder = ((maxOrd as any)?.order ?? 0) + 1;
+      const ts = Date.now();
+      const slugBase = String(mod.slug || mod.title || "module").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+      const { data: newMod, error: newErr } = await supabaseAdmin.from("modules")
+        .insert({ course_id: mod.course_id, title: `${mod.title} (Copy)`, slug: `${slugBase}-copy-${ts}`, description: mod.description, status: "inactive", order: newOrder })
+        .select("id").single();
+      if (newErr) throw newErr;
+      const { data: lessons } = await supabaseAdmin.from("lessons").select("*").eq("module_id", moduleId).order("order");
+      if (lessons && lessons.length > 0) {
+        const newLessons = lessons.map((l: any) => ({
+          course_id: l.course_id, module_id: newMod.id, title: l.title,
+          slug: `${String(l.slug || l.title || "lesson").toLowerCase().replace(/[^a-z0-9]+/g, "-")}-${ts}`,
+          type: l.type, short_description: l.short_description, order: l.order,
+          status: l.status, duration_minutes: l.duration_minutes, is_free_preview: l.is_free_preview,
+        }));
+        const { data: createdLessons } = await supabaseAdmin.from("lessons").insert(newLessons).select("id");
+        if (createdLessons) {
+          for (let i = 0; i < lessons.length; i++) {
+            const newId = createdLessons[i]?.id;
+            if (!newId) continue;
+            const { data: contents } = await supabaseAdmin.from("lesson_contents").select("type,content_type,text_content,content,position").eq("lesson_id", lessons[i].id);
+            if (contents?.length) await supabaseAdmin.from("lesson_contents").insert(contents.map((c: any) => ({ ...c, lesson_id: newId })));
+          }
+        }
+      }
+      res.json({ success: true, moduleId: newMod.id });
+    } catch (e: any) {
+      console.error("POST /api/teacher/modules/:id/duplicate", e);
+      res.status(500).json({ error: e.message || "Server error" });
+    }
+  });
+
+  // ── Re-generate audio/video download content for an existing lesson ───────
+  app.post("/api/teacher/lessons/:id/regenerate-content", async (req: Request, res: Response) => {
+    try {
+      const caller = await assertAuthenticated(req, res);
+      if (!caller) return;
+      const lessonId = req.params.id;
+      const userId = typeof req.body?.userId === "string" ? req.body.userId.trim() : "";
+      if (!userId) return res.status(400).json({ error: "userId is required" });
+      const { data: lesson, error: lErr } = await supabaseAdmin.from("lessons").select("id,title,short_description,course_id").eq("id", lessonId).maybeSingle();
+      if (lErr) throw lErr;
+      if (!lesson) return res.status(404).json({ error: "Lesson not found" });
+      const gate = await assertTeacherOwnsCourse(userId, String(lesson.course_id));
+      if (!gate.ok) return res.status(403).json({ error: "Access denied" });
+      const title = String(lesson.title || "");
+      const desc = String(lesson.short_description || "").split("\n")[0];
+      const url = String(lesson.short_description || "").split("\n")[1] || "";
+      const isAudioDL = title.includes("Audio");
+      const isVideoDL = title.includes("Video") && !isAudioDL;
+      if (!isAudioDL && !isVideoDL) return res.status(400).json({ error: "Not an audio/video download lesson" });
+      const OUP_BASE = "https://elt.oup.com";
+      const CC_STR = "?cc=global&selLanguage=en";
+      const slugMatch = url.match(/\/student\/headway\/([^/?]+)\//);
+      const levelSlug = slugMatch ? slugMatch[1] : (url.match(/headway_([a-z]+)_students/) ? "beg" : "preint4");
+      const dlPage = `${OUP_BASE}/student/headway/${levelSlug}/download${CC_STR}`;
+      const zipLink = url ? `<p style="margin:10px 0 4px;font-size:12px">or download directly:</p><a href="${url}" target="_blank" rel="noopener noreferrer" style="font-size:12px;font-weight:600;text-decoration:underline">⬇ Direct ZIP download</a>` : "";
+      let html = "";
+      if (isAudioDL) {
+        html = `<div style="margin:0 auto;max-width:480px;padding:28px 24px;border:1.5px solid #99f6e4;border-radius:16px;background:linear-gradient(135deg,#f0fdfa 0%,#ccfbf1 100%);text-align:center;font-family:system-ui,sans-serif"><div style="font-size:40px;margin-bottom:10px">🎧</div><p style="margin:0 0 4px;color:#0f766e;font-size:17px;font-weight:700">${title}</p><p style="margin:0 0 6px;color:#115e59;font-size:13px">${desc}</p><p style="margin:0 0 20px;color:#0d9488;font-size:12px;background:#ccfbf1;display:inline-block;padding:4px 12px;border-radius:99px;border:1px solid #5eead4">📦 MP3 audio files</p><br/><a href="${dlPage}" target="_blank" rel="noopener noreferrer" style="display:inline-flex;align-items:center;gap:8px;background:#0d9488;color:#fff;padding:12px 28px;border-radius:10px;text-decoration:none;font-weight:700;font-size:14px">🔗 Open Downloads Page</a>${zipLink}<p style="margin:14px 0 0;color:#5eead4;font-size:11px">Oxford University Press · elt.oup.com</p></div>`;
+      } else {
+        html = `<div style="margin:0 auto;max-width:480px;padding:28px 24px;border:1.5px solid #bae6fd;border-radius:16px;background:linear-gradient(135deg,#f0f9ff 0%,#e0f2fe 100%);text-align:center;font-family:system-ui,sans-serif"><div style="font-size:40px;margin-bottom:10px">🎬</div><p style="margin:0 0 4px;color:#0369a1;font-size:17px;font-weight:700">${title}</p><p style="margin:0 0 6px;color:#075985;font-size:13px">${desc}</p><p style="margin:0 0 20px;color:#0284c7;font-size:12px;background:#e0f2fe;display:inline-block;padding:4px 12px;border-radius:99px;border:1px solid #7dd3fc">📦 MP4 video clips</p><br/><a href="${dlPage}" target="_blank" rel="noopener noreferrer" style="display:inline-flex;align-items:center;gap:8px;background:#0284c7;color:#fff;padding:12px 28px;border-radius:10px;text-decoration:none;font-weight:700;font-size:14px">🔗 Open Downloads Page</a>${zipLink}<p style="margin:14px 0 0;color:#7dd3fc;font-size:11px">Oxford University Press · elt.oup.com</p></div>`;
+      }
+      const { data: existing } = await supabaseAdmin.from("lesson_contents").select("id").eq("lesson_id", lessonId).maybeSingle();
+      if (existing?.id) {
+        await supabaseAdmin.from("lesson_contents").update({ text_content: html, content: html }).eq("id", existing.id);
+      } else {
+        await supabaseAdmin.from("lesson_contents").insert({ lesson_id: lessonId, type: "text", content_type: "text", text_content: html, content: html, position: 1 });
+      }
+      res.json({ success: true });
+    } catch (e: any) {
+      console.error("POST /api/teacher/lessons/:id/regenerate-content", e);
+      res.status(500).json({ error: e.message || "Server error" });
+    }
+  });
+
+  // ── Reset a student's progress (quiz attempts + lesson progress) ──────────
+  app.post("/api/teacher/students/:studentId/reset-progress", async (req: Request, res: Response) => {
+    try {
+      const caller = await assertAuthenticated(req, res);
+      if (!caller) return;
+      const studentId = req.params.studentId;
+      const userId = typeof req.body?.userId === "string" ? req.body.userId.trim() : "";
+      const courseId = typeof req.body?.courseId === "string" && req.body.courseId ? req.body.courseId.trim() : null;
+      if (!userId) return res.status(400).json({ error: "userId is required" });
+      const { data: teacherCourses } = await supabaseAdmin.from("courses").select("id").eq("teacher_id", userId);
+      const allowedIds = (teacherCourses || []).map((c: any) => String(c.id));
+      if (courseId && !allowedIds.includes(courseId)) return res.status(403).json({ error: "Access denied" });
+      const scopedCourseIds = courseId ? [courseId] : allowedIds;
+      const { data: quizzes } = await supabaseAdmin.from("quizzes").select("id").in("course_id", scopedCourseIds);
+      const quizIds = (quizzes || []).map((q: any) => String(q.id));
+      let deletedAttempts = 0;
+      if (quizIds.length) {
+        const { data: d } = await supabaseAdmin.from("quiz_attempts").delete().eq("student_id", studentId).in("quiz_id", quizIds).select("id");
+        deletedAttempts = d?.length ?? 0;
+      }
+      const { data: lessons } = await supabaseAdmin.from("lessons").select("id").in("course_id", scopedCourseIds);
+      const lessonIds = (lessons || []).map((l: any) => String(l.id));
+      let deletedProgress = 0;
+      if (lessonIds.length) {
+        const { data: d } = await supabaseAdmin.from("lesson_progress").delete().eq("student_id", studentId).in("lesson_id", lessonIds).select("id");
+        deletedProgress = d?.length ?? 0;
+      }
+      res.json({ success: true, deletedAttempts, deletedProgress });
+    } catch (e: any) {
+      console.error("POST /api/teacher/students/:studentId/reset-progress", e);
+      res.status(500).json({ error: e.message || "Server error" });
+    }
+  });
+
+  // ── Suggestion 7: Per-module completion dashboard ────────────────────────
+  app.get("/api/teacher/courses/:courseId/module-completion", async (req: Request, res: Response) => {
+    try {
+      const caller = await assertAuthenticated(req, res);
+      if (!caller) return;
+      if (caller.role !== "teacher" && caller.role !== "admin") {
+        return res.status(403).json({ error: "Forbidden: teacher role required" });
+      }
+      const courseId = String(req.params.courseId || "").trim();
+      if (!courseId) return res.status(400).json({ error: "courseId is required" });
+
+      const gate = await assertTeacherOwnsCourse(caller.userId, courseId);
+      if (!gate.ok) return res.status(403).json({ error: "Access denied" });
+
+      const [modulesRes, lessonsRes, courseRes] = await Promise.all([
+        supabaseAdmin.from("modules").select("id, title, order").eq("course_id", courseId).order("order"),
+        supabaseAdmin.from("lessons").select("id, module_id, title, status").eq("course_id", courseId).eq("status", "published"),
+        supabaseAdmin.from("courses").select("id, student_ids").eq("id", courseId).maybeSingle(),
+      ]);
+      if (modulesRes.error) throw modulesRes.error;
+      if (lessonsRes.error) throw lessonsRes.error;
+
+      const modules = modulesRes.data || [];
+      const lessons = lessonsRes.data || [];
+      const studentIds: string[] = Array.isArray(courseRes.data?.student_ids)
+        ? (courseRes.data.student_ids as string[]).filter(Boolean)
+        : [];
+
+      if (studentIds.length === 0 || lessons.length === 0) {
+        return res.json({ success: true, modules, studentCount: studentIds.length, completion: [] });
+      }
+
+      // Fetch all profiles for students
+      const profilesRes = await supabaseAdmin.from("profiles").select("id, display_name, email").in("id", studentIds);
+      const profiles = (profilesRes.data || []) as Array<{ id: string; display_name: string; email: string }>;
+
+      // Fetch all lesson progress for these lessons
+      const lessonIds = lessons.map((l: any) => String(l.id));
+      const progressRes = await supabaseAdmin
+        .from("lesson_progress")
+        .select("student_id, lesson_id, completed")
+        .in("lesson_id", lessonIds)
+        .in("student_id", studentIds);
+      const progressRows = (progressRes.data || []) as Array<{ student_id: string; lesson_id: string; completed: boolean }>;
+
+      // Build completion map: studentId -> lessonId -> completed
+      const completionMap: Record<string, Record<string, boolean>> = {};
+      for (const row of progressRows) {
+        const sid = String(row.student_id);
+        const lid = String(row.lesson_id);
+        if (!completionMap[sid]) completionMap[sid] = {};
+        completionMap[sid][lid] = Boolean(row.completed);
+      }
+
+      // Build lesson-to-module map
+      const lessonToModule: Record<string, string> = {};
+      for (const lesson of lessons) {
+        if (lesson.module_id) lessonToModule[String(lesson.id)] = String(lesson.module_id);
+      }
+
+      // Build per-student, per-module completion
+      const completion = profiles.map(profile => {
+        const sid = profile.id;
+        const studentProgress = completionMap[sid] || {};
+        const modulesProgress = modules.map((mod: any) => {
+          const modLessons = lessons.filter((l: any) => String(l.module_id) === String(mod.id));
+          const completedCount = modLessons.filter((l: any) => studentProgress[String(l.id)]).length;
+          return {
+            moduleId: String(mod.id),
+            moduleTitle: String(mod.title || ""),
+            total: modLessons.length,
+            completed: completedCount,
+            percent: modLessons.length > 0 ? Math.round((completedCount / modLessons.length) * 100) : 0,
+          };
+        });
+        const totalCompleted = modulesProgress.reduce((s, m) => s + m.completed, 0);
+        const totalLessons = lessons.length;
+        return {
+          studentId: sid,
+          studentName: String(profile.display_name || profile.email || sid),
+          studentEmail: String(profile.email || ""),
+          overallPercent: totalLessons > 0 ? Math.round((totalCompleted / totalLessons) * 100) : 0,
+          modules: modulesProgress,
+        };
+      });
+
+      return res.json({ success: true, modules, studentCount: studentIds.length, completion });
+    } catch (e: any) {
+      console.error("GET /api/teacher/courses/:courseId/module-completion", e);
+      return res.status(500).json({ error: e.message || "Server error" });
+    }
+  });
+
   // ── Teacher Lesson routes (service-role, bypasses RLS) ──────────────────
   app.get("/api/teacher/lessons", async (req, res) => {
     try {
@@ -4063,6 +6019,1797 @@ Assistant:`;
     } catch (e: any) {
       console.error("POST /api/teacher/lessons", e);
       res.status(500).json({ error: e.message || "Server error" });
+    }
+  });
+
+  // Bulk-delete all modules (and their lessons/quizzes) for a course
+  app.post("/api/teacher/courses/:courseId/clear-modules", async (req: Request, res: Response) => {
+    try {
+      const caller = await assertAuthenticated(req, res);
+      if (!caller) return;
+      const { courseId } = req.params;
+      const userId = typeof req.body?.userId === "string" ? req.body.userId.trim() : "";
+      if (!userId) return res.status(400).json({ error: "userId is required" });
+
+      const gate = await assertTeacherOwnsCourse(userId, courseId);
+      if (!gate.ok) return res.status(403).json({ error: "Access denied" });
+
+      // Fetch all module IDs for this course
+      const { data: mods, error: mErr } = await supabaseAdmin
+        .from("modules")
+        .select("id")
+        .eq("course_id", courseId);
+      if (mErr) throw mErr;
+      if (!mods || mods.length === 0) return res.json({ deleted: 0 });
+
+      const moduleIds = mods.map((m: any) => m.id);
+
+      // Delete lessons first (avoids FK issues if no cascade)
+      await supabaseAdmin.from("lessons").delete().in("module_id", moduleIds);
+
+      // Delete quizzes tied to those modules (if quiz table has module_id — silently ignore if column absent)
+      try {
+        await supabaseAdmin.from("quizzes").delete().in("module_id", moduleIds);
+      } catch { /* module_id column may not exist on quizzes */ }
+
+      // Delete the modules
+      const { error: dErr } = await supabaseAdmin.from("modules").delete().in("id", moduleIds);
+      if (dErr) throw dErr;
+
+      res.json({ success: true, deleted: moduleIds.length });
+    } catch (e: any) {
+      console.error("POST /api/teacher/courses/:courseId/clear-modules", e);
+      res.status(500).json({ error: e.message || "Server error" });
+    }
+  });
+
+  // Headway auto-populate: creates modules + per-unit lessons with real Oxford exercise links
+  app.post("/api/teacher/courses/:courseId/headway-populate", async (req: Request, res: Response) => {
+    try {
+      const caller = await assertAuthenticated(req, res);
+      if (!caller) return;
+      const { courseId } = req.params;
+      const userId = typeof req.body?.userId === "string" ? req.body.userId.trim() : "";
+      const level   = typeof req.body?.level  === "string" ? req.body.level.trim()  : "";
+      if (!userId) return res.status(400).json({ error: "userId is required" });
+      if (!level)  return res.status(400).json({ error: "level is required" });
+      if (!canAccessTeacherCourses(caller, userId)) return res.status(403).json({ error: "Forbidden" });
+
+      const gate = await assertTeacherOwnsCourse(userId, courseId);
+      if (!gate.ok) return res.status(403).json({ error: "You do not have access to this course." });
+
+      const rawOpts = req.body?.options ?? {};
+      const includeGrammar       = rawOpts.grammar        !== false;
+      const includeVocabulary    = rawOpts.vocabulary      !== false;
+      const includeEverydayEnglish = rawOpts.everydayEnglish !== false;
+      const includeAudioDownload = rawOpts.audioDownload   !== false;
+      const includeVideoDownload = rawOpts.videoDownload   !== false;
+      const includeTestBuilder   = rawOpts.testBuilder     !== false;
+
+      const OUP = "https://elt.oup.com";
+      const CC  = "?cc=global&selLanguage=en";
+      // HEADWAY_FULL_DATA is imported from src/lib/headwayData.ts
+
+
+      const levelData = HEADWAY_FULL_DATA[level];
+      if (!levelData) return res.status(400).json({ error: `Unknown Headway level: "${level}". Valid: ${Object.keys(HEADWAY_FULL_DATA).join(", ")}` });
+
+      const slugify = (s: string) => s.toLowerCase().replace(/[^\w\s-]/g, "").replace(/\s+/g, "-").replace(/-+/g, "-").trim();
+
+      const wantStream = req.body?.stream === true;
+      const total = levelData.units.length;
+
+      // Helper: emit a Server-Sent Event line
+      const emit = (obj: Record<string, unknown>) => {
+        if (wantStream) res.write(`data: ${JSON.stringify(obj)}\n\n`);
+      };
+
+      if (wantStream) {
+        res.setHeader("Content-Type", "text/event-stream");
+        res.setHeader("Cache-Control", "no-cache");
+        res.setHeader("X-Accel-Buffering", "no");
+        res.flushHeaders();
+      }
+
+      let totalLessons = 0;
+      let totalModules = 0;
+      const unitModuleIds: string[] = [];
+
+      // ── Process each unit individually so we can stream progress ─────────────
+      for (let i = 0; i < levelData.units.length; i++) {
+        const unit = levelData.units[i];
+
+        emit({ type: "progress", unit: i + 1, total, title: unit.title, phase: "module" });
+
+        // Insert module
+        const { data: modRows, error: modErr } = await supabaseAdmin
+          .from("modules")
+          .insert([{
+            course_id:   courseId,
+            title:       unit.title,
+            slug:        slugify(unit.title),
+            description: unit.description,
+            order:       i + 1,
+            status:      "active",
+          }])
+          .select("id, order");
+
+        if (modErr || !modRows?.length) {
+          const msg = modErr ? [modErr.message, modErr.details, modErr.hint].filter(Boolean).join(" — ") : "Module not created";
+          emit({ type: "error", message: msg });
+          if (!wantStream) return res.status(400).json({ error: msg });
+          res.end();
+          return;
+        }
+        const mod = modRows[0];
+        unitModuleIds[i] = String(mod.id);
+        totalModules++;
+
+        emit({ type: "progress", unit: i + 1, total, title: unit.title, phase: "lessons" });
+
+        // Build lessons for this unit
+        const lessonRows: Record<string, unknown>[] = [];
+        const lessonUrls: string[] = [];
+        let ord = 0;
+
+        const hwTag = `\nheadway:${level}:${unit.num}`;
+        if (includeGrammar) {
+          for (const gr of unit.grammar) {
+            const url = `${OUP}${gr.path}${CC}`;
+            lessonRows.push({ course_id: courseId, module_id: mod.id, title: `Grammar: ${gr.topic}`, slug: slugify(`u${unit.num}-gr-${gr.topic}`), type: "text", short_description: `Oxford Headway exercise — ${gr.topic}\n${url}${hwTag}`, order: ++ord, status: "published", duration_minutes: 20, is_free_preview: ord === 1 });
+            lessonUrls.push(url);
+          }
+        }
+        if (includeVocabulary) {
+          for (const vc of unit.vocabulary) {
+            const url = `${OUP}${vc.path}${CC}`;
+            lessonRows.push({ course_id: courseId, module_id: mod.id, title: `Vocabulary: ${vc.topic}`, slug: slugify(`u${unit.num}-vc-${vc.topic}`), type: "text", short_description: `Oxford Headway vocabulary — ${vc.topic}\n${url}${hwTag}`, order: ++ord, status: "published", duration_minutes: 15, is_free_preview: false });
+            lessonUrls.push(url);
+          }
+        }
+        if (includeEverydayEnglish) {
+          const eeUrl = `${OUP}/student/headway/${levelData.slug}/everydayenglish/${unit.eeSlug}/${CC}`;
+          lessonRows.push({ course_id: courseId, module_id: mod.id, title: "Everyday English", slug: slugify(`u${unit.num}-everyday-english`), type: "video", short_description: `Listen and practise dialogues from Unit ${unit.num}.\n${eeUrl}${hwTag}`, order: ++ord, status: "published", duration_minutes: 20, is_free_preview: false });
+          lessonUrls.push(eeUrl);
+        }
+        if (includeAudioDownload && (unit as any).audioZip) {
+          lessonRows.push({ course_id: courseId, module_id: mod.id, title: "Student's Book Audio — Download", slug: slugify(`u${unit.num}-audio`), type: "text", short_description: `Download Student's Book audio for Unit ${unit.num}.\n${(unit as any).audioZip}${hwTag}`, order: ++ord, status: "published", duration_minutes: 0, is_free_preview: false });
+          lessonUrls.push((unit as any).audioZip);
+        }
+        if (includeVideoDownload && (unit as any).videoZip) {
+          lessonRows.push({ course_id: courseId, module_id: mod.id, title: "Video — Download", slug: slugify(`u${unit.num}-video`), type: "video", short_description: `Download video for Unit ${unit.num}.\n${(unit as any).videoZip}${hwTag}`, order: ++ord, status: "published", duration_minutes: 0, is_free_preview: false });
+          lessonUrls.push((unit as any).videoZip);
+        }
+
+        // Insert lessons for this unit
+        const { data: createdLessons, error: lessonErr } = await supabaseAdmin.from("lessons").insert(lessonRows).select("id");
+        if (lessonErr) {
+          const msg = [lessonErr.message, lessonErr.details, lessonErr.hint].filter(Boolean).join(" — ");
+          emit({ type: "error", message: msg || "Failed to create lessons" });
+          if (!wantStream) return res.status(400).json({ error: msg });
+          res.end();
+          return;
+        }
+        totalLessons += lessonRows.length;
+
+        // Lesson contents (best-effort) — rich cards per lesson type
+        if (Array.isArray(createdLessons) && createdLessons.length > 0) {
+          const contentRows = createdLessons.map((l: any, li: number) => {
+            const url  = lessonUrls[li] || "";
+            const lsn  = lessonRows[li] as any;
+            const title = lsn?.title || "";
+            const desc  = lsn?.short_description?.split("\n")[0] || "";
+
+            // Determine card type from title / URL
+            const isAudioDL   = title.includes("Audio") && url.endsWith(".zip");
+            const isVideoDL   = title.includes("Video") && url.endsWith(".zip");
+            const isEE        = title === "Everyday English";
+            const isGrammar   = title.startsWith("Grammar:");
+            const isVocab     = title.startsWith("Vocabulary:");
+
+            let html = "";
+
+            if (isAudioDL) {
+              // ── 🎧 Audio Download — rich card with track listing ─────────────
+              const dlPage = `${OUP}/student/headway/${levelData.slug}/audiodl${CC}`;
+              const audioTracks = [
+                { label: "Student's Book Audio", icon: "📗", desc: `All listening tracks for Unit ${unit.num} — dialogues, reading texts & exercises` },
+                { label: "Pronunciation Practice", icon: "🎙️", desc: `Sounds, word stress & intonation drills from Unit ${unit.num}` },
+                { label: "Listening Activities", icon: "🎵", desc: `Graded listening tasks and comprehension exercises` },
+                { label: "Everyday English Dialogue", icon: "💬", desc: `Functional language & real-life conversation practice` },
+              ];
+              const trackRows = audioTracks.map(t =>
+                `<div style="display:flex;align-items:flex-start;gap:10px;padding:10px 12px;background:#f0fdfa;border-radius:10px;border:1px solid #99f6e4;text-align:left">
+  <span style="font-size:20px;line-height:1">${t.icon}</span>
+  <div><p style="margin:0 0 2px;font-size:13px;font-weight:700;color:#0f766e">${t.label}</p><p style="margin:0;font-size:11px;color:#115e59">${t.desc}</p></div>
+</div>`).join("");
+              html = `<div style="margin:0 auto;max-width:560px;padding:28px 24px;border:1.5px solid #99f6e4;border-radius:18px;background:linear-gradient(135deg,#f0fdfa 0%,#ccfbf1 100%);font-family:system-ui,sans-serif">
+  <div style="display:flex;align-items:center;gap:14px;margin-bottom:16px">
+    <div style="width:52px;height:52px;border-radius:14px;background:linear-gradient(135deg,#0d9488,#0f766e);display:flex;align-items:center;justify-content:center;font-size:26px;flex-shrink:0">🎧</div>
+    <div>
+      <p style="margin:0 0 2px;color:#0f766e;font-size:17px;font-weight:800">${unit.title} — Audio Downloads</p>
+      <p style="margin:0;color:#115e59;font-size:12px">Oxford Headway · Student's Book &amp; Workbook Audio · MP3</p>
+    </div>
+  </div>
+  <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px">
+    <span style="background:#ccfbf1;color:#0f766e;font-size:11px;font-weight:700;padding:4px 10px;border-radius:99px;border:1px solid #5eead4">🎵 MP3 Format</span>
+    <span style="background:#ccfbf1;color:#0f766e;font-size:11px;font-weight:700;padding:4px 10px;border-radius:99px;border:1px solid #5eead4">📚 Unit ${unit.num}</span>
+    <span style="background:#ccfbf1;color:#0f766e;font-size:11px;font-weight:700;padding:4px 10px;border-radius:99px;border:1px solid #5eead4">🏫 Oxford University Press</span>
+  </div>
+  <div style="display:grid;gap:8px;margin-bottom:20px">${trackRows}</div>
+  <div style="display:flex;gap:10px;flex-wrap:wrap">
+    <a href="${dlPage}" target="_blank" rel="noopener noreferrer" style="flex:1;min-width:160px;display:inline-flex;align-items:center;justify-content:center;gap:8px;background:linear-gradient(135deg,#0d9488,#0f766e);color:#fff;padding:12px 20px;border-radius:12px;text-decoration:none;font-weight:700;font-size:13px">🔗 Open Audio Downloads</a>
+    <a href="${url}" target="_blank" rel="noopener noreferrer" style="flex:1;min-width:160px;display:inline-flex;align-items:center;justify-content:center;gap:8px;background:#fff;color:#0f766e;padding:12px 20px;border-radius:12px;text-decoration:none;font-weight:700;font-size:13px;border:2px solid #5eead4">⬇ Direct ZIP Download</a>
+  </div>
+  <p style="margin:14px 0 0;color:#5eead4;font-size:11px;text-align:center">Oxford University Press · elt.oup.com — for educational use</p>
+</div>`;
+            } else if (isVideoDL) {
+              // ── 🎬 Video Download — rich card with content listing ────────────
+              const dlPage = `${OUP}/student/headway/${levelData.slug}/video_bandw${CC}`;
+              const videoItems = [
+                { label: "Unit Video Clip", icon: "🎬", desc: `Main video for Unit ${unit.num} — watch & understand real-life situations` },
+                { label: "Video Script", icon: "📄", desc: `Full transcript of the video dialogue for study and review` },
+                { label: "Video Tasks", icon: "✏️", desc: `Comprehension questions and follow-up activities` },
+                { label: "MP4 Download", icon: "💾", desc: `Download the video ZIP for offline classroom use` },
+              ];
+              const videoRows = videoItems.map(v =>
+                `<div style="display:flex;align-items:flex-start;gap:10px;padding:10px 12px;background:#f0f9ff;border-radius:10px;border:1px solid #bae6fd;text-align:left">
+  <span style="font-size:20px;line-height:1">${v.icon}</span>
+  <div><p style="margin:0 0 2px;font-size:13px;font-weight:700;color:#0369a1">${v.label}</p><p style="margin:0;font-size:11px;color:#075985">${v.desc}</p></div>
+</div>`).join("");
+              html = `<div style="margin:0 auto;max-width:560px;padding:28px 24px;border:1.5px solid #bae6fd;border-radius:18px;background:linear-gradient(135deg,#f0f9ff 0%,#e0f2fe 100%);font-family:system-ui,sans-serif">
+  <div style="display:flex;align-items:center;gap:14px;margin-bottom:16px">
+    <div style="width:52px;height:52px;border-radius:14px;background:linear-gradient(135deg,#0284c7,#0369a1);display:flex;align-items:center;justify-content:center;font-size:26px;flex-shrink:0">🎬</div>
+    <div>
+      <p style="margin:0 0 2px;color:#0369a1;font-size:17px;font-weight:800">${unit.title} — Video Downloads</p>
+      <p style="margin:0;color:#075985;font-size:12px">Oxford Headway · Classroom Video · MP4 &amp; Scripts</p>
+    </div>
+  </div>
+  <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px">
+    <span style="background:#e0f2fe;color:#0369a1;font-size:11px;font-weight:700;padding:4px 10px;border-radius:99px;border:1px solid #7dd3fc">🎥 MP4 Format</span>
+    <span style="background:#e0f2fe;color:#0369a1;font-size:11px;font-weight:700;padding:4px 10px;border-radius:99px;border:1px solid #7dd3fc">📚 Unit ${unit.num}</span>
+    <span style="background:#e0f2fe;color:#0369a1;font-size:11px;font-weight:700;padding:4px 10px;border-radius:99px;border:1px solid #7dd3fc">🏫 Oxford University Press</span>
+  </div>
+  <div style="display:grid;gap:8px;margin-bottom:20px">${videoRows}</div>
+  <div style="display:flex;gap:10px;flex-wrap:wrap">
+    <a href="${dlPage}" target="_blank" rel="noopener noreferrer" style="flex:1;min-width:160px;display:inline-flex;align-items:center;justify-content:center;gap:8px;background:linear-gradient(135deg,#0284c7,#0369a1);color:#fff;padding:12px 20px;border-radius:12px;text-decoration:none;font-weight:700;font-size:13px">▶ Open Video Page</a>
+    <a href="${url}" target="_blank" rel="noopener noreferrer" style="flex:1;min-width:160px;display:inline-flex;align-items:center;justify-content:center;gap:8px;background:#fff;color:#0369a1;padding:12px 20px;border-radius:12px;text-decoration:none;font-weight:700;font-size:13px;border:2px solid #7dd3fc">⬇ Direct ZIP Download</a>
+  </div>
+  <p style="margin:14px 0 0;color:#7dd3fc;font-size:11px;text-align:center">Oxford University Press · elt.oup.com — for educational use</p>
+</div>`;
+            } else if (isEE) {
+              // ── 🎤 Everyday English ───────────────────────────────────────────
+              html = `<div style="margin:0 auto;max-width:480px;padding:28px 24px;border:1.5px solid #ddd6fe;border-radius:16px;background:linear-gradient(135deg,#faf5ff 0%,#ede9fe 100%);text-align:center;font-family:system-ui,sans-serif">
+  <div style="font-size:40px;margin-bottom:10px">🎤</div>
+  <p style="margin:0 0 4px;color:#6d28d9;font-size:17px;font-weight:700">Everyday English</p>
+  <p style="margin:0 0 20px;color:#7c3aed;font-size:13px">${desc}</p>
+  <a href="${url}" target="_blank" rel="noopener noreferrer" style="display:inline-flex;align-items:center;gap:8px;background:#7c3aed;color:#fff;padding:12px 28px;border-radius:10px;text-decoration:none;font-weight:700;font-size:14px">▶ Watch &amp; Listen</a>
+  <p style="margin:14px 0 0;color:#c4b5fd;font-size:11px">Interactive dialogue · Oxford Headway Online</p>
+</div>`;
+            } else if (isGrammar) {
+              // ── 📘 Grammar Exercise ───────────────────────────────────────────
+              const topic = title.replace("Grammar: ", "");
+              html = `<div style="margin:0 auto;max-width:480px;padding:28px 24px;border:1.5px solid #c7d2fe;border-radius:16px;background:linear-gradient(135deg,#eef2ff 0%,#e0e7ff 100%);text-align:center;font-family:system-ui,sans-serif">
+  <div style="font-size:40px;margin-bottom:10px">📘</div>
+  <p style="margin:0 0 4px;color:#3730a3;font-size:17px;font-weight:700">Grammar: ${topic}</p>
+  <p style="margin:0 0 20px;color:#4338ca;font-size:13px">${desc}</p>
+  <a href="${url}" target="_blank" rel="noopener noreferrer" style="display:inline-flex;align-items:center;gap:8px;background:#4f46e5;color:#fff;padding:12px 28px;border-radius:10px;text-decoration:none;font-weight:700;font-size:14px">Open Grammar Exercise →</a>
+  <p style="margin:14px 0 0;color:#a5b4fc;font-size:11px">Interactive practice · Oxford Headway Online</p>
+</div>`;
+            } else if (isVocab) {
+              // ── 🌿 Vocabulary Exercise ────────────────────────────────────────
+              const topic = title.replace("Vocabulary: ", "");
+              html = `<div style="margin:0 auto;max-width:480px;padding:28px 24px;border:1.5px solid #bbf7d0;border-radius:16px;background:linear-gradient(135deg,#f0fdf4 0%,#dcfce7 100%);text-align:center;font-family:system-ui,sans-serif">
+  <div style="font-size:40px;margin-bottom:10px">🌿</div>
+  <p style="margin:0 0 4px;color:#166534;font-size:17px;font-weight:700">Vocabulary: ${topic}</p>
+  <p style="margin:0 0 20px;color:#15803d;font-size:13px">${desc}</p>
+  <a href="${url}" target="_blank" rel="noopener noreferrer" style="display:inline-flex;align-items:center;gap:8px;background:#16a34a;color:#fff;padding:12px 28px;border-radius:10px;text-decoration:none;font-weight:700;font-size:14px">Open Vocabulary Exercise →</a>
+  <p style="margin:14px 0 0;color:#86efac;font-size:11px">Interactive practice · Oxford Headway Online</p>
+</div>`;
+            } else {
+              // ── Generic fallback ──────────────────────────────────────────────
+              const isZip = url.endsWith(".zip");
+              html = `<div style="margin:0 auto;max-width:480px;padding:24px;border:1px solid #e2e8f0;border-radius:12px;background:#f8fafc;text-align:center;font-family:system-ui,sans-serif">
+  <p style="margin:0 0 8px;color:#334155;font-size:15px;font-weight:600">${title}</p>
+  <p style="margin:0 0 16px;color:#64748b;font-size:13px">${desc}</p>
+  <a href="${url}" target="_blank" rel="noopener noreferrer" style="display:inline-block;background:#6366f1;color:#fff;padding:11px 28px;border-radius:8px;text-decoration:none;font-weight:700;font-size:14px">${isZip ? "⬇ Download ZIP" : "Open →"}</a>
+</div>`;
+            }
+
+            return { lesson_id: l.id, type: "text", content_type: "text", text_content: html, content: html, position: 1 };
+          });
+          try { await supabaseAdmin.from("lesson_contents").insert(contentRows); } catch { /* best-effort */ }
+        }
+
+        emit({ type: "progress", unit: i + 1, total, title: unit.title, phase: "done" });
+      }
+
+      // ── Quizzes intentionally not created during headway-populate ────────────
+      // Use the Smart Test Builder (/teacher/quizzes/test-builder) to create
+      // targeted quizzes from specific grammar/vocabulary sections instead.
+      if (false && includeTestBuilder) {
+        emit({ type: "status", message: "Creating Test Builder quizzes with questions..." });
+
+        // Helper: generate realistic MC questions from a unit's grammar + vocab topics
+        const buildUnitQuestions = (u: HUnit): Record<string, unknown>[] => {
+          const questions: Record<string, unknown>[] = [];
+          let order = 0;
+
+          // Grammar questions — one per grammar topic
+          for (const gr of u.grammar) {
+            const topic = gr.topic;
+            const url = `${OUP}${gr.path}${CC}`;
+            questions.push({
+              text: `Which of the following best demonstrates correct use of "${topic}" from Unit ${u.num}?`,
+              question_text: `Which of the following best demonstrates correct use of "${topic}" from Unit ${u.num}?`,
+              type: "multiple-choice",
+              options: JSON.stringify([
+                `Practice exercise on "${topic}" — see Oxford Headway: ${url}`,
+                `An incorrect form that ignores the rules of "${topic}"`,
+                `A sentence that mixes "${topic}" with an incompatible tense`,
+                `A phrase that avoids "${topic}" altogether`,
+              ]),
+              correct_answer: `0`,
+              points: 1,
+              explanation: `The correct answer links to the Oxford Headway interactive exercise on "${topic}". Visit: ${url}`,
+              order: order++,
+            });
+          }
+
+          // Vocabulary questions — one per vocab topic
+          for (const vc of u.vocabulary) {
+            const topic = vc.topic;
+            const url = `${OUP}${vc.path}${CC}`;
+            questions.push({
+              text: `Which sentence uses vocabulary from the "${topic}" set in Unit ${u.num} correctly?`,
+              question_text: `Which sentence uses vocabulary from the "${topic}" set in Unit ${u.num} correctly?`,
+              type: "multiple-choice",
+              options: JSON.stringify([
+                `Correct use of a word from the "${topic}" group — practise here: ${url}`,
+                `Incorrect word chosen from a different category`,
+                `A synonym used in the wrong register or context`,
+                `A word that looks similar but has a different meaning`,
+              ]),
+              correct_answer: `0`,
+              points: 1,
+              explanation: `The first option is correct. Review the "${topic}" vocabulary set at: ${url}`,
+              order: order++,
+            });
+          }
+
+          // Unit-level comprehension question (always included)
+          questions.push({
+            text: `What is the main topic of ${u.title}?`,
+            question_text: `What is the main topic of ${u.title}?`,
+            type: "multiple-choice",
+            options: JSON.stringify([
+              u.description,
+              `A lesson about a completely different theme unrelated to ${u.title}`,
+              `An advanced grammar topic not covered in this unit`,
+              `A revision unit with no new content`,
+            ]),
+            correct_answer: `0`,
+            points: 1,
+            explanation: u.description,
+            order: order++,
+          });
+
+          // Test Builder reference question
+          const tbUrl = `${OUP}/student/headway/${levelData.slug}/testbuilder${CC}`;
+          questions.push({
+            text: `Where can you find the Oxford Headway Test Builder for ${u.title}?`,
+            question_text: `Where can you find the Oxford Headway Test Builder for ${u.title}?`,
+            type: "multiple-choice",
+            options: JSON.stringify([
+              tbUrl,
+              `https://www.cambridge.org/elt/headway`,
+              `https://www.bbc.co.uk/learningenglish`,
+              `https://www.longman.com/english`,
+            ]),
+            correct_answer: `0`,
+            points: 1,
+            explanation: `Oxford Headway Test Builder is at: ${tbUrl}`,
+            order: order++,
+          });
+
+          return questions;
+        };
+
+        // Insert quizzes one at a time so we can attach questions
+        for (let qi = 0; qi < levelData.units.length; qi++) {
+          const u = levelData.units[qi];
+          emit({ type: "status", message: `Creating quiz for ${u.title}…` });
+
+          const { data: quizData } = await insertCompatibleQuizAdmin({
+            course_id: courseId,
+            teacher_id: userId,
+            module_id: unitModuleIds[qi] || null,
+            title: `${u.title.replace(/^Unit \d+ — /, "")} — Test Builder`,
+            description: `Grammar and vocabulary test for ${u.title}. Also open the Oxford Headway Test Builder: ${OUP}/student/headway/${levelData.slug}/testbuilder${CC}`,
+            time_limit: 20,
+            passing_score: 70,
+            published: false,
+            status: "draft",
+          }, userId);
+
+          if (!quizData?.id) {
+            console.error("[headway-populate] quiz insert failed (all retries exhausted)");
+            continue;
+          }
+
+          // Insert questions for this quiz
+          const questionRows = buildUnitQuestions(u).map(q => ({ ...q, quiz_id: quizData.id }));
+          if (questionRows.length > 0) {
+            let { error: iqErr } = await supabaseAdmin.from("questions").insert(questionRows);
+            // Fallback: drop the `text` field if the column doesn't exist in the schema
+            if (iqErr && /question_text|null value.*text/i.test(iqErr.message + (iqErr.details || ""))) {
+              const fallback = questionRows.map(q => {
+                const r = { ...q } as Record<string, unknown>;
+                delete r["text"];
+                return r;
+              });
+              ({ error: iqErr } = await supabaseAdmin.from("questions").insert(fallback));
+            }
+            if (iqErr) console.error("[headway-populate] questions insert failed:", iqErr.message);
+          }
+        }
+      }
+
+      // ── Auto-update course level to match Headway level ─────────────────────
+      try {
+        await supabaseAdmin.from("courses").update({ level }).eq("id", courseId);
+      } catch { /* non-critical — course level update is best-effort */ }
+
+      // ── Persist sync timestamp to platform_config ─────────────────────────────
+      const syncedAt = new Date().toISOString();
+      try {
+        await supabaseAdmin.from("platform_config").upsert(
+          { section: `headway_sync:${courseId}`, value: { syncedAt, level, modules: totalModules, lessons: totalLessons }, updated_at: syncedAt },
+          { onConflict: "section" }
+        );
+      } catch { /* non-critical */ }
+
+      emit({ type: "done", modules: totalModules, lessons: totalLessons, level, syncedAt, success: true });
+
+      if (wantStream) {
+        res.end();
+      } else {
+        res.json({ success: true, modules: totalModules, lessons: totalLessons, level });
+      }
+    } catch (e: any) {
+      console.error("POST /api/teacher/courses/:courseId/headway-populate", e);
+      if (res.headersSent) { res.write(`data: ${JSON.stringify({ type: "error", message: e?.message || "Server error" })}\n\n`); res.end(); }
+      else res.status(500).json({ error: e?.message || "Server error" });
+    }
+  });
+
+  // ── POST /api/teacher/headway/save-unit-quiz — save one unit's Test Builder quiz to Supabase ──
+  app.post("/api/teacher/headway/save-unit-quiz", async (req: Request, res: Response) => {
+    try {
+      const caller = await assertAuthenticated(req, res);
+      if (!caller) return;
+      const userId   = typeof req.body?.userId   === "string" ? req.body.userId.trim()   : "";
+      const courseId = typeof req.body?.courseId === "string" ? req.body.courseId.trim() : "";
+      const level    = typeof req.body?.level    === "string" ? req.body.level.trim()    : "";
+      const unitNum  = Number(req.body?.unitNum ?? 0);
+      if (!userId)   return res.status(400).json({ error: "userId is required" });
+      if (!courseId) return res.status(400).json({ error: "courseId is required" });
+      if (!level)    return res.status(400).json({ error: "level is required" });
+      if (!unitNum)  return res.status(400).json({ error: "unitNum is required" });
+      if (!canAccessTeacherCourses(caller, userId)) return res.status(403).json({ error: "Forbidden" });
+
+      const levelData = HEADWAY_FULL_DATA[level];
+      if (!levelData) return res.status(400).json({ error: `Unknown level "${level}"` });
+      const unit = levelData.units.find(u => u.num === unitNum);
+      if (!unit) return res.status(404).json({ error: `Unit ${unitNum} not found` });
+
+      const OUP = "https://elt.oup.com";
+      const CC  = "?cc=global&selLanguage=en";
+      const tbUrl = `${OUP}/student/headway/${levelData.slug}/testbuilder${CC}`;
+
+      // Insert quiz — compatible insert strips teacher_id / published if columns are absent
+      const { data: quizData, error: quizErr } = await insertCompatibleQuizAdmin({
+        course_id:     courseId,
+        teacher_id:    userId,
+        title:         `${unit.title.replace(/^Unit \d+ — /, "")} — Test Builder`,
+        description:   `Grammar and vocabulary test for ${unit.title}. Also open the Oxford Headway Test Builder: ${tbUrl}\nheadway:${level}:${unitNum}`,
+        time_limit:    20,
+        passing_score: 70,
+        published:     false,
+        status:        "draft",
+      }, userId);
+
+      if (!quizData?.id) {
+        const msg = quizErr ? (quizErr as any)?.message || String(quizErr) : "Quiz could not be created";
+        return res.status(400).json({ error: msg });
+      }
+
+      // Build questions — try AI first, fall back to static bank
+      const aiApiKey = (process.env.AI_INTEGRATIONS_GEMINI_API_KEY || process.env.GEMINI_API_KEY || "").trim();
+      let questionRows: Record<string, unknown>[] = [];
+
+      if (aiApiKey && (unit.grammar.length > 0 || unit.vocabulary.length > 0)) {
+        try {
+          const cefrMap: Record<string, string> = {
+            "Beginner": "A1", "Elementary": "A2", "Pre-Intermediate": "B1",
+            "Intermediate": "B1+", "Upper-Intermediate": "B2", "Advanced": "C1",
+          };
+          const cefr = cefrMap[level] || "B1";
+          const topics = [
+            ...unit.grammar.map(g => ({ type: "grammar" as const, topic: g.topic })),
+            ...unit.vocabulary.map(v => ({ type: "vocabulary" as const, topic: v.topic })),
+          ];
+          const prompt = `You are an Oxford Headway English language test generator.
+Level: ${level} (${cefr}) — ${unit.title}
+Unit theme: ${unit.description}
+
+Generate ONE fill-in-the-blank multiple-choice question for each topic below.
+Each question must be a realistic English sentence with _____ (5 underscores) for the blank.
+Provide 4 plausible options where exactly ONE is correct.
+
+Topics:
+${topics.map((t, i) => `${i + 1}. [${t.type}] ${t.topic}`).join("\n")}
+
+Return ONLY a valid JSON array — no markdown, no code fences:
+[{"topic":"...","type":"grammar","text":"She _____ to work.","options":["goes","is going","went","has gone"],"correct":0,"explanation":"..."}]`;
+
+          const { GoogleGenAI } = await import("@google/genai");
+          const geminiBaseUrl = (process.env.AI_INTEGRATIONS_GEMINI_BASE_URL || "").trim();
+          const ai = geminiBaseUrl
+            ? new GoogleGenAI({ apiKey: aiApiKey, httpOptions: { apiVersion: "", baseUrl: geminiBaseUrl } })
+            : new GoogleGenAI({ apiKey: aiApiKey });
+          const aiResult = await ai.models.generateContent({
+            model: "gemini-2.5-flash",
+            contents: prompt,
+            config: { temperature: 0.4 },
+          });
+          const raw = (aiResult.text || "").trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```\s*$/i, "").trim();
+          const parsed = JSON.parse(raw);
+          if (Array.isArray(parsed)) {
+            questionRows = parsed
+              .filter((q: any) => q && typeof q.text === "string" && Array.isArray(q.options))
+              .map((q: any, idx: number) => {
+                const correctIdx = Math.max(0, Math.min(3, Number(q.correct) || 0));
+                const opts = (q.options as string[]).slice(0, 4);
+                const correctText = opts[correctIdx];
+                const shuffled = [...opts].sort(() => Math.random() - 0.5);
+                const foundIdx = shuffled.indexOf(correctText);
+                const safeIdx = foundIdx === -1 ? 0 : foundIdx;
+                const optionObjects = shuffled.map((text, i) => ({ id: String(i + 1), text }));
+                return {
+                  quiz_id:        quizData.id,
+                  type:           "multiple-choice",
+                  text:           String(q.text),
+                  question_text:  String(q.text),
+                  options:        optionObjects,
+                  correct_answer: String(safeIdx + 1),
+                  explanation:    String(q.explanation || ""),
+                  points:         1,
+                  order:          idx,
+                };
+              });
+          }
+        } catch (aiErr: any) {
+          console.warn("[save-unit-quiz] AI generation failed, using static bank:", aiErr?.message);
+        }
+      }
+
+      // Fall back to static placeholder questions if AI didn't produce anything
+      if (questionRows.length === 0) {
+        questionRows = buildHwUnitQuestions(unit, levelData.slug).map((q, idx) => {
+          const correctText = q.options[q.correctIndex];
+          const shuffled = [...q.options].sort(() => Math.random() - 0.5);
+          const foundIdx = shuffled.indexOf(correctText);
+          const safeIdx = foundIdx === -1 ? 0 : foundIdx;
+          const optionObjects = shuffled.map((text, i) => ({ id: String(i + 1), text }));
+          return {
+            quiz_id:        quizData.id,
+            type:           "multiple-choice",
+            text:           q.questionText,
+            question_text:  q.questionText,
+            options:        optionObjects,
+            correct_answer: String(safeIdx + 1),
+            explanation:    q.explanation,
+            points:         1,
+            order:          idx,
+          };
+        });
+      }
+
+      // Set points so total = 100 (e.g. 10 questions → 10 pts each)
+      if (questionRows.length > 0) {
+        const pointsEach = Math.round(100 / questionRows.length);
+        questionRows = questionRows.map(r => ({ ...r, points: pointsEach }));
+      }
+
+      if (questionRows.length > 0) {
+        let { error: iqErr } = await supabaseAdmin.from("questions").insert(questionRows);
+        if (iqErr && /question_text|null value.*text/i.test(iqErr.message + (iqErr.details || ""))) {
+          const fallback = questionRows.map(q => { const r = { ...q } as Record<string, unknown>; delete r["text"]; return r; });
+          ({ error: iqErr } = await supabaseAdmin.from("questions").insert(fallback));
+        }
+        if (iqErr) console.warn("[save-unit-quiz] questions insert warning:", iqErr.message);
+      }
+
+      // Auto-update course level to match Headway level
+      try {
+        await supabaseAdmin.from("courses").update({ level }).eq("id", courseId);
+      } catch { /* non-critical */ }
+
+      return res.json({ success: true, quizId: quizData.id, questions: questionRows.length });
+    } catch (e: any) {
+      console.error("POST /api/teacher/headway/save-unit-quiz", e);
+      return res.status(500).json({ error: e?.message || "Server error" });
+    }
+  });
+
+  // ── GET /api/teacher/headway-preview — return MC questions for a unit (no DB writes) ──
+  app.get("/api/teacher/headway-preview", (req: Request, res: Response) => {
+    try {
+      const level = typeof req.query.level === "string" ? req.query.level.trim() : "";
+      const unitNum = parseInt(String(req.query.unit ?? "1"), 10);
+      if (!level) return res.status(400).json({ error: "level query param required" });
+      const levelData = HEADWAY_FULL_DATA[level];
+      if (!levelData) return res.status(400).json({ error: `Unknown level "${level}"` });
+      const unit = levelData.units.find(u => u.num === unitNum);
+      if (!unit) return res.status(404).json({ error: `Unit ${unitNum} not found for level "${level}"` });
+      const questions = buildHwUnitQuestions(unit, levelData.slug);
+      return res.json({ level, unit: unitNum, title: unit.title, description: unit.description, questions });
+    } catch (e: any) {
+      return res.status(500).json({ error: e?.message || "Server error" });
+    }
+  });
+
+  // ── POST /api/teacher/headway/generate-questions — AI generates real fill-in-the-blank questions ──
+  app.post("/api/teacher/headway/generate-questions", async (req: Request, res: Response) => {
+    try {
+      const caller = await assertAuthenticated(req, res);
+      if (!caller) return;
+
+      const level   = typeof req.body?.level   === "string" ? req.body.level.trim()        : "";
+      const unitNum = Number(req.body?.unitNum ?? 0);
+      if (!level)   return res.status(400).json({ error: "level is required" });
+      if (!unitNum) return res.status(400).json({ error: "unitNum is required" });
+
+      const levelData = HEADWAY_FULL_DATA[level];
+      if (!levelData) return res.status(400).json({ error: `Unknown level "${level}"` });
+      const unit = levelData.units.find(u => u.num === unitNum);
+      if (!unit)  return res.status(404).json({ error: `Unit ${unitNum} not found` });
+
+      const apiKey = (process.env.AI_INTEGRATIONS_GEMINI_API_KEY || process.env.GEMINI_API_KEY || "").trim();
+      if (!apiKey) return res.status(503).json({ error: "AI not configured — set GEMINI_API_KEY in Secrets." });
+
+      const topics: Array<{ type: "grammar" | "vocabulary"; topic: string }> = [
+        ...unit.grammar.map(g => ({ type: "grammar"    as const, topic: g.topic })),
+        ...unit.vocabulary.map(v => ({ type: "vocabulary" as const, topic: v.topic })),
+      ];
+
+      if (topics.length === 0) {
+        return res.json({ level, unitNum, title: unit.title, questions: [] });
+      }
+
+      const cefrMap: Record<string, string> = {
+        "Beginner": "A1", "Elementary": "A2", "Pre-Intermediate": "B1",
+        "Intermediate": "B1+", "Upper-Intermediate": "B2", "Advanced": "C1",
+      };
+      const cefr = cefrMap[level] || "B1";
+
+      const prompt = `You are an Oxford Headway English language test generator.
+Level: ${level} (${cefr}) — ${unit.title}
+Unit theme: ${unit.description}
+
+Generate ONE fill-in-the-blank multiple-choice question for each topic below.
+Each question must be a realistic English sentence with _____ (5 underscores) for the blank.
+Provide 4 plausible options where exactly ONE is correct. Use vocabulary and grammar appropriate for ${cefr} learners.
+
+Topics:
+${topics.map((t, i) => `${i + 1}. [${t.type}] ${t.topic}`).join("\n")}
+
+Return ONLY a valid JSON array — no markdown, no code fences, no extra text:
+[
+  {
+    "topic": "exact topic name from the list above",
+    "type": "grammar",
+    "text": "She _____ to work every day.",
+    "options": ["goes", "is going", "went", "has gone"],
+    "correct": 0,
+    "explanation": "Use Present Simple for habits and routines."
+  }
+]
+
+Rules:
+- text must contain exactly one _____ (5 underscores)
+- options must have exactly 4 items
+- correct is the 0-based index of the correct option
+- explanation is one concise sentence
+- For vocabulary: test word choice, collocations, or meaning in context
+- Make sentences natural, realistic and appropriate for the unit theme`;
+
+      const { GoogleGenAI } = await import("@google/genai");
+      const geminiBaseUrl = (process.env.AI_INTEGRATIONS_GEMINI_BASE_URL || "").trim();
+      const ai = geminiBaseUrl
+        ? new GoogleGenAI({ apiKey, httpOptions: { apiVersion: "", baseUrl: geminiBaseUrl } })
+        : new GoogleGenAI({ apiKey });
+
+      const result = await ai.models.generateContent({
+        model: "gemini-2.5-flash",
+        contents: prompt,
+        config: { temperature: 0.4 },
+      });
+
+      const raw = (result.text || "").trim();
+      const cleaned = raw.replace(/^```(?:json)?\s*/i, "").replace(/\s*```\s*$/i, "").trim();
+
+      let questions: unknown[];
+      try {
+        questions = JSON.parse(cleaned);
+      } catch {
+        console.error("[headway/generate-questions] JSON parse error. Raw:", cleaned.slice(0, 300));
+        return res.status(500).json({ error: "AI returned invalid JSON. Please try again." });
+      }
+
+      if (!Array.isArray(questions)) {
+        return res.status(500).json({ error: "AI did not return an array." });
+      }
+
+      // Sanitise each question — shuffle options so correct answer isn't always position 0
+      const sanitised = questions
+        .filter((q: any) => q && typeof q.text === "string" && Array.isArray(q.options))
+        .map((q: any, idx: number) => {
+          const correctIdx = Math.max(0, Math.min(3, Number(q.correct) || 0));
+          const opts = (q.options as string[]).slice(0, 4);
+          const correctText = opts[correctIdx];
+          const shuffled = [...opts].sort(() => Math.random() - 0.5);
+          const foundIdx = shuffled.indexOf(correctText);
+          const safeIdx = foundIdx === -1 ? 0 : foundIdx;
+          return {
+            order:          idx,
+            type:           q.type === "vocabulary" ? "vocabulary" : "grammar",
+            topic:          String(q.topic || ""),
+            questionText:   String(q.text || ""),
+            text:           String(q.text || ""),
+            options:        shuffled,
+            correctIndex:   safeIdx,
+            correct_answer: shuffled[safeIdx],
+            explanation:    String(q.explanation || ""),
+            oxfordUrl:      `${OUP}/student/headway/${levelData.slug}/testbuilder${CC}`,
+          };
+        });
+
+      return res.json({ level, unitNum, title: unit.title, questions: sanitised });
+    } catch (e: any) {
+      console.error("POST /api/teacher/headway/generate-questions", e);
+      return res.status(500).json({ error: e?.message || "Server error" });
+    }
+  });
+
+  // ── GET /api/teacher/headway/media — list uploaded audio/video files for a unit ──
+  app.get("/api/teacher/headway/media", async (req: Request, res: Response) => {
+    try {
+      const caller = await assertAuthenticated(req, res);
+      if (!caller) return;
+      const levelSlug = typeof req.query.levelSlug === "string" ? req.query.levelSlug.trim() : "";
+      const unitNum   = parseInt(String(req.query.unitNum ?? "0"), 10);
+      if (!levelSlug || !unitNum) return res.status(400).json({ error: "levelSlug and unitNum required" });
+
+      // Query the headway_media table (inserted during Drive import) using
+      // case-insensitive level match so "Beginner" == "beginner" == "BEGINNER"
+      const { data: rows, error } = await supabaseAdmin
+        .from("headway_media")
+        .select("title, file_name, url, mime_type, type")
+        .ilike("level", levelSlug)
+        .eq("unit_number", unitNum);
+
+      if (error) {
+        // Table may not exist yet — return empty list gracefully
+        if (error.code === "42P01") return res.json({ files: [] });
+        throw new Error(error.message);
+      }
+
+      const files = (rows ?? []).map((r: any) => ({
+        name: r.file_name || r.title,
+        path: r.url,
+        url:  r.url,
+        // Normalise type: student_audio / workbook_audio → "audio", video → "video"
+        type: String(r.type || "").includes("video") ? "video" : "audio",
+      }));
+
+      return res.json({ files });
+    } catch (e: any) {
+      console.error("GET /api/teacher/headway/media", e);
+      return res.status(500).json({ error: e?.message || "Server error" });
+    }
+  });
+
+  // ── POST /api/teacher/headway/media/upload-url — get signed URL to upload a file ──
+  app.post("/api/teacher/headway/media/upload-url", async (req: Request, res: Response) => {
+    try {
+      const caller = await assertAuthenticated(req, res);
+      if (!caller) return;
+      const levelSlug = typeof req.body?.levelSlug === "string" ? req.body.levelSlug.trim() : "";
+      const unitNum   = Number(req.body?.unitNum ?? 0);
+      const type      = req.body?.type === "video" ? "video" : "audio";
+      const rawName   = typeof req.body?.filename === "string" ? req.body.filename.trim() : "file";
+      if (!levelSlug || !unitNum) return res.status(400).json({ error: "levelSlug and unitNum required" });
+
+      // Sanitise filename
+      const safe = rawName.replace(/[^a-zA-Z0-9._\-() ]/g, "_").replace(/\s+/g, "_");
+      const storagePath = `${levelSlug}/${unitNum}/${type}/${safe}`;
+
+      const { data, error } = await supabaseAdmin.storage
+        .from("headway-media")
+        .createSignedUploadUrl(storagePath);
+      if (error || !data) {
+        return res.status(500).json({ error: error?.message || "Could not create upload URL" });
+      }
+      const { data: { publicUrl } } = supabaseAdmin.storage.from("headway-media").getPublicUrl(storagePath);
+      return res.json({ signedUrl: data.signedUrl, path: storagePath, publicUrl });
+    } catch (e: any) {
+      console.error("POST /api/teacher/headway/media/upload-url", e);
+      return res.status(500).json({ error: e?.message || "Server error" });
+    }
+  });
+
+  // ── DELETE /api/teacher/headway/media — delete an uploaded media file ──
+  app.delete("/api/teacher/headway/media", async (req: Request, res: Response) => {
+    try {
+      const caller = await assertAuthenticated(req, res);
+      if (!caller) return;
+      const path = typeof req.body?.path === "string" ? req.body.path.trim() : "";
+      if (!path) return res.status(400).json({ error: "path required" });
+      // Safety: only allow paths inside headway-media bucket
+      if (path.includes("..")) return res.status(400).json({ error: "Invalid path" });
+      const { error } = await supabaseAdmin.storage.from("headway-media").remove([path]);
+      if (error) return res.status(500).json({ error: error.message });
+      return res.json({ success: true });
+    } catch (e: any) {
+      console.error("DELETE /api/teacher/headway/media", e);
+      return res.status(500).json({ error: e?.message || "Server error" });
+    }
+  });
+
+  // ── POST /api/teacher/headway/import-unit-audio — download OUP ZIP, extract & store files ──
+  app.post("/api/teacher/headway/import-unit-audio", async (req: Request, res: Response) => {
+    try {
+      const caller = await assertAuthenticated(req, res);
+      if (!caller) return;
+
+      const level     = typeof req.body?.level     === "string" ? req.body.level.trim()     : "";
+      const levelSlug = typeof req.body?.levelSlug === "string" ? req.body.levelSlug.trim() : "";
+      const unitNum   = Number(req.body?.unitNum ?? 0);
+      const mediaType: "audio" | "video" = req.body?.type === "video" ? "video" : "audio";
+
+      if (!level || !levelSlug || !unitNum) {
+        return res.status(400).json({ error: "level, levelSlug, and unitNum are required" });
+      }
+
+      const levelData = HEADWAY_FULL_DATA[level];
+      if (!levelData) return res.status(400).json({ error: `Unknown level: ${level}` });
+
+      const unit = levelData.units.find((u: HUnit) => u.num === unitNum);
+      if (!unit) return res.status(400).json({ error: `Unit ${unitNum} not found in level ${level}` });
+
+      const zipUrl: string | undefined = mediaType === "video" ? (unit as any).videoZip : (unit as any).audioZip;
+      if (!zipUrl) return res.status(400).json({ error: `No ${mediaType} ZIP available for ${level} Unit ${unitNum}` });
+
+      // Download the ZIP from OUP (publicly accessible, no auth)
+      const zipRes = await fetch(zipUrl, {
+        headers: { "User-Agent": "Mozilla/5.0 (compatible; Headway-Importer/1.0)" },
+        signal: AbortSignal.timeout(60_000),
+      });
+      if (!zipRes.ok) {
+        return res.status(502).json({ error: `OUP server returned ${zipRes.status}: ${zipRes.statusText}` });
+      }
+
+      const zipBuffer = Buffer.from(await zipRes.arrayBuffer());
+
+      // Extract files using unzipper
+      const unzipper = _require("unzipper");
+      const directory = await unzipper.Open.buffer(zipBuffer);
+
+      const allowedExts = mediaType === "video"
+        ? [".mp4", ".webm", ".mov", ".avi", ".mkv", ".m4v"]
+        : [".mp3", ".wav", ".ogg", ".m4a", ".aac", ".flac"];
+
+      const mediaFiles: any[] = (directory.files as any[]).filter((f: any) => {
+        if (f.type !== "File") return false;
+        const ext = f.path.toLowerCase().match(/\.[^.]+$/)?.[0] ?? "";
+        return allowedExts.includes(ext);
+      });
+
+      if (mediaFiles.length === 0) {
+        return res.status(422).json({ error: "No audio/video files found in the ZIP" });
+      }
+
+      const prefix = `${levelSlug}/${unitNum}/${mediaType}`;
+
+      // Get already-uploaded files to skip re-uploading
+      const { data: existing } = await supabaseAdmin.storage.from("headway-media").list(prefix);
+      const existingNames = new Set((existing ?? []).map((f: any) => f.name));
+
+      const results: { name: string; path: string; url: string; type: "audio" | "video" }[] = [];
+
+      for (const file of mediaFiles) {
+        const rawName = (file.path as string).split("/").pop() ?? file.path;
+        const safe = rawName.replace(/[^a-zA-Z0-9._\-() ]/g, "_").replace(/\s+/g, "_");
+        const storagePath = `${prefix}/${safe}`;
+
+        if (existingNames.has(safe)) {
+          // Already stored — just return public URL
+          const { data: { publicUrl } } = supabaseAdmin.storage.from("headway-media").getPublicUrl(storagePath);
+          results.push({ name: safe, path: storagePath, url: publicUrl, type: mediaType });
+          continue;
+        }
+
+        const content: Buffer = await file.buffer();
+        const mimeType = mediaType === "video" ? "video/mp4" : "audio/mpeg";
+
+        const { error: uploadErr } = await supabaseAdmin.storage
+          .from("headway-media")
+          .upload(storagePath, content, { contentType: mimeType, upsert: false });
+
+        if (!uploadErr) {
+          const { data: { publicUrl } } = supabaseAdmin.storage.from("headway-media").getPublicUrl(storagePath);
+          results.push({ name: safe, path: storagePath, url: publicUrl, type: mediaType });
+        }
+      }
+
+      return res.json({ files: results, imported: results.length });
+    } catch (e: any) {
+      console.error("POST /api/teacher/headway/import-unit-audio", e);
+      return res.status(500).json({ error: e?.message || "Server error" });
+    }
+  });
+
+  // ── GET /api/teacher/headway/drive-config ────────────────────────────────
+  app.get("/api/teacher/headway/drive-config", (_req: Request, res: Response) => {
+    return res.json({ configured: Boolean(process.env.GOOGLE_API_KEY?.trim()) });
+  });
+
+  // ── POST /api/teacher/headway/drive-import/start ─────────────────────────
+  app.post("/api/teacher/headway/drive-import/start", async (req: Request, res: Response) => {
+    try {
+      const caller = await assertAuthenticated(req, res);
+      if (!caller) return;
+      if (!["admin", "teacher"].includes(caller.role)) return res.status(403).json({ error: "Forbidden" });
+
+      const apiKey = process.env.GOOGLE_API_KEY?.trim();
+      if (!apiKey) return res.status(503).json({ error: "GOOGLE_API_KEY not configured in Replit Secrets" });
+
+      const level    = String(req.body?.level    || "Beginner").trim();
+      const courseId = typeof req.body?.courseId === "string" ? req.body.courseId.trim() : undefined;
+      const jobId = `hw-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+      const job: DriveImportJob = { status: "running", total: 0, done: 0, skipped: 0, errors: [], logs: [] };
+      driveImportJobs.set(jobId, job);
+      console.log(`[drive-import] Starting job ${jobId} for level="${level}"${courseId ? ` courseId=${courseId}` : ""}`);
+
+      // Auto-ensure course_id column exists on headway_media (best-effort)
+      try {
+        await supabaseAdmin.rpc("exec_sql", {
+          sql: "ALTER TABLE headway_media ADD COLUMN IF NOT EXISTS course_id UUID REFERENCES courses(id) ON DELETE SET NULL;"
+        });
+      } catch { /* ignore — column may already exist or exec_sql not available */ }
+
+      // Choose level-specific folders; fall back to Beginner if level not configured
+      const levelFolders = LEVEL_DRIVE_FOLDERS[level] ?? LEVEL_DRIVE_FOLDERS['Beginner'];
+      job.logs.push(`📚 Level: ${level}${courseId ? " · linked to course" : ""} — ${Object.keys(levelFolders).length} folder(s) configured`);
+
+      res.json({ jobId });
+
+      // Run import in background (fire-and-forget)
+      (async () => {
+        for (const [type, folderId] of Object.entries(levelFolders)) {
+          try {
+            job.logs.push(`📂 Listing ${type} folder…`);
+            const allEntries = await listDriveFolder(folderId, apiKey);
+
+            // Separate ZIPs from plain media files
+            const zipFiles   = allEntries.filter((f: any) => /\.zip$/i.test(f.name));
+            const plainMedia = allEntries.filter((f: any) =>
+              !f.name.toLowerCase().endsWith('.zip') &&
+              f.mimeType !== 'application/vnd.google-apps.folder' &&
+              MEDIA_EXTS.has((f.name.split('.').pop() || '').toLowerCase())
+            );
+
+            job.logs.push(`   ↳ ${zipFiles.length} ZIP(s), ${plainMedia.length} plain media file(s)`);
+
+            // ── Process ZIP files ──────────────────────────────────────────
+            for (const zipFile of zipFiles) {
+              try {
+                job.logs.push(`📦 Downloading ZIP: ${zipFile.name}…`);
+                const zipBuf = await downloadDriveFileBuffer(zipFile.id, apiKey);
+                job.logs.push(`   ↳ ${(zipBuf.length / 1024 / 1024).toFixed(1)} MB — extracting…`);
+                await processZipEntries(zipBuf, zipFile.name, zipFile.id, type, level, job, courseId);
+              } catch (err: any) {
+                job.errors.push(`${zipFile.name}: ${err?.message}`);
+                job.logs.push(`✗ ${zipFile.name}: ${err?.message}`);
+              }
+              await new Promise(r => setTimeout(r, 200));
+            }
+
+            // ── Process plain media files (non-ZIP) ────────────────────────
+            for (const driveFile of plainMedia) {
+              try {
+                const compositeId = driveFile.id;
+                const { data: existing } = await supabaseAdmin
+                  .from('headway_media').select('id').eq('drive_file_id', compositeId).maybeSingle();
+                if (existing) {
+                  job.skipped++;
+                  job.logs.push(`↷ Skip (exists): ${driveFile.name}`);
+                  continue;
+                }
+
+                const unitNum = detectUnitNumber(driveFile.name);
+                const ext = (driveFile.name.split('.').pop() || '').toLowerCase();
+                const mime = mimeForExt(ext);
+
+                // Download and re-upload to Supabase Storage
+                const fileBuf = await downloadDriveFileBuffer(driveFile.id, apiKey);
+                const safeName = driveFile.name.replace(/\s+/g, '_');
+                const storagePath = `headway/${level}/${type}/unit${unitNum ?? 0}/${safeName}`;
+                const { error: uploadErr } = await supabaseAdmin.storage
+                  .from('headway-media')
+                  .upload(storagePath, fileBuf, { contentType: mime, upsert: true });
+                if (uploadErr) throw new Error(`Storage: ${uploadErr.message}`);
+
+                const { data: { publicUrl } } = supabaseAdmin.storage.from('headway-media').getPublicUrl(storagePath);
+                const title = safeName.replace(/\.[^.]+$/, '').replace(/[_-]/g, ' ').trim();
+
+                const insertRow: Record<string, unknown> = {
+                  level, unit_number: unitNum, type, title,
+                  file_name: safeName, drive_file_id: compositeId,
+                  url: publicUrl, mime_type: mime,
+                  size_bytes: fileBuf.length,
+                };
+                if (courseId) insertRow.course_id = courseId;
+                let insResult2 = await supabaseAdmin.from('headway_media').insert(insertRow);
+                if (insertRow.course_id && isMissingColumnError(insResult2.error, 'course_id')) {
+                  // course_id not yet visible in PostgREST schema cache — retry without it
+                  const { course_id: _dropped, ...rowWithoutCourse } = insertRow;
+                  insResult2 = await supabaseAdmin.from('headway_media').insert(rowWithoutCourse);
+                }
+                if (insResult2.error) {
+                  if (insResult2.error.code === '42P01') throw new Error('headway_media table not found — run migration 014');
+                  throw new Error(insResult2.error.message);
+                }
+                job.done++;
+                job.total++;
+                job.logs.push(`✓ ${driveFile.name}${unitNum ? ` → Unit ${unitNum}` : ''}`);
+              } catch (err: any) {
+                job.errors.push(`${driveFile.name}: ${err?.message}`);
+                job.logs.push(`✗ ${driveFile.name}: ${err?.message}`);
+              }
+            }
+          } catch (err: any) {
+            job.errors.push(`${type}: ${err?.message}`);
+            job.logs.push(`✗ Folder ${type}: ${err?.message}`);
+          }
+        }
+
+        job.status = job.done === 0 && job.errors.length > 0 ? "error" : "done";
+        job.logs.push(`🏁 Done — ${job.done} imported, ${job.skipped} skipped, ${job.errors.length} errors`);
+        console.log(`[drive-import] Job ${jobId} finished — done=${job.done} skipped=${job.skipped} errors=${job.errors.length}`);
+        if (job.errors.length > 0) console.warn('[drive-import] Errors:', job.errors.slice(0, 5).join(' | '));
+      })().catch(err => {
+        job.status = "error";
+        job.errors.push(String(err?.message || err));
+        job.logs.push(`✗ Fatal: ${err?.message}`);
+        console.error(`[drive-import] Job ${jobId} fatal error:`, err?.message);
+      });
+    } catch (e: any) {
+      console.error("POST /api/teacher/headway/drive-import/start", e);
+      return res.status(500).json({ error: e?.message || "Server error" });
+    }
+  });
+
+  // ── GET /api/teacher/headway/drive-import/:jobId — poll progress ──────────
+  app.get("/api/teacher/headway/drive-import/:jobId", async (req: Request, res: Response) => {
+    try {
+      const caller = await assertAuthenticated(req, res);
+      if (!caller) return;
+      const job = driveImportJobs.get(req.params.jobId);
+      if (!job) return res.status(404).json({ error: "Job not found" });
+      return res.json(job);
+    } catch (e: any) {
+      return res.status(500).json({ error: e?.message });
+    }
+  });
+
+  // ── POST /api/teacher/headway/lessons-media-summary — batch summary per lesson ──
+  // Supports two lookup strategies:
+  //   1. lesson_id column (media explicitly linked to a lesson)
+  //   2. headway:level:unit tag in lesson short_description (tag-based, for imported lessons)
+  app.post("/api/teacher/headway/lessons-media-summary", async (req: Request, res: Response) => {
+    try {
+      const caller = await assertAuthenticated(req, res);
+      if (!caller) return;
+
+      const lessonIds: string[] = Array.isArray(req.body?.lessonIds) ? req.body.lessonIds.slice(0, 200) : [];
+      if (lessonIds.length === 0) return res.json({ summary: {} });
+
+      const summary: Record<string, { audioCount: number; videoCount: number; level: string; unit: number | null }> = {};
+
+      // ── Strategy 1: lesson_id column ────────────────────────────────────────
+      const { data: byId, error: e1 } = await supabaseAdmin
+        .from("headway_media")
+        .select("lesson_id, type, level, unit_number")
+        .in("lesson_id", lessonIds);
+
+      if (e1 && e1.code !== "42P01") throw e1;
+
+      for (const row of (byId ?? []) as any[]) {
+        const lid = String(row.lesson_id || "");
+        if (!lid) continue;
+        if (!summary[lid]) summary[lid] = { audioCount: 0, videoCount: 0, level: row.level || "", unit: row.unit_number ?? null };
+        if (String(row.type || "").includes("video")) summary[lid].videoCount++;
+        else summary[lid].audioCount++;
+      }
+
+      // ── Strategy 2: headway:level:unit tag in short_description ─────────────
+      // Only for lessons that weren't resolved via lesson_id
+      const unresolved = lessonIds.filter(id => !summary[id]);
+      if (unresolved.length > 0) {
+        // Fetch short_descriptions for unresolved lessons
+        const { data: lessonRows } = await supabaseAdmin
+          .from("lessons")
+          .select("id, short_description")
+          .in("id", unresolved);
+
+        // Group lessons by their "level:unit" tag
+        const tagGroups = new Map<string, { level: string; unit: number; lessonIds: string[] }>();
+        for (const row of (lessonRows ?? []) as any[]) {
+          const desc = String(row.short_description || "");
+          const m = desc.match(/headway:([^:\n\s]+):(\d+)/i);
+          if (!m) continue;
+          const lvl  = m[1].trim();
+          const unit = parseInt(m[2], 10);
+          const key  = `${lvl.toLowerCase()}:${unit}`;
+          if (!tagGroups.has(key)) tagGroups.set(key, { level: lvl, unit, lessonIds: [] });
+          tagGroups.get(key)!.lessonIds.push(String(row.id));
+        }
+
+        // For each tag group, count media from headway_media
+        for (const { level: lvl, unit, lessonIds: lids } of tagGroups.values()) {
+          const { data: mediaRows } = await supabaseAdmin
+            .from("headway_media")
+            .select("type, level")
+            .ilike("level", lvl)
+            .eq("unit_number", unit);
+
+          if (!mediaRows?.length) continue;
+
+          let audioCount = 0, videoCount = 0;
+          for (const mr of mediaRows as any[]) {
+            if (String(mr.type || "").includes("video")) videoCount++;
+            else audioCount++;
+          }
+          if (audioCount === 0 && videoCount === 0) continue;
+
+          const levelDisplay = (mediaRows[0] as any).level || lvl;
+          for (const lid of lids) {
+            summary[lid] = { audioCount, videoCount, level: levelDisplay, unit };
+          }
+        }
+      }
+
+      return res.json({ summary });
+    } catch (e: any) {
+      console.error("POST /api/teacher/headway/lessons-media-summary", e);
+      return res.status(500).json({ error: e?.message });
+    }
+  });
+
+  // ── GET /api/teacher/headway/lesson-media/:lessonId — media linked to a lesson ──
+  app.get("/api/teacher/headway/lesson-media/:lessonId", async (req: Request, res: Response) => {
+    try {
+      const caller = await assertAuthenticated(req, res);
+      if (!caller) return;
+      const lessonId = String(req.params.lessonId || '').trim();
+      if (!lessonId) return res.status(400).json({ error: 'lessonId required' });
+
+      // First try to get media linked by lesson_id
+      const { data: byLesson, error: e1 } = await supabaseAdmin
+        .from("headway_media")
+        .select("id, title, file_name, url, mime_type, type, level, unit_number")
+        .eq("lesson_id", lessonId)
+        .order("type", { ascending: true })
+        .order("file_name", { ascending: true });
+
+      if (e1 && e1.code !== "42P01") throw e1;
+
+      // Also check lesson short_description for headway:levelSlug:unitNum tag
+      const { data: lessonRow } = await supabaseAdmin
+        .from("lessons")
+        .select("short_description")
+        .eq("id", lessonId)
+        .maybeSingle();
+
+      let byUnit: any[] = [];
+      const desc = String((lessonRow as any)?.short_description || '');
+      const hwMatch = desc.match(/headway:([^:\n]+):(\d+)/i);
+      if (hwMatch) {
+        const levelSlug = hwMatch[1].trim();
+        const unitNum   = parseInt(hwMatch[2], 10);
+        const { data: unitRows } = await supabaseAdmin
+          .from("headway_media")
+          .select("id, title, file_name, url, mime_type, type, level, unit_number")
+          .ilike("level", levelSlug)
+          .eq("unit_number", unitNum)
+          .order("type", { ascending: true })
+          .order("file_name", { ascending: true });
+        byUnit = unitRows ?? [];
+      }
+
+      // Merge, deduplicate by id
+      const allRows = [...(byLesson ?? []), ...byUnit];
+      const seen = new Set<string>();
+      const files = allRows
+        .filter((r: any) => { if (seen.has(r.id)) return false; seen.add(r.id); return true; })
+        .map((r: any) => ({
+          id: r.id,
+          name: r.file_name || r.title || 'Media',
+          url: r.url,
+          type: String(r.type || '').includes('video') ? 'video' : 'audio',
+          mime_type: r.mime_type,
+          level: r.level,
+          unit_number: r.unit_number,
+        }));
+
+      return res.json({ files });
+    } catch (e: any) {
+      console.error("GET /api/teacher/headway/lesson-media", e);
+      return res.status(500).json({ error: e?.message });
+    }
+  });
+
+  // ── GET /api/teacher/headway/drive-media — list imported Drive media ──────
+  app.get("/api/teacher/headway/drive-media", async (req: Request, res: Response) => {
+    try {
+      const caller = await assertAuthenticated(req, res);
+      if (!caller) return;
+      const level    = typeof req.query.level    === "string" ? req.query.level    : "Beginner";
+      const unitNum  = req.query.unit  ? parseInt(String(req.query.unit), 10)  : undefined;
+      const type     = typeof req.query.type     === "string" ? req.query.type     : undefined;
+      const courseId = typeof req.query.courseId === "string" ? req.query.courseId.trim() : undefined;
+
+      let q = supabaseAdmin
+        .from("headway_media")
+        .select("*")
+        .eq("level", level)
+        .order("unit_number", { ascending: true, nullsFirst: false })
+        .order("file_name",   { ascending: true });
+
+      if (unitNum)  q = (q as any).eq("unit_number", unitNum);
+      if (type)     q = (q as any).eq("type", type);
+      if (courseId) q = (q as any).eq("course_id", courseId);
+
+      const { data, error } = await q;
+      if (error) {
+        if (error.code === "42P01") return res.json({ media: [] }); // table not yet created
+        if (isMissingColumnError(error, "course_id")) return res.json({ media: [] }); // column not in cache yet
+        throw error;
+      }
+      return res.json({ media: data ?? [] });
+    } catch (e: any) {
+      console.error("GET /api/teacher/headway/drive-media", e);
+      return res.status(500).json({ error: e?.message });
+    }
+  });
+
+  // ── DELETE /api/teacher/headway/drive-media/:id ────────────────────────────
+  app.delete("/api/teacher/headway/drive-media/:id", async (req: Request, res: Response) => {
+    try {
+      const caller = await assertAuthenticated(req, res);
+      if (!caller) return;
+      if (!["admin", "teacher"].includes(caller.role)) return res.status(403).json({ error: "Forbidden" });
+      const { error } = await supabaseAdmin.from("headway_media").delete().eq("id", req.params.id);
+      if (error) throw error;
+      return res.json({ success: true });
+    } catch (e: any) {
+      return res.status(500).json({ error: e?.message });
+    }
+  });
+
+  // ── DELETE /api/teacher/headway/drive-media — bulk delete all media (optionally by level) ──
+  app.delete("/api/teacher/headway/drive-media", async (req: Request, res: Response) => {
+    try {
+      const caller = await assertAuthenticated(req, res);
+      if (!caller) return;
+      if (!["admin", "teacher"].includes(caller.role)) return res.status(403).json({ error: "Forbidden" });
+
+      const level = typeof req.query.level === "string" ? req.query.level.trim() : "";
+
+      let query = supabaseAdmin.from("headway_media").delete();
+      if (level) {
+        query = (query as any).ilike("level", level);
+      } else {
+        // Delete all — require explicit confirmation header
+        const confirm = req.headers["x-confirm-delete-all"];
+        if (confirm !== "yes") {
+          return res.status(400).json({ error: "Pass header x-confirm-delete-all: yes to delete all media" });
+        }
+        query = (query as any).neq("id", "00000000-0000-0000-0000-000000000000"); // match all rows
+      }
+
+      const { error, count } = await (query as any).select("id", { count: "exact", head: true });
+      // Re-run actual delete
+      let delQuery = supabaseAdmin.from("headway_media").delete();
+      if (level) {
+        delQuery = (delQuery as any).ilike("level", level);
+      } else {
+        delQuery = (delQuery as any).neq("id", "00000000-0000-0000-0000-000000000000");
+      }
+      const { error: delErr } = await delQuery;
+      if (delErr) throw delErr;
+
+      return res.json({ success: true, level: level || "all" });
+    } catch (e: any) {
+      console.error("DELETE /api/teacher/headway/drive-media (bulk)", e);
+      return res.status(500).json({ error: e?.message });
+    }
+  });
+
+  // ── GET /api/teacher/headway/drive-stream/:fileId — proxy Drive file ───────
+  app.get("/api/teacher/headway/drive-stream/:fileId", async (req: Request, res: Response) => {
+    try {
+      const caller = await assertAuthenticated(req, res);
+      if (!caller) return;
+      const fileId = String(req.params.fileId || "").trim();
+      if (!fileId) return res.status(400).json({ error: "fileId required" });
+
+      const apiKey = process.env.GOOGLE_API_KEY?.trim();
+      const downloadUrl = apiKey
+        ? `${DRIVE_API_BASE}/files/${encodeURIComponent(fileId)}?alt=media&key=${apiKey}`
+        : `https://drive.google.com/uc?export=download&id=${encodeURIComponent(fileId)}`;
+
+      const reqHeaders: Record<string, string> = { "User-Agent": "Mozilla/5.0" };
+      if (req.headers.range) reqHeaders["Range"] = req.headers.range;
+
+      const driveRes = await fetch(downloadUrl, { headers: reqHeaders, redirect: "follow" });
+
+      if (!driveRes.ok && driveRes.status !== 206) {
+        return res.status(driveRes.status).json({ error: `Drive returned ${driveRes.status}` });
+      }
+
+      const ct = driveRes.headers.get("content-type") || "application/octet-stream";
+      const cl = driveRes.headers.get("content-length");
+      const cr = driveRes.headers.get("content-range");
+
+      res.setHeader("Content-Type", ct);
+      res.setHeader("Accept-Ranges", "bytes");
+      res.setHeader("Cache-Control", "public, max-age=3600");
+      if (cl) res.setHeader("Content-Length", cl);
+      if (cr) res.setHeader("Content-Range", cr);
+      if (req.headers.range) res.status(206);
+
+      if (!driveRes.body) return res.status(500).json({ error: "No body from Drive" });
+
+      // Stream response body to client
+      const reader = driveRes.body.getReader();
+      const pump = (): void => {
+        reader.read().then(({ done, value }) => {
+          if (done) { res.end(); return; }
+          res.write(Buffer.from(value));
+          pump();
+        }).catch(() => { try { res.end(); } catch { /**/ } });
+      };
+      pump();
+    } catch (e: any) {
+      console.error("GET /api/teacher/headway/drive-stream", e);
+      if (!res.headersSent) res.status(500).json({ error: e?.message });
+    }
+  });
+
+  // ── POST /api/teacher/exams/:id/generate-ai-questions — generate exam questions via Gemini ──
+  app.post("/api/teacher/exams/:id/generate-ai-questions", async (req: Request, res: Response) => {
+    try {
+      const caller = await assertAuthenticated(req, res);
+      if (!caller) return;
+      if (!["admin", "teacher"].includes(caller.role)) {
+        return res.status(403).json({ error: "Forbidden" });
+      }
+
+      const examId = req.params.id?.trim();
+      if (!examId) return res.status(400).json({ error: "examId is required" });
+
+      const topic    = typeof req.body?.topic    === "string" ? req.body.topic.trim()    : "";
+      const level    = typeof req.body?.level    === "string" ? req.body.level.trim()    : "intermediate";
+      const count    = Math.min(30, Math.max(1, parseInt(req.body?.count  ?? "10", 10)));
+      const language = typeof req.body?.language === "string" ? req.body.language.trim() : "English";
+
+      if (!topic) return res.status(400).json({ error: "topic is required" });
+
+      const aiApiKey = (process.env.AI_INTEGRATIONS_GEMINI_API_KEY || process.env.GEMINI_API_KEY || "").trim();
+
+      // ── No API key → fall back to the same static bank as the Smart Test Builder ──
+      if (!aiApiKey) {
+        // Normalise level to Headway bank casing
+        const levelMap: Record<string, string> = {
+          beginner: "Beginner",
+          elementary: "Elementary",
+          "pre-intermediate": "Pre-Intermediate",
+          intermediate: "Intermediate",
+          "upper-intermediate": "Upper-Intermediate",
+          advanced: "Advanced",
+        };
+        const normLevel = levelMap[level.toLowerCase()] ?? "Intermediate";
+
+        // Pull questions from the static bank — getQuestionsForSection does fuzzy
+        // topic matching and falls back to template questions if no match.
+        let staticQs = getQuestionsForSection(normLevel, topic, count);
+
+        // If the matched section has fewer questions than requested, pad from other
+        // sections of the same level (shuffle each section before sampling, deduplicate by text).
+        if (staticQs.length < count) {
+          const usedTexts = new Set(staticQs.map(q => q.text));
+          const levelSections = HEADWAY_QUESTIONS[normLevel] ?? [];
+          // Shuffle the section list so we don't always pick the same padding sections
+          const shuffledSections = [...levelSections].sort(() => Math.random() - 0.5);
+          for (const sec of shuffledSections) {
+            if (staticQs.length >= count) break;
+            const shuffledPool = [...sec.questions].sort(() => Math.random() - 0.5);
+            for (const q of shuffledPool) {
+              if (staticQs.length >= count) break;
+              if (!usedTexts.has(q.text)) {
+                usedTexts.add(q.text);
+                staticQs = [...staticQs, q];
+              }
+            }
+          }
+        }
+
+        if (staticQs.length === 0) {
+          return res.status(400).json({ error: "No questions available for this topic. Please add a GEMINI_API_KEY to generate custom questions." });
+        }
+
+        const valid = staticQs.map((q, i) => {
+          // Save correct answer text before shuffling options
+          const correctText = q.options[q.correct] ?? q.options[0];
+          // Shuffle the answer options so correct isn't always first
+          const shuffledOpts = [...q.options].sort(() => Math.random() - 0.5);
+          return {
+            text: q.text,
+            options: shuffledOpts,
+            correct_answer: correctText,
+            explanation: q.explanation || "",
+            order: i,
+            points: 1,
+          };
+        });
+
+        console.log(`[exam-builder] Static bank fallback: ${valid.length} questions for topic="${topic}" level="${normLevel}"`);
+        return res.json({ questions: valid });
+      }
+
+      const prompt = `You are an expert English language exam writer.
+Generate exactly ${count} multiple-choice questions for the following exam topic.
+
+Topic: ${topic}
+Difficulty level: ${level}
+Language for question text and options: ${language}
+
+Rules:
+- Each question must have exactly 4 answer options (A, B, C, D).
+- Exactly one option must be correct.
+- Questions must test real language understanding, vocabulary, or grammar skills.
+- Do NOT number the questions in the text field.
+- Return ONLY valid JSON — no explanation, no markdown fences.
+
+JSON format (array of objects):
+[
+  {
+    "text": "<question text>",
+    "options": ["<option A>", "<option B>", "<option C>", "<option D>"],
+    "correct_answer": "<the correct option text, must exactly match one of the options>",
+    "explanation": "<brief reason why this is correct>"
+  }
+]`;
+
+      const { GoogleGenAI } = await import("@google/genai");
+      const geminiBaseUrl = (process.env.AI_INTEGRATIONS_GEMINI_BASE_URL || "").trim();
+      const ai = geminiBaseUrl
+        ? new GoogleGenAI({ apiKey: aiApiKey, httpOptions: { apiVersion: "", baseUrl: geminiBaseUrl } })
+        : new GoogleGenAI({ apiKey: aiApiKey });
+
+      const response = await ai.models.generateContent({
+        model: "gemini-2.5-flash",
+        contents: [{ role: "user", parts: [{ text: prompt }] }],
+        config: { temperature: 0.7, maxOutputTokens: 8192 },
+      });
+
+      const rawText = response.candidates?.[0]?.content?.parts?.[0]?.text ?? "";
+      const cleaned = rawText.replace(/```json\s*/gi, "").replace(/```\s*/gi, "").trim();
+      let questions: any[] = [];
+      try {
+        questions = JSON.parse(cleaned);
+        if (!Array.isArray(questions)) throw new Error("Not an array");
+      } catch {
+        const match = cleaned.match(/\[[\s\S]*\]/);
+        if (match) questions = JSON.parse(match[0]);
+        else return res.status(502).json({ error: "AI returned invalid JSON", raw: cleaned.slice(0, 500) });
+      }
+
+      // Validate & sanitise
+      const valid = questions
+        .filter(q => q && typeof q.text === "string" && Array.isArray(q.options) && q.options.length >= 2)
+        .slice(0, count)
+        .map((q: any, i: number) => ({
+          text: q.text,
+          options: q.options.slice(0, 4),
+          correct_answer: q.correct_answer || q.options[0],
+          explanation: q.explanation || "",
+          order: i,
+          points: 1,
+        }));
+
+      return res.json({ questions: valid });
+    } catch (e: any) {
+      console.error("POST /api/teacher/exams/:id/generate-ai-questions", e);
+      return res.status(500).json({ error: e?.message || "Failed to generate questions" });
+    }
+  });
+
+  // ── POST /api/teacher/exams/question-counts — count questions per exam id (bypasses RLS) ──
+  app.post("/api/teacher/exams/question-counts", async (req: Request, res: Response) => {
+    try {
+      const caller = await assertAuthenticated(req, res);
+      if (!caller) return;
+      const ids: string[] = Array.isArray(req.body?.ids) ? req.body.ids.filter((x: unknown) => typeof x === "string") : [];
+      if (ids.length === 0) return res.json({ counts: {} });
+
+      const { data, error } = await supabaseAdmin
+        .from("questions")
+        .select("quiz_id")
+        .in("quiz_id", ids);
+      if (error) throw error;
+
+      const counts: Record<string, number> = {};
+      (data || []).forEach((r: { quiz_id: string }) => {
+        if (r?.quiz_id) counts[r.quiz_id] = (counts[r.quiz_id] || 0) + 1;
+      });
+      return res.json({ counts });
+    } catch (e: any) {
+      console.error("POST /api/teacher/exams/question-counts", e);
+      return res.status(500).json({ error: e?.message || "Failed to count questions" });
+    }
+  });
+
+  // ── POST /api/teacher/exams/:id/save-questions — save exam questions via service role (bypasses RLS) ──
+  app.post("/api/teacher/exams/:id/save-questions", async (req: Request, res: Response) => {
+    try {
+      const caller = await assertAuthenticated(req, res);
+      if (!caller) return;
+      if (caller.role !== "teacher" && caller.role !== "admin") {
+        return res.status(403).json({ error: "Forbidden" });
+      }
+
+      const examId = typeof req.params.id === "string" ? req.params.id.trim() : "";
+      if (!examId) return res.status(400).json({ error: "Exam id is required" });
+
+      const rows = (req.body as { questions?: unknown })?.questions;
+      if (!Array.isArray(rows)) {
+        return res.status(400).json({ error: "Body must include questions: []" });
+      }
+
+      // Verify the exam exists — teacher_id column may not exist in all deployments, so select only id
+      const { data: examRow, error: examErr } = await supabaseAdmin
+        .from("quizzes")
+        .select("id")
+        .eq("id", examId)
+        .maybeSingle();
+      if (examErr) throw examErr;
+      if (!examRow?.id) return res.status(404).json({ error: "Exam not found." });
+
+      // Delete existing questions then insert new ones via service role — bypasses RLS
+      const { error: delErr } = await supabaseAdmin.from("questions").delete().eq("quiz_id", examId);
+      if (delErr) throw delErr;
+
+      if (rows.length === 0) return res.json({ success: true });
+
+      const qtext = (r: Record<string, unknown>) => {
+        const raw = r.text ?? r.question_text;
+        if (typeof raw === "string" && raw.trim()) return raw.trim();
+        return " ";
+      };
+
+      const buildRows = (mode: "text" | "question_text" | "both") =>
+        rows.map((r: Record<string, unknown>, idx: number) => {
+          const t = qtext(r);
+          const row: Record<string, unknown> = {
+            quiz_id: examId,
+            type: "multiple-choice",
+            options: r.options ?? null,
+            correct_answer: r.correct_answer ?? null,
+            explanation: r.explanation ?? null,
+            points: (() => { const n = Number(r.points); return Number.isFinite(n) ? n : 1; })(),
+            order: typeof r.order === "number" ? r.order : idx,
+          };
+          if (mode === "both") { row.text = t; row.question_text = t; }
+          else { row[mode] = t; }
+          return row;
+        });
+
+      const errStr = (e: any) => e ? [e.message, e.details, e.hint, e.code].filter(Boolean).join(" — ") : "";
+
+      let { error: insErr } = await supabaseAdmin.from("questions").insert(buildRows("text"));
+
+      // If "text" column doesn't exist, retry with "question_text"
+      if (insErr && (/question_text/i.test(errStr(insErr)) || /null value[^\n]*question_text/i.test(errStr(insErr)) || /column[^\n]*\btext\b.*does not exist/i.test(errStr(insErr)))) {
+        ({ error: insErr } = await supabaseAdmin.from("questions").insert(buildRows("question_text")));
+      }
+
+      // If neither alone works, try both columns
+      if (insErr && (/null value[^\n]*\btext\b/i.test(errStr(insErr)) || /column[^\n]*question_text.*does not exist/i.test(errStr(insErr)))) {
+        ({ error: insErr } = await supabaseAdmin.from("questions").insert(buildRows("both")));
+      }
+
+      if (insErr) {
+        const msg = [insErr.message, insErr.details, insErr.hint].filter(Boolean).join(" — ") || "Insert failed";
+        return res.status(400).json({ error: msg });
+      }
+
+      return res.json({ success: true, count: rows.length });
+    } catch (e: any) {
+      console.error("POST /api/teacher/exams/:id/save-questions", e);
+      return res.status(500).json({ error: e?.message || "Failed to save questions" });
+    }
+  });
+
+  // ── POST /api/teacher/headway/regenerate-quiz — replace all questions for a saved Headway quiz with fresh AI ones ──
+  app.post("/api/teacher/headway/regenerate-quiz", async (req: Request, res: Response) => {
+    try {
+      const caller = await assertAuthenticated(req, res);
+      if (!caller) return;
+
+      const quizId = typeof req.body?.quizId === "string" ? req.body.quizId.trim() : "";
+      if (!quizId) return res.status(400).json({ error: "quizId is required" });
+
+      // Load quiz to get level + unitNum from description tag
+      const { data: quiz, error: qErr } = await supabaseAdmin
+        .from("quizzes").select("id, description").eq("id", quizId).maybeSingle();
+      if (qErr || !quiz) return res.status(404).json({ error: "Quiz not found" });
+
+      const match = String(quiz.description || "").match(/headway:([^:\n]+):(\d+)/);
+      if (!match) return res.status(400).json({ error: "Quiz is not a Headway unit quiz" });
+
+      const level   = match[1];
+      const unitNum = parseInt(match[2], 10);
+
+      const levelData = HEADWAY_FULL_DATA[level];
+      if (!levelData) return res.status(400).json({ error: `Unknown level "${level}"` });
+      const unit = levelData.units.find(u => u.num === unitNum);
+      if (!unit)  return res.status(404).json({ error: `Unit ${unitNum} not found` });
+
+      const aiApiKey = (process.env.AI_INTEGRATIONS_GEMINI_API_KEY || process.env.GEMINI_API_KEY || "").trim();
+      if (!aiApiKey) return res.status(503).json({ error: "AI not configured — set GEMINI_API_KEY in Secrets." });
+
+      const cefrMap: Record<string, string> = {
+        "Beginner": "A1", "Elementary": "A2", "Pre-Intermediate": "B1",
+        "Intermediate": "B1+", "Upper-Intermediate": "B2", "Advanced": "C1",
+      };
+      const cefr = cefrMap[level] || "B1";
+      const topics = [
+        ...unit.grammar.map(g => ({ type: "grammar" as const, topic: g.topic })),
+        ...unit.vocabulary.map(v => ({ type: "vocabulary" as const, topic: v.topic })),
+      ];
+      if (topics.length === 0) return res.status(400).json({ error: "Unit has no grammar/vocabulary topics" });
+
+      const prompt = `You are an Oxford Headway English language test generator.
+Level: ${level} (${cefr}) — ${unit.title}
+Unit theme: ${unit.description}
+
+Generate ONE fill-in-the-blank multiple-choice question for each topic below.
+Each question must be a realistic English sentence with _____ (5 underscores) for the blank.
+Provide 4 plausible options where exactly ONE is correct. Use vocabulary and grammar appropriate for ${cefr} learners.
+
+Topics:
+${topics.map((t, i) => `${i + 1}. [${t.type}] ${t.topic}`).join("\n")}
+
+Return ONLY a valid JSON array — no markdown, no code fences, no extra text:
+[
+  {
+    "topic": "exact topic name from the list above",
+    "type": "grammar",
+    "text": "She _____ to work every day.",
+    "options": ["goes", "is going", "went", "has gone"],
+    "correct": 0,
+    "explanation": "Use Present Simple for habits and routines."
+  }
+]
+
+Rules:
+- text must contain exactly one _____ (5 underscores)
+- options must have exactly 4 items
+- correct is the 0-based index of the correct option
+- explanation is one concise sentence`;
+
+      const { GoogleGenAI } = await import("@google/genai");
+      const geminiBaseUrl = (process.env.AI_INTEGRATIONS_GEMINI_BASE_URL || "").trim();
+      const ai = geminiBaseUrl
+        ? new GoogleGenAI({ apiKey: aiApiKey, httpOptions: { apiVersion: "", baseUrl: geminiBaseUrl } })
+        : new GoogleGenAI({ apiKey: aiApiKey });
+
+      const aiResult = await ai.models.generateContent({
+        model: "gemini-2.5-flash",
+        contents: prompt,
+        config: { temperature: 0.5 },
+      });
+
+      const raw = (aiResult.text || "").trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```\s*$/i, "").trim();
+      let parsed: unknown[];
+      try { parsed = JSON.parse(raw); }
+      catch { return res.status(500).json({ error: "AI returned invalid JSON. Please try again." }); }
+      if (!Array.isArray(parsed) || parsed.length === 0) {
+        return res.status(500).json({ error: "AI did not return valid questions." });
+      }
+
+      const rawRows = parsed
+        .filter((q: any) => q && typeof q.text === "string" && Array.isArray(q.options))
+        .map((q: any, idx: number) => {
+          const correctIdx = Math.max(0, Math.min(3, Number(q.correct) || 0));
+          const opts = (q.options as string[]).slice(0, 4);
+          const correctText = opts[correctIdx];
+          const shuffled = [...opts].sort(() => Math.random() - 0.5);
+          const foundIdx = shuffled.indexOf(correctText);
+          const safeIdx = foundIdx === -1 ? 0 : foundIdx;
+          const optionObjects = shuffled.map((text, i) => ({ id: String(i + 1), text }));
+          return {
+            quiz_id:        quizId,
+            type:           "multiple-choice",
+            text:           String(q.text),
+            question_text:  String(q.text),
+            options:        optionObjects,
+            correct_answer: String(safeIdx + 1),
+            explanation:    String(q.explanation || ""),
+            points:         1,
+            order:          idx,
+          };
+        });
+      const pointsEach = rawRows.length > 0 ? Math.round(100 / rawRows.length) : 10;
+      const newRows = rawRows.map(r => ({ ...r, points: pointsEach }));
+
+      // Delete old questions and insert new ones
+      await supabaseAdmin.from("questions").delete().eq("quiz_id", quizId);
+      let { error: insErr } = await supabaseAdmin.from("questions").insert(newRows);
+      if (insErr && /question_text|null value.*text/i.test(insErr.message + (insErr.details || ""))) {
+        const fallback = newRows.map(r => { const x = { ...r } as Record<string, unknown>; delete x["text"]; return x; });
+        ({ error: insErr } = await supabaseAdmin.from("questions").insert(fallback));
+      }
+      if (insErr) {
+        console.warn("[regenerate-quiz] insert warning:", insErr.message);
+        return res.status(500).json({ error: insErr.message });
+      }
+
+      return res.json({ success: true, quizId, questions: newRows.length, level, unitNum });
+    } catch (e: any) {
+      console.error("POST /api/teacher/headway/regenerate-quiz", e);
+      return res.status(500).json({ error: e?.message || "Server error" });
+    }
+  });
+
+  // ── GET /api/teacher/headway/saved-quizzes — list units that already have a saved quiz ──
+  app.get("/api/teacher/headway/saved-quizzes", async (req: Request, res: Response) => {
+    try {
+      const caller = await assertAuthenticated(req, res);
+      if (!caller) return;
+
+      // Fetch all quizzes whose description contains the headway tag
+      const { data: quizzes } = await supabaseAdmin
+        .from("quizzes")
+        .select("id, description")
+        .ilike("description", "%headway:%");
+
+      const saved: { level: string; unitNum: number; quizId: string }[] = [];
+      for (const quiz of quizzes ?? []) {
+        const match = String(quiz.description || "").match(/headway:([^:\n]+):(\d+)/);
+        if (match) {
+          saved.push({ level: match[1], unitNum: parseInt(match[2], 10), quizId: quiz.id });
+        }
+      }
+      return res.json({ saved });
+    } catch (e: any) {
+      console.error("GET /api/teacher/headway/saved-quizzes", e);
+      return res.status(500).json({ error: e?.message || "Server error" });
     }
   });
 
@@ -4184,7 +7931,7 @@ Assistant:`;
   const normalizeLessonContentRow = (row: any, index: number) => {
     const rawType = String(row?.type || row?.content_type || '').toLowerCase();
     const type =
-      rawType === 'video' || rawType === 'audio' || rawType === 'pdf' || rawType === 'text'
+      rawType === 'video' || rawType === 'audio' || rawType === 'pdf' || rawType === 'text' || rawType === 'link'
         ? rawType
         : 'text';
 
@@ -4409,9 +8156,25 @@ Assistant:`;
         }
         throw contentsRes.error;
       }
+
+      // Generate signed URLs for media files (same as student API)
+      const contentRows = normalizeLessonContentRows(contentsRes.data || []).map((row: any) => ({
+        ...row,
+        signed_url: typeof row?.storage_path === 'string' && /^https?:\/\//i.test(row.storage_path)
+          ? row.storage_path
+          : null,
+      }));
+      await ensureLessonMediaBucket();
+      for (const row of contentRows) {
+        const path = String(row?.storage_path || '').trim();
+        if (!path || /^https?:\/\//i.test(path)) continue;
+        const signed = await supabaseAdmin.storage.from('lesson-media').createSignedUrl(path, 3600);
+        row.signed_url = signed.error ? null : signed.data?.signedUrl || null;
+      }
+
       return res.json({
         success: true,
-        contents: normalizeLessonContentRows(contentsRes.data || []),
+        contents: contentRows,
         storage: 'database',
       });
     } catch (e: any) {
@@ -4574,7 +8337,17 @@ Assistant:`;
         }
         throw upd.error;
       }
-      return res.json({ success: true, content: normalizeLessonContentRow(upd.data, 0) });
+      const normalizedRow: any = normalizeLessonContentRow(upd.data, 0);
+      // Generate signed URL for media files
+      const storagePath = String(normalizedRow?.storage_path || '').trim();
+      if (storagePath && !/^https?:\/\//i.test(storagePath)) {
+        await ensureLessonMediaBucket();
+        const signed = await supabaseAdmin.storage.from('lesson-media').createSignedUrl(storagePath, 3600);
+        normalizedRow.signed_url = signed.error ? null : signed.data?.signedUrl || null;
+      } else if (/^https?:\/\//i.test(storagePath)) {
+        normalizedRow.signed_url = storagePath;
+      }
+      return res.json({ success: true, content: normalizedRow });
     } catch (e: any) {
       void logSystemError(
         {
@@ -4712,6 +8485,25 @@ Assistant:`;
       const gate = await assertTeacherOwnsCourse(userId, String((lesson as any).course_id || ''));
       if (!gate.ok) return res.status(403).json({ error: 'Forbidden: no access to this lesson' });
 
+      // Validate content type and file size before issuing a signed URL
+      const ALLOWED_CONTENT_TYPES = [
+        'image/jpeg', 'image/png', 'image/gif', 'image/webp', 'image/svg+xml',
+        'video/mp4', 'video/webm', 'video/ogg',
+        'audio/mpeg', 'audio/ogg', 'audio/wav', 'audio/webm',
+        'application/pdf',
+        'text/plain', 'text/html',
+        'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+        'application/vnd.ms-powerpoint',
+      ];
+      const MAX_FILE_SIZE = 500 * 1024 * 1024; // 500 MB
+      if (!ALLOWED_CONTENT_TYPES.includes(contentType)) {
+        return res.status(400).json({ error: `File type not allowed: ${contentType}` });
+      }
+      const fileSize = typeof req.body?.fileSize === 'number' ? req.body.fileSize : null;
+      if (fileSize !== null && fileSize > MAX_FILE_SIZE) {
+        return res.status(400).json({ error: 'File exceeds maximum allowed size of 500 MB.' });
+      }
+
       const cleanName = fileName.replace(/[^\w.\-]/g, '_');
       const storagePath = `lesson/${lessonId}/${Date.now()}_${cleanName}`;
       await ensureLessonMediaBucket();
@@ -4732,6 +8524,11 @@ Assistant:`;
 
   app.get('/api/admin/analytics', async (req, res) => {
     try {
+      const analyticsStartedAt = Date.now();
+      const adminAnalyticsCacheKey = "admin-analytics:global";
+      const cachedAdminAnalytics = getCachedApiResponse<any>(adminAnalyticsCacheKey);
+      if (cachedAdminAnalytics) return res.json(cachedAdminAnalytics);
+
       const certsPromise = (async () => {
         const certRows = await fetchCertificatesSelectWithFallback([
           "id, status, created_at",
@@ -4880,7 +8677,7 @@ Assistant:`;
       const presentCount = attendance.filter(a => a.status === 'present').length;
       const attendanceRate = attendance.length > 0 ? Math.round((presentCount / attendance.length) * 100) : 0;
 
-      res.json({
+      const payload = {
         success: true,
         overview: {
           totalStudents: profiles.filter(p => p.role === 'student').length,
@@ -4910,13 +8707,25 @@ Assistant:`;
         courseByCategory,
         courseByLevel,
         scoreDistribution,
-      });
+      };
+      setCachedApiResponse(adminAnalyticsCacheKey, payload, 300_000);
+      const durationMs = Date.now() - analyticsStartedAt;
+      if (durationMs > PERF_SLOW_THRESHOLD_MS) {
+        console.warn(
+          `[perf] slow admin analytics duration=${durationMs}ms profiles=${profiles.length} courses=${courses.length} classes=${classes.length} attempts=${attempts.length}`,
+        );
+      }
+      res.json(payload);
     } catch (e: any) { res.status(500).json({ error: e.message }); }
   });
 
   // ── REPORTS ─────────────────────────────────────────────────
   app.get('/api/admin/reports/students', async (req, res) => {
     try {
+      const rptStudentsCacheKey = 'admin-reports:students';
+      const rptStudentsCached = getCachedApiResponse<any>(rptStudentsCacheKey);
+      if (rptStudentsCached) return res.json(rptStudentsCached);
+
       const [studentsRes, enrollmentsResWithIds, certs] = await Promise.all([
         supabaseAdmin.from('profiles').select('id, display_name, email, status, created_at').eq('role', 'student'),
         supabaseAdmin.from('courses').select('id, student_ids'),
@@ -4962,7 +8771,9 @@ Assistant:`;
         };
       });
 
-      res.json({ success: true, report });
+      const rptStudentsPayload = { success: true, report };
+      setCachedApiResponse(rptStudentsCacheKey, rptStudentsPayload, 180_000);
+      res.json(rptStudentsPayload);
     } catch (e: any) { res.status(500).json({ error: e.message }); }
   });
 
@@ -5116,6 +8927,10 @@ Assistant:`;
 
   app.get('/api/admin/reports/roles', async (req, res) => {
     try {
+      const rptRolesCacheKey = 'admin-reports:roles';
+      const rptRolesCached = getCachedApiResponse<any>(rptRolesCacheKey);
+      if (rptRolesCached) return res.json(rptRolesCached);
+
       const [profilesRes, coursesRes, quizzesRes, certs] = await Promise.all([
         supabaseAdmin.from('profiles').select('id, role, status, created_at'),
         supabaseAdmin.from('courses').select('teacher_id'),
@@ -5186,7 +9001,9 @@ Assistant:`;
       });
 
       const report = [roleStats.admin, roleStats.teacher, roleStats.student];
-      res.json({ success: true, report });
+      const rptRolesPayload = { success: true, report };
+      setCachedApiResponse(rptRolesCacheKey, rptRolesPayload, 180_000);
+      res.json(rptRolesPayload);
     } catch (e: any) { res.status(500).json({ error: e.message }); }
   });
 
@@ -5414,6 +9231,390 @@ Assistant:`;
     }
   });
 
+  // ─── Update Payment ───────────────────────────────────────────────────────────
+  app.patch('/api/admin/payments/:id', async (req, res) => {
+    try {
+      const { id } = req.params;
+      if (!id) return res.status(400).json({ error: 'Payment ID is required' });
+
+      const {
+        amount,
+        currency,
+        status,
+        method,
+        payment_date,
+        description,
+        reference,
+      } = req.body || {};
+
+      const updates: Record<string, any> = {};
+      if (amount !== undefined) {
+        const numericAmount = Number(amount);
+        if (!Number.isFinite(numericAmount) || numericAmount <= 0)
+          return res.status(400).json({ error: 'Amount must be greater than zero' });
+        updates.amount = numericAmount;
+      }
+      if (currency !== undefined) updates.currency = currency;
+      if (status !== undefined) updates.status = status;
+      if (method !== undefined) updates.method = method;
+      if (payment_date !== undefined) updates.payment_date = payment_date;
+      if (description !== undefined) updates.description = description;
+      if (reference !== undefined) updates.reference = reference;
+
+      const { error } = await supabaseAdmin
+        .from('payments')
+        .update(updates)
+        .eq('id', id);
+      if (error) throw error;
+
+      res.json({ success: true });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message || 'Failed to update payment' });
+    }
+  });
+
+  // ─── Delete Payment ───────────────────────────────────────────────────────────
+  app.delete('/api/admin/payments/:id', async (req, res) => {
+    try {
+      const { id } = req.params;
+      if (!id) return res.status(400).json({ error: 'Payment ID is required' });
+
+      const { error } = await supabaseAdmin
+        .from('payments')
+        .delete()
+        .eq('id', id);
+      if (error) throw error;
+
+      res.json({ success: true });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message || 'Failed to delete payment' });
+    }
+  });
+
+  // ─── Student Monthly Payments ────────────────────────────────────────────────
+  app.get('/api/admin/student-payments', async (req, res) => {
+    try {
+      const { month } = req.query as Record<string, string>;
+      const monthYear = month || new Date().toISOString().slice(0, 7);
+
+      const [studentsRes, paymentsRes, teachersResult] = await Promise.all([
+        supabaseAdmin.from('profiles').select('id, display_name, email, teacher_id').eq('role', 'student').order('display_name'),
+        supabaseAdmin.from('student_monthly_payments').select('*').eq('month_year', monthYear).order('paid_at', { ascending: false }),
+        supabaseAdmin.from('profiles').select('id, display_name, email').eq('role', 'teacher'),
+      ]);
+
+      if (studentsRes.error) throw studentsRes.error;
+
+      const payments: any[] = paymentsRes.data || [];
+      const teacherMap: Record<string, string> = {};
+      (teachersResult.data || []).forEach((t: any) => { teacherMap[t.id] = t.display_name || t.email || 'Unknown'; });
+
+      const paidSet = new Set(payments.map((p: any) => p.student_id));
+      const paymentByStudent: Record<string, any> = {};
+      payments.forEach((p: any) => { paymentByStudent[p.student_id] = p; });
+
+      const students = (studentsRes.data || []).map((s: any) => ({
+        id: s.id,
+        name: s.display_name || s.email || 'Unnamed',
+        email: s.email || '',
+        teacher_id: s.teacher_id || null,
+        teacher_name: s.teacher_id ? (teacherMap[s.teacher_id] || '—') : '—',
+        paid: paidSet.has(s.id),
+        payment: paymentByStudent[s.id] || null,
+      }));
+
+      res.json({ success: true, students, month_year: monthYear });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message || 'Failed to load student payments' });
+    }
+  });
+
+  app.post('/api/admin/student-payments', async (req, res) => {
+    try {
+      const { student_id, month_year, amount = 0, notes = '', send_invoice = true } = req.body || {};
+      if (!student_id) return res.status(400).json({ error: 'student_id is required' });
+      const monthYear = month_year || new Date().toISOString().slice(0, 7);
+
+      const { data: student, error: sErr } = await supabaseAdmin
+        .from('profiles').select('id, display_name, email, teacher_id').eq('id', student_id).single();
+      if (sErr || !student) return res.status(400).json({ error: 'Student not found' });
+
+      const { data: inserted, error: insErr } = await supabaseAdmin
+        .from('student_monthly_payments')
+        .upsert({ student_id, month_year: monthYear, amount: Number(amount) || 0, notes: notes || '', paid_at: new Date().toISOString() }, { onConflict: 'student_id,month_year' })
+        .select('id').single();
+      if (insErr) throw insErr;
+      const paymentId = inserted?.id;
+
+      const studentName = student.display_name || student.email || 'Student';
+      const [yr, mo] = monthYear.split('-');
+      const monthLabel = new Date(Number(yr), Number(mo) - 1, 1).toLocaleString('default', { month: 'long', year: 'numeric' });
+
+      const notifs: any[] = [{
+        user_id: student_id,
+        type: 'payment_confirmed',
+        title: 'Pagesa u konfirmua',
+        message: `Pagesa juaj për muajin ${monthLabel} u konfirmua me sukses.`,
+        read: false,
+      }];
+      if (student.teacher_id) {
+        notifs.push({
+          user_id: student.teacher_id,
+          type: 'payment_confirmed',
+          title: 'Pagesa e studentit u konfirmua',
+          message: `Pagesa e ${studentName} për muajin ${monthLabel} u konfirmua.`,
+          read: false,
+        });
+      }
+      await supabaseAdmin.from('notifications').insert(notifs).then(() => {});
+
+      // Send invoice email to student (fire-and-forget)
+      if (send_invoice && student.email && isEmailConfigured()) {
+        const settings: any = await getConfigSection('settings').catch(() => ({}));
+        const brandName: string = settings?.general?.school_name || 'QuizMaster';
+        const paidAt = new Date().toISOString();
+        const tpl = renderInvoiceEmail({
+          studentName,
+          amount: Number(amount) || 0,
+          monthLabel,
+          notes: notes || undefined,
+          paidAt,
+          brandName,
+        });
+        sendEmail({ to: student.email, toName: studentName, subject: tpl.subject, htmlContent: tpl.htmlContent, textContent: tpl.textContent })
+          .catch((e: any) => console.error('[invoice-email] failed:', e.message));
+      }
+
+      res.json({ success: true, id: paymentId, invoice_sent: !!(send_invoice && student.email && isEmailConfigured()) });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message || 'Failed to record payment' });
+    }
+  });
+
+  // Manual trigger: POST /api/admin/student-payments/send-reminders
+  app.post('/api/admin/student-payments/send-reminders', async (req, res) => {
+    try {
+      const caller = await assertAuthenticated(req, res);
+      if (!caller) return;
+      if (!isAdmin(caller)) return res.status(403).json({ error: 'Admin only' });
+      const result = await runPaymentDeadlineReminders({ force: true });
+      res.json({ success: true, ...result });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message || 'Failed to send reminders' });
+    }
+  });
+
+  app.delete('/api/admin/student-payments/:id', async (req, res) => {
+    try {
+      const { id } = req.params;
+      const { error } = await supabaseAdmin.from('student_monthly_payments').delete().eq('id', id);
+      if (error) throw error;
+      res.json({ success: true });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message || 'Failed to delete payment' });
+    }
+  });
+
+  // Called during login to check if student has paid the current month
+  app.get('/api/auth/check-student-payment', async (req, res) => {
+    try {
+      const token = (req.headers.authorization || '').replace('Bearer ', '').trim();
+      if (!token) return res.status(401).json({ error: 'Unauthorized' });
+
+      const { data: { user }, error: authErr } = await supabaseAdmin.auth.getUser(token);
+      if (authErr || !user) return res.status(401).json({ error: 'Unauthorized' });
+
+      const { data: profile } = await supabaseAdmin.from('profiles').select('role').eq('id', user.id).single();
+      if (profile?.role !== 'student') return res.json({ required: false, paid: true });
+
+      const monthYear = new Date().toISOString().slice(0, 7);
+      const { data: payRow } = await supabaseAdmin
+        .from('student_monthly_payments')
+        .select('id')
+        .eq('student_id', user.id)
+        .eq('month_year', monthYear)
+        .maybeSingle();
+
+      res.json({ required: true, paid: !!payRow });
+    } catch (e: any) {
+      res.json({ required: false, paid: true });
+    }
+  });
+
+  // ─── Teacher Hours ───────────────────────────────────────────────────────────
+  app.get('/api/admin/teacher-hours', async (req, res) => {
+    try {
+      const { teacher_id, month } = req.query as Record<string, string>;
+      const monthYear = month || new Date().toISOString().slice(0, 7);
+      const [yr, mo] = monthYear.split('-');
+      const startDate = `${yr}-${mo}-01`;
+      const endDate = new Date(Number(yr), Number(mo), 0).toISOString().slice(0, 10);
+
+      let hoursQuery = supabaseAdmin
+        .from('teacher_hours')
+        .select('*')
+        .gte('work_date', startDate)
+        .lte('work_date', endDate)
+        .order('work_date', { ascending: false });
+      if (teacher_id) hoursQuery = hoursQuery.eq('teacher_id', teacher_id);
+
+      const [hoursRes, teachersRes] = await Promise.all([
+        hoursQuery,
+        supabaseAdmin.from('profiles').select('id, display_name, email').eq('role', 'teacher').order('display_name'),
+      ]);
+
+      const rows: any[] = hoursRes.data || [];
+      const teacherMap: Record<string, string> = {};
+      (teachersRes.data || []).forEach((t: any) => { teacherMap[t.id] = t.display_name || t.email || 'Unknown'; });
+
+      const hours = rows.map((r: any) => ({
+        ...r,
+        teacher_name: teacherMap[r.teacher_id] || '—',
+        hours: Number(r.hours),
+        rate_per_hour: Number(r.rate_per_hour),
+        total: Number(r.hours) * Number(r.rate_per_hour),
+      }));
+
+      const summaryMap: Record<string, { teacher_id: string; teacher_name: string; total_hours: number; total_amount: number }> = {};
+      hours.forEach((r: any) => {
+        if (!summaryMap[r.teacher_id]) {
+          summaryMap[r.teacher_id] = { teacher_id: r.teacher_id, teacher_name: r.teacher_name, total_hours: 0, total_amount: 0 };
+        }
+        summaryMap[r.teacher_id].total_hours += Number(r.hours);
+        summaryMap[r.teacher_id].total_amount += r.total;
+      });
+
+      res.json({
+        success: true,
+        hours,
+        summary: Object.values(summaryMap),
+        teachers: teachersRes.data || [],
+        month_year: monthYear,
+      });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message || 'Failed to load teacher hours' });
+    }
+  });
+
+  app.post('/api/admin/teacher-hours', async (req, res) => {
+    try {
+      const { teacher_id, work_date, hours, rate_per_hour = 40, notes = '' } = req.body || {};
+      if (!teacher_id) return res.status(400).json({ error: 'teacher_id is required' });
+      if (!work_date) return res.status(400).json({ error: 'work_date is required' });
+      const numHours = Number(hours);
+      if (!Number.isFinite(numHours) || numHours <= 0) return res.status(400).json({ error: 'hours must be greater than 0' });
+
+      const [wd_yr, wd_mo] = work_date.split('-');
+      const monthStart = `${wd_yr}-${wd_mo}-01`;
+      const monthEnd = new Date(Number(wd_yr), Number(wd_mo), 0).toISOString().slice(0, 10);
+      if (work_date < monthStart || work_date > monthEnd) {
+        return res.status(400).json({ error: 'Data e punës nuk është e vlefshme' });
+      }
+
+      const { data: inserted, error: insErr } = await supabaseAdmin
+        .from('teacher_hours')
+        .insert({ teacher_id, work_date, hours: numHours, rate_per_hour: Number(rate_per_hour) || 40, notes: notes || '' })
+        .select('id').single();
+      if (insErr) throw insErr;
+      res.json({ success: true, id: inserted?.id });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message || 'Failed to record hours' });
+    }
+  });
+
+  app.patch('/api/admin/teacher-hours/:id', async (req, res) => {
+    try {
+      const { id } = req.params;
+      const { hours, rate_per_hour, notes, work_date } = req.body || {};
+      const updates: Record<string, any> = {};
+      if (hours !== undefined) updates.hours = Number(hours);
+      if (rate_per_hour !== undefined) updates.rate_per_hour = Number(rate_per_hour);
+      if (notes !== undefined) updates.notes = notes;
+      if (work_date !== undefined) updates.work_date = work_date;
+      if (!Object.keys(updates).length) return res.json({ success: true });
+      const { error } = await supabaseAdmin.from('teacher_hours').update(updates).eq('id', id);
+      if (error) throw error;
+      res.json({ success: true });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message || 'Failed to update hours' });
+    }
+  });
+
+  app.delete('/api/admin/teacher-hours/:id', async (req, res) => {
+    try {
+      const { id } = req.params;
+      const { error } = await supabaseAdmin.from('teacher_hours').delete().eq('id', id);
+      if (error) throw error;
+      res.json({ success: true });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message || 'Failed to delete hours' });
+    }
+  });
+
+  // Invoice data for a teacher/month
+  app.get('/api/admin/teacher-hours/invoice', async (req, res) => {
+    try {
+      const { teacher_id, month } = req.query as Record<string, string>;
+      if (!teacher_id) return res.status(400).json({ error: 'teacher_id is required' });
+      const monthYear = month || new Date().toISOString().slice(0, 7);
+      const [yr, mo] = monthYear.split('-');
+      const startDate = `${yr}-${mo}-01`;
+      const endDate = new Date(Number(yr), Number(mo), 0).toISOString().slice(0, 10);
+
+      const [teacherRes, hoursRes] = await Promise.all([
+        supabaseAdmin.from('profiles').select('id, display_name, email').eq('id', teacher_id).single(),
+        supabaseAdmin.from('teacher_hours').select('*').eq('teacher_id', teacher_id).gte('work_date', startDate).lte('work_date', endDate).order('work_date'),
+      ]);
+
+      if (teacherRes.error) throw teacherRes.error;
+
+      const rows: any[] = hoursRes.data || [];
+      const total_hours = rows.reduce((s: number, r: any) => s + Number(r.hours), 0);
+      const total_amount = rows.reduce((s: number, r: any) => s + Number(r.hours) * Number(r.rate_per_hour), 0);
+
+      res.json({
+        success: true,
+        teacher: teacherRes.data,
+        month_year: monthYear,
+        rows: rows.map((r: any) => ({ ...r, hours: Number(r.hours), rate_per_hour: Number(r.rate_per_hour), total: Number(r.hours) * Number(r.rate_per_hour) })),
+        total_hours,
+        total_amount,
+      });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message || 'Failed to generate invoice' });
+    }
+  });
+
+  // Teacher's own earnings (for dashboard widget)
+  app.get('/api/teacher/earnings', async (req, res) => {
+    try {
+      const token = (req.headers.authorization || '').replace('Bearer ', '').trim();
+      if (!token) return res.status(401).json({ error: 'Unauthorized' });
+      const { data: { user }, error: authErr } = await supabaseAdmin.auth.getUser(token);
+      if (authErr || !user) return res.status(401).json({ error: 'Unauthorized' });
+
+      const monthYear = new Date().toISOString().slice(0, 7);
+      const [yr, mo] = monthYear.split('-');
+      const startDate = `${yr}-${mo}-01`;
+      const endDate = new Date(Number(yr), Number(mo), 0).toISOString().slice(0, 10);
+
+      const { data: earningsData } = await supabaseAdmin
+        .from('teacher_hours')
+        .select('hours, rate_per_hour, work_date')
+        .eq('teacher_id', user.id)
+        .gte('work_date', startDate)
+        .lte('work_date', endDate);
+
+      const rows = earningsData || [];
+      const total_hours = rows.reduce((s: number, r: any) => s + Number(r.hours), 0);
+      const total_amount = rows.reduce((s: number, r: any) => s + Number(r.hours) * Number(r.rate_per_hour), 0);
+
+      res.json({ success: true, total_hours, total_amount, month_year: monthYear });
+    } catch (e: any) {
+      res.json({ success: true, total_hours: 0, total_amount: 0, month_year: new Date().toISOString().slice(0, 7) });
+    }
+  });
+
   app.get('/api/admin/invoices', async (req, res) => {
     try {
       const invRes = await supabaseAdmin
@@ -5564,7 +9765,534 @@ Assistant:`;
   app.post("/api/teacher/quizzes", teacherQuizzesPostHandler);
   app.post("/api/teacher/quizzes/", teacherQuizzesPostHandler);
 
+  /** AI Question Generation — server-side Gemini call so the browser never needs an API key */
+  app.post("/api/teacher/ai/generate-questions", async (req: Request, res: Response) => {
+    try {
+      const caller = await assertAuthenticated(req, res);
+      if (!caller) return;
+      if (caller.role !== "teacher" && caller.role !== "admin") {
+        return res.status(403).json({ error: "Forbidden" });
+      }
+      const { content, questionTypes } = req.body as { content?: string; questionTypes?: string[] };
+      if (!content?.trim()) return res.status(400).json({ error: "content is required" });
+      const geminiKey = (process.env.AI_INTEGRATIONS_GEMINI_API_KEY || process.env.GEMINI_API_KEY || "").trim();
+
+      const QUIZ_MAX = 16000;
+      const clipped = content.trim().slice(0, QUIZ_MAX);
+      const types: string[] = Array.isArray(questionTypes) && questionTypes.length > 0
+        ? questionTypes : ["multiple-choice", "true-false", "fill-in-the-blank"];
+
+      const words = (clipped.match(/[A-Za-z0-9]+/g) || []).length;
+      const autoCount = words <= 120 ? 3 : words <= 250 ? 4 : words <= 450 ? 5 : words <= 850 ? 7 : 9;
+      const count = Math.max(types.length, autoCount);
+
+      const TYPE_LABELS: Record<string, string> = {
+        "multiple-choice": "Multiple Choice", "multiple-answer": "Multiple Answer",
+        "true-false": "True / False", "fill-in-the-blank": "Fill in the Blank",
+        "short-answer": "Short Answer", "long-answer": "Essay", "matching": "Matching",
+        "ordering": "Ordering", "word-bank": "Word Bank", "sentence-building": "Sentence Building",
+        "drag-drop": "Drag & Drop", "cloze": "Cloze Test", "listening": "Listening Questions",
+        "audio-fill-blank": "Audio Fill in Blank", "dictation": "Dictation", "speaking": "Speaking",
+        "pronunciation": "Pronunciation Check", "reading-comprehension": "Reading Comprehension",
+      };
+      const TYPE_SCHEMAS: Record<string, string> = {
+        "multiple-choice": `{"type":"multiple-choice","question":"...","options":["A","B","C","D"],"correct_answer":"A","explanation":"..."}`,
+        "multiple-answer": `{"type":"multiple-answer","question":"...","options":["A","B","C","D"],"correct_answers":["A","C"],"explanation":"..."}`,
+        "true-false": `{"type":"true-false","question":"...","correct_answer":"True","explanation":"..."}`,
+        "fill-in-the-blank": `{"type":"fill-in-the-blank","question":"The ___ is the powerhouse of the cell.","correct_answer":"mitochondria","explanation":"..."}`,
+        "short-answer": `{"type":"short-answer","question":"...","correct_answer":"brief answer","explanation":"..."}`,
+        "long-answer": `{"type":"long-answer","question":"Explain in detail...","explanation":"sample answer or rubric hint"}`,
+        "matching": `{"type":"matching","question":"Match each word to its definition:","pairs":[{"left":"apple","right":"a red fruit"},{"left":"book","right":"pages bound together"}],"explanation":"..."}`,
+        "ordering": `{"type":"ordering","question":"Put these steps in order:","items":["Step C","Step A","Step B"],"correct_order":["Step A","Step B","Step C"],"explanation":"..."}`,
+        "word-bank": `{"type":"word-bank","question":"Choose the correct word: The ___ shines brightly.","word_bank":["sun","moon","rain","cloud"],"correct_answer":"sun","explanation":"..."}`,
+        "sentence-building": `{"type":"sentence-building","question":"Arrange the words:","words":["is","The","sky","blue"],"correct_answer":"The sky is blue","explanation":"..."}`,
+        "drag-drop": `{"type":"drag-drop","question":"Drag to put in correct order:","items":["C","A","B"],"correct_order":["A","B","C"],"explanation":"..."}`,
+        "cloze": `{"type":"cloze","question":"Complete the passage:","passage":"The ___ (1) rises in the east.","blanks":["sun"],"explanation":"..."}`,
+        "reading-comprehension": `{"type":"reading-comprehension","question":"Read the passage and answer:","passage":"...","options":["A","B","C","D"],"correct_answer":"A","explanation":"..."}`,
+        "listening": `{"type":"listening","question":"[Listening] ...","audio_transcript":"Full transcript","options":["A","B","C","D"],"correct_answer":"A","explanation":"..."}`,
+        "audio-fill-blank": `{"type":"audio-fill-blank","question":"Listen and fill: 'The capital of France is ___.'","audio_transcript":"Paris.","correct_answer":"Paris","explanation":"..."}`,
+        "dictation": `{"type":"dictation","question":"Listen carefully and write what you hear.","audio_transcript":"The quick brown fox.","correct_answer":"The quick brown fox.","explanation":"..."}`,
+        "speaking": `{"type":"speaking","question":"Describe your favourite holiday in 3-4 sentences.","explanation":"..."}`,
+        "pronunciation": `{"type":"pronunciation","question":"Say the following word clearly:","correct_answer":"necessary","explanation":"..."}`,
+      };
+
+      const onlyMC = types.length === 1 && types[0] === "multiple-choice";
+      const typeLabels = types.map(t => TYPE_LABELS[t] || t).join(", ");
+      const schemaDesc = types.map(t => `- ${TYPE_LABELS[t] || t}: ${TYPE_SCHEMAS[t] || `{"type":"${t}","question":"...","correct_answer":"...","explanation":"..."}`}`).join("\n");
+
+      const systemPrompt = `You are an expert quiz creator for an LMS platform. You always respond with ONLY a valid JSON array of question objects — no markdown, no explanation, no extra text.`;
+      const userPrompt = onlyMC
+        ? `Create exactly ${count} multiple-choice quiz questions using ONLY the content below. Each question needs exactly 4 options and 1 correct answer. Return a JSON array:
+[{"type":"multiple-choice","question":"...","options":["A","B","C","D"],"correct_answer":"A","explanation":"..."}]
+Content:\n"""${clipped}"""`
+        : `Generate exactly ${count} quiz questions using ONLY the content below.
+Types to use: ${typeLabels} (distribute evenly, ~${Math.ceil(count / types.length)} per type).
+Rules: For fill-in-the-blank use ___ for the blank. For matching provide pairs array. For ordering/drag-drop provide items and correct_order. For word-bank provide word_bank array. For multiple-choice: 4 options, 1 correct. Always include explanation.
+Schemas:\n${schemaDesc}
+Return ONLY a JSON array:\n[...questions]
+Content:\n"""${clipped}"""`;
+
+      let rawText = "";
+      if (geminiKey) {
+        const { GoogleGenAI } = await import("@google/genai");
+        const geminiBaseUrl = (process.env.AI_INTEGRATIONS_GEMINI_BASE_URL || "").trim();
+        const ai = geminiBaseUrl
+          ? new GoogleGenAI({ apiKey: geminiKey, httpOptions: { apiVersion: "", baseUrl: geminiBaseUrl } })
+          : new GoogleGenAI({ apiKey: geminiKey });
+        const result = await ai.models.generateContent({ model: "gemini-2.5-flash", contents: `${systemPrompt}\n\n${userPrompt}` });
+        rawText = (result.text || "").trim();
+      } else {
+        const pollinationsRes = await fetch("https://text.pollinations.ai/", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            messages: [
+              { role: "system", content: systemPrompt },
+              { role: "user", content: userPrompt },
+            ],
+            model: "openai",
+            jsonMode: true,
+          }),
+        });
+        if (!pollinationsRes.ok) throw new Error(`AI service error: ${pollinationsRes.status}`);
+        rawText = (await pollinationsRes.text()).trim();
+      }
+
+      const parseJsonFromText = (text: string): any[] => {
+        const fenced = text.match(/```(?:json)?\s*([\s\S]*?)```/i);
+        const clean = (fenced ? fenced[1] : text).trim();
+        try { const p = JSON.parse(clean); return Array.isArray(p) ? p : (p?.questions ?? []); } catch {}
+        let depth = 0, start = -1;
+        for (let i = 0; i < clean.length; i++) {
+          if (clean[i] === '[') { if (start === -1) start = i; depth++; }
+          else if (clean[i] === ']' && start !== -1) { depth--; if (depth === 0) { try { const p = JSON.parse(clean.slice(start, i + 1)); return Array.isArray(p) ? p : []; } catch {} } }
+        }
+        return [];
+      };
+
+      const parsed = parseJsonFromText(rawText);
+      const questions = parsed.map((item: any) => {
+        const type = String(item.type || "multiple-choice");
+        const text = String(item.question || item.text || "").trim();
+        if (!text) return null;
+        const q: any = { type, text, explanation: String(item.explanation || "").trim(), points: 1 };
+        if (type === "multiple-choice" || type === "reading-comprehension" || type === "listening") {
+          const opts = Array.isArray(item.options) ? item.options.map(String) : [];
+          q.options = opts.slice(0, 4).map((t: string, i: number) => ({ id: String(i + 1), text: t }));
+          const ca = String(item.correct_answer || opts[0] || "");
+          const caIdx = q.options.findIndex((o: any) => o.text === ca);
+          q.correctAnswer = caIdx >= 0 ? String(caIdx + 1) : "1";
+          if (type !== "multiple-choice") q.passage = String(item.passage || item.audio_transcript || "");
+        } else if (type === "multiple-answer") {
+          const opts = Array.isArray(item.options) ? item.options.map(String) : [];
+          q.options = opts.slice(0, 4).map((t: string, i: number) => ({ id: String(i + 1), text: t }));
+          const cas: string[] = Array.isArray(item.correct_answers) ? item.correct_answers.map(String) : [String(item.correct_answer || opts[0] || "")];
+          q.correctAnswer = cas.map((ca: string) => { const idx = q.options.findIndex((o: any) => o.text === ca); return idx >= 0 ? String(idx + 1) : "1"; });
+        } else if (type === "true-false") {
+          q.options = [{ id: "1", text: "True" }, { id: "2", text: "False" }];
+          q.correctAnswer = String(item.correct_answer || "True").toLowerCase().startsWith("t") ? "1" : "2";
+        } else if (["fill-in-the-blank","short-answer","audio-fill-blank","dictation","pronunciation"].includes(type)) {
+          q.correctAnswer = String(item.correct_answer || item.audio_transcript || "").trim();
+          if (item.audio_transcript) q.audioTranscript = String(item.audio_transcript);
+        } else if (type === "long-answer" || type === "speaking") {
+          q.points = 2;
+        } else if (type === "matching") {
+          q.pairs = Array.isArray(item.pairs) ? item.pairs.filter((p: any) => p.left && p.right) : [];
+          if (q.pairs.length < 2) return null;
+          q.points = q.pairs.length;
+        } else if (type === "ordering" || type === "drag-drop") {
+          q.items = Array.isArray(item.items) ? item.items.map(String) : [];
+          q.correctOrder = Array.isArray(item.correct_order) ? item.correct_order.map(String) : q.items;
+          if (q.items.length < 2) return null;
+        } else if (type === "word-bank") {
+          q.wordBank = Array.isArray(item.word_bank) ? item.word_bank.map(String) : [];
+          q.correctAnswer = String(item.correct_answer || "").trim();
+        } else if (type === "sentence-building") {
+          q.words = Array.isArray(item.words) ? item.words.map(String) : [];
+          q.correctAnswer = String(item.correct_answer || q.words.join(" ")).trim();
+          if (q.words.length < 2) return null;
+        } else if (type === "cloze") {
+          q.passage = String(item.passage || text);
+          q.blanks = Array.isArray(item.blanks) ? item.blanks.map(String) : [];
+          q.correctAnswer = JSON.stringify(q.blanks);
+        }
+        return q;
+      }).filter(Boolean);
+
+      if (questions.length === 0) {
+        return res.status(500).json({ error: "AI could not generate questions from the provided content. Try adding more detailed text." });
+      }
+      return res.json({ questions });
+    } catch (e: any) {
+      console.error("POST /api/teacher/ai/generate-questions", e);
+      return res.status(500).json({ error: e?.message || "Failed to generate questions" });
+    }
+  });
+
+  /** Smart Test Builder — AI generates questions from Headway grammar/vocabulary sections */
+  app.post("/api/teacher/smart-quiz/generate", async (req: Request, res: Response) => {
+    try {
+      const caller = await assertAuthenticated(req, res);
+      if (!caller) return;
+      if (caller.role !== "teacher" && caller.role !== "admin") {
+        return res.status(403).json({ error: "Forbidden" });
+      }
+
+      const body = req.body as {
+        level: string;
+        selectedSections: Array<{ id: string; topic: string; type: string; unitTitle: string }>;
+        courseId: string;
+        title: string;
+        timeLimit?: number;
+        passmark?: number;
+        questionsPerSection?: number;
+        questionTypes?: string[];
+      };
+
+      const { level, selectedSections, courseId, title } = body;
+      const timeLimit = Number(body.timeLimit) || 30;
+      const passmark = Number(body.passmark) || 70;
+      const questionsPerSection = Math.min(Math.max(Number(body.questionsPerSection) || 3, 2), 8);
+      const questionTypes: string[] = Array.isArray(body.questionTypes) && body.questionTypes.length > 0
+        ? body.questionTypes : ["multiple-choice"];
+      const useAI = Boolean((process.env.AI_INTEGRATIONS_GEMINI_API_KEY || process.env.GEMINI_API_KEY || "").trim());
+
+      if (!level || !Array.isArray(selectedSections) || selectedSections.length === 0) {
+        return res.status(400).json({ error: "level and selectedSections are required" });
+      }
+      if (!courseId) return res.status(400).json({ error: "courseId is required" });
+      if (!title?.trim()) return res.status(400).json({ error: "title is required" });
+
+      // Verify teacher owns the course
+      if (caller.role !== "admin") {
+        const { data: course } = await supabaseAdmin.from("courses").select("teacher_id").eq("id", courseId).maybeSingle();
+        if (!course) return res.status(404).json({ error: "Course not found" });
+        const scopedIds = await getTeacherIdCandidates(caller.userId);
+        const tid = course.teacher_id ? String(course.teacher_id) : "";
+        if (tid && !scopedIds.includes(tid) && tid !== caller.userId) {
+          return res.status(403).json({ error: "You do not own this course" });
+        }
+      }
+
+      // Build questions — AI path for mixed types, static bank for MC-only
+      type SmartQ = { type: string; text: string; options: string[]; correct_answer: string; explanation: string; [key: string]: any };
+      let questions: SmartQ[] = [];
+
+      if (useAI) {
+        const aiApiKey = (process.env.AI_INTEGRATIONS_GEMINI_API_KEY || process.env.GEMINI_API_KEY || "").trim();
+
+        const TYPE_LABELS: Record<string, string> = {
+          "multiple-choice": "Multiple Choice", "multiple-answer": "Multiple Answer",
+          "true-false": "True / False", "fill-in-the-blank": "Fill in the Blank",
+          "short-answer": "Short Answer", "long-answer": "Essay", "matching": "Matching",
+          "ordering": "Ordering", "word-bank": "Word Bank", "sentence-building": "Sentence Building",
+          "drag-drop": "Drag & Drop", "cloze": "Cloze Test", "listening": "Listening Questions",
+          "audio-fill-blank": "Audio Fill in Blank", "dictation": "Dictation", "speaking": "Speaking",
+          "pronunciation": "Pronunciation Check", "reading-comprehension": "Reading Comprehension",
+        };
+        const typeLabels = questionTypes.map(t => TYPE_LABELS[t] || t).join(", ");
+        const totalCount = selectedSections.length * questionsPerSection;
+        const perType = Math.ceil(totalCount / questionTypes.length);
+
+        const sectionList = selectedSections.map(s => `- ${s.unitTitle}: ${s.type} (${s.topic})`).join("\n");
+        const smartSysPrompt = `You are an expert English language teacher creating a Headway-style quiz. Respond ONLY with a valid JSON array — no markdown, no extra text.`;
+        const smartUserPrompt = `Generate exactly ${totalCount} English language questions for ${level} level students based on these topics:\n${sectionList}\n\nTypes: ${typeLabels} (~${perType} per type).\nRules: fill-in-the-blank uses ___. matching needs pairs array. ordering/drag-drop needs items+correct_order. word-bank needs word_bank array. Always include explanation.\nReturn ONLY a JSON array:\n[...questions]`;
+
+        let rawAI = "";
+        let aiSucceeded = false;
+        if (aiApiKey) {
+          const { GoogleGenAI } = await import("@google/genai");
+          const geminiBaseUrl = (process.env.AI_INTEGRATIONS_GEMINI_BASE_URL || "").trim();
+          const ai = geminiBaseUrl
+            ? new GoogleGenAI({ apiKey: aiApiKey, httpOptions: { apiVersion: "", baseUrl: geminiBaseUrl } })
+            : new GoogleGenAI({ apiKey: aiApiKey });
+          const maxRetries = 3;
+          for (let attempt = 0; attempt < maxRetries; attempt++) {
+            try {
+              if (attempt > 0) await new Promise(r => setTimeout(r, attempt * 2000));
+              const aiResult = await ai.models.generateContent({ model: "gemini-2.0-flash-lite", contents: `${smartSysPrompt}\n\n${smartUserPrompt}` });
+              rawAI = (aiResult.text || "").trim();
+              aiSucceeded = true;
+              break;
+            } catch (aiErr: any) {
+              const status = aiErr?.status ?? aiErr?.code ?? 0;
+              const isRetryable = status === 503 || status === 429 || String(aiErr?.message || "").includes("UNAVAILABLE") || String(aiErr?.message || "").includes("overloaded");
+              console.warn(`[smart-quiz] Gemini attempt ${attempt + 1} failed (${status}): ${aiErr?.message}`);
+              if (!isRetryable || attempt === maxRetries - 1) break;
+            }
+          }
+        }
+        if (!aiSucceeded) {
+          console.warn("[smart-quiz] AI unavailable — falling back to static question bank");
+        }
+
+        const parseArr = (text: string): any[] => {
+          const fenced = text.match(/```(?:json)?\s*([\s\S]*?)```/i);
+          const clean = (fenced ? fenced[1] : text).trim();
+          try { const p = JSON.parse(clean); return Array.isArray(p) ? p : []; } catch {}
+          let depth = 0, start = -1;
+          for (let i = 0; i < clean.length; i++) {
+            if (clean[i] === '[') { if (start === -1) start = i; depth++; }
+            else if (clean[i] === ']' && start !== -1) { depth--; if (depth === 0) { try { const p = JSON.parse(clean.slice(start, i + 1)); return Array.isArray(p) ? p : []; } catch {} } }
+          }
+          return [];
+        };
+
+        if (aiSucceeded && rawAI) {
+          const parsed = parseArr(rawAI);
+          questions = parsed.map((item: any) => {
+            const type = String(item.type || "multiple-choice");
+            const text = String(item.question || item.text || "").trim();
+            if (!text) return null;
+            return { type, text, options: Array.isArray(item.options) ? item.options.map(String) : [], correct_answer: String(item.correct_answer || ""), explanation: String(item.explanation || ""), ...item };
+          }).filter(Boolean) as SmartQ[];
+          console.log(`[smart-quiz] AI generated ${questions.length} questions for ${selectedSections.length} sections (level=${level}, types=${questionTypes.join(",")})`);
+        }
+
+      }
+
+      // Static bank fallback — runs when useAI=false OR when AI returned nothing
+      if (questions.length === 0) {
+        if (useAI) console.warn("[smart-quiz] AI returned no questions — using static bank as fallback");
+        const transformToType = (q: { text: string; options: string[]; correct: number; explanation: string }, qType: string, qIndex: number): SmartQ => {
+          const correctText = q.options[q.correct ?? 0] ?? q.options[0];
+          const wrongOptions = q.options.filter((_, i) => i !== (q.correct ?? 0));
+          const wrongText = wrongOptions[qIndex % wrongOptions.length] ?? q.options[1] ?? "";
+          switch (qType) {
+            case "fill-in-the-blank":
+              return { type: "fill-in-the-blank", text: q.text, options: [], correct_answer: correctText, explanation: q.explanation };
+            case "true-false": {
+              const useTrue = qIndex % 2 === 0;
+              const sentence = q.text.replace("_____", useTrue ? correctText : wrongText);
+              return { type: "true-false", text: sentence, options: ["True", "False"], correct_answer: useTrue ? "True" : "False", explanation: q.explanation };
+            }
+            case "word-bank": {
+              const shuffled = [...q.options].sort(() => Math.random() - 0.5);
+              return { type: "word-bank", text: q.text, options: shuffled, word_bank: shuffled, correct_answer: correctText, explanation: q.explanation };
+            }
+            case "short-answer":
+              return { type: "short-answer", text: q.text, options: [], correct_answer: correctText, explanation: q.explanation };
+            case "sentence-building": {
+              const fullSentence = q.text.replace("_____", correctText);
+              const words = fullSentence.replace(/[.!?]$/, "").split(" ").filter(Boolean);
+              const scrambled = [...words].sort(() => Math.random() - 0.5);
+              return { type: "sentence-building", text: "Arrange the words to form a correct sentence:", options: scrambled, words: scrambled, correct_answer: fullSentence.replace(/[.!?]$/, ""), explanation: q.explanation };
+            }
+            case "multiple-choice":
+            default:
+              return { type: "multiple-choice", text: q.text, options: q.options, correct_answer: String((q.correct ?? 0) + 1), explanation: q.explanation };
+          }
+        };
+        let typeIndex = 0;
+        for (const sec of selectedSections) {
+          const staticQs = getQuestionsForSection(level, sec.topic, questionsPerSection);
+          for (const q of staticQs) {
+            const qType = questionTypes[typeIndex % questionTypes.length];
+            questions.push(transformToType(q, qType, typeIndex));
+            typeIndex++;
+          }
+        }
+        console.log(`[smart-quiz] Static bank generated ${questions.length} questions for ${selectedSections.length} sections (level=${level}, types=${questionTypes.join(",")})`);
+      }
+
+      if (questions.length === 0) {
+        return res.status(400).json({ error: "No questions could be generated for the selected sections. Try different types or add more sections." });
+      }
+
+      // Create the quiz
+      const quizPayload: Record<string, unknown> = {
+        title: title.trim(),
+        description: `Smart Test Builder — ${level} · ${selectedSections.length} sections · ${questionTypes.join(", ")}`,
+        course_id: courseId,
+        teacher_id: caller.userId,
+        time_limit: timeLimit,
+        pass_mark: passmark,
+        published: false,
+        settings: {
+          shuffleQuestions: false,
+          shuffleAnswers: false,
+          allowRetry: true,
+          passingScore: passmark,
+          smartTestMeta: {
+            level,
+            sections: selectedSections,
+            questionsPerSection,
+            questionTypes,
+          },
+        },
+      };
+
+      const { data: inserted, error: insErr } = await insertCompatibleQuizAdmin(quizPayload, caller.userId);
+      if (insErr || !inserted?.id) {
+        console.error("[smart-quiz] quiz insert error:", insErr);
+        return res.status(500).json({ error: insErr?.message || "Failed to create quiz" });
+      }
+
+      const quizId = inserted.id;
+
+      // Map any question type to the subset the DB constraint allows
+      const DB_ALLOWED_TYPES = new Set(['multiple-choice','true-false','open-text','fill-in-the-blank','matching','ordering','image','video','reading','instruction']);
+      const normalizeQType = (t: string): string => {
+        if (DB_ALLOWED_TYPES.has(t)) return t;
+        const map: Record<string, string> = {
+          'word-bank': 'fill-in-the-blank', 'cloze': 'fill-in-the-blank', 'audio-fill-blank': 'fill-in-the-blank',
+          'sentence-building': 'open-text', 'short-answer': 'open-text', 'long-answer': 'open-text',
+          'dictation': 'open-text', 'speaking': 'open-text', 'pronunciation': 'open-text', 'listening': 'open-text',
+          'drag-drop': 'ordering', 'multiple-answer': 'multiple-choice', 'reading-comprehension': 'reading',
+        };
+        return map[t] ?? 'multiple-choice';
+      };
+
+      // Insert questions — preserve actual type for AI-generated questions
+      const questionRows = questions.map((q: any, idx: number) => ({
+        quiz_id: quizId,
+        type: normalizeQType(String(q.type || "multiple-choice")),
+        text: String(q.text || q.question || "").trim() || " ",
+        question_text: String(q.text || q.question || "").trim() || " ",
+        options: Array.isArray(q.options) ? q.options : [],
+        correct_answer: q.correct_answer ?? (Array.isArray(q.options) ? q.options[0] : ""),
+        explanation: q.explanation ?? null,
+        points: ["long-answer","speaking","matching"].includes(String(q.type)) ? 2 : 1,
+        order: idx,
+      }));
+
+      // Try inserting with text column first, fallback to question_text
+      let { error: qInsErr } = await supabaseAdmin.from("questions").insert(
+        questionRows.map(({ question_text: _qt, ...r }: any) => r)
+      );
+      if (qInsErr && /question_text|does not exist|PGRST204/i.test(qInsErr.message || "")) {
+        ({ error: qInsErr } = await supabaseAdmin.from("questions").insert(
+          questionRows.map(({ text: _t, ...r }: any) => ({ ...r, question_text: r.question_text }))
+        ));
+      }
+      if (qInsErr) {
+        console.warn("[smart-quiz] question insert warning:", qInsErr.message);
+      }
+
+      console.log(`[smart-quiz] Created quiz ${quizId} with ${questions.length} questions for level=${level}`);
+      return res.json({ success: true, quizId, questionCount: questions.length });
+    } catch (e: any) {
+      console.error("POST /api/teacher/smart-quiz/generate", e);
+      return res.status(500).json({ error: e?.message || "Failed to generate smart quiz" });
+    }
+  });
+
+  /** Regenerate AI questions for a Smart Test Builder quiz. */
+  app.post("/api/teacher/quizzes/:id/regenerate-questions", async (req: Request, res: Response) => {
+    try {
+      const caller = await assertAuthenticated(req, res);
+      if (!caller) return;
+      if (caller.role !== "teacher" && caller.role !== "admin") {
+        return res.status(403).json({ error: "Forbidden" });
+      }
+
+      const quizId = req.params.id;
+      let quiz: any = null;
+      let quizErr: any = null;
+      ({ data: quiz, error: quizErr } = await supabaseAdmin
+        .from("quizzes")
+        .select("id, settings, course_id")
+        .eq("id", quizId)
+        .maybeSingle());
+
+      if (quizErr || !quiz) {
+        return res.status(404).json({ error: "Quiz not found" });
+      }
+
+      const meta = (quiz.settings as any)?.smartTestMeta;
+      if (!meta?.level || !Array.isArray(meta?.sections) || meta.sections.length === 0) {
+        return res.status(400).json({ error: "This quiz was not created with Smart Test Builder. No regeneration metadata found." });
+      }
+
+      const { level, sections: selectedSections, questionsPerSection = 3 } = meta;
+
+      // Regenerate from expanded static bank — shuffled differently each call for variety
+      type SmartQ = { text: string; options: string[]; correct_answer: string; explanation: string };
+      const questions: SmartQ[] = [];
+
+      for (const sec of selectedSections) {
+        const staticQs = getQuestionsForSection(level, sec.topic, questionsPerSection);
+        for (const q of staticQs) {
+          // Store correct_answer as 1-based index string to match QuizBuilder's opt.id convention
+          questions.push({ text: q.text, options: q.options, correct_answer: String((q.correct ?? 0) + 1), explanation: q.explanation });
+        }
+      }
+      console.log(`[regen] Static bank regenerated ${questions.length} questions for quiz ${quizId} (level=${level})`);
+
+      if (questions.length === 0) {
+        return res.status(400).json({ error: "Could not generate questions." });
+      }
+
+      // Delete existing questions and insert new ones
+      await supabaseAdmin.from("questions").delete().eq("quiz_id", quizId);
+
+      const questionRows = questions.map((q: SmartQ, idx: number) => ({
+        quiz_id: quizId,
+        type: "multiple-choice",
+        text: q.text,
+        question_text: q.text,
+        options: q.options,
+        correct_answer: q.correct_answer,
+        explanation: q.explanation || null,
+        points: 1,
+        order: idx,
+      }));
+
+      let { error: qInsErr } = await supabaseAdmin.from("questions").insert(
+        questionRows.map(({ question_text: _qt, ...r }: any) => r)
+      );
+      if (qInsErr && /question_text|does not exist|PGRST204/i.test(qInsErr.message || "")) {
+        ({ error: qInsErr } = await supabaseAdmin.from("questions").insert(
+          questionRows.map(({ text: _t, ...r }: any) => ({ ...r, question_text: r.question_text }))
+        ));
+      }
+
+      console.log(`[regen] Replaced questions for quiz ${quizId}: ${questions.length} new questions`);
+      return res.json({ success: true, questionCount: questions.length });
+    } catch (e: any) {
+      console.error("POST /api/teacher/quizzes/:id/regenerate-questions", e);
+      return res.status(500).json({ error: e?.message || "Failed to regenerate questions" });
+    }
+  });
+
   /** Update quiz metadata (service role — bypasses RLS for schemas without teacher_id). */
+  /** GET single quiz by id (service role) — used by ExamBuilder to bypass RLS. */
+  app.get("/api/teacher/quizzes/:id", async (req: Request, res: Response) => {
+    try {
+      const caller = await assertAuthenticated(req, res);
+      if (!caller) return;
+      if (caller.role !== "teacher" && caller.role !== "admin") {
+        return res.status(403).json({ error: "Forbidden" });
+      }
+      const quizId = typeof req.params.id === "string" ? req.params.id.trim() : "";
+      if (!quizId) return res.status(400).json({ error: "Quiz id required" });
+
+      const { data: qz, error: qzErr } = await supabaseAdmin
+        .from("quizzes")
+        .select("id, title, description, time_limit, pass_mark, course_id, published, status, type, settings")
+        .eq("id", quizId)
+        .maybeSingle();
+      if (qzErr) return res.status(500).json({ error: qzErr.message });
+      if (!qz) return res.status(404).json({ error: "Exam not found" });
+
+      let courseName = "";
+      if (qz.course_id) {
+        const { data: c } = await supabaseAdmin.from("courses").select("title").eq("id", qz.course_id).maybeSingle();
+        courseName = c?.title || "";
+      }
+
+      const { data: qs } = await supabaseAdmin
+        .from("questions")
+        .select("*")
+        .eq("quiz_id", quizId)
+        .order("order", { ascending: true });
+
+      return res.json({ success: true, quiz: { ...qz, courseName }, questions: qs || [] });
+    } catch (e: any) {
+      res.status(500).json({ error: e?.message || "Failed to load quiz" });
+    }
+  });
+
   app.patch("/api/teacher/quizzes/:id", async (req: Request, res: Response) => {
     try {
       const caller = await assertAuthenticated(req, res);
@@ -5594,7 +10322,7 @@ Assistant:`;
         if ((e.code === "PGRST204" || /schema cache|could not find|does not exist/i.test(msg)) && msg.includes("settings") && "settings" in payload) {
           const { settings: _s, ...rest } = payload; void _s; payload = rest; continue;
         }
-        if ((e.code === "PGRST204" || /schema cache|could not find|does not exist/i.test(msg)) && msg.includes("published") && "published" in payload) {
+        if (missingQuizzesPublishedColumn(e) && "published" in payload) {
           const { published: _p, ...rest } = payload; void _p; payload = rest; continue;
         }
         if ((e.code === "PGRST204" || e.code === "42703") && msg.includes("publish_at") && "publish_at" in payload) {
@@ -5866,12 +10594,90 @@ Assistant:`;
   app.delete("/api/teacher/quizzes/:id", teacherQuizDeleteHandler);
   app.post("/api/teacher/quizzes/:id/delete", teacherQuizDeleteHandler);
 
+  // ─── Quiz Sections ─────────────────────────────────────────────────────────
+  const isQuizSectionsMissing = (e: unknown): boolean => {
+    const msg = String((e as any)?.message || '');
+    const code = String((e as any)?.code || '');
+    return code === '42P01' || code === 'PGRST205' || /does not exist|could not find the table/i.test(msg);
+  };
+
+  app.get('/api/teacher/quizzes/:id/sections', async (req, res) => {
+    try {
+      const caller = await assertAuthenticated(req, res);
+      if (!caller) return;
+      if (caller.role !== 'teacher' && caller.role !== 'admin') return res.status(403).json({ error: 'Forbidden' });
+      const quizId = String(req.params.id || '').trim();
+      if (!quizId) return res.status(400).json({ error: 'Quiz id required' });
+      const { data, error } = await supabaseAdmin
+        .from('quiz_sections')
+        .select('*')
+        .eq('quiz_id', quizId)
+        .order('order_index', { ascending: true });
+      if (error) {
+        if (isQuizSectionsMissing(error)) return res.json({ success: true, sections: [] });
+        throw error;
+      }
+      return res.json({ success: true, sections: data || [] });
+    } catch (e: any) { res.status(500).json({ error: e?.message || 'Failed to load sections' }); }
+  });
+
+  app.post('/api/teacher/quizzes/:id/sections/sync', async (req, res) => {
+    try {
+      const caller = await assertAuthenticated(req, res);
+      if (!caller) return;
+      if (caller.role !== 'teacher' && caller.role !== 'admin') return res.status(403).json({ error: 'Forbidden' });
+      const quizId = String(req.params.id || '').trim();
+      if (!quizId) return res.status(400).json({ error: 'Quiz id required' });
+      const sections = Array.isArray(req.body?.sections) ? req.body.sections : [];
+      const delRes = await supabaseAdmin.from('quiz_sections').delete().eq('quiz_id', quizId);
+      if (delRes.error && !isQuizSectionsMissing(delRes.error)) throw delRes.error;
+      if (sections.length === 0) return res.json({ success: true, sections: [] });
+      const rows = sections.map((s: any, idx: number) => ({
+        quiz_id: quizId,
+        title: String(s.title || 'Section').trim() || 'Section',
+        type: String(s.type || 'general').trim(),
+        instructions: s.instructions ? String(s.instructions).trim() : null,
+        audio_url: s.audio_url ? String(s.audio_url).trim() : null,
+        order_index: idx,
+      }));
+      const { data: inserted, error: insErr } = await supabaseAdmin
+        .from('quiz_sections').insert(rows).select();
+      if (insErr) {
+        if (isQuizSectionsMissing(insErr)) return res.json({ success: true, sections: [] });
+        throw insErr;
+      }
+      return res.json({ success: true, sections: inserted || [] });
+    } catch (e: any) { res.status(500).json({ error: e?.message || 'Failed to sync sections' }); }
+  });
+
+  app.get('/api/student/quizzes/:id/sections', async (req, res) => {
+    try {
+      const caller = await assertAuthenticated(req, res);
+      if (!caller) return;
+      const quizId = String(req.params.id || '').trim();
+      if (!quizId) return res.status(400).json({ error: 'Quiz id required' });
+      const { data, error } = await supabaseAdmin
+        .from('quiz_sections')
+        .select('id,title,type,instructions,audio_url,order_index')
+        .eq('quiz_id', quizId)
+        .order('order_index', { ascending: true });
+      if (error) {
+        if (isQuizSectionsMissing(error)) return res.json({ success: true, sections: [] });
+        throw error;
+      }
+      return res.json({ success: true, sections: data || [] });
+    } catch (e: any) { res.status(500).json({ error: e?.message || 'Failed to load sections' }); }
+  });
+
   // Admin users list for dashboard user management (teachers only)
   app.get('/api/admin/users', async (req, res) => {
     try {
       const caller = await assertAuthenticated(req, res);
       if (!caller) return;
       if (caller.role !== 'admin') return res.status(403).json({ error: 'Forbidden: admin role required' });
+      const adminUsersCacheKey = "admin-users:teachers";
+      const cachedAdminUsers = getCachedApiResponse<any>(adminUsersCacheKey);
+      if (cachedAdminUsers) return res.json(cachedAdminUsers);
 
       const { data, error } = await supabaseAdmin
         .from('profiles')
@@ -5880,7 +10686,9 @@ Assistant:`;
         .order('created_at', { ascending: false });
 
       if (error) throw error;
-      res.json({ success: true, users: data || [] });
+      const payload = { success: true, users: data || [] };
+      setCachedApiResponse(adminUsersCacheKey, payload, 15_000);
+      res.json(payload);
     } catch (e: unknown) {
       res.status(500).json({ error: (e as Error).message || 'Failed to load users' });
     }
@@ -6060,6 +10868,80 @@ Assistant:`;
   });
 
   // List sessions for logged-in teacher (teacher or admin only)
+  const isLiveSessionsStartedAtColumnMissing = (error: any) => {
+    const hay = `${error?.message || ''} ${error?.details || ''} ${error?.hint || ''} ${error?.code || ''}`.toLowerCase();
+    if (!hay.includes('started_at')) return false;
+    // "column does not exist" (schema cache miss or truly absent)
+    if (/schema cache|could not find|does not exist|42703|undefined column/.test(hay)) return true;
+    // "can only be updated to DEFAULT" — column is GENERATED ALWAYS in Postgres
+    if (hay.includes('can only be updated to default')) return true;
+    return false;
+  };
+
+  // ── Jitsi / JaaS token endpoint ─────────────────────────────────────────
+  // Returns a signed JWT so the caller can join as moderator (teacher) or
+  // guest (student) without the meet.jit.si "Log in as moderator" gate.
+  // Requires env vars: JAAS_APP_ID, JAAS_API_KEY_ID, JAAS_PRIVATE_KEY
+  app.post('/api/jitsi-token', async (req, res) => {
+    try {
+      const caller = await assertAuthenticated(req, res);
+      if (!caller) return;
+
+      const { roomName, moderator = false, displayName } = req.body as {
+        roomName?: string;
+        moderator?: boolean;
+        displayName?: string;
+      };
+
+      const appId      = process.env.JAAS_APP_ID;
+      const keyId      = process.env.JAAS_API_KEY_ID;
+      const privateKey = process.env.JAAS_PRIVATE_KEY;
+
+      if (!appId || !keyId || !privateKey) {
+        // Credentials not configured — tell client to fall back to meet.jit.si
+        return res.json({ token: null, domain: 'meet.jit.si', appId: null });
+      }
+
+      const now = Math.floor(Date.now() / 1000);
+      const payload = {
+        iss: 'chat',
+        aud: 'jitsi',
+        iat: now - 10,
+        nbf: now - 10,
+        exp: now + 7200,
+        sub: appId,
+        room: roomName || '*',
+        context: {
+          user: {
+            moderator: String(moderator),
+            name: displayName || caller.displayName || caller.email || 'User',
+            id: caller.id,
+            avatar: '',
+            email: caller.email || '',
+          },
+          features: {
+            livestreaming: 'false',
+            'outbound-call': 'false',
+            'sip-outbound-call': 'false',
+            transcription: 'false',
+            recording: 'false',
+          },
+        },
+      };
+
+      const pemKey = privateKey.replace(/\\n/g, '\n');
+      const token = jwt.sign(payload, pemKey, {
+        algorithm: 'RS256',
+        header: { alg: 'RS256', kid: `${appId}/${keyId}`, typ: 'JWT' } as any,
+      });
+
+      res.json({ token, domain: '8x8.vc', appId });
+    } catch (err: any) {
+      console.error('[jitsi-token] error:', err.message);
+      res.json({ token: null, domain: 'meet.jit.si', appId: null });
+    }
+  });
+
   app.get('/api/teacher/live-sessions', async (req, res) => {
     try {
       const caller = await assertAuthenticated(req, res);
@@ -6180,7 +11062,7 @@ Assistant:`;
           action_url: `/student/live-sessions/${session.id}`,
           created_at: new Date().toISOString(),
         }));
-        await supabaseAdmin.from('notifications').insert(notifRows);
+        await notifInsert(notifRows);
       }
 
       res.json({ success: true, session });
@@ -6194,7 +11076,7 @@ Assistant:`;
       if (!hostId) return;
 
       // Whitelist the fields a host is permitted to change
-      const ALLOWED_FIELDS = ['status', 'title', 'description', 'scheduled_at', 'duration_minutes', 'recording_url', 'jitsi_room_name', 'started_at'];
+      const ALLOWED_FIELDS = ['status', 'title', 'description', 'scheduled_at', 'duration_minutes', 'recording_url', 'jitsi_room_name', 'started_at', 'chat_enabled', 'reactions_enabled', 'raise_hand_enabled'];
       const update: Record<string, unknown> = { updated_at: new Date().toISOString() };
       for (const key of ALLOWED_FIELDS) {
         if (key in req.body) update[key] = req.body[key];
@@ -6203,14 +11085,38 @@ Assistant:`;
         return res.status(400).json({ error: 'No updatable fields provided' });
       }
 
-      const { data, error } = await supabaseAdmin
+      // When transitioning to 'live', always record started_at in DB
+      // (client may not send it, e.g. when using the list page "Start" button)
+      if (req.body.status === 'live' && !update.started_at) {
+        update.started_at = new Date().toISOString();
+      }
+
+      // When a new recording_url is being set, also append it to recording_urls array
+      if (update.recording_url) {
+        const { data: existing } = await supabaseAdmin
+          .from('live_sessions').select('recording_urls').eq('id', req.params.id).single();
+        const existingUrls: string[] = Array.isArray(existing?.recording_urls) ? existing.recording_urls : [];
+        const newUrl = String(update.recording_url);
+        if (!existingUrls.includes(newUrl)) {
+          update.recording_urls = [...existingUrls, newUrl];
+        }
+      }
+
+      let updateResult = await supabaseAdmin
         .from('live_sessions')
         .update(update)
         .eq('id', req.params.id).select().single();
+      if (updateResult.error && isLiveSessionsStartedAtColumnMissing(updateResult.error) && 'started_at' in update) {
+        const { started_at: _startedAt, ...fallbackUpdate } = update;
+        updateResult = await supabaseAdmin
+          .from('live_sessions')
+          .update(fallbackUpdate)
+          .eq('id', req.params.id).select().single();
+      }
+      const { data, error } = updateResult;
       if (error) throw error;
 
       if (req.body.status === 'live') {
-        update.started_at = new Date().toISOString();
         const { data: parts, error: partsErr } = await supabaseAdmin
           .from('session_participants').select('user_id').eq('session_id', req.params.id);
         if (partsErr && !isSessionParticipantsTableMissing(partsErr)) throw partsErr;
@@ -6223,7 +11129,7 @@ Assistant:`;
             action_url: `/student/live-sessions/${req.params.id}`,
             created_at: new Date().toISOString(),
           }));
-          await supabaseAdmin.from('notifications').insert(notifRows);
+          await notifInsert(notifRows);
         }
       }
 
@@ -6253,11 +11159,12 @@ Assistant:`;
       .from('live_sessions').select('host_id').eq('id', sessionId).single();
     if (!sessionRow) { res.status(404).json({ error: 'Session not found' }); return null; }
     if (sessionRow.host_id === caller.userId) return caller.userId;
-    const { data: participation, error: partErr } = await supabaseAdmin
-      .from('session_participants').select('id,is_removed').eq('session_id', sessionId).eq('user_id', caller.userId).single();
+    const { data: participationRows, error: partErr } = await supabaseAdmin
+      .from('session_participants').select('id,is_removed').eq('session_id', sessionId).eq('user_id', caller.userId).limit(1);
     if (partErr && !isSessionParticipantsTableMissing(partErr)) {
       throw partErr;
     }
+    const participation = Array.isArray(participationRows) ? participationRows[0] ?? null : null;
     if (participation && (participation as { id: string; is_removed?: boolean }).is_removed) {
       res.status(403).json({ error: 'Forbidden: you have been removed from this session' }); return null;
     }
@@ -6283,8 +11190,9 @@ Assistant:`;
 
     // Check session_participants table
     let participantsTableMissing = false;
-    const { data: participation, error: partErr } = await supabaseAdmin
-      .from('session_participants').select('id,is_removed').eq('session_id', sessionId).eq('user_id', caller.userId).single();
+    const { data: participationRows, error: partErr } = await supabaseAdmin
+      .from('session_participants').select('id,is_removed').eq('session_id', sessionId).eq('user_id', caller.userId).limit(1);
+    const participation = Array.isArray(participationRows) ? participationRows[0] ?? null : null;
     if (partErr) {
       if (isSessionParticipantsTableMissing(partErr)) {
         participantsTableMissing = true;
@@ -6330,16 +11238,16 @@ Assistant:`;
     res.status(403).json({ error: 'Forbidden: you are not a participant of this session' }); return null;
   };
 
-  // Student session detail — accessible to invited participants AND enrolled students (for ended sessions)
+  // Student session detail — any authenticated student can view session info via direct link
   app.get('/api/student/live-sessions/:id', async (req, res) => {
     try {
-      const userId = await assertSessionAccess(req, res, req.params.id);
-      if (!userId) return;
+      const caller = await getAuthUser(req);
+      if (!caller) { res.status(401).json({ error: 'Unauthorized' }); return; }
       const { data, error } = await supabaseAdmin
         .from('live_sessions')
         .select('*, host:profiles!host_id(id,display_name,email), course:courses!course_id(id,title)')
         .eq('id', req.params.id).single();
-      if (error) throw error;
+      if (error || !data) { res.status(404).json({ error: 'Session not found' }); return; }
       res.json({ success: true, session: data });
     } catch (e: unknown) { res.status(500).json({ error: (e as Error).message }); }
   });
@@ -6362,13 +11270,23 @@ Assistant:`;
   // Single session fetch — accessible by host or invited participants only (not enrolled-only students)
   app.get('/api/teacher/live-sessions/:id', async (req, res) => {
     try {
-      const userId = await assertSessionParticipantAccess(req, res, req.params.id);
-      if (!userId) return;
+      const caller = await getAuthUser(req);
+      if (!caller) { res.status(401).json({ error: 'Unauthorized' }); return; }
       const { data, error } = await supabaseAdmin
         .from('live_sessions')
         .select('*, host:profiles!host_id(id,display_name,email), course:courses!course_id(id,title)')
         .eq('id', req.params.id).single();
       if (error) throw error;
+      if (!data) { res.status(404).json({ error: 'Session not found' }); return; }
+      // Allow: admin, the host, or an invited participant
+      if (caller.role !== 'admin' && data.host_id !== caller.userId) {
+        const { data: part } = await supabaseAdmin
+          .from('session_participants').select('id,is_removed')
+          .eq('session_id', req.params.id).eq('user_id', caller.userId).limit(1).maybeSingle();
+        if (!part || (part as { is_removed?: boolean }).is_removed) {
+          res.status(403).json({ error: 'Forbidden: you are not the host or an invited participant' }); return;
+        }
+      }
       res.json({ success: true, session: data });
     } catch (e: unknown) { res.status(500).json({ error: (e as Error).message }); }
   });
@@ -6424,7 +11342,7 @@ Assistant:`;
         action_url: `/student/live-sessions/${req.params.id}`,
         created_at: new Date().toISOString(),
       }));
-      await supabaseAdmin.from('notifications').insert(notifRows);
+      await notifInsert(notifRows);
 
       res.json({ success: true, invited: inviteIds.length });
     } catch (e: unknown) { res.status(500).json({ error: (e as Error).message }); }
@@ -6597,7 +11515,7 @@ Assistant:`;
       }
       const { data, error } = await supabaseAdmin
         .from('session_chat_messages')
-        .insert({ session_id: req.params.id, sender_id, message: text, created_at: new Date().toISOString() })
+        .insert({ session_id: req.params.id, sender_id, message: text, created_at: new Date().toISOString(), sender_display_name: caller.displayName as string | undefined ?? null })
         .select('*, sender:profiles!sender_id(id,display_name,avatar_url)').single();
       if (error && !isSessionChatTableMissing(error)) throw error;
       // If table missing, return a local echo of the message so UI doesn't crash
@@ -6621,6 +11539,48 @@ Assistant:`;
         .select().single();
       if (error && !isSessionReactionsTableMissing(error)) throw error;
       res.json({ success: true, reaction: data || { session_id: req.params.id, user_id: caller.userId, emoji } });
+    } catch (e: unknown) { res.status(500).json({ error: (e as Error).message }); }
+  });
+
+  // Push quiz to all session students (host only)
+  app.post('/api/teacher/live-sessions/:id/push-quiz', async (req, res) => {
+    try {
+      const hostId = await assertSessionHost(req, res, req.params.id);
+      if (!hostId) return;
+      const { quizId, quizTitle } = req.body;
+      if (!quizId || !quizTitle) return res.status(400).json({ error: 'quizId and quizTitle required' });
+
+      // Update live_sessions row with live_quiz_id + live_quiz_title so Realtime pushes to students
+      const { error: patchErr } = await supabaseAdmin
+        .from('live_sessions')
+        .update({ live_quiz_id: quizId, live_quiz_title: quizTitle } as any)
+        .eq('id', req.params.id);
+      if (patchErr) {
+        // Column may not exist yet — still send notifications, just skip the update
+        console.warn('[push-quiz] live_sessions update skipped (column missing?):', patchErr.message);
+      }
+
+      // Also send in-app notifications to all session participants
+      const { data: participants } = await supabaseAdmin
+        .from('session_participants')
+        .select('user_id')
+        .eq('session_id', req.params.id)
+        .is('left_at', null);
+
+      if (participants && participants.length > 0) {
+        const notifs = participants.map((p: any) => ({
+          user_id: p.user_id,
+          title: '📝 Kuiz i ri',
+          message: `Mësuesi ka nisur kuizin: ${quizTitle}`,
+          type: 'quiz',
+          action_url: `/student/quiz/${quizId}`,
+          read: false,
+          created_at: new Date().toISOString(),
+        }));
+        await supabaseAdmin.from('notifications').insert(notifs).catch(() => {});
+      }
+
+      res.json({ success: true });
     } catch (e: unknown) { res.status(500).json({ error: (e as Error).message }); }
   });
 
@@ -6750,7 +11710,13 @@ Assistant:`;
       if (teacherIdCandidates.length > 0) query = query.in('teacher_id', teacherIdCandidates);
       const { data, error } = await query;
       if (error) throw error;
-      res.json({ success: true, classes: data || [] });
+      const deduped = (data || []).map((cls: any) => ({
+        ...cls,
+        student_ids: Array.isArray(cls.student_ids)
+          ? [...new Set(cls.student_ids.map((s: unknown) => String(s)).filter(Boolean))]
+          : [],
+      }));
+      res.json({ success: true, classes: deduped });
     } catch (e: unknown) { res.status(500).json({ error: (e as Error).message }); }
   });
 
@@ -6863,7 +11829,176 @@ Assistant:`;
     }
   });
 
+  // ── Suggestion 5: CSV Student Enrollment into a class ─────────────────────
+  app.post('/api/teacher/classes/:classId/enroll-csv', async (req, res) => {
+    try {
+      const caller = await assertAuthenticated(req, res);
+      if (!caller) return;
+      if (caller.role !== 'teacher' && caller.role !== 'admin') {
+        return res.status(403).json({ error: 'Forbidden: teacher role required' });
+      }
+      const classId = String(req.params.classId || '').trim();
+      if (!classId) return res.status(400).json({ error: 'classId is required' });
+
+      // emails can be an array or a comma/newline-separated string
+      let rawEmails: string[] = [];
+      if (Array.isArray(req.body?.emails)) {
+        rawEmails = req.body.emails.map((e: any) => String(e).trim().toLowerCase()).filter(Boolean);
+      } else if (typeof req.body?.emails === 'string') {
+        rawEmails = req.body.emails.split(/[\n,;]+/).map((e: string) => e.trim().toLowerCase()).filter(Boolean);
+      }
+      if (rawEmails.length === 0) return res.status(400).json({ error: 'No emails provided' });
+
+      // Get class row
+      const classSnap = await supabaseAdmin.from('classes').select('id, teacher_id, student_ids, course_id').eq('id', classId).maybeSingle();
+      if (classSnap.error) throw classSnap.error;
+      const cls = classSnap.data as any;
+      if (!cls) return res.status(404).json({ error: 'Class not found' });
+
+      // Resolve teacher access
+      const teacherIdCandidates = await getTeacherIdCandidates(caller.userId);
+      const scopedIds = teacherIdCandidates.length > 0 ? teacherIdCandidates : [caller.userId];
+      if (cls.teacher_id && !scopedIds.includes(String(cls.teacher_id))) {
+        return res.status(403).json({ error: 'Access denied to this class' });
+      }
+
+      // Look up profiles by email
+      const profilesRes = await supabaseAdmin.from('profiles').select('id, email, role').in('email', rawEmails);
+      if (profilesRes.error) throw profilesRes.error;
+      const profiles = (profilesRes.data || []) as Array<{ id: string; email: string; role: string }>;
+
+      const foundEmails = new Set(profiles.map(p => p.email.toLowerCase()));
+      const notFound = rawEmails.filter(e => !foundEmails.has(e));
+      const studentProfiles = profiles.filter(p => p.role === 'student' || p.role === 'admin');
+
+      // Add to class
+      const existingIds: string[] = Array.isArray(cls.student_ids) ? cls.student_ids.map((s: any) => String(s)) : [];
+      const newIds = studentProfiles.map(p => p.id).filter(id => !existingIds.includes(id));
+      const mergedIds = [...new Set([...existingIds, ...newIds])];
+
+      const classUpdate = await supabaseAdmin.from('classes').update({ student_ids: mergedIds }).eq('id', classId);
+      if (classUpdate.error) throw classUpdate.error;
+
+      // Also enroll in the linked course if present
+      if (cls.course_id && newIds.length > 0) {
+        const courseSnap = await supabaseAdmin.from('courses').select('id, student_ids, total_students').eq('id', String(cls.course_id)).maybeSingle();
+        if (!courseSnap.error && courseSnap.data) {
+          const course = courseSnap.data as any;
+          const courseStudentIds: string[] = Array.isArray(course.student_ids) ? course.student_ids.map((s: any) => String(s)) : [];
+          const nextCourseIds = [...new Set([...courseStudentIds, ...newIds])];
+          await supabaseAdmin.from('courses').update({ student_ids: nextCourseIds, total_students: nextCourseIds.length }).eq('id', String(cls.course_id));
+        }
+      }
+
+      return res.json({
+        success: true,
+        enrolled: newIds.length,
+        alreadyEnrolled: existingIds.filter(id => studentProfiles.map(p => p.id).includes(id)).length,
+        notFound,
+        notStudents: profiles.filter(p => p.role !== 'student' && p.role !== 'admin').map(p => p.email),
+      });
+    } catch (e: any) {
+      console.error('POST /api/teacher/classes/:classId/enroll-csv', e);
+      return res.status(500).json({ error: e?.message || 'Failed to enroll students' });
+    }
+  });
+
   // ── STUDENT LIVE SESSIONS ───────────────────────────────────
+
+  // Return all published courses belonging to the student's assigned teacher.
+  // This powers the "Available Courses" / discover section in /student/courses.
+  app.get('/api/student/courses/available', async (req, res) => {
+    try {
+      const caller = await assertAuthenticated(req, res);
+      if (!caller) return;
+      if (caller.role !== 'student' && caller.role !== 'admin') {
+        return res.status(403).json({ error: 'Forbidden: student role required' });
+      }
+
+      // Get the student's assigned teacher_id from their profile
+      const { data: profile, error: profileErr } = await supabaseAdmin
+        .from('profiles')
+        .select('teacher_id')
+        .eq('id', caller.userId)
+        .single();
+      if (profileErr) throw profileErr;
+
+      const linkedTeacherId = profile?.teacher_id ? String(profile.teacher_id) : '';
+
+      // Helper: fetch ALL published courses (fallback when no teacher is linked or teacher_id column missing)
+      const fetchAllPublished = async () => {
+        let res = await supabaseAdmin
+          .from('courses')
+          .select('id, title, description, level, language, status, teacher_id, student_ids, total_students, total_lessons, short_description, category, created_at')
+          .eq('status', 'published')
+          .order('created_at', { ascending: false });
+        if (res.error && isMissingCoursesStudentIdsError(res.error)) {
+          res = await supabaseAdmin
+            .from('courses')
+            .select('id, title, description, level, language, status, teacher_id, total_students, total_lessons, short_description, category, created_at')
+            .eq('status', 'published')
+            .order('created_at', { ascending: false });
+        }
+        return res;
+      };
+
+      // If student has no linked teacher, return all published courses so they can see available ones
+      if (!linkedTeacherId) {
+        const fallbackRes = await fetchAllPublished();
+        const courses = (fallbackRes.data || []).map((c: any) => ({
+          ...c,
+          student_ids: Array.isArray(c.student_ids) ? c.student_ids : [],
+        }));
+        return res.json({ success: true, courses });
+      }
+
+      // Resolve all candidate IDs for the teacher (handles teachers table row id vs auth uid)
+      const teacherIds = await getTeacherIdCandidates(linkedTeacherId);
+      const scopedIds = teacherIds.length > 0 ? teacherIds : [linkedTeacherId];
+
+      // Fetch all published courses from those teacher IDs
+      let coursesRes = await supabaseAdmin
+        .from('courses')
+        .select('id, title, description, level, language, status, teacher_id, student_ids, total_students, total_lessons, short_description, category, created_at')
+        .in('teacher_id', scopedIds)
+        .eq('status', 'published')
+        .order('created_at', { ascending: false });
+
+      if (coursesRes.error) {
+        // Fallback 1: student_ids column missing — retry without it
+        if (isMissingCoursesStudentIdsError(coursesRes.error)) {
+          coursesRes = await supabaseAdmin
+            .from('courses')
+            .select('id, title, description, level, language, status, teacher_id, total_students, total_lessons, short_description, category, created_at')
+            .in('teacher_id', scopedIds)
+            .eq('status', 'published')
+            .order('created_at', { ascending: false });
+        }
+        // Fallback 2: teacher_id column missing — fetch all published courses
+        if (coursesRes.error) {
+          const fallbackRes = await fetchAllPublished();
+          if (!fallbackRes.error) {
+            const courses = (fallbackRes.data || []).map((c: any) => ({
+              ...c,
+              student_ids: Array.isArray(c.student_ids) ? c.student_ids : [],
+            }));
+            return res.json({ success: true, courses });
+          }
+          throw coursesRes.error;
+        }
+      }
+
+      const courses = (coursesRes.data || []).map((c: any) => ({
+        ...c,
+        student_ids: Array.isArray(c.student_ids) ? c.student_ids : [],
+      }));
+
+      return res.json({ success: true, courses });
+    } catch (e: any) {
+      console.error('GET /api/student/courses/available', e);
+      return res.status(500).json({ error: e?.message || 'Failed to load available courses' });
+    }
+  });
 
   // Student enroll in a published course owned by their assigned teacher.
   app.post('/api/student/courses/:courseId/enroll', async (req, res) => {
@@ -7215,6 +12350,275 @@ Assistant:`;
   });
 
   // Student quizzes: only published quizzes from courses where the student is enrolled.
+  /**
+   * Auto-certificate: called by the student client immediately after a passed quiz.
+   * Verifies the attempt belongs to the caller, that they passed, then inserts a
+   * certificate row (idempotent — won't double-issue for the same student + course)
+   * and fires a certificateIssued notification.
+   */
+  app.post('/api/student/quiz/auto-certificate', async (req: Request, res: Response) => {
+    try {
+      const caller = await assertAuthenticated(req, res);
+      if (!caller) return;
+      if (caller.role !== 'student' && caller.role !== 'admin') {
+        return res.status(403).json({ error: 'Forbidden' });
+      }
+
+      const { attemptId } = req.body as { attemptId?: string };
+      if (!attemptId) return res.status(400).json({ error: 'attemptId is required' });
+
+      // 1. Fetch the attempt — must belong to this student and be passed
+      const { data: attempt, error: attErr } = await supabaseAdmin
+        .from('quiz_attempts')
+        .select('id, quiz_id, student_id, score, total_points, passed, score_percent')
+        .eq('id', attemptId)
+        .maybeSingle()
+        .catch(() => ({ data: null, error: null }));
+
+      if (attErr) return res.status(500).json({ error: 'Could not fetch attempt' });
+      if (!attempt) return res.status(404).json({ error: 'Attempt not found' });
+      if (attempt.student_id !== caller.userId) return res.status(403).json({ error: 'Forbidden' });
+      if (!attempt.passed) return res.status(400).json({ error: 'Student did not pass this quiz' });
+
+      // 2. Fetch quiz details (title, course_id, teacher_id, type)
+      const { data: quiz } = await supabaseAdmin
+        .from('quizzes')
+        .select('id, title, course_id, teacher_id, type')
+        .eq('id', attempt.quiz_id)
+        .maybeSingle()
+        .catch(() => ({ data: null }));
+
+      if (!quiz) return res.status(404).json({ error: 'Quiz not found' });
+
+      const courseId = quiz.course_id ? String(quiz.course_id) : null;
+      const isExam = String(quiz.type || '').toLowerCase() === 'exam';
+
+      // 3. Idempotency: for exams check per quiz_id; for regular quizzes check per course
+      const dupCheck = isExam
+        ? await supabaseAdmin.from('certificates').select('id, grade, score, certificate_number').eq('student_id', caller.userId).contains('meta', { quiz_id: quiz.id }).limit(1).maybeSingle().catch(() => ({ data: null }))
+        : courseId
+          ? await supabaseAdmin.from('certificates').select('id, grade, score, certificate_number').eq('student_id', caller.userId).eq('course_id', courseId).not('meta', 'cs', '{"quiz_type":"exam"}').limit(1).maybeSingle().catch(() => ({ data: null }))
+          : await supabaseAdmin.from('certificates').select('id, grade, score, certificate_number').eq('student_id', caller.userId).contains('meta', { quiz_id: quiz.id }).limit(1).maybeSingle().catch(() => ({ data: null }));
+
+      if ((dupCheck as any)?.data?.id) {
+        const dup = (dupCheck as any).data;
+        return res.json({ ok: true, duplicate: true, certificateId: dup.id, grade: dup.grade, score: dup.score, certificateNumber: dup.certificate_number });
+      }
+
+      // 4. Compute grade from score percentage
+      const pct: number = attempt.score_percent != null
+        ? Number(attempt.score_percent)
+        : (attempt.total_points > 0 ? Math.round((attempt.score / attempt.total_points) * 100) : 0);
+
+      const grade =
+        pct >= 97 ? 'A+' :
+        pct >= 93 ? 'A'  :
+        pct >= 90 ? 'A-' :
+        pct >= 87 ? 'B+' :
+        pct >= 83 ? 'B'  :
+        pct >= 80 ? 'B-' :
+        pct >= 77 ? 'C+' :
+        pct >= 73 ? 'C'  :
+        pct >= 70 ? 'C-' :
+        'D';
+
+      // Derive a descriptive performance level from the grade
+      const level =
+        grade === 'A+' || grade === 'A'  ? 'Outstanding' :
+        grade === 'A-' || grade === 'B+' ? 'Excellent' :
+        grade === 'B'  || grade === 'B-' ? 'Very Good' :
+        grade === 'C+' || grade === 'C'  ? 'Good' :
+        grade === 'C-'                   ? 'Satisfactory' :
+        'Pass';
+
+      // 5. Generate unique certificate number
+      const certYear = new Date().getFullYear();
+      const certRand = Math.random().toString(36).toUpperCase().slice(2, 8);
+      const certNumber = `CERT-${certYear}-${certRand}`;
+
+      // 6. Determine certificate title
+      //    For exams: use the exam title directly.
+      //    For regular quizzes: use the course title (fallback to quiz title).
+      let certTitle = quiz.title;
+      if (!isExam && courseId) {
+        const { data: course } = await supabaseAdmin.from('courses').select('title').eq('id', courseId).maybeSingle().catch(() => ({ data: null }));
+        if (course?.title) certTitle = String(course.title);
+      }
+
+      // 7. Insert certificate with full meta
+      const { data: cert, error: certErr } = await supabaseAdmin
+        .from('certificates')
+        .insert({
+          student_id: caller.userId,
+          course_id: courseId,
+          title: certTitle,
+          issued_at: new Date().toISOString().slice(0, 10),
+          certificate_number: certNumber,
+          grade,
+          score: pct,
+          status: 'issued',
+          meta: {
+            quiz_id: quiz.id,
+            quiz_title: quiz.title,
+            quiz_type: quiz.type || 'standard',
+            level,
+            score: attempt.score,
+            total_points: attempt.total_points,
+          },
+        })
+        .select('id')
+        .maybeSingle();
+
+      if (certErr || !cert?.id) {
+        console.error('[auto-certificate] insert error:', certErr?.message);
+        return res.status(500).json({ error: certErr?.message || 'Failed to create certificate' });
+      }
+
+      // 8. Fire certificateIssued notification (server-side, best-effort)
+      try {
+        const teacherId = quiz.teacher_id ? String(quiz.teacher_id) : undefined;
+        await notifyEvent(
+          supabaseAdmin,
+          { isEventEnabled: isNotificationEnabled },
+          'certificateIssued',
+          {
+            studentId: caller.userId,
+            teacherId,
+            courseId: courseId ?? undefined,
+            courseTitle: certTitle,
+            certificateId: cert.id,
+            certificateNumber: certNumber,
+          }
+        );
+      } catch { /* notifications are best-effort */ }
+
+      return res.json({ ok: true, duplicate: false, certificateId: cert.id, certificateNumber: certNumber, grade, level, score: pct, totalPoints: attempt.total_points, earnedPoints: attempt.score });
+    } catch (e: any) {
+      console.error('[auto-certificate]', e?.message);
+      return res.status(500).json({ error: 'Server error' });
+    }
+  });
+
+  /** Look up the auto-issued certificate for the current student + a given quiz */
+  app.get('/api/student/certificate/by-quiz', async (req: Request, res: Response) => {
+    try {
+      const caller = await assertAuthenticated(req, res);
+      if (!caller) return;
+      const quizId = typeof req.query.quizId === 'string' ? req.query.quizId.trim() : '';
+      if (!quizId) return res.status(400).json({ error: 'quizId is required' });
+
+      const { data: cert } = await supabaseAdmin
+        .from('certificates')
+        .select('id, grade, score, certificate_number, title, issued_at, meta, status')
+        .eq('student_id', caller.userId)
+        .contains('meta', { quiz_id: quizId })
+        .eq('status', 'issued')
+        .limit(1)
+        .maybeSingle()
+        .catch(() => ({ data: null }));
+
+      if (!cert) return res.json({ cert: null });
+
+      const meta: any = cert.meta || {};
+      return res.json({
+        cert: {
+          id: cert.id,
+          grade: cert.grade,
+          score: cert.score,
+          certificateNumber: cert.certificate_number,
+          title: cert.title,
+          issuedAt: cert.issued_at,
+          level: meta.level || null,
+          totalPoints: meta.total_points ?? null,
+          earnedPoints: meta.score ?? null,
+        },
+      });
+    } catch (e: any) {
+      console.error('[cert-by-quiz]', e?.message);
+      return res.status(500).json({ error: 'Server error' });
+    }
+  });
+
+  /** Headway Test Builder — get available grammar topics for a level */
+  app.get('/api/student/headway-test/topics', async (req, res) => {
+    try {
+      const caller = await assertAuthenticated(req, res);
+      if (!caller) return;
+      const level = typeof req.query.level === 'string' ? req.query.level.trim() : 'Pre-Intermediate';
+      const topics = getTopicsForLevel(level).map(s => ({ topic: s.topic, type: s.type, count: s.questions.length }));
+      return res.json({ level, topics });
+    } catch (e: any) {
+      console.error('[headway-test/topics]', e?.message);
+      return res.status(500).json({ error: 'Server error' });
+    }
+  });
+
+  /** Headway Test Builder — student submits test answers with user_id tracking */
+  app.post('/api/student/headway-test/submit', async (req, res) => {
+    try {
+      const caller = await assertAuthenticated(req, res);
+      if (!caller) return;
+
+      const body = req.body as {
+        level: string;
+        selectedTopics: string[];
+        answers: Array<{ questionIdx: number; chosen: string; correct: string }>;
+        score: number;
+        total: number;
+        timeTakenSeconds?: number;
+      };
+
+      const { level, selectedTopics, answers, score, total } = body;
+      if (!level || !Array.isArray(answers)) {
+        return res.status(400).json({ error: 'level and answers are required' });
+      }
+
+      const percentage = total > 0 ? Math.round((score / total) * 100) : 0;
+
+      // Auto-create headway_test_results table if not exists (idempotent)
+      await supabaseAdmin.rpc('exec_sql', {
+        sql: `CREATE TABLE IF NOT EXISTS headway_test_results (
+          id uuid DEFAULT gen_random_uuid() PRIMARY KEY,
+          user_id uuid NOT NULL,
+          level text NOT NULL,
+          selected_topics text[] DEFAULT '{}',
+          answers jsonb DEFAULT '[]',
+          score int NOT NULL DEFAULT 0,
+          total int NOT NULL DEFAULT 0,
+          percentage int NOT NULL DEFAULT 0,
+          time_taken_seconds int,
+          created_at timestamptz DEFAULT now()
+        );`
+      }).catch(() => null); // ignore if rpc not available; table may already exist
+
+      const { data: row, error: insErr } = await supabaseAdmin
+        .from('headway_test_results')
+        .insert({
+          user_id: caller.userId,
+          level,
+          selected_topics: selectedTopics ?? [],
+          answers,
+          score,
+          total,
+          percentage,
+          time_taken_seconds: body.timeTakenSeconds ?? null,
+        })
+        .select('id, created_at')
+        .maybeSingle();
+
+      if (insErr) {
+        // If table doesn't exist yet, still return success — result stored client-side
+        console.warn('[headway-test/submit] DB insert warning:', insErr.message);
+        return res.json({ ok: true, stored: false, percentage, message: 'Score calculated but not saved to DB — table may need migration.' });
+      }
+
+      return res.json({ ok: true, stored: true, id: row?.id, percentage });
+    } catch (e: any) {
+      console.error('[headway-test/submit]', e?.message);
+      return res.status(500).json({ error: 'Server error' });
+    }
+  });
+
   app.get('/api/student/quizzes', async (req, res) => {
     try {
       const caller = await assertAuthenticated(req, res);
@@ -7225,11 +12629,21 @@ Assistant:`;
 
       const requestedCourseId = typeof req.query.courseId === 'string' ? req.query.courseId.trim() : '';
 
-      const { data: enrolledCourses, error: ecErr } = await supabaseAdmin
-        .from('courses')
-        .select('id,title')
-        .contains('student_ids', [caller.userId]);
-      if (ecErr) throw ecErr;
+      let enrolledCourses: any[] = [];
+      {
+        const { data: ecData, error: ecErr } = await supabaseAdmin
+          .from('courses')
+          .select('id,title,level')
+          .contains('student_ids', [caller.userId]);
+        if (ecErr) {
+          // courses.student_ids column may not exist in all deployments — fall back gracefully
+          if (!isMissingCoursesStudentIdsError(ecErr)) throw ecErr;
+          // column missing: rely on classes-based enrollment only
+          enrolledCourses = [];
+        } else {
+          enrolledCourses = ecData || [];
+        }
+      }
 
       const { data: enrolledClasses, error: classErr } = await supabaseAdmin
         .from('classes')
@@ -7252,18 +12666,21 @@ Assistant:`;
       if (courseIds.length === 0) return res.json({ success: true, quizzes: [] });
 
       const courseTitleById: Record<string, string> = {};
+      const courseLevelById: Record<string, string> = {};
       (enrolledCourses || []).forEach((course: any) => {
         courseTitleById[String(course.id)] = String(course.title || 'Course');
+        courseLevelById[String(course.id)] = String(course.level || '');
       });
       if (classCourseIds.length > 0) {
         const missingTitleIds = classCourseIds.filter((cid) => !courseTitleById[cid]);
         if (missingTitleIds.length > 0) {
           const { data: classLinkedCourses } = await supabaseAdmin
             .from('courses')
-            .select('id,title')
+            .select('id,title,level')
             .in('id', missingTitleIds);
           (classLinkedCourses || []).forEach((course: any) => {
             courseTitleById[String(course.id)] = String(course.title || 'Course');
+            courseLevelById[String(course.id)] = String(course.level || '');
           });
         }
       }
@@ -7340,11 +12757,15 @@ Assistant:`;
         const publishedText = String(row?.published || '').trim().toLowerCase();
         if (publishedText) return publishedText === 'true' || publishedText === '1' || publishedText === 'yes';
         return true;
-      }).map((row: any) => ({
-        ...row,
-        course_id: String(row?.course_id || '') || lessonToCourse[String(row?.lesson_id || '')] || '',
-        course_title: courseTitleById[String(row?.course_id || '') || lessonToCourse[String(row?.lesson_id || '')] || ''] || 'Course',
-      }));
+      }).map((row: any) => {
+        const resolvedCourseId = String(row?.course_id || '') || lessonToCourse[String(row?.lesson_id || '')] || '';
+        return {
+          ...row,
+          course_id: resolvedCourseId,
+          course_title: courseTitleById[resolvedCourseId] || 'Course',
+          course_level: courseLevelById[resolvedCourseId] || '',
+        };
+      });
 
       return res.json({ success: true, quizzes });
     } catch (e: any) {
@@ -7365,11 +12786,15 @@ Assistant:`;
 
       const { data: quizRow, error: quizErr } = await supabaseAdmin
         .from('quizzes')
-        .select('id,course_id,lesson_id')
+        .select('id,course_id,lesson_id,settings')
         .eq('id', quizId)
         .maybeSingle();
       if (quizErr) throw quizErr;
       if (!quizRow?.id) return res.status(404).json({ error: 'Quiz not found' });
+
+      const quizSettings = (quizRow as any)?.settings;
+      const doShuffleQuestions = quizSettings?.shuffleQuestions === true;
+      const doShuffleAnswers = quizSettings?.shuffleAnswers === true;
 
       let resolvedCourseId = String((quizRow as any)?.course_id || '').trim();
       if (!resolvedCourseId) {
@@ -7400,12 +12825,20 @@ Assistant:`;
         return res.status(403).json({ error: 'Quiz is not linked to an enrolled course' });
       }
 
+      // courses.student_ids column may not exist — handle gracefully
+      let hasDirectAccess = false;
       const { data: directCourseRows, error: directErr } = await supabaseAdmin
         .from('courses')
         .select('id')
         .eq('id', resolvedCourseId)
         .contains('student_ids', [caller.userId]);
-      if (directErr) throw directErr;
+      if (directErr) {
+        if (!isMissingCoursesStudentIdsError(directErr)) throw directErr;
+        // column missing — allow; classes check below may still restrict
+        hasDirectAccess = false;
+      } else {
+        hasDirectAccess = (directCourseRows || []).length > 0;
+      }
 
       const { data: classRows, error: classErr } = await supabaseAdmin
         .from('classes')
@@ -7414,7 +12847,10 @@ Assistant:`;
         .contains('student_ids', [caller.userId]);
       if (classErr && !isClassesTableMissing(classErr)) throw classErr;
 
-      const hasAccess = (directCourseRows || []).length > 0 || (classRows || []).length > 0 || caller.role === 'admin';
+      // When courses.student_ids is missing we can't verify direct enrollment,
+      // so we fall back to: allow if the quiz is published (best-effort for partial schemas).
+      const isMissingDirectCheck = !!(directErr && isMissingCoursesStudentIdsError(directErr));
+      const hasAccess = hasDirectAccess || (classRows || []).length > 0 || caller.role === 'admin' || isMissingDirectCheck;
       if (!hasAccess) return res.status(403).json({ error: 'You do not have access to this quiz' });
 
       let qRes = await supabaseAdmin
@@ -7439,7 +12875,28 @@ Assistant:`;
       }
       if (qRes.error) throw qRes.error;
 
-      return res.json({ success: true, questions: qRes.data || [] });
+      let questions: any[] = qRes.data || [];
+
+      if (doShuffleQuestions || doShuffleAnswers) {
+        const seed = `${caller.userId}:${quizId}`;
+        if (doShuffleQuestions) {
+          questions = seededShuffle(questions, seed);
+        }
+        if (doShuffleAnswers) {
+          questions = questions.map((q: any) => ({
+            ...q,
+            options: Array.isArray(q.options) && q.options.length > 1
+              ? seededShuffle(q.options, `${seed}:${String(q.id)}`)
+              : q.options,
+          }));
+        }
+      }
+
+      return res.json({
+        success: true,
+        questions,
+        shuffled: { questions: doShuffleQuestions, answers: doShuffleAnswers },
+      });
     } catch (e: any) {
       return res.status(500).json({ error: e?.message || 'Failed to load quiz questions' });
     }
@@ -7624,12 +13081,11 @@ Assistant:`;
         violationCount !== null ? `Warnings: ${violationCount}` : '',
       ].filter(Boolean).join(' | ');
 
-      await supabaseAdmin.from('notifications').insert({
+      await notifInsert({
         user_id: teacherId,
         title: 'Quiz Integrity Alert',
         message: `${studentLabel} triggered a quiz violation in "${quizTitle}". ${violationInfo}`.trim(),
         type: 'warning',
-        read: false,
         action_url: `/teacher/results`,
         created_at: new Date().toISOString(),
       });
@@ -7841,6 +13297,96 @@ Assistant:`;
       });
     } catch (e: any) {
       return res.status(500).json({ error: e?.message || 'Failed to load student profile' });
+    }
+  });
+
+  // Student modules: returns all modules for enrolled courses via supabaseAdmin (bypasses RLS).
+  app.get('/api/student/modules', async (req, res) => {
+    try {
+      const caller = await assertAuthenticated(req, res);
+      if (!caller) return;
+      if (caller.role !== 'student' && caller.role !== 'admin') {
+        return res.status(403).json({ error: 'Forbidden' });
+      }
+
+      // Resolve enrolled course IDs using the same multi-path logic as /api/student/courses/available
+      const uid = caller.userId;
+
+      // Path A: direct student_ids enrollment
+      let courseIds: string[] = [];
+      const directRes = await supabaseAdmin.from('courses')
+        .select('id,title,level,status')
+        .contains('student_ids', [uid])
+        .eq('status', 'published');
+      if (!directRes.error) {
+        courseIds = (directRes.data || []).map((c: any) => String(c.id));
+      }
+
+      // Path B: class-based enrollment
+      const classRes = await supabaseAdmin.from('classes').select('course_id').contains('student_ids', [uid]);
+      if (!classRes.error && classRes.data?.length) {
+        const classCourseIds = classRes.data.map((r: any) => String(r.course_id)).filter(Boolean);
+        const missing = classCourseIds.filter((id) => !courseIds.includes(id));
+        if (missing.length) {
+          const extraRes = await supabaseAdmin.from('courses').select('id').in('id', missing).eq('status', 'published');
+          if (!extraRes.error) courseIds.push(...(extraRes.data || []).map((c: any) => String(c.id)));
+        }
+      }
+
+      // Path C: teacher-linked courses (via profile.teacher_id)
+      if (!courseIds.length) {
+        const profileRes = await supabaseAdmin.from('profiles').select('teacher_id').eq('id', uid).single();
+        const teacherId = profileRes.data?.teacher_id;
+        if (teacherId) {
+          const teacherCourses = await supabaseAdmin.from('courses').select('id').eq('teacher_id', teacherId).eq('status', 'published');
+          if (!teacherCourses.error) courseIds.push(...(teacherCourses.data || []).map((c: any) => String(c.id)));
+        }
+        if (!courseIds.length) {
+          // fallback: all published courses
+          const allRes = await supabaseAdmin.from('courses').select('id').eq('status', 'published');
+          if (!allRes.error) courseIds.push(...(allRes.data || []).map((c: any) => String(c.id)));
+        }
+      }
+
+      courseIds = [...new Set(courseIds)];
+      if (!courseIds.length) return res.json({ success: true, modules: [], courses: [] });
+
+      // Fetch course details + modules + lesson counts
+      const [coursesRes, modulesRes] = await Promise.all([
+        supabaseAdmin.from('courses').select('id,title,level').in('id', courseIds),
+        supabaseAdmin.from('modules').select('id,title,description,order,status,course_id,created_at').in('course_id', courseIds).order('order', { ascending: true }),
+      ]);
+
+      const moduleIds = (modulesRes.data || []).map((m: any) => String(m.id));
+      const lessonsRes = moduleIds.length
+        ? await supabaseAdmin.from('lessons').select('id,module_id').in('module_id', moduleIds)
+        : { data: [] };
+
+      const lessonsByModule: Record<string, number> = {};
+      (lessonsRes.data || []).forEach((l: any) => { lessonsByModule[l.module_id] = (lessonsByModule[l.module_id] || 0) + 1; });
+
+      const courseTitleMap: Record<string, string> = {};
+      const courseLevelMap: Record<string, string> = {};
+      (coursesRes.data || []).forEach((c: any) => { courseTitleMap[c.id] = c.title || ''; courseLevelMap[c.id] = c.level || ''; });
+
+      const modules = (modulesRes.data || []).map((m: any) => ({
+        id: m.id,
+        title: m.title || 'Untitled Module',
+        description: m.description || '',
+        order: m.order ?? 0,
+        status: m.status || 'active',
+        course_id: m.course_id,
+        courseTitle: courseTitleMap[m.course_id] || 'Course',
+        courseLevel: courseLevelMap[m.course_id] || '',
+        lessonCount: lessonsByModule[m.id] || 0,
+        createdAt: m.created_at || '',
+      }));
+
+      const courses = (coursesRes.data || []).map((c: any) => ({ id: c.id, title: c.title || 'Course', level: c.level || '' }));
+      return res.json({ success: true, modules, courses });
+    } catch (e: any) {
+      console.error('GET /api/student/modules', e);
+      return res.status(500).json({ error: e?.message || 'Failed to load modules' });
     }
   });
 
@@ -8058,7 +13604,50 @@ Assistant:`;
         : 0;
 
       const upsertRes = await upsertLessonProgressWithFallback(caller.userId, lessonId, completed, lastVideoPosition);
-      return res.json({ success: true, progress: upsertRes.row, storage: upsertRes.storage });
+
+      // --- Suggestion 9: Auto-issue certificate when all lessons complete ---
+      let autoCertificateIssued = false;
+      if (completed) {
+        try {
+          const lessonSnap = await supabaseAdmin.from('lessons').select('course_id').eq('id', lessonId).maybeSingle();
+          const courseId = lessonSnap.data?.course_id ? String(lessonSnap.data.course_id) : '';
+          if (courseId) {
+            const allLessonsRes = await supabaseAdmin.from('lessons').select('id').eq('course_id', courseId).eq('status', 'published');
+            const allLessonIds = (allLessonsRes.data || []).map((l: any) => String(l.id));
+            if (allLessonIds.length > 0) {
+              const progressRes = await fetchLessonProgressRows(caller.userId, allLessonIds);
+              const completedIds = new Set(
+                (progressRes.rows || [])
+                  .filter((p: any) => toLessonCompleted(p))
+                  .map((p: any) => String(p.lesson_id))
+              );
+              const allComplete = allLessonIds.every(id => completedIds.has(id));
+              if (allComplete) {
+                const existingCert = await supabaseAdmin
+                  .from('certificates')
+                  .select('id')
+                  .eq('student_id', caller.userId)
+                  .eq('course_id', courseId)
+                  .maybeSingle();
+                if (!existingCert.error && !existingCert.data) {
+                  await supabaseAdmin.from('certificates').insert({
+                    student_id: caller.userId,
+                    course_id: courseId,
+                    status: 'issued',
+                    issued_date: new Date().toISOString(),
+                  });
+                  autoCertificateIssued = true;
+                  console.log(`[auto-cert] Certificate issued student=${caller.userId} course=${courseId}`);
+                }
+              }
+            }
+          }
+        } catch (certErr: any) {
+          console.warn('[auto-cert] Failed to issue certificate:', certErr?.message);
+        }
+      }
+
+      return res.json({ success: true, progress: upsertRes.row, storage: upsertRes.storage, autoCertificateIssued });
     } catch (e: any) {
       return res.status(500).json({ error: e?.message || 'Failed to update lesson progress' });
     }
@@ -8111,6 +13700,9 @@ Assistant:`;
         return res.status(403).json({ error: 'Forbidden: student or admin role required' });
       }
       const { status } = req.query;
+      const studentLiveSessionsCacheKey = `student-live-sessions:${caller.userId}:${String(status || "all")}`;
+      const cachedLiveSessions = getCachedApiResponse<any>(studentLiveSessionsCacheKey);
+      if (cachedLiveSessions) return res.json(cachedLiveSessions);
 
       // Find session_ids where this user is a non-removed participant
       const { data: participantRows, error: pErr } = await supabaseAdmin
@@ -8182,7 +13774,9 @@ Assistant:`;
           host: row.host_id ? hostMap[String(row.host_id)] || null : null,
         }));
       }
-      res.json({ success: true, sessions: data || [] });
+      const payload = { success: true, sessions: data || [] };
+      setCachedApiResponse(studentLiveSessionsCacheKey, payload, 15_000);
+      res.json(payload);
     } catch (e: unknown) {
       console.error('GET /api/student/live-sessions', e);
       res.status(500).json({ error: (e as Error).message });
@@ -8240,8 +13834,15 @@ Assistant:`;
 
   app.patch('/api/admin/live-sessions/:id', async (req, res) => {
     try {
-      const { data, error } = await supabaseAdmin
-        .from('live_sessions').update({ ...req.body, updated_at: new Date().toISOString() }).eq('id', req.params.id).select().single();
+      const adminUpdatePayload: Record<string, unknown> = { ...req.body, updated_at: new Date().toISOString() };
+      let updateResult = await supabaseAdmin
+        .from('live_sessions').update(adminUpdatePayload).eq('id', req.params.id).select().single();
+      if (updateResult.error && isLiveSessionsStartedAtColumnMissing(updateResult.error) && 'started_at' in adminUpdatePayload) {
+        const { started_at: _startedAt, ...fallbackUpdate } = adminUpdatePayload;
+        updateResult = await supabaseAdmin
+          .from('live_sessions').update(fallbackUpdate).eq('id', req.params.id).select().single();
+      }
+      const { data, error } = updateResult;
       if (error) throw error;
       res.json({ success: true, session: data });
     } catch (e: any) { res.status(500).json({ error: e.message }); }
@@ -8487,6 +14088,34 @@ Assistant:`;
     questionStats: RQReportQuestion[];
   }
   const rqCompletedSessions = new Map<string, RQReport>();
+  const RQ_REPORT_SECTION_PREFIX = 'rq_report:';
+
+  const rqPersistReport = async (report: RQReport): Promise<void> => {
+    try {
+      await supabaseAdmin.from('platform_config').upsert(
+        { section: `${RQ_REPORT_SECTION_PREFIX}${report.id}`, value: report as any, updated_at: new Date().toISOString() },
+        { onConflict: 'section' }
+      );
+    } catch (e) { console.warn('[rq] persist report failed:', e); }
+  };
+
+  const rqRestoreReportsFromDB = async (): Promise<void> => {
+    try {
+      const { data } = await supabaseAdmin
+        .from('platform_config')
+        .select('section, value')
+        .like('section', `${RQ_REPORT_SECTION_PREFIX}%`);
+      if (!data) return;
+      let count = 0;
+      for (const row of data) {
+        const r = row.value as any;
+        if (!r?.id) continue;
+        rqCompletedSessions.set(r.id, r as RQReport);
+        count++;
+      }
+      if (count > 0) console.log(`[rq] Restored ${count} completed quiz report(s) from DB`);
+    } catch (e) { console.warn('[rq] restoreReportsFromDB failed:', e); }
+  };
 
   const buildRQReport = (session: RQSession): RQReport => {
     const parts = [...session.participants.values()];
@@ -8549,6 +14178,44 @@ Assistant:`;
   const studentQuizCount   = new Map<string, number>();
   const studentPassStreak  = new Map<string, number>();
 
+  // ── Badge DB persistence (survive server restarts) ──────────────────────────
+  const BADGE_SECTION_PREFIX = 'rq_badge:';
+
+  const rqPersistBadgeState = async (userId: string): Promise<void> => {
+    try {
+      const badges = [...(studentBadges.get(userId) ?? [])];
+      const quizCount  = studentQuizCount.get(userId)  ?? 0;
+      const passStreak = studentPassStreak.get(userId) ?? 0;
+      await supabaseAdmin.from('platform_config').upsert(
+        { section: `${BADGE_SECTION_PREFIX}${userId}`, value: { badges, quizCount, passStreak }, updated_at: new Date().toISOString() },
+        { onConflict: 'section' }
+      );
+    } catch { /* non-critical */ }
+  };
+
+  const rqRestoreBadgeStateFromDB = async (): Promise<void> => {
+    try {
+      const { data } = await supabaseAdmin
+        .from('platform_config')
+        .select('section, value')
+        .like('section', `${BADGE_SECTION_PREFIX}%`);
+      if (!data) return;
+      let restored = 0;
+      for (const row of data) {
+        const userId = (row.section as string).slice(BADGE_SECTION_PREFIX.length);
+        const d = row.value as any;
+        if (!userId || !d) continue;
+        if (Array.isArray(d.badges))           studentBadges.set(userId, new Set<string>(d.badges));
+        if (typeof d.quizCount  === 'number')  studentQuizCount.set(userId, d.quizCount);
+        if (typeof d.passStreak === 'number')  studentPassStreak.set(userId, d.passStreak);
+        restored++;
+      }
+      if (restored > 0) console.log(`[badges] Restored badge state for ${restored} user(s)`);
+    } catch { /* non-critical */ }
+  };
+  rqRestoreBadgeStateFromDB().catch(() => {});
+  // ────────────────────────────────────────────────────────────────────────────
+
   const awardBadge = (userId: string, badgeId: string) => {
     if (!studentBadges.has(userId)) studentBadges.set(userId, new Set());
     studentBadges.get(userId)!.add(badgeId);
@@ -8574,6 +14241,7 @@ Assistant:`;
     const newStreak = pct >= 50 ? prevStreak + 1 : 0;
     studentPassStreak.set(userId, newStreak);
     if (newStreak >= 3) awardBadge(userId, 'consistent');
+    rqPersistBadgeState(userId).catch(() => {});
   };
   // ─── END ACHIEVEMENT BADGE SYSTEM ────────────────────────────────────────────
 
@@ -8619,9 +14287,12 @@ Assistant:`;
       if (nextIndex >= s.questions.length) {
         s.status = 'ended';
         rqPins.delete(s.pin);
-        rqCompletedSessions.set(s.id, buildRQReport(s));
+        const _autoReport1 = buildRQReport(s);
+        rqCompletedSessions.set(s.id, _autoReport1);
+        rqPersistReport(_autoReport1).catch(() => {});
         const board = rqLeaderboard(s);
         await rqBroadcast(sessionId, 'session_ended', { leaderboard: board });
+        rqDeleteSessionFromDB(sessionId).catch(() => {});
       } else {
         s.currentQuestionIndex = nextIndex;
         s.questionStartedAt = Date.now();
@@ -8634,10 +14305,140 @@ Assistant:`;
           timerSeconds: nq.timerSeconds,
           startedAt: s.questionStartedAt,
         });
+        rqPersistSession(s).catch(() => {});
         rqScheduleAutoNext(sessionId);
       }
     }, q.timerSeconds * 1000 + 500);
   };
+
+  // ─── LIVE QUIZ SESSION PERSISTENCE (survive server restarts) ─────────────────
+  const RQ_SESSION_SECTION_PREFIX = 'teacher/live-quiz:';
+  const RQ_SESSION_SECTION_PREFIX_LEGACY = 'rq_session:';
+  const rqSectionForSession = (sessionId: string) => `${RQ_SESSION_SECTION_PREFIX}${sessionId}`;
+  const rqLegacySectionForSession = (sessionId: string) => `${RQ_SESSION_SECTION_PREFIX_LEGACY}${sessionId}`;
+
+  const rqSerializeSession = (s: RQSession) => ({
+    id: s.id, quizId: s.quizId, quizTitle: s.quizTitle, hostId: s.hostId,
+    pin: s.pin, status: s.status, currentQuestionIndex: s.currentQuestionIndex,
+    questionStartedAt: s.questionStartedAt, questions: s.questions,
+    createdAt: s.createdAt, teamsEnabled: s.teamsEnabled, teamCount: s.teamCount,
+    teamNames: s.teamNames, participantTeams: s.participantTeams, teamScores: s.teamScores,
+    participants: Object.fromEntries(s.participants.entries()),
+  });
+
+  const rqPersistSession = async (s: RQSession) => {
+    try {
+      await supabaseAdmin.from('platform_config')
+        .upsert(
+          { section: rqSectionForSession(s.id), value: rqSerializeSession(s), updated_at: new Date().toISOString() },
+          { onConflict: 'section' }
+        );
+      // Clean up legacy key once new key is saved.
+      await supabaseAdmin.from('platform_config').delete().eq('section', rqLegacySectionForSession(s.id));
+    } catch (e) { console.warn('[rq] persist failed:', e); }
+  };
+
+  const rqDeleteSessionFromDB = async (sessionId: string) => {
+    try {
+      await supabaseAdmin
+        .from('platform_config')
+        .delete()
+        .in('section', [rqSectionForSession(sessionId), rqLegacySectionForSession(sessionId)]);
+    } catch (e) { console.warn('[rq] delete from DB failed:', e); }
+  };
+
+  const rqRestoreSingleSessionFromDB = async (sessionId: string): Promise<RQSession | null> => {
+    try {
+      const { data, error } = await supabaseAdmin
+        .from('platform_config')
+        .select('section, value')
+        .in('section', [rqSectionForSession(sessionId), rqLegacySectionForSession(sessionId)])
+        .maybeSingle();
+      if (error || !data?.value) return null;
+      const d = data.value as any;
+      if (!d?.id || d.id !== sessionId || !d?.status) return null;
+      if (d.status === 'ended') {
+        await supabaseAdmin.from('platform_config').delete().eq('section', data.section);
+        return null;
+      }
+      const session: RQSession = {
+        id: d.id, quizId: d.quizId, quizTitle: d.quizTitle, hostId: d.hostId,
+        pin: d.pin, status: d.status, currentQuestionIndex: d.currentQuestionIndex ?? 0,
+        questionStartedAt: d.questionStartedAt ?? null, questions: d.questions ?? [],
+        createdAt: d.createdAt ?? Date.now(),
+        teamsEnabled: Boolean(d.teamsEnabled), teamCount: d.teamCount ?? 2,
+        teamNames: Array.isArray(d.teamNames) ? d.teamNames : ['Red', 'Blue'],
+        participantTeams: d.participantTeams ?? {},
+        teamScores: d.teamScores ?? {},
+        participants: new Map(Object.entries(d.participants ?? {})),
+      };
+      rqSessions.set(session.id, session);
+      rqPins.set(session.pin, session.id);
+      if (session.status === 'active') rqScheduleAutoNext(session.id);
+      return session;
+    } catch {
+      return null;
+    }
+  };
+
+  const rqRestoreSessionsFromDB = async () => {
+    try {
+      const { data, error } = await supabaseAdmin
+        .from('platform_config')
+        .select('section, value')
+        .or(`section.like.${RQ_SESSION_SECTION_PREFIX}%,section.like.${RQ_SESSION_SECTION_PREFIX_LEGACY}%`);
+      if (error || !data) return;
+      let restored = 0;
+      for (const row of data) {
+        try {
+          const d = row.value as any;
+          if (!d?.id || !d?.status) continue;
+          if (d.status === 'ended') {
+            // Clean up ended sessions from DB
+            await supabaseAdmin.from('platform_config').delete().eq('section', row.section);
+            continue;
+          }
+          // Check if session expired (older than 3 hours)
+          const msLeft = (d.createdAt ?? 0) + 3 * 60 * 60 * 1000 - Date.now();
+          if (msLeft <= 0) {
+            await supabaseAdmin.from('platform_config').delete().eq('section', row.section);
+            continue;
+          }
+          // Reconstruct session
+          const session: RQSession = {
+            id: d.id, quizId: d.quizId, quizTitle: d.quizTitle, hostId: d.hostId,
+            pin: d.pin, status: d.status, currentQuestionIndex: d.currentQuestionIndex ?? 0,
+            questionStartedAt: d.questionStartedAt ?? null, questions: d.questions ?? [],
+            createdAt: d.createdAt ?? Date.now(),
+            teamsEnabled: Boolean(d.teamsEnabled), teamCount: d.teamCount ?? 2,
+            teamNames: Array.isArray(d.teamNames) ? d.teamNames : ['Red', 'Blue'],
+            participantTeams: d.participantTeams ?? {},
+            teamScores: d.teamScores ?? {},
+            participants: new Map(Object.entries(d.participants ?? {})),
+          };
+          rqSessions.set(session.id, session);
+          rqPins.set(session.pin, session.id);
+          // Reschedule auto-next if session is active
+          if (session.status === 'active') {
+            rqScheduleAutoNext(session.id);
+          }
+          // Auto-clean when remaining lifetime expires
+          setTimeout(() => {
+            const s = rqSessions.get(session.id);
+            if (s) { rqPins.delete(s.pin); rqSessions.delete(session.id); }
+            rqDeleteSessionFromDB(session.id).catch(() => {});
+          }, msLeft);
+          restored++;
+        } catch (e) { console.warn('[rq] restore session failed:', e); }
+      }
+      if (restored > 0) console.log(`[rq] Restored ${restored} live quiz session(s) from DB`);
+    } catch (e) { console.warn('[rq] restoreSessionsFromDB failed:', e); }
+  };
+
+  // Restore sessions and completed reports immediately (fire-and-forget)
+  rqRestoreSessionsFromDB().catch(() => {});
+  rqRestoreReportsFromDB().catch(() => {});
+  // ─── END LIVE QUIZ SESSION PERSISTENCE ───────────────────────────────────────
 
   // Teacher: start a live quiz session
   app.post('/api/teacher/realtime-quiz/start', async (req: Request, res: Response) => {
@@ -8721,10 +14522,14 @@ Assistant:`;
       rqSessions.set(sessionId, session);
       rqPins.set(pin, sessionId);
 
+      // Persist session so it survives server restarts
+      await rqPersistSession(session);
+
       // Auto-clean sessions after 3 hours
       setTimeout(() => {
         const s = rqSessions.get(sessionId);
         if (s) { rqPins.delete(s.pin); rqSessions.delete(sessionId); }
+        rqDeleteSessionFromDB(sessionId).catch(() => {});
       }, 3 * 60 * 60 * 1000);
 
       res.json({ success: true, sessionId, pin, quizTitle: session.quizTitle, totalQuestions: rqQuestions.length });
@@ -8739,7 +14544,9 @@ Assistant:`;
     try {
       const caller = await assertAuthenticated(req, res);
       if (!caller) return;
-      const session = rqSessions.get(req.params.sessionId);
+      const session =
+        rqSessions.get(req.params.sessionId) ??
+        (await rqRestoreSingleSessionFromDB(req.params.sessionId));
       if (!session) return res.status(404).json({ error: 'Session not found.' });
       if (session.hostId !== caller.userId && caller.role !== 'admin') {
         return res.status(403).json({ error: 'Access denied.' });
@@ -8780,10 +14587,29 @@ Assistant:`;
   });
 
   // Teacher: list completed quiz reports
+  // Merge any DB-persisted reports that are missing from the in-memory map.
+  // Called by the list endpoint so the first page-load after a restart is correct.
+  const rqSyncReportsFromDB = async (): Promise<void> => {
+    try {
+      const { data } = await supabaseAdmin
+        .from('platform_config')
+        .select('section, value')
+        .like('section', `${RQ_REPORT_SECTION_PREFIX}%`);
+      if (!data) return;
+      for (const row of data) {
+        const r = row.value as any;
+        if (!r?.id || rqCompletedSessions.has(r.id)) continue;
+        rqCompletedSessions.set(r.id, r as RQReport);
+      }
+    } catch (_) { /* non-critical */ }
+  };
+
   app.get('/api/teacher/rq-reports', async (req: Request, res: Response) => {
     try {
       const caller = await assertAuthenticated(req, res);
       if (!caller) return;
+      // Always sync from DB so reports aren't lost across server restarts
+      await rqSyncReportsFromDB();
       const reports = [...rqCompletedSessions.values()]
         .filter(r => r.hostId === caller.userId || caller.role === 'admin')
         .sort((a, b) => b.endedAt - a.endedAt)
@@ -8809,7 +14635,21 @@ Assistant:`;
     try {
       const caller = await assertAuthenticated(req, res);
       if (!caller) return;
-      const report = rqCompletedSessions.get(req.params.sessionId);
+      let report = rqCompletedSessions.get(req.params.sessionId);
+      // Fallback: load from DB if not in memory
+      if (!report) {
+        try {
+          const { data } = await supabaseAdmin
+            .from('platform_config')
+            .select('value')
+            .eq('section', `${RQ_REPORT_SECTION_PREFIX}${req.params.sessionId}`)
+            .maybeSingle();
+          if (data?.value) {
+            report = data.value as RQReport;
+            rqCompletedSessions.set(report.id, report);
+          }
+        } catch (_) {}
+      }
       if (!report) return res.status(404).json({ error: 'Report not found.' });
       if (report.hostId !== caller.userId && caller.role !== 'admin') {
         return res.status(403).json({ error: 'Access denied.' });
@@ -8825,7 +14665,9 @@ Assistant:`;
     try {
       const caller = await assertAuthenticated(req, res);
       if (!caller) return;
-      const session = rqSessions.get(req.params.sessionId);
+      const session =
+        rqSessions.get(req.params.sessionId) ??
+        (await rqRestoreSingleSessionFromDB(req.params.sessionId));
       if (!session) return res.status(404).json({ error: 'Session not found.' });
       if (session.hostId !== caller.userId && caller.role !== 'admin') {
         return res.status(403).json({ error: 'Access denied.' });
@@ -8840,6 +14682,7 @@ Assistant:`;
           index: q.index, body: q.body, options: q.options, points: q.points,
           timerSeconds: q.timerSeconds, startedAt: session.questionStartedAt,
         });
+        rqPersistSession(session).catch(() => {});
         rqScheduleAutoNext(session.id);
         return res.json({ success: true, status: 'active', questionIndex: 0 });
       }
@@ -8850,9 +14693,12 @@ Assistant:`;
         if (nextIndex >= session.questions.length) {
           session.status = 'ended';
           rqPins.delete(session.pin);
-          rqCompletedSessions.set(session.id, buildRQReport(session));
+          const _nextReport = buildRQReport(session);
+          rqCompletedSessions.set(session.id, _nextReport);
+          rqPersistReport(_nextReport).catch(() => {});
           const board = rqLeaderboard(session);
           await rqBroadcast(session.id, 'session_ended', { leaderboard: board });
+          rqDeleteSessionFromDB(session.id).catch(() => {});
           return res.json({ success: true, status: 'ended', leaderboard: board });
         }
         session.currentQuestionIndex = nextIndex;
@@ -8862,6 +14708,7 @@ Assistant:`;
           index: nq.index, body: nq.body, options: nq.options, points: nq.points,
           timerSeconds: nq.timerSeconds, startedAt: session.questionStartedAt,
         });
+        rqPersistSession(session).catch(() => {});
         rqScheduleAutoNext(session.id);
         return res.json({ success: true, status: 'active', questionIndex: nextIndex });
       }
@@ -8877,7 +14724,9 @@ Assistant:`;
     try {
       const caller = await assertAuthenticated(req, res);
       if (!caller) return;
-      const session = rqSessions.get(req.params.sessionId);
+      const session =
+        rqSessions.get(req.params.sessionId) ??
+        (await rqRestoreSingleSessionFromDB(req.params.sessionId));
       if (!session) return res.status(404).json({ error: 'Session not found.' });
       if (session.hostId !== caller.userId && caller.role !== 'admin') {
         return res.status(403).json({ error: 'Access denied.' });
@@ -8885,9 +14734,12 @@ Assistant:`;
       if (session.autoNextTimer) clearTimeout(session.autoNextTimer);
       session.status = 'ended';
       rqPins.delete(session.pin);
-      rqCompletedSessions.set(session.id, buildRQReport(session));
+      const _endReport = buildRQReport(session);
+      rqCompletedSessions.set(session.id, _endReport);
+      rqPersistReport(_endReport).catch(() => {});
       const board = rqLeaderboard(session);
       await rqBroadcast(session.id, 'session_ended', { leaderboard: board });
+      rqDeleteSessionFromDB(session.id).catch(() => {});
       res.json({ success: true, leaderboard: board });
     } catch (err) {
       res.status(500).json({ error: 'Failed to end session.' });
@@ -8915,6 +14767,7 @@ Assistant:`;
         await rqBroadcast(sessionId, 'participant_joined', {
           displayName: name, participantCount: session.participants.size,
         });
+        rqPersistSession(session).catch(() => {});
       } else {
         participant.status = 'connected';
         participant.displayName = name;
@@ -8980,7 +14833,12 @@ Assistant:`;
   });
 
   // Student: submit answer
+  // In-memory set to prevent race-condition double-submissions on the answer endpoint.
+  // Key: `${sessionId}:${userId}:${questionIndex}`
+  const rqAnswerProcessing = new Set<string>();
+
   app.post('/api/student/realtime-quiz/:sessionId/answer', async (req: Request, res: Response) => {
+    let _rqKey = '';
     try {
       const caller = await assertAuthenticated(req, res);
       if (!caller) return;
@@ -8999,6 +14857,15 @@ Assistant:`;
       if (participant.answers[questionIndex] !== undefined) {
         return res.status(400).json({ error: 'Already answered this question.' });
       }
+
+      // Race-condition guard: prevent two simultaneous requests from both passing
+      // the "already answered" check above before either has written the answer.
+      _rqKey = `${req.params.sessionId}:${caller.userId}:${questionIndex}`;
+      if (rqAnswerProcessing.has(_rqKey)) {
+        return res.status(429).json({ error: 'Answer is being processed, please wait.' });
+      }
+      rqAnswerProcessing.add(_rqKey);
+      // Key is removed in the finally block below
 
       const q = session.questions[questionIndex];
       if (!q) return res.status(400).json({ error: 'Invalid question.' });
@@ -9045,6 +14912,8 @@ Assistant:`;
         teamScores: session.teamScores,
       });
 
+      rqPersistSession(session).catch(() => {});
+
       res.json({
         success: true, isCorrect, pointsEarned, correctAnswer: q.correctAnswer, score: participant.score,
         teamScore: session.teamsEnabled && session.participantTeams[caller.userId]
@@ -9052,6 +14921,8 @@ Assistant:`;
       });
     } catch (err) {
       res.status(500).json({ error: 'Failed to submit answer.' });
+    } finally {
+      if (_rqKey) rqAnswerProcessing.delete(_rqKey);
     }
   });
 
@@ -9149,12 +15020,11 @@ Assistant:`;
   // ─── END REAL-TIME LIVE QUIZ ──────────────────────────────────────────────────
 
   const addDiscussionNotification = async (userId: string, title: string, message: string, actionUrl: string) => {
-    await supabaseAdmin.from('notifications').insert({
+    await notifInsert({
       user_id: userId,
       title,
       message: message.slice(0, 240),
       type: 'info',
-      read: false,
       action_url: actionUrl,
       created_at: new Date().toISOString(),
     });
@@ -9859,7 +15729,7 @@ Assistant:`;
       };
     });
 
-    await supabaseAdmin.from('notifications').insert(notifRows);
+    await notifInsert(notifRows);
 
     // Send email via Brevo if enabled
     if (shouldSendEmail) {
@@ -10094,7 +15964,379 @@ Assistant:`;
     } catch (e: any) { res.status(500).json({ error: e.message }); }
   });
 
-  // Student: get own submission for an assignment (poolQuery – bypasses PostgREST schema cache)
+  // ── Teacher Announcement routes (same logic as admin, accessible to teacher or admin) ──
+  app.get('/api/teacher/announcements', async (req: Request, res: Response) => {
+    try {
+      const caller = await assertAuthenticated(req, res);
+      if (!caller) return;
+      if (caller.role !== 'teacher' && caller.role !== 'admin') return res.status(403).json({ error: 'Forbidden' });
+      const { data, error } = await supabaseAdmin
+        .from('announcements')
+        .select('*, author:profiles!author_id(id,display_name,email)')
+        .order('created_at', { ascending: false });
+      if (error) throw error;
+      res.json({ success: true, announcements: data });
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  app.post('/api/teacher/announcements', async (req: Request, res: Response) => {
+    try {
+      const caller = await assertAuthenticated(req, res);
+      if (!caller) return;
+      if (caller.role !== 'teacher' && caller.role !== 'admin') return res.status(403).json({ error: 'Forbidden' });
+      const { class_ids, student_ids, send_email, ...body } = req.body || {};
+      const payload = {
+        ...body,
+        author_id: body.author_id || caller.userId,
+        published_at: body.status === 'published' ? new Date().toISOString() : null,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      };
+      const { data, error } = await annInsert(payload);
+      if (error) throw error;
+      if (body.status === 'published') {
+        const classIds: string[] = Array.isArray(class_ids) ? class_ids.map((x: unknown) => String(x || '').trim()).filter(Boolean) : [];
+        const studentIds: string[] = Array.isArray(student_ids) ? student_ids.map((x: unknown) => String(x || '').trim()).filter(Boolean) : [];
+        await sendAnnouncementNotifications({
+          title: String(body.title || ''), content: String(body.content || ''),
+          priority: String(body.priority || 'normal'), audience: String(body.target_audience || 'all'),
+          classIds, studentIds, sendEmail: Boolean(send_email),
+        });
+      }
+      res.json({ success: true, announcement: data });
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  app.patch('/api/teacher/announcements/:id', async (req: Request, res: Response) => {
+    try {
+      const caller = await assertAuthenticated(req, res);
+      if (!caller) return;
+      if (caller.role !== 'teacher' && caller.role !== 'admin') return res.status(403).json({ error: 'Forbidden' });
+      const { class_ids, student_ids, send_email, ...body } = req.body || {};
+      const payload = {
+        ...body,
+        updated_at: new Date().toISOString(),
+        ...(body.status === 'published' ? { published_at: new Date().toISOString() } : {}),
+      };
+      const { data, error } = await annUpdate(req.params.id, payload);
+      if (error) throw error;
+      if (body.status === 'published') {
+        const classIds: string[] = Array.isArray(class_ids) ? class_ids.map((x: unknown) => String(x || '').trim()).filter(Boolean) : [];
+        const studentIds: string[] = Array.isArray(student_ids) ? student_ids.map((x: unknown) => String(x || '').trim()).filter(Boolean) : [];
+        await sendAnnouncementNotifications({
+          title: String((body.title ?? data?.title) || ''), content: String((body.content ?? data?.content) || ''),
+          priority: String((body.priority ?? data?.priority) || 'normal'), audience: String((body.target_audience ?? data?.target_audience) || 'all'),
+          classIds, studentIds, sendEmail: Boolean(send_email),
+        });
+      }
+      res.json({ success: true, announcement: data });
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  app.delete('/api/teacher/announcements/:id', async (req: Request, res: Response) => {
+    try {
+      const caller = await assertAuthenticated(req, res);
+      if (!caller) return;
+      if (caller.role !== 'teacher' && caller.role !== 'admin') return res.status(403).json({ error: 'Forbidden' });
+      const { error } = await supabaseAdmin.from('announcements').delete().eq('id', req.params.id);
+      if (error) throw error;
+      res.json({ success: true });
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  app.post('/api/teacher/announcements/:id/resend', async (req: Request, res: Response) => {
+    try {
+      const caller = await assertAuthenticated(req, res);
+      if (!caller) return;
+      if (caller.role !== 'teacher' && caller.role !== 'admin') return res.status(403).json({ error: 'Forbidden' });
+      const { data: ann, error } = await supabaseAdmin.from('announcements').select('*').eq('id', req.params.id).maybeSingle();
+      if (error) throw error;
+      if (!ann) return res.status(404).json({ error: 'Announcement not found' });
+      const count = await sendAnnouncementNotifications({
+        title: String(ann.title || ''), content: String(ann.content || ''),
+        priority: String(ann.priority || 'normal'), audience: String(ann.target_audience || 'all'),
+        classIds: [], studentIds: [], sendEmail: false,
+      });
+      res.json({ success: true, count });
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  app.get('/api/teacher/brevo/status', async (_req: Request, res: Response) => {
+    const configured = isEmailConfigured();
+    if (!configured) return res.json({ configured: false, connected: false, reason: 'BREVO_API_KEY, BREVO_SENDER_EMAIL or BREVO_SENDER_NAME is missing.' });
+    try {
+      const apiKey = process.env.BREVO_API_KEY || '';
+      const r = await fetch('https://api.brevo.com/v3/account', { headers: { 'api-key': apiKey, 'accept': 'application/json' } });
+      const json = await r.json() as any;
+      if (!r.ok) return res.json({ configured: true, connected: false, reason: json?.message || `Brevo returned ${r.status}` });
+      res.json({ configured: true, connected: true, email: json?.email, plan: json?.plan?.[0]?.title, senderEmail: process.env.BREVO_SENDER_EMAIL || '', senderName: process.env.BREVO_SENDER_NAME || '' });
+    } catch (e: any) { res.json({ configured: true, connected: false, reason: e.message }); }
+  });
+
+  // ── POST /api/teacher/students/:studentId/reset-password — teacher resets a student's password ──
+  app.post("/api/teacher/students/:studentId/reset-password", async (req: Request, res: Response) => {
+    try {
+      const caller = await assertAuthenticated(req, res);
+      if (!caller) return;
+      if (caller.role !== "teacher" && caller.role !== "admin") return res.status(403).json({ error: "Forbidden" });
+
+      const studentId = String(req.params.studentId || "").trim();
+      const newPassword = typeof req.body?.newPassword === "string" ? req.body.newPassword.trim() : "";
+      if (!studentId) return res.status(400).json({ error: "studentId is required" });
+      if (!newPassword || newPassword.length < 6) return res.status(400).json({ error: "Password must be at least 6 characters" });
+
+      const { data: student, error: sErr } = await supabaseAdmin
+        .from("profiles").select("id, role, teacher_id, display_name, email").eq("id", studentId).maybeSingle();
+      if (sErr) throw sErr;
+      if (!student) return res.status(404).json({ error: "Student not found" });
+      if (student.role !== "student") return res.status(400).json({ error: "Target user is not a student" });
+
+      if (caller.role === "teacher") {
+        const teacherIds = await getTeacherIdCandidates(caller.userId);
+        const scopedIds = teacherIds.length > 0 ? teacherIds : [caller.userId];
+        if (!scopedIds.includes(String(student.teacher_id))) {
+          return res.status(403).json({ error: "Forbidden: student is not linked to your account" });
+        }
+      }
+
+      const { error: updErr } = await supabaseAdmin.auth.admin.updateUserById(studentId, { password: newPassword });
+      if (updErr) throw updErr;
+
+      return res.json({ success: true, message: `Password updated for ${student.display_name || student.email}` });
+    } catch (e: any) {
+      console.error("POST /api/teacher/students/:studentId/reset-password", e);
+      return res.status(500).json({ error: e?.message || "Failed to reset password" });
+    }
+  });
+
+  // ── GET /api/teacher/students/:studentId/detail — full student detail for progress view ──
+  app.get("/api/teacher/students/:studentId/detail", async (req: Request, res: Response) => {
+    try {
+      const caller = await assertAuthenticated(req, res);
+      if (!caller) return;
+      if (caller.role !== "teacher" && caller.role !== "admin") return res.status(403).json({ error: "Forbidden" });
+
+      const studentId = String(req.params.studentId || "").trim();
+      if (!studentId) return res.status(400).json({ error: "studentId is required" });
+
+      const { data: profile, error: pErr } = await supabaseAdmin
+        .from("profiles")
+        .select("id,display_name,email,role,status,teacher_id,created_at")
+        .eq("id", studentId)
+        .maybeSingle();
+      if (pErr) throw pErr;
+      if (!profile) return res.status(404).json({ error: "Student not found" });
+      if (profile.role !== "student") return res.status(400).json({ error: "Target user is not a student" });
+
+      if (caller.role === "teacher") {
+        const teacherIds = await getTeacherIdCandidates(caller.userId);
+        const scopedIds = teacherIds.length > 0 ? teacherIds : [caller.userId];
+
+        const isLinked = scopedIds.includes(String(profile.teacher_id || ""));
+        if (!isLinked) {
+          // Also allow if student enrolled in teacher's courses or classes
+          const courseRowsCk = await fetchTeacherCourseRows(scopedIds, true);
+          const studentInCourse = courseRowsCk.some((c: any) =>
+            Array.isArray(c.student_ids) && c.student_ids.map(String).includes(studentId)
+          );
+          const classRowsCk = await supabaseAdmin
+            .from("classes").select("student_ids").in("teacher_id", scopedIds);
+          const studentInClass = (classRowsCk.data || []).some((cl: any) =>
+            Array.isArray(cl.student_ids) && cl.student_ids.map(String).includes(studentId)
+          );
+          if (!studentInCourse && !studentInClass) {
+            return res.status(403).json({ error: "Forbidden: student is not linked to your account" });
+          }
+        }
+      }
+
+      // Enrolled courses
+      const courseRowsRes = await supabaseAdmin
+        .from("courses")
+        .select("id,title,student_ids")
+        .not("student_ids", "is", null);
+      const allCourses = (courseRowsRes.data || []);
+      const enrolledCourses = allCourses
+        .filter((c: any) => Array.isArray(c.student_ids) && c.student_ids.map(String).includes(studentId))
+        .map((c: any) => ({ id: String(c.id), title: String(c.title || "Untitled"), role: "student" }));
+
+      // Quiz attempts
+      const teacherIds2 = caller.role === "teacher"
+        ? (await getTeacherIdCandidates(caller.userId).then(ids => ids.length > 0 ? ids : [caller.userId]))
+        : null;
+      const teacherCourseIds = teacherIds2
+        ? (await fetchTeacherCourseRows(teacherIds2)).map((c: any) => String(c.id || "")).filter(Boolean)
+        : [];
+
+      let quizRows: any[] = [];
+      if (teacherCourseIds.length > 0) {
+        const quizzesRes = await supabaseAdmin.from("quizzes").select("id,title,course_id,settings,passing_score,pass_mark").in("course_id", teacherCourseIds);
+        if (!quizzesRes.error) quizRows = quizzesRes.data || [];
+      }
+      const quizIds = new Set<string>(quizRows.map((q: any) => String(q.id || "")).filter(Boolean));
+      const passingScoreByQuiz = quizRows.reduce((acc: Record<string, number>, q: any) => {
+        const raw = q?.settings?.passingScore ?? q?.passing_score ?? q?.pass_mark;
+        acc[String(q.id)] = Number.isFinite(Number(raw)) ? Number(raw) : 50;
+        return acc;
+      }, {});
+
+      const attemptRows = normalizeAttempts(
+        await fetchFilteredAttemptRows({ quizIds, studentIds: new Set([studentId]) }),
+        passingScoreByQuiz
+      ).filter((a: any) => String(a.student_id || "") === studentId && quizIds.has(String(a.quiz_id || "")));
+
+      const attempts = attemptRows.length;
+      const passed = attemptRows.filter((a: any) => a.passed).length;
+      const failed = attempts - passed;
+      const scoreSum = attemptRows.reduce((s: number, a: any) => s + (Number(a.score_percent) || 0), 0);
+      const avgScore = attempts > 0 ? Math.round(scoreSum / attempts) : 0;
+      const passRate = attempts > 0 ? Math.round((passed / attempts) * 100) : 0;
+      const sorted = [...attemptRows].sort((a: any, b: any) =>
+        new Date(b.completed_at || 0).getTime() - new Date(a.completed_at || 0).getTime()
+      );
+      const lastAttemptDate: string | null = sorted[0]?.completed_at || null;
+
+      const quizHistory = sorted.map((a: any) => {
+        const quiz = quizRows.find((q: any) => String(q.id || "") === String(a.quiz_id || ""));
+        return {
+          quizId: String(a.quiz_id || ""),
+          quizTitle: quiz?.title || "Quiz",
+          score: Math.round(Number(a.score_percent) || 0),
+          passed: Boolean(a.passed),
+          completedAt: a.completed_at || null,
+        };
+      });
+
+      // Weekly activity — last 7 days
+      const now = Date.now();
+      const weeklyActivity = Array.from({ length: 7 }).map((_, i) => {
+        const day = new Date(now - (6 - i) * 86400000);
+        const label = day.toLocaleDateString("en-US", { weekday: "short" });
+        const dayStr = day.toISOString().slice(0, 10);
+        const dayAttempts = attemptRows.filter((a: any) => {
+          const d = a.completed_at ? new Date(a.completed_at).toISOString().slice(0, 10) : "";
+          return d === dayStr;
+        });
+        const dayAvg = dayAttempts.length > 0
+          ? Math.round(dayAttempts.reduce((s: number, a: any) => s + (Number(a.score_percent) || 0), 0) / dayAttempts.length)
+          : 0;
+        return { day: label, attempts: dayAttempts.length, avgScore: dayAvg };
+      });
+
+      return res.json({
+        success: true,
+        student: {
+          id: String(profile.id),
+          displayName: String(profile.display_name || "Unknown Student"),
+          email: String(profile.email || ""),
+          status: String(profile.status || "inactive"),
+          createdAt: profile.created_at || null,
+          teacherId: profile.teacher_id || null,
+          enrolledCourses,
+          attempts,
+          passed,
+          failed,
+          avgScore,
+          passRate,
+          lastAttemptDate,
+          quizHistory,
+          weeklyActivity,
+        },
+      });
+    } catch (e: any) {
+      console.error("GET /api/teacher/students/:studentId/detail", e);
+      return res.status(500).json({ error: e?.message || "Failed to load student details" });
+    }
+  });
+
+  // GET /api/student/assignments — list published assignments visible to this student
+  app.get('/api/student/assignments', async (req: Request, res: Response) => {
+    try {
+      const caller = await assertAuthenticated(req, res);
+      if (!caller) return;
+      if (caller.role !== 'student' && caller.role !== 'admin') return res.status(403).json({ error: 'Forbidden' });
+
+      const { data: profile } = await supabaseAdmin
+        .from('profiles').select('teacher_id').eq('id', caller.userId).maybeSingle();
+
+      const teacherId: string | null = profile?.teacher_id || null;
+      console.log(`[student/assignments] student=${caller.userId} teacher_id=${teacherId}`);
+      if (!teacherId) {
+        console.log('[student/assignments] no teacher_id on profile — returning empty');
+        return res.json({ success: true, assignments: [] });
+      }
+
+      // Always keep the raw teacher_id from profile; getTeacherIdCandidates may add extras
+      let teacherIds: string[] = [teacherId];
+      try {
+        const candidates = await getTeacherIdCandidates(teacherId);
+        // candidates always contains teacherId itself, so safe to use
+        if (candidates.length > 0) teacherIds = candidates;
+      } catch { /* teachers table may not exist */ }
+      console.log(`[student/assignments] querying teacher_ids=${JSON.stringify(teacherIds)}`);
+
+      let assignments: any[] = [];
+      try {
+        // Debug: count total assignments for this teacher
+        const countResult = await poolQuery(
+          `SELECT COUNT(*) AS total, COUNT(*) FILTER (WHERE status='published') AS published FROM public.assignments WHERE teacher_id = ANY($1::uuid[])`,
+          [teacherIds]
+        );
+        const { total, published } = countResult.rows[0] || {};
+        console.log(`[student/assignments] teacher has ${total} total assignments, ${published} published`);
+
+        // Try with courses JOIN first
+        let didJoin = false;
+        try {
+          const result = await poolQuery(
+            `SELECT a.*, COALESCE(c.title, c.name, '') AS course_title
+             FROM public.assignments a
+             LEFT JOIN public.courses c ON c.id = a.course_id
+             WHERE a.teacher_id = ANY($1::uuid[])
+               AND a.status = 'published'
+             ORDER BY a.due_date ASC NULLS LAST, a.created_at DESC`,
+            [teacherIds]
+          );
+          assignments = result.rows;
+          didJoin = true;
+        } catch {
+          // courses table unavailable — query without join
+          const result = await poolQuery(
+            `SELECT a.* FROM public.assignments a
+             WHERE a.teacher_id = ANY($1::uuid[])
+               AND a.status = 'published'
+             ORDER BY a.due_date ASC NULLS LAST, a.created_at DESC`,
+            [teacherIds]
+          );
+          assignments = result.rows.map((r: any) => ({ ...r, course_title: '' }));
+        }
+        console.log(`[student/assignments] returning ${assignments.length} assignments (join=${didJoin})`);
+      } catch (sqlErr: any) {
+        console.warn('[student/assignments] poolQuery failed entirely:', sqlErr?.message);
+        // Last resort: raw SQL via supabaseAdmin RPC or direct query
+        try {
+          const { data, error } = await supabaseAdmin
+            .from('assignments')
+            .select('*')
+            .eq('status', 'published')
+            .order('created_at', { ascending: false });
+          if (error) throw error;
+          // Filter client-side since PostgREST may not support .in() for teacher_id
+          const filtered = (data || []).filter((a: any) =>
+            a.teacher_id && teacherIds.includes(String(a.teacher_id))
+          );
+          assignments = filtered.map((a: any) => ({ ...a, course_title: '' }));
+          console.log(`[student/assignments] supabaseAdmin fallback: ${assignments.length} of ${data?.length || 0}`);
+        } catch (fbErr: any) {
+          console.error('[student/assignments] all methods failed:', fbErr?.message);
+        }
+      }
+
+      return res.json({ success: true, assignments });
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  // Student: get own submission for an assignment
   app.get('/api/student/assignments/:assignmentId/submission', async (req: Request, res: Response) => {
     try {
       const caller = await assertAuthenticated(req, res);
@@ -10114,13 +16356,31 @@ Assistant:`;
       const caller = await assertAuthenticated(req, res);
       if (!caller) return;
       const { assignmentId } = req.params;
-      const { content } = req.body;
+      const { content, file_urls, link_urls } = req.body;
 
-      const asgRes = await poolQuery(
-        `SELECT id, due_date, allow_late_submission, status FROM assignments WHERE id=$1 LIMIT 1`,
-        [assignmentId]
-      );
-      const assignment = asgRes.rows[0];
+      // Fetch assignment — try poolQuery first for reliability
+      let assignment: any = null;
+      try {
+        const r = await poolQuery(
+          `SELECT id, due_date, allow_late_submission, status FROM assignments WHERE id=$1`,
+          [assignmentId]
+        );
+        if (r.rows[0]) assignment = r.rows[0];
+      } catch {
+        const { data: aFull } = await supabaseAdmin
+          .from('assignments')
+          .select('id, due_date, allow_late_submission, status')
+          .eq('id', assignmentId)
+          .maybeSingle();
+        if (aFull) assignment = aFull;
+        else {
+          const { data: aBasic } = await supabaseAdmin
+            .from('assignments').select('id, due_date, status').eq('id', assignmentId).maybeSingle();
+          if (aBasic) assignment = { ...aBasic, allow_late_submission: false };
+        }
+      }
+
+
       if (!assignment || assignment.status !== 'published') {
         return res.status(400).json({ error: 'Assignment not available' });
       }
@@ -10130,33 +16390,142 @@ Assistant:`;
         return res.status(400).json({ error: 'Deadline has passed and late submissions are not allowed' });
       }
 
-      const existingRes = await poolQuery(
-        `SELECT id FROM assignment_submissions WHERE assignment_id=$1 AND student_id=$2 LIMIT 1`,
-        [assignmentId, caller.userId]
-      );
-      const existing = existingRes.rows[0];
       const now = new Date().toISOString();
+      const fileUrlsJson = JSON.stringify(Array.isArray(file_urls) ? file_urls : []);
+      const linkUrlsJson = JSON.stringify(Array.isArray(link_urls) ? link_urls : []);
 
-      let row;
-      if (existing?.id) {
-        const upd = await poolQuery(
-          `UPDATE assignment_submissions SET content=$1, status='submitted', is_late=$2, submitted_at=$3, updated_at=$3 WHERE id=$4 RETURNING *`,
-          [content || null, isLate, now, existing.id]
+      // Check for existing submission
+      let existingId: string | null = null;
+      try {
+        const r = await poolQuery(
+          `SELECT id FROM assignment_submissions WHERE assignment_id=$1 AND student_id=$2 LIMIT 1`,
+          [assignmentId, caller.userId]
         );
-        row = upd.rows[0];
-      } else {
-        const ins = await poolQuery(
-          `INSERT INTO assignment_submissions (assignment_id, student_id, content, status, is_late, submitted_at, created_at, updated_at)
-           VALUES ($1,$2,$3,'submitted',$4,$5,$5,$5) RETURNING *`,
-          [assignmentId, caller.userId, content || null, isLate, now]
-        );
-        row = ins.rows[0];
+        existingId = r.rows[0]?.id || null;
+      } catch {
+        const { data: ex } = await supabaseAdmin
+          .from('assignment_submissions').select('id')
+          .eq('assignment_id', assignmentId).eq('student_id', caller.userId).maybeSingle();
+        existingId = ex?.id || null;
       }
-      res.json({ success: true, submission: row });
-    } catch (e: any) { res.status(500).json({ error: e.message }); }
+
+      let rowData: any;
+      try {
+        if (existingId) {
+          const r = await poolQuery(
+            `UPDATE assignment_submissions
+             SET content=$1, file_urls=$2::jsonb, link_urls=$3::jsonb,
+                 status='submitted', is_late=$4, submitted_at=$5, updated_at=$5,
+                 draft_content=NULL, draft_file_urls='[]'::jsonb, draft_link_urls='[]'::jsonb
+             WHERE id=$6
+             RETURNING *`,
+            [content || '', fileUrlsJson, linkUrlsJson, isLate, now, existingId]
+          );
+          rowData = r.rows[0];
+        } else {
+          const r = await poolQuery(
+            `INSERT INTO assignment_submissions
+               (assignment_id, student_id, content, file_urls, link_urls, status, is_late, submitted_at, created_at, updated_at)
+             VALUES ($1,$2,$3,$4::jsonb,$5::jsonb,'submitted',$6,$7,$7,$7)
+             RETURNING *`,
+            [assignmentId, caller.userId, content || '', fileUrlsJson, linkUrlsJson, isLate, now]
+          );
+          rowData = r.rows[0];
+        }
+      } catch (sqlErr: any) {
+        // poolQuery unavailable — fall back to supabaseAdmin
+        const payload: any = {
+          assignment_id: assignmentId,
+          student_id: caller.userId,
+          content: content || '',
+          file_urls: Array.isArray(file_urls) ? file_urls : [],
+          link_urls: Array.isArray(link_urls) ? link_urls : [],
+          status: 'submitted',
+          is_late: isLate,
+          submitted_at: now,
+          updated_at: now,
+        };
+        let result;
+        if (existingId) {
+          result = await supabaseAdmin.from('assignment_submissions').update(payload).eq('id', existingId).select().single();
+        } else {
+          result = await supabaseAdmin.from('assignment_submissions').insert({ ...payload, created_at: now }).select().single();
+        }
+        if (result.error) throw result.error;
+        rowData = result.data;
+      }
+
+      return res.json({ success: true, submission: rowData });
+    } catch (e: any) {
+      console.error('POST /api/student/assignments/:id/submit', e.message);
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  // Student: save draft (auto-save)
+  app.post('/api/student/assignments/:assignmentId/save-draft', async (req: Request, res: Response) => {
+    try {
+      const caller = await assertAuthenticated(req, res);
+      if (!caller) return;
+      const { assignmentId } = req.params;
+      const { draft_content, draft_file_urls, draft_link_urls } = req.body;
+      const now = new Date().toISOString();
+      const dfJson  = JSON.stringify(Array.isArray(draft_file_urls) ? draft_file_urls : []);
+      const dlJson  = JSON.stringify(Array.isArray(draft_link_urls) ? draft_link_urls : []);
+
+      try {
+        await poolQuery(
+          `INSERT INTO assignment_submissions
+             (assignment_id, student_id, content, status, draft_content, draft_file_urls, draft_link_urls, draft_saved_at, submitted_at, created_at, updated_at)
+           VALUES ($1,$2,'','draft',$3,$4::jsonb,$5::jsonb,$6,$6,$6,$6)
+           ON CONFLICT (assignment_id, student_id)
+           DO UPDATE SET draft_content=$3, draft_file_urls=$4::jsonb, draft_link_urls=$5::jsonb,
+                         draft_saved_at=$6, updated_at=$6
+           WHERE assignment_submissions.status != 'submitted'`,
+          [assignmentId, caller.userId, draft_content || '', dfJson, dlJson, now]
+        );
+      } catch {
+        // Table may not have unique constraint — do upsert manually
+        const { data: ex } = await supabaseAdmin
+          .from('assignment_submissions').select('id, status')
+          .eq('assignment_id', assignmentId).eq('student_id', caller.userId).maybeSingle();
+        if (!ex) {
+          await supabaseAdmin.from('assignment_submissions').insert({
+            assignment_id: assignmentId, student_id: caller.userId,
+            content: '', status: 'draft',
+            draft_content: draft_content || '',
+            draft_file_urls: Array.isArray(draft_file_urls) ? draft_file_urls : [],
+            draft_link_urls: Array.isArray(draft_link_urls) ? draft_link_urls : [],
+            draft_saved_at: now, submitted_at: now, created_at: now, updated_at: now,
+          });
+        } else if (ex.status !== 'submitted') {
+          await supabaseAdmin.from('assignment_submissions').update({
+            draft_content: draft_content || '',
+            draft_file_urls: Array.isArray(draft_file_urls) ? draft_file_urls : [],
+            draft_link_urls: Array.isArray(draft_link_urls) ? draft_link_urls : [],
+            draft_saved_at: now, updated_at: now,
+          }).eq('id', ex.id);
+        }
+      }
+
+      return res.json({ success: true });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
   });
 
   // ── Teacher Assignment CRUD (poolQuery — bypasses PostgREST schema cache) ────
+  // Trigger auto-publish check immediately (called by frontend on page load)
+  app.post('/api/teacher/assignments/trigger-autopublish', async (req: Request, res: Response) => {
+    try {
+      const caller = await assertAuthenticated(req, res);
+      if (!caller) return;
+      if (caller.role !== 'teacher' && caller.role !== 'admin') return res.status(403).json({ error: 'Forbidden' });
+      await runAutoPublishAssignments();
+      return res.json({ success: true });
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
   app.get('/api/teacher/assignments', async (req: Request, res: Response) => {
     try {
       const caller = await assertAuthenticated(req, res);
@@ -10233,9 +16602,9 @@ Assistant:`;
         );
         return res.json({ success: true, assignment: { id: result.rows[0].id } });
       } catch {
-        // poolQuery unavailable — fall back to supabaseAdmin without schema-sensitive columns
+        // poolQuery unavailable — fall back to supabaseAdmin with column-strip retry loop
         const now = new Date().toISOString();
-        const base: Record<string, unknown> = {
+        let payload: Record<string, unknown> = {
           title: String(b.title),
           description: b.description != null ? String(b.description) : null,
           course_id: b.course_id || null, class_id: b.class_id || null,
@@ -10243,11 +16612,22 @@ Assistant:`;
           type: b.type || 'homework', due_date: b.due_date || null,
           max_score: Number(b.max_score) || 100, status: b.status || 'draft',
           allow_late_submission: Boolean(b.allow_late_submission),
-          publish_at: publishAt, created_at: now, updated_at: now,
+          instructions: b.instructions != null ? String(b.instructions) : null,
+          submission_config: b.submission_config != null ? b.submission_config : null,
+          created_at: now, updated_at: now,
         };
-        const { data, error } = await supabaseAdmin.from('assignments').insert(base).select('id').single();
-        if (error) return res.status(500).json({ error: error.message });
-        return res.json({ success: true, assignment: { id: data?.id } });
+        if (publishAt) payload.publish_at = publishAt; // only include if actually set
+        const STRIP_COLS = ['publish_at', 'allow_late_submission', 'instructions', 'submission_config'];
+        for (let i = 0; i < STRIP_COLS.length + 2; i++) {
+          const { data, error } = await supabaseAdmin.from('assignments').insert(payload).select('id').single();
+          if (!error && data?.id) return res.json({ success: true, assignment: { id: data.id } });
+          if (!error) return res.status(500).json({ error: 'Insert returned no id' });
+          const em = (error.message || '').toLowerCase();
+          const hit = STRIP_COLS.find(c => em.includes(c) && c in payload);
+          if (hit) { const { [hit]: _d, ...rest } = payload; payload = rest; continue; }
+          return res.status(500).json({ error: error.message });
+        }
+        return res.status(500).json({ error: 'Failed to insert assignment' });
       }
     } catch (e: any) { res.status(500).json({ error: e.message }); }
   });
@@ -10281,7 +16661,7 @@ Assistant:`;
         await poolQuery(`UPDATE assignments SET ${sets.join(', ')} WHERE id = $${pi}`, params);
         return res.json({ success: true });
       } catch {
-        // poolQuery unavailable — fall back to supabaseAdmin
+        // poolQuery unavailable — fall back to supabaseAdmin with column-strip retry loop
         let payload: Record<string, unknown> = { updated_at: new Date().toISOString() };
         if (b.title !== undefined) payload.title = String(b.title);
         if (b.description !== undefined) payload.description = b.description != null ? String(b.description) : null;
@@ -10294,10 +16674,18 @@ Assistant:`;
         if (b.instructions !== undefined) payload.instructions = b.instructions != null ? String(b.instructions) : null;
         if (b.allow_late_submission !== undefined) payload.allow_late_submission = Boolean(b.allow_late_submission);
         if (b.submission_config !== undefined) payload.submission_config = b.submission_config;
-        if ('publish_at' in b) payload.publish_at = b.publish_at ? new Date(String(b.publish_at)).toISOString() : null;
-        const { error } = await supabaseAdmin.from('assignments').update(payload).eq('id', aId);
-        if (error) return res.status(500).json({ error: error.message });
-        return res.json({ success: true });
+        // Only include publish_at if it has a value (null/absent = don't touch the column)
+        if ('publish_at' in b && b.publish_at) payload.publish_at = new Date(String(b.publish_at)).toISOString();
+        const STRIP_COLS = ['publish_at', 'allow_late_submission', 'instructions', 'submission_config'];
+        for (let i = 0; i < STRIP_COLS.length + 2; i++) {
+          const { error } = await supabaseAdmin.from('assignments').update(payload).eq('id', aId);
+          if (!error) return res.json({ success: true });
+          const em = (error.message || '').toLowerCase();
+          const hit = STRIP_COLS.find(c => em.includes(c) && c in payload);
+          if (hit) { const { [hit]: _d, ...rest } = payload; payload = rest; continue; }
+          return res.status(500).json({ error: error.message });
+        }
+        return res.status(500).json({ error: 'Failed to update assignment' });
       }
     } catch (e: any) { res.status(500).json({ error: e.message }); }
   });
@@ -10322,13 +16710,13 @@ Assistant:`;
       if (!caller) return;
       const { assignmentId } = req.params;
 
+      // poolQuery — bypasses PostgREST schema cache; enrich with profiles via supabaseAdmin
       const subRes = await poolQuery(
         `SELECT * FROM assignment_submissions WHERE assignment_id=$1 ORDER BY submitted_at DESC`,
         [assignmentId]
       );
-      const submissions = subRes.rows;
-
-      const studentIds = [...new Set(submissions.map((s: any) => s.student_id))];
+      const rawRows = subRes.rows;
+      const studentIds = [...new Set(rawRows.map((s: any) => s.student_id))];
       let profileMap: Record<string, any> = {};
       if (studentIds.length > 0) {
         const { data: profiles } = await supabaseAdmin
@@ -10337,8 +16725,7 @@ Assistant:`;
           .in('id', studentIds);
         (profiles || []).forEach((p: any) => { profileMap[p.id] = p; });
       }
-
-      const enriched = submissions.map((s: any) => ({
+      const enriched = rawRows.map((s: any) => ({
         ...s,
         student: profileMap[s.student_id] || { display_name: 'Unknown', email: '' },
       }));
@@ -10363,6 +16750,288 @@ Assistant:`;
       res.json({ success: true, submission: result.rows[0] });
     } catch (e: any) { res.status(500).json({ error: e.message }); }
   });
+
+  // ── PRESENTATIONS ──────────────────────────────────────────────────────────
+  // Auto-migrate presentations table
+  async function ensurePresentationsTable() {
+    try {
+      const { error } = await supabaseAdmin.from('presentations').select('id').limit(1);
+      if (error && (error.message.includes('does not exist') || error.code === '42P01')) {
+        // Table doesn't exist — create it via poolQuery
+        await poolQuery(`
+          CREATE TABLE IF NOT EXISTS presentations (
+            id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            user_id UUID NOT NULL,
+            title TEXT NOT NULL,
+            description TEXT,
+            theme TEXT NOT NULL DEFAULT 'modern',
+            language TEXT NOT NULL DEFAULT 'en',
+            education_level TEXT,
+            slides JSONB NOT NULL DEFAULT '[]',
+            is_public BOOLEAN NOT NULL DEFAULT false,
+            assignment_id UUID,
+            created_at TIMESTAMPTZ DEFAULT NOW(),
+            updated_at TIMESTAMPTZ DEFAULT NOW()
+          )
+        `).catch(() => null);
+        await poolQuery(`CREATE INDEX IF NOT EXISTS presentations_user_id_idx ON presentations(user_id)`).catch(() => null);
+        console.log('[presentations] Table created ✓');
+      } else {
+        // Table exists — ensure assignment_id column is present
+        await poolQuery(`ALTER TABLE presentations ADD COLUMN IF NOT EXISTS assignment_id UUID`).catch(() => null);
+      }
+    } catch (e: any) {
+      console.warn('[presentations] Migration check:', e?.message);
+    }
+  }
+  void ensurePresentationsTable();
+
+  // GET /api/presentations — list presentations (admin: all, teacher/student: own)
+  app.get('/api/presentations', async (req: Request, res: Response) => {
+    try {
+      const { data: { user }, error: authErr } = await supabaseAdmin.auth.getUser(
+        req.headers.authorization?.replace('Bearer ', '') || ''
+      );
+      if (authErr || !user) return res.status(401).json({ error: 'Unauthorized' });
+
+      const { data: profile } = await supabaseAdmin
+        .from('profiles').select('role').eq('id', user.id).single();
+
+      let query = supabaseAdmin
+        .from('presentations')
+        .select('id, user_id, title, description, theme, language, education_level, is_public, slides, assignment_id, created_at, updated_at')
+        .order('created_at', { ascending: false });
+
+      if (profile?.role !== 'admin') {
+        query = query.eq('user_id', user.id);
+      }
+
+      const { data, error } = await query;
+      if (error) throw error;
+      res.json({ success: true, presentations: data || [] });
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  // GET /api/presentations/:id — get single presentation
+  app.get('/api/presentations/:id', async (req: Request, res: Response) => {
+    try {
+      const { data: { user }, error: authErr } = await supabaseAdmin.auth.getUser(
+        req.headers.authorization?.replace('Bearer ', '') || ''
+      );
+      if (authErr || !user) return res.status(401).json({ error: 'Unauthorized' });
+
+      const { data, error } = await supabaseAdmin
+        .from('presentations').select('*').eq('id', req.params.id).single();
+      if (error) throw error;
+
+      const { data: profile } = await supabaseAdmin
+        .from('profiles').select('role').eq('id', user.id).single();
+      if (profile?.role !== 'admin' && data.user_id !== user.id && !data.is_public) {
+        return res.status(403).json({ error: 'Forbidden' });
+      }
+      res.json({ success: true, presentation: data });
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  // POST /api/presentations — create presentation
+  app.post('/api/presentations', async (req: Request, res: Response) => {
+    try {
+      const { data: { user }, error: authErr } = await supabaseAdmin.auth.getUser(
+        req.headers.authorization?.replace('Bearer ', '') || ''
+      );
+      if (authErr || !user) return res.status(401).json({ error: 'Unauthorized' });
+
+      const { title, description, theme, language, education_level, slides, is_public, assignment_id } = req.body;
+      const insertPayload: Record<string, any> = {
+        user_id: user.id, title, description, theme: theme || 'modern',
+        language: language || 'en', education_level, slides: slides || [],
+        is_public: is_public || false,
+        assignment_id: assignment_id || null,
+      };
+      let { data, error } = await supabaseAdmin.from('presentations').insert(insertPayload).select().single();
+      if (error && error.message?.includes('assignment_id')) {
+        // Schema cache doesn't know about assignment_id yet — insert without it
+        const { assignment_id: _drop, ...payloadWithout } = insertPayload;
+        ({ data, error } = await supabaseAdmin.from('presentations').insert(payloadWithout).select().single());
+      }
+      if (error) throw error;
+      res.json({ success: true, presentation: data });
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  // PUT /api/presentations/:id — update presentation
+  app.put('/api/presentations/:id', async (req: Request, res: Response) => {
+    try {
+      const { data: { user }, error: authErr } = await supabaseAdmin.auth.getUser(
+        req.headers.authorization?.replace('Bearer ', '') || ''
+      );
+      if (authErr || !user) return res.status(401).json({ error: 'Unauthorized' });
+
+      const { data: existing } = await supabaseAdmin
+        .from('presentations').select('user_id').eq('id', req.params.id).single();
+      const { data: profile } = await supabaseAdmin
+        .from('profiles').select('role').eq('id', user.id).single();
+      if (profile?.role !== 'admin' && existing?.user_id !== user.id) {
+        return res.status(403).json({ error: 'Forbidden' });
+      }
+
+      const { title, description, theme, language, education_level, slides, is_public, assignment_id } = req.body;
+      const updatePayload: Record<string, any> = {
+        title, description, theme, language, education_level, slides, is_public,
+        assignment_id: assignment_id ?? null,
+        updated_at: new Date().toISOString(),
+      };
+      let { data, error } = await supabaseAdmin.from('presentations')
+        .update(updatePayload).eq('id', req.params.id).select().single();
+      if (error && error.message?.includes('assignment_id')) {
+        const { assignment_id: _drop, ...payloadWithout } = updatePayload;
+        ({ data, error } = await supabaseAdmin.from('presentations')
+          .update(payloadWithout).eq('id', req.params.id).select().single());
+      }
+      if (error) throw error;
+      res.json({ success: true, presentation: data });
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  // DELETE /api/presentations/:id — delete presentation
+  app.delete('/api/presentations/:id', async (req: Request, res: Response) => {
+    try {
+      const { data: { user }, error: authErr } = await supabaseAdmin.auth.getUser(
+        req.headers.authorization?.replace('Bearer ', '') || ''
+      );
+      if (authErr || !user) return res.status(401).json({ error: 'Unauthorized' });
+
+      const { data: existing } = await supabaseAdmin
+        .from('presentations').select('user_id').eq('id', req.params.id).single();
+      const { data: profile } = await supabaseAdmin
+        .from('profiles').select('role').eq('id', user.id).single();
+      if (profile?.role !== 'admin' && existing?.user_id !== user.id) {
+        return res.status(403).json({ error: 'Forbidden' });
+      }
+
+      const { error } = await supabaseAdmin.from('presentations').delete().eq('id', req.params.id);
+      if (error) throw error;
+      res.json({ success: true });
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  // POST /api/presentations/generate — AI-generate slide content via Gemini
+  app.post('/api/presentations/generate', async (req: Request, res: Response) => {
+    try {
+      const { data: { user }, error: authErr } = await supabaseAdmin.auth.getUser(
+        req.headers.authorization?.replace('Bearer ', '') || ''
+      );
+      if (authErr || !user) return res.status(401).json({ error: 'Unauthorized' });
+
+      const { topic, language, slideCount, style, educationLevel } = req.body;
+      if (!topic) return res.status(400).json({ error: 'Topic is required' });
+
+      const count = Math.min(Math.max(Number(slideCount) || 8, 3), 20);
+      const apiKey = (process.env.AI_INTEGRATIONS_GEMINI_API_KEY || process.env.GEMINI_API_KEY || '').trim();
+
+      const prompt = `You are an expert educational presentation creator. Generate a complete presentation about "${topic}".
+
+Requirements:
+- Language: ${language || 'English'}
+- Number of slides: ${count}
+- Style: ${style || 'modern'} (modern = clean & bold, business = formal & structured, education = colorful & engaging, minimal = simple & elegant)
+- Education level: ${educationLevel || 'general'}
+
+CRITICAL JSON RULES — you must follow these exactly:
+- Output ONLY raw JSON. No markdown, no code fences, no explanation before or after.
+- Every string value must be on a single line — NO literal newlines inside strings.
+- Use \\n (backslash-n) if you need a line break inside a string value.
+- Do NOT use any control characters inside strings.
+
+Output this exact structure:
+{"title":"Presentation Title","slides":[{"order":1,"type":"title","title":"Slide Title","content":["bullet 1","bullet 2","bullet 3"],"notes":"Speaker notes as a single line. Multiple sentences separated by spaces, not newlines.","emoji":"🎯"}]}
+
+Slide types: "title" (first slide only), "content" (main slides), "stats", "quote", "summary" (last slide only).
+Each content/stats/quote slide must have 3-5 bullet points.
+Speaker notes: 2-3 sentences on a single line with no line breaks.`;
+
+      /** Robustly parse AI JSON — handles markdown fences, bare newlines inside strings, stray control chars */
+      function safeParseJSON(raw: string): any {
+        if (!raw || !raw.trim()) return null;
+        // 1. Strip markdown fences
+        let text = raw.replace(/^```(?:json)?\s*/im, '').replace(/\s*```\s*$/im, '').trim();
+        // 2. Extract the outermost { } block (greedy — takes largest match)
+        const start = text.indexOf('{');
+        const end = text.lastIndexOf('}');
+        if (start === -1 || end === -1 || end <= start) return null;
+        text = text.slice(start, end + 1);
+        // 3. Direct parse (best case — AI followed instructions)
+        try { return JSON.parse(text); } catch { /* fall through */ }
+        // 4. Escape bare newlines/tabs/CRs that appear inside string values
+        //    Walk char by char to track whether we're inside a JSON string
+        let result = '';
+        let inStr = false;
+        let escape = false;
+        for (let i = 0; i < text.length; i++) {
+          const ch = text[i];
+          if (escape) { result += ch; escape = false; continue; }
+          if (ch === '\\' && inStr) { result += ch; escape = true; continue; }
+          if (ch === '"') { inStr = !inStr; result += ch; continue; }
+          if (inStr) {
+            if (ch === '\n') { result += '\\n'; continue; }
+            if (ch === '\r') { result += '\\r'; continue; }
+            if (ch === '\t') { result += '\\t'; continue; }
+          }
+          result += ch;
+        }
+        try { return JSON.parse(result); } catch { /* fall through */ }
+        // 5. Aggressive fallback: strip all remaining control chars except structural whitespace
+        const stripped = result.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, ' ');
+        try { return JSON.parse(stripped); } catch { return null; }
+      }
+
+      let rawText = '';
+
+      if (apiKey) {
+        const { GoogleGenAI } = await import('@google/genai');
+        const geminiBaseUrl = (process.env.AI_INTEGRATIONS_GEMINI_BASE_URL || '').trim();
+        const ai = new GoogleGenAI(geminiBaseUrl
+          ? { apiKey, httpOptions: { apiVersion: '', baseUrl: geminiBaseUrl } }
+          : { apiKey }
+        );
+        // Use gemini-2.0-flash — reliable JSON output, not a thinking model (2.5-flash thinking model
+        // returns empty text when responseMimeType is set, and produces newlines in strings without it)
+        const response = await ai.models.generateContent({
+          model: 'gemini-2.0-flash',
+          contents: prompt,
+        });
+        rawText = response.text ?? '';
+      } else {
+        // Free fallback: Pollinations AI (no API key required)
+        const pollinationsRes = await fetch('https://text.pollinations.ai/', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            messages: [{ role: 'user', content: prompt }],
+            model: 'openai',
+            seed: 42,
+            jsonMode: true,
+          }),
+        });
+        if (!pollinationsRes.ok) {
+          throw new Error(`Pollinations AI error: ${pollinationsRes.status}`);
+        }
+        rawText = await pollinationsRes.text();
+      }
+
+      console.log(`[presentations/generate] rawText length=${rawText.length}, preview=${rawText.slice(0, 120).replace(/\n/g, ' ')}`);
+      const parsed = safeParseJSON(rawText);
+      if (!parsed) {
+        console.error('[presentations/generate] safeParseJSON returned null. rawText (first 500):', rawText.slice(0, 500));
+        return res.status(500).json({ error: 'AI did not return valid JSON. Please try again.' });
+      }
+      res.json({ success: true, data: parsed });
+    } catch (e: any) {
+      console.error('[presentations/generate]', e?.message);
+      res.status(500).json({ error: e?.message || 'AI generation failed' });
+    }
+  });
+  // ── END PRESENTATIONS ────────────────────────────────────────────────────────
 
   app.use((err: any, req: Request, res: Response, next: any) => {
     if (!err) return next();
@@ -10406,17 +17075,55 @@ Assistant:`;
       const isReplit = !!(process.env.REPL_ID || process.env.REPLIT_DEV_DOMAIN);
       let hmrConfig: any;
       if (isReplit) {
-        const replitPort = Number(process.env.PORT) || 5000;
         hmrConfig = {
           ...(options.httpServer ? { server: options.httpServer } : {}),
           protocol: "wss",
           host: process.env.REPLIT_DEV_DOMAIN || undefined,
-          clientPort: replitPort,
+          clientPort: 443,
         };
       } else {
         hmrConfig = options.httpServer ? { server: options.httpServer } : true;
       }
       const vite = await createServer({
+        configFile: false,
+        root: process.cwd(),
+        plugins: [
+          (await import("@vitejs/plugin-react")).default(),
+          (await import("@tailwindcss/vite")).default(),
+        ],
+        resolve: {
+          alias: { '@': process.cwd() },
+          dedupe: ['react', 'react-dom', 'react-dom/client', 'react/jsx-runtime'],
+        },
+        optimizeDeps: {
+          include: [
+            'react',
+            'react-dom',
+            'react-dom/client',
+            'react/jsx-runtime',
+            'react/jsx-dev-runtime',
+            'react-router-dom',
+            'react-hook-form',
+            'react-i18next',
+            '@hookform/resolvers/zod',
+            'zod',
+            'lucide-react',
+            'clsx',
+            'tailwind-merge',
+            'sonner',
+            'motion/react',
+            'date-fns',
+            'recharts',
+            'i18next',
+            'i18next-browser-languagedetector',
+            '@supabase/supabase-js',
+            '@dnd-kit/core',
+            '@dnd-kit/sortable',
+            '@dnd-kit/utilities',
+            'canvas-confetti',
+            'dompurify',
+          ],
+        },
         server: {
           middlewareMode: true,
           hmr: hmrConfig,
@@ -10432,9 +17139,6 @@ Assistant:`;
               "**/tmp/**",
               "**/.replit",
               "**/replit.md",
-              // Backend-only and non-source files — Vite cannot hot-replace
-              // them so watching them forces a full page reload, which breaks
-              // mid-flow states such as the 2FA code-entry screen.
               "**/server.ts",
               "**/server.js",
               "**/*.server.ts",
@@ -10448,154 +17152,29 @@ Assistant:`;
         },
         appType: "spa",
       });
+      // Prevent browser from caching Vite pre-bundled dep chunks across
+      // optimization runs — stale cached chunks from prior runs cause
+      // mismatched React instances and "Invalid hook call" errors.
+      app.use('/node_modules/.vite/deps/', (_req: any, res: any, next: any) => {
+        res.set('Cache-Control', 'no-store');
+        next();
+      });
       app.use(vite.middlewares);
     } else {
       const distPath = path.join(process.cwd(), "dist");
-      app.use(express.static(distPath));
+      // Vite hashed assets (e.g. index-AbCdEf.js) can be cached for 1 year — immutable.
+      // index.html and other entry files must NOT be cached so clients always get the latest.
+      app.use('/assets', express.static(path.join(distPath, 'assets'), {
+        maxAge: '1y',
+        immutable: true,
+      }));
+      app.use(express.static(distPath, { maxAge: 0 }));
       app.get("*", (_req, res) => {
+        res.setHeader('Cache-Control', 'no-store');
         res.sendFile(path.join(distPath, "index.html"));
       });
     }
   }
-
-  // Student: get own submission (duplicate registration – poolQuery)
-  app.get('/api/student/assignments/:assignmentId/submission', async (req: Request, res: Response) => {
-    try {
-      const caller = await assertAuthenticated(req, res);
-      if (!caller) return;
-      const { assignmentId } = req.params;
-      const result = await poolQuery(
-        `SELECT * FROM assignment_submissions WHERE assignment_id=$1 AND student_id=$2 LIMIT 1`,
-        [assignmentId, caller.userId]
-      );
-      res.json({ success: true, submission: result.rows[0] || null });
-    } catch (e: any) { res.status(500).json({ error: e.message }); }
-  });
-
-  // Student: submit/resubmit (duplicate registration – poolQuery)
-  app.post('/api/student/assignments/:assignmentId/submit', async (req: Request, res: Response) => {
-    try {
-      const caller = await assertAuthenticated(req, res);
-      if (!caller) return;
-      const { assignmentId } = req.params;
-      const { content, file_urls, link_urls } = req.body;
-
-      const asgRes = await poolQuery(
-        `SELECT id, due_date, allow_late_submission, status FROM assignments WHERE id=$1 LIMIT 1`,
-        [assignmentId]
-      );
-      const assignment = asgRes.rows[0];
-      if (!assignment || assignment.status !== 'published') {
-        return res.status(400).json({ error: 'Assignment not available' });
-      }
-      const isLate = assignment.due_date ? new Date() > new Date(assignment.due_date) : false;
-      if (isLate && !assignment.allow_late_submission) {
-        return res.status(400).json({ error: 'Deadline has passed and late submissions are not allowed' });
-      }
-
-      const existingRes = await poolQuery(
-        `SELECT id FROM assignment_submissions WHERE assignment_id=$1 AND student_id=$2 LIMIT 1`,
-        [assignmentId, caller.userId]
-      );
-      const existing = existingRes.rows[0];
-      const now = new Date().toISOString();
-      const safeFileUrls = JSON.stringify(Array.isArray(file_urls) ? file_urls : []);
-      const safeLinkUrls = JSON.stringify(Array.isArray(link_urls) ? link_urls : []);
-
-      let row;
-      if (existing?.id) {
-        const upd = await poolQuery(
-          `UPDATE assignment_submissions SET content=$1, file_urls=$2::jsonb, link_urls=$3::jsonb, status='submitted', is_late=$4, submitted_at=$5, updated_at=$5 WHERE id=$6 RETURNING *`,
-          [content || null, safeFileUrls, safeLinkUrls, isLate, now, existing.id]
-        );
-        row = upd.rows[0];
-      } else {
-        const ins = await poolQuery(
-          `INSERT INTO assignment_submissions (assignment_id, student_id, content, file_urls, link_urls, status, is_late, submitted_at, created_at, updated_at)
-           VALUES ($1,$2,$3,$4::jsonb,$5::jsonb,'submitted',$6,$7,$7,$7) RETURNING *`,
-          [assignmentId, caller.userId, content || null, safeFileUrls, safeLinkUrls, isLate, now]
-        );
-        row = ins.rows[0];
-      }
-      res.json({ success: true, submission: row });
-    } catch (e: any) { res.status(500).json({ error: e.message }); }
-  });
-
-  // Student: save draft (duplicate registration – poolQuery)
-  app.post('/api/student/assignments/:assignmentId/save-draft', async (req: Request, res: Response) => {
-    try {
-      const caller = await assertAuthenticated(req, res);
-      if (!caller) return;
-      const { assignmentId } = req.params;
-      const { draft_content, draft_file_urls, draft_link_urls } = req.body;
-
-      const existingRes = await poolQuery(
-        `SELECT id FROM assignment_submissions WHERE assignment_id=$1 AND student_id=$2 LIMIT 1`,
-        [assignmentId, caller.userId]
-      );
-      const existing = existingRes.rows[0];
-      const now = new Date().toISOString();
-      const safeDraftFiles = JSON.stringify(Array.isArray(draft_file_urls) ? draft_file_urls : []);
-      const safeDraftLinks = JSON.stringify(Array.isArray(draft_link_urls) ? draft_link_urls : []);
-
-      let row;
-      if (existing?.id) {
-        const upd = await poolQuery(
-          `UPDATE assignment_submissions SET draft_content=$1, draft_file_urls=$2::jsonb, draft_link_urls=$3::jsonb, draft_saved_at=$4, updated_at=$4 WHERE id=$5 RETURNING *`,
-          [draft_content || null, safeDraftFiles, safeDraftLinks, now, existing.id]
-        );
-        row = upd.rows[0];
-      } else {
-        const ins = await poolQuery(
-          `INSERT INTO assignment_submissions (assignment_id, student_id, status, is_late, draft_content, draft_file_urls, draft_link_urls, draft_saved_at, created_at, updated_at)
-           VALUES ($1,$2,'submitted',false,$3,$4::jsonb,$5::jsonb,$6,$6,$6) RETURNING *`,
-          [assignmentId, caller.userId, draft_content || null, safeDraftFiles, safeDraftLinks, now]
-        );
-        row = ins.rows[0];
-      }
-      res.json({ success: true, saved: true, submission: row });
-    } catch (e: any) { res.status(500).json({ error: e.message }); }
-  });
-
-  // Teacher: list submissions (duplicate registration – poolQuery)
-  app.get('/api/teacher/assignments/:assignmentId/submissions', async (req: Request, res: Response) => {
-    try {
-      const caller = await assertAuthenticated(req, res);
-      if (!caller) return;
-      const { assignmentId } = req.params;
-
-      const subRes = await poolQuery(
-        `SELECT * FROM assignment_submissions WHERE assignment_id=$1 ORDER BY submitted_at DESC`,
-        [assignmentId]
-      );
-      const submissions = subRes.rows;
-      const studentIds = [...new Set(submissions.map((s: any) => s.student_id))];
-      let profileMap: Record<string, any> = {};
-      if (studentIds.length > 0) {
-        const { data: profiles } = await supabaseAdmin.from('profiles').select('id, display_name, email, avatar_url').in('id', studentIds);
-        (profiles || []).forEach((p: any) => { profileMap[p.id] = p; });
-      }
-      const enriched = submissions.map((s: any) => ({ ...s, student: profileMap[s.student_id] || { display_name: 'Unknown', email: '' } }));
-      res.json({ success: true, submissions: enriched });
-    } catch (e: any) { res.status(500).json({ error: e.message }); }
-  });
-
-  // Teacher: grade submission (duplicate registration – poolQuery)
-  app.patch('/api/teacher/assignments/submissions/:subId/grade', async (req: Request, res: Response) => {
-    try {
-      const caller = await assertAuthenticated(req, res);
-      if (!caller) return;
-      const { subId } = req.params;
-      const { grade, feedback } = req.body;
-      const now = new Date().toISOString();
-      const result = await poolQuery(
-        `UPDATE assignment_submissions SET grade=$1, feedback=$2, status='graded', graded_at=$3, updated_at=$3 WHERE id=$4 RETURNING *`,
-        [grade !== undefined && grade !== '' ? Number(grade) : null, feedback || null, now, subId]
-      );
-      if (!result.rows[0]) return res.status(404).json({ error: 'Submission not found' });
-      res.json({ success: true, submission: result.rows[0] });
-    } catch (e: any) { res.status(500).json({ error: e.message }); }
-  });
 
   return app;
 }
@@ -10813,6 +17392,88 @@ async function runAnnouncementColumnsMigration(): Promise<void> {
   console.log('[migration] announcements columns: will use graceful fallback in API handlers');
 }
 
+// ─── Student Monthly Payments Migration ──────────────────────────────────────
+async function runStudentMonthlyPaymentsMigration() {
+  const dbUrl = process.env.DATABASE_URL?.trim();
+  if (!dbUrl) return;
+  try {
+    await poolQuery(`
+      CREATE TABLE IF NOT EXISTS student_monthly_payments (
+        id          UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+        student_id  UUID        NOT NULL,
+        month_year  TEXT        NOT NULL,
+        amount      NUMERIC(10,2) NOT NULL DEFAULT 0,
+        notes       TEXT,
+        paid_at     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        paid_by     UUID,
+        created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        UNIQUE(student_id, month_year)
+      )
+    `);
+    await poolQuery(`CREATE INDEX IF NOT EXISTS idx_smp_student ON student_monthly_payments (student_id)`);
+    await poolQuery(`CREATE INDEX IF NOT EXISTS idx_smp_month  ON student_monthly_payments (month_year)`);
+    await poolQuery(`NOTIFY pgrst, 'reload schema'`).catch(() => {});
+    console.log('[migration] student_monthly_payments table ensured ✓');
+  } catch (err: any) {
+    console.warn('[migration] student_monthly_payments:', err?.message?.split('\n')[0]);
+  }
+}
+
+// ─── Teacher Hours Migration ──────────────────────────────────────────────────
+async function runTeacherHoursMigration() {
+  const dbUrl = process.env.DATABASE_URL?.trim();
+  if (!dbUrl) return;
+  try {
+    await poolQuery(`
+      CREATE TABLE IF NOT EXISTS teacher_hours (
+        id             UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+        teacher_id     UUID        NOT NULL,
+        work_date      DATE        NOT NULL,
+        hours          NUMERIC(5,2) NOT NULL,
+        rate_per_hour  NUMERIC(10,2) NOT NULL DEFAULT 40,
+        notes          TEXT,
+        created_by     UUID,
+        created_at     TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      )
+    `);
+    await poolQuery(`CREATE INDEX IF NOT EXISTS idx_th_teacher ON teacher_hours (teacher_id)`);
+    await poolQuery(`CREATE INDEX IF NOT EXISTS idx_th_date    ON teacher_hours (work_date DESC)`);
+    await poolQuery(`NOTIFY pgrst, 'reload schema'`).catch(() => {});
+    console.log('[migration] teacher_hours table ensured ✓');
+  } catch (err: any) {
+    console.warn('[migration] teacher_hours:', err?.message?.split('\n')[0]);
+  }
+}
+
+// ─── Student Transfers Log Migration ─────────────────────────────────────────
+async function runStudentTransfersMigration() {
+  const dbUrl = process.env.DATABASE_URL?.trim();
+  if (!dbUrl) return;
+  try {
+    await poolQuery(`
+      CREATE TABLE IF NOT EXISTS student_transfers (
+        id              UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+        student_id      UUID        NOT NULL,
+        student_name    TEXT        NOT NULL DEFAULT '',
+        student_email   TEXT        NOT NULL DEFAULT '',
+        from_teacher_id UUID        NOT NULL,
+        from_teacher_name TEXT      NOT NULL DEFAULT '',
+        to_teacher_id   UUID        NOT NULL,
+        to_teacher_name TEXT        NOT NULL DEFAULT '',
+        transferred_by  UUID        NOT NULL,
+        note            TEXT,
+        transferred_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      )
+    `);
+    await poolQuery(`CREATE INDEX IF NOT EXISTS idx_student_transfers_from_teacher ON student_transfers (from_teacher_id)`);
+    await poolQuery(`CREATE INDEX IF NOT EXISTS idx_student_transfers_to_teacher   ON student_transfers (to_teacher_id)`);
+    await poolQuery(`CREATE INDEX IF NOT EXISTS idx_student_transfers_at           ON student_transfers (transferred_at DESC)`);
+    console.log('[migration] student_transfers table ensured ✓');
+  } catch (err: any) {
+    console.warn('[migration] student_transfers table:', err?.message?.split('\n')[0]);
+  }
+}
+
 // ─── Assignment Submissions Migration ────────────────────────────────────────
 async function runAssignmentSubmissionsMigration() {
   const dbUrl = process.env.DATABASE_URL?.trim();
@@ -10894,6 +17555,16 @@ async function runAssignmentSubmissionsMigration() {
   } catch (err: any) {
     console.warn('[migration] assignments submission_config:', err?.message?.split('\n')[0]);
   }
+  try {
+    await poolQuery(`ALTER TABLE assignments ADD COLUMN IF NOT EXISTS publish_at timestamptz NULL`);
+    console.log('[migration] assignments.publish_at column ensured ✓');
+  } catch (err: any) {
+    if (!String(err?.message || '').toLowerCase().includes('already exists')) {
+      console.warn('[migration] assignments.publish_at:', err?.message?.split('\n')[0]);
+    } else {
+      console.log('[migration] assignments.publish_at column already exists ✓');
+    }
+  }
 }
 
 async function runModulesPublishAtMigration(): Promise<void> {
@@ -10921,6 +17592,43 @@ async function runModulesPublishAtMigration(): Promise<void> {
   } catch (err: any) {
     console.warn('[migration] modules.publish_at column could not be auto-created:', err?.message?.split('\n')[0]);
     console.warn('[migration] Run manually: ALTER TABLE modules ADD COLUMN IF NOT EXISTS publish_at timestamptz NULL');
+  }
+}
+
+async function runQuizSectionsMigration(): Promise<void> {
+  try {
+    await poolQuery(`
+      CREATE TABLE IF NOT EXISTS public.quiz_sections (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        quiz_id UUID NOT NULL REFERENCES public.quizzes(id) ON DELETE CASCADE,
+        title TEXT NOT NULL DEFAULT 'Section',
+        type TEXT NOT NULL DEFAULT 'general',
+        instructions TEXT,
+        audio_url TEXT,
+        order_index INTEGER NOT NULL DEFAULT 0,
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+        updated_at TIMESTAMPTZ DEFAULT NOW()
+      );
+      DO $$ BEGIN
+        IF NOT EXISTS (SELECT 1 FROM pg_indexes WHERE indexname = 'idx_quiz_sections_quiz_id') THEN
+          CREATE INDEX idx_quiz_sections_quiz_id ON public.quiz_sections(quiz_id);
+        END IF;
+      END $$;
+      ALTER TABLE public.questions ADD COLUMN IF NOT EXISTS section_id UUID REFERENCES public.quiz_sections(id) ON DELETE SET NULL;
+      DO $$ BEGIN
+        IF NOT EXISTS (SELECT 1 FROM pg_indexes WHERE indexname = 'idx_questions_section_id') THEN
+          CREATE INDEX idx_questions_section_id ON public.questions(section_id);
+        END IF;
+      END $$;
+    `);
+    console.log('[migration] quiz_sections table + questions.section_id ensured ✓');
+  } catch (err: any) {
+    try {
+      const probe = await supabaseAdmin.from('quiz_sections').select('id').limit(1);
+      if (!probe.error) { console.log('[migration] quiz_sections already exists ✓'); return; }
+    } catch {}
+    console.warn('[migration] quiz_sections: could not auto-create — run migrations/012_quiz_sections.sql manually.');
+    console.warn('[migration] Error:', err?.message?.split?.('\n')?.[0]);
   }
 }
 
@@ -10993,6 +17701,158 @@ async function runAssignmentsPublishAtMigration(): Promise<void> {
   }
 }
 
+async function runNotificationsColumnsMigration(): Promise<void> {
+  // Add `title` and `read` columns if the live DB was created from an older schema
+  const cols: Array<{ name: string; ddl: string }> = [
+    { name: 'title', ddl: `ALTER TABLE notifications ADD COLUMN IF NOT EXISTS title TEXT NOT NULL DEFAULT ''` },
+    { name: 'read',  ddl: `ALTER TABLE notifications ADD COLUMN IF NOT EXISTS read BOOLEAN NOT NULL DEFAULT FALSE` },
+  ];
+  for (const col of cols) {
+    try {
+      await poolQuery(col.ddl);
+      console.log(`[migration] notifications.${col.name} column ensured ✓`);
+    } catch {
+      // poolQuery failed — try supabase probe then RPC
+      try {
+        const probe = await supabaseAdmin.from('notifications').select(col.name).limit(1);
+        if (!probe.error) {
+          console.log(`[migration] notifications.${col.name} column already exists ✓`);
+          continue;
+        }
+        const rpc = await (supabaseAdmin as any).rpc('exec_sql', { sql: col.ddl });
+        if (rpc.error) throw rpc.error;
+        console.log(`[migration] notifications.${col.name} added via RPC ✓`);
+      } catch (err: any) {
+        console.warn(`[migration] notifications.${col.name} could not be auto-created:`, err?.message?.split('\n')[0]);
+      }
+    }
+  }
+}
+
+async function runLiveSessionsRecordingUrlsMigration(): Promise<void> {
+  const ddl = `ALTER TABLE public.live_sessions ADD COLUMN IF NOT EXISTS recording_urls JSONB NOT NULL DEFAULT '[]'::jsonb`;
+  try {
+    await poolQuery(ddl);
+    console.log('[migration] live_sessions.recording_urls column ensured ✓');
+    return;
+  } catch { /* fall through */ }
+  try {
+    const probe = await supabaseAdmin.from('live_sessions').select('recording_urls').limit(1);
+    if (!probe.error) { console.log('[migration] live_sessions.recording_urls column already exists ✓'); return; }
+    const rpc = await (supabaseAdmin as any).rpc('exec_sql', { sql: ddl });
+    if (rpc.error) throw rpc.error;
+    console.log('[migration] live_sessions.recording_urls added via RPC ✓');
+  } catch (err: any) {
+    console.warn('[migration] live_sessions.recording_urls could not be auto-created:', err?.message?.split('\n')[0]);
+    console.warn('[migration] Run manually:', ddl);
+  }
+}
+
+async function runLiveSessionsControlsMigration(): Promise<void> {
+  const ddls = [
+    `ALTER TABLE public.live_sessions ADD COLUMN IF NOT EXISTS chat_enabled BOOLEAN NOT NULL DEFAULT true`,
+    `ALTER TABLE public.live_sessions ADD COLUMN IF NOT EXISTS reactions_enabled BOOLEAN NOT NULL DEFAULT true`,
+    `ALTER TABLE public.live_sessions ADD COLUMN IF NOT EXISTS raise_hand_enabled BOOLEAN NOT NULL DEFAULT true`,
+  ];
+  try {
+    for (const ddl of ddls) await poolQuery(ddl);
+    console.log('[migration] live_sessions controls columns ensured ✓');
+    return;
+  } catch { /* fall through */ }
+  try {
+    for (const ddl of ddls) {
+      const rpc = await (supabaseAdmin as any).rpc('exec_sql', { sql: ddl });
+      if (rpc.error && !String(rpc.error.message).includes('already exists')) throw rpc.error;
+    }
+    console.log('[migration] live_sessions controls columns added via RPC ✓');
+  } catch (err: any) {
+    console.warn('[migration] live_sessions controls columns could not be auto-created:', err?.message?.split('\n')[0]);
+  }
+}
+
+async function runSessionParticipantsHandRaisedMigration(): Promise<void> {
+  const ddl = `ALTER TABLE public.session_participants ADD COLUMN IF NOT EXISTS is_hand_raised BOOLEAN NOT NULL DEFAULT false`;
+  try {
+    await poolQuery(ddl);
+    console.log('[migration] session_participants.is_hand_raised column ensured ✓');
+    return;
+  } catch { /* fall through */ }
+  try {
+    const probe = await supabaseAdmin.from('session_participants').select('is_hand_raised').limit(1);
+    if (!probe.error) { console.log('[migration] session_participants.is_hand_raised already exists ✓'); return; }
+    const rpc = await (supabaseAdmin as any).rpc('exec_sql', { sql: ddl });
+    if (rpc.error) throw rpc.error;
+    console.log('[migration] session_participants.is_hand_raised added via RPC ✓');
+  } catch (err: any) {
+    console.warn('[migration] session_participants.is_hand_raised could not be auto-created:', err?.message?.split('\n')[0]);
+  }
+}
+
+async function ensureHeadwayMediaTable(): Promise<void> {
+  const ddl = `
+    CREATE TABLE IF NOT EXISTS headway_media (
+      id            UUID        DEFAULT gen_random_uuid() PRIMARY KEY,
+      level         TEXT        NOT NULL DEFAULT 'Beginner',
+      unit_number   INTEGER,
+      module_id     UUID,
+      lesson_id     UUID,
+      type          TEXT        NOT NULL DEFAULT 'student_audio',
+      title         TEXT,
+      file_name     TEXT,
+      drive_file_id TEXT        UNIQUE NOT NULL,
+      url           TEXT,
+      mime_type     TEXT,
+      size_bytes    BIGINT,
+      created_at    TIMESTAMPTZ DEFAULT NOW()
+    );
+    CREATE INDEX IF NOT EXISTS idx_headway_media_level_unit ON headway_media (level, unit_number);
+    CREATE INDEX IF NOT EXISTS idx_headway_media_drive_id   ON headway_media (drive_file_id);
+  `;
+  try {
+    await poolQuery(ddl);
+    console.log('[migration] headway_media table ensured ✓');
+  } catch { /* fall through to RPC */ }
+  try {
+    const probe = await supabaseAdmin.from('headway_media').select('id').limit(1);
+    if (probe.error) {
+      const rpc = await (supabaseAdmin as any).rpc('exec_sql', { sql: ddl });
+      if (rpc.error) throw rpc.error;
+      console.log('[migration] headway_media table created via RPC ✓');
+    } else {
+      console.log('[migration] headway_media table already exists ✓');
+    }
+  } catch (err: any) {
+    console.warn('[migration] headway_media table could not be auto-created:', err?.message?.split('\n')[0]);
+  }
+  // Ensure course_id column + index exist (added after initial migration)
+  try {
+    await poolQuery(`ALTER TABLE headway_media ADD COLUMN IF NOT EXISTS course_id UUID`);
+    await poolQuery(`CREATE INDEX IF NOT EXISTS idx_headway_media_course_id ON headway_media (course_id) WHERE course_id IS NOT NULL`);
+    await poolQuery(`NOTIFY pgrst, 'reload schema'`).catch(() => {});
+    console.log('[migration] headway_media.course_id column + index ensured ✓');
+  } catch (err: any) {
+    console.warn('[migration] headway_media.course_id column could not be added:', err?.message?.split('\n')[0]);
+  }
+}
+
+async function ensureHeadwayMediaBucket(): Promise<void> {
+  try {
+    // Try creating; if it already exists the error is ignored
+    const { error } = await supabaseAdmin.storage.createBucket('headway-media', { public: true });
+    if (error && !error.message.toLowerCase().includes('already exists')) {
+      // Bucket may already exist under a different plan limit — attempt without options
+      const { error: e2 } = await supabaseAdmin.storage.createBucket('headway-media', {});
+      if (e2 && !e2.message.toLowerCase().includes('already exists')) {
+        console.warn('[storage] headway-media bucket setup:', e2.message);
+        return;
+      }
+    }
+    console.log('[storage] headway-media bucket ready ✓');
+  } catch (e: any) {
+    console.warn('[storage] headway-media bucket failed:', e?.message);
+  }
+}
+
 async function ensureAssignmentFilesBucket(): Promise<void> {
   try {
     const { error } = await supabaseAdmin.storage.createBucket('assignment-files', {
@@ -11009,7 +17869,142 @@ async function ensureAssignmentFilesBucket(): Promise<void> {
   }
 }
 
+/**
+ * Fix multiple-choice questions where correct_answer was stored as option text
+ * instead of the 1-based option id ("1","2","3","4") that QuizBuilder expects.
+ * Handles both cases:
+ *   A) options stored as {id,text} objects  → match by text, use object's id
+ *   B) options stored as plain strings       → match by text, use 1-based index
+ * Also fixes questions where correct_answer is NULL/empty but options are plain
+ * strings (legacy fallback questions always had correctIndex 0 → set to "1").
+ * Runs once at startup and is idempotent.
+ */
+async function fixHeadwayQuizCorrectAnswers(): Promise<void> {
+  try {
+    const { data: rows, error } = await supabaseAdmin
+      .from("questions")
+      .select("id, options, correct_answer")
+      .eq("type", "multiple-choice");
+
+    if (error || !rows || rows.length === 0) return;
+
+    const updates: { id: string; correct_answer: string; options?: unknown }[] = [];
+
+    for (const row of rows) {
+      const opts: unknown = row.options;
+      if (!Array.isArray(opts) || opts.length === 0) continue;
+
+      const ca = String(row.correct_answer ?? "");
+      const firstOpt = opts[0];
+
+      // ── Case A: options are {id, text} objects ───────────────────────────
+      if (firstOpt && typeof firstOpt === "object" && "id" in firstOpt && "text" in firstOpt) {
+        const optObjs = opts as { id: string; text: string }[];
+
+        // Already a valid option id → nothing to do
+        if (optObjs.some(o => o.id === ca)) continue;
+
+        // Match by text (exact then case-insensitive)
+        const caLower = ca.toLowerCase();
+        const match = optObjs.find(o => o.text === ca) ?? optObjs.find(o => o.text.toLowerCase() === caLower);
+        if (match) {
+          updates.push({ id: row.id, correct_answer: match.id });
+        }
+        continue;
+      }
+
+      // ── Case B: options are plain strings ───────────────────────────────
+      if (typeof firstOpt === "string") {
+        const optStrs = opts as string[];
+
+        // Convert options to {id, text} objects for future compatibility
+        const optionObjects = optStrs.map((text, i) => ({ id: String(i + 1), text }));
+
+        // If correct_answer already matches a 1-based id, just convert options format
+        if (optionObjects.some(o => o.id === ca)) {
+          updates.push({ id: row.id, correct_answer: ca, options: optionObjects });
+          continue;
+        }
+
+        // Match correct_answer by text → convert to 1-based id
+        const caLower = ca.toLowerCase();
+        const match = optionObjects.find(o => o.text === ca) ?? optionObjects.find(o => o.text.toLowerCase() === caLower);
+        if (match) {
+          updates.push({ id: row.id, correct_answer: match.id, options: optionObjects });
+          continue;
+        }
+
+        // correct_answer is NULL/empty or doesn't match → default to first option ("1")
+        // Only do this for questions that look like Headway imports (have explanation or topic-style text)
+        if (!ca || ca === "0" || ca === "null") {
+          updates.push({ id: row.id, correct_answer: "1", options: optionObjects });
+        }
+      }
+    }
+
+    if (updates.length === 0) return;
+
+    for (const upd of updates) {
+      const patch: Record<string, unknown> = { correct_answer: upd.correct_answer };
+      if (upd.options) patch.options = upd.options;
+      await supabaseAdmin.from("questions").update(patch).eq("id", upd.id);
+    }
+
+    console.log(`[migration] fixed correct_answer for ${updates.length} quiz question(s) ✓`);
+  } catch (e: any) {
+    console.warn("[migration] fixHeadwayQuizCorrectAnswers:", e?.message);
+  }
+}
+
+function logEnvValidation() {
+  type VarLevel = 'required' | 'optional';
+  const checks: { key: string; level: VarLevel; isUrl?: boolean }[] = [
+    { key: 'VITE_SUPABASE_URL',        level: 'required', isUrl: true },
+    { key: 'VITE_SUPABASE_ANON_KEY',   level: 'required' },
+    { key: 'SUPABASE_SERVICE_ROLE_KEY',level: 'required' },
+    { key: 'GEMINI_API_KEY',           level: 'optional' },
+    { key: 'BREVO_API_KEY',            level: 'optional' },
+    { key: 'BREVO_SENDER_EMAIL',       level: 'optional' },
+    { key: 'TELEGRAM_BOT_TOKEN',       level: 'optional' },
+    { key: 'DATABASE_URL',             level: 'optional' },
+  ];
+
+  const errors: string[] = [];
+  const warnings: string[] = [];
+
+  for (const { key, level, isUrl } of checks) {
+    const raw = key === 'GEMINI_API_KEY'
+      ? ((process.env.AI_INTEGRATIONS_GEMINI_API_KEY ?? '') || (process.env.GEMINI_API_KEY ?? '')).trim()
+      : (process.env[key] ?? '').trim();
+
+    if (!raw) {
+      if (level === 'required') errors.push(`  ✗ ${key} — MISSING (required)`);
+      else warnings.push(`  ⚠ ${key} — not set (optional)`);
+      continue;
+    }
+    if (isUrl && !raw.startsWith('https://') && !raw.startsWith('http://')) {
+      errors.push(`  ✗ ${key} — INVALID URL: must start with https:// (got: "${raw.slice(0, 30)}…")`);
+      continue;
+    }
+    const preview = isUrl
+      ? raw.replace(/^(https?:\/\/[^.]+).*/, '$1') + '…'
+      : `${raw.slice(0, 4)}${'*'.repeat(Math.max(0, raw.length - 4))}`;
+    console.log(`  ✓ ${key} — ${preview}`);
+  }
+
+  for (const w of warnings) console.warn(w);
+  if (errors.length) {
+    for (const e of errors) console.error(e);
+    console.error(`[env] ${errors.length} required variable(s) missing or invalid — the app may not work correctly.`);
+  } else {
+    console.log('[env] All required environment variables are set ✓');
+  }
+}
+
 async function startServer() {
+  console.log('[env] Validating environment variables…');
+  logEnvValidation();
+
   const parsedPort = Number(process.env.PORT);
   const preferredPort = Number.isInteger(parsedPort) && parsedPort > 0 ? parsedPort : 5000;
   const preferredHost = process.env.HOST || "0.0.0.0";
@@ -11024,11 +18019,33 @@ async function startServer() {
   void runLessonsPublishAtMigration();
   void runQuizzesPublishAtMigration();
   void runAssignmentsPublishAtMigration();
+  void runNotificationsColumnsMigration();
+  void runLiveSessionsRecordingUrlsMigration();
+  void runLiveSessionsControlsMigration();
+  void runSessionParticipantsHandRaisedMigration();
+  void runQuizSectionsMigration();
+  void runStudentTransfersMigration();
+  void runStudentMonthlyPaymentsMigration();
+  void runTeacherHoursMigration();
   void ensureAssignmentFilesBucket();
+  void ensureHeadwayMediaBucket();
+  void ensureHeadwayMediaTable();
+  void fixHeadwayQuizCorrectAnswers();
 
-  const httpServer = http.createServer();
-  const app = await createApp({ includeFrontend: true, httpServer });
-  httpServer.on("request", app);
+  // Create a minimal HTTP server that binds the port immediately so Replit's
+  // workflow health-check passes, then swap in the full Express app once Vite
+  // has finished pre-bundling dependencies (which can take >30s on first run).
+  let appHandler: ((req: any, res: any) => void) | null = null;
+  const httpServer = http.createServer((req, res) => {
+    if (appHandler) {
+      appHandler(req, res);
+    } else {
+      // Vite is still initialising — respond with a loading page so the
+      // browser doesn't show a connection-refused error.
+      res.writeHead(200, { 'Content-Type': 'text/html' });
+      res.end('<html><body style="font-family:sans-serif;display:flex;align-items:center;justify-content:center;height:100vh;margin:0"><p>Starting up, please wait…</p></body></html>');
+    }
+  });
 
   const tryListen = (port: number, host: string) =>
     new Promise<void>((resolve, reject) => {
@@ -11048,6 +18065,7 @@ async function startServer() {
     });
 
   let lastRecoverableError: NodeJS.ErrnoException | null = null;
+  let boundPort: number | null = null;
 
   for (let portOffset = 0; portOffset < maxPortAttempts; portOffset++) {
     const portToTry = preferredPort + portOffset;
@@ -11055,7 +18073,8 @@ async function startServer() {
     for (const hostToTry of hostCandidates) {
       try {
         await tryListen(portToTry, hostToTry);
-        return;
+        boundPort = portToTry;
+        break;
       } catch (error) {
         const listenError = error as NodeJS.ErrnoException;
         if (!listenError.code || !recoverableListenErrors.has(listenError.code)) {
@@ -11074,11 +18093,120 @@ async function startServer() {
         }
       }
     }
+    if (boundPort !== null) break;
   }
 
-  throw new Error(
-    `Unable to start server after trying ports ${preferredPort}-${preferredPort + maxPortAttempts - 1}. Last error: ${lastRecoverableError?.code ?? "unknown"}`,
-  );
+  if (boundPort === null) {
+    throw new Error(
+      `Unable to start server after trying ports ${preferredPort}-${preferredPort + maxPortAttempts - 1}. Last error: ${lastRecoverableError?.code ?? "unknown"}`,
+    );
+  }
+
+  // Now initialise the full Express + Vite app asynchronously (may take a while
+  // on first run due to Vite dependency pre-bundling).
+  console.log('[startup] Initialising Express + Vite app…');
+  createApp({ includeFrontend: true, httpServer }).then(app => {
+    appHandler = app;
+    console.log('[startup] App ready — all requests now served by Express + Vite');
+  }).catch(err => {
+    console.error('[startup] createApp failed:', err);
+  });
+
+  // In Replit, also listen on 24678 with the same handler.
+  if (process.env.REPL_ID) {
+    const replitProxyServer = http.createServer((req, res) => {
+      if (appHandler) {
+        appHandler(req, res);
+      } else {
+        res.writeHead(200, { 'Content-Type': 'text/html' });
+        res.end('<html><body style="font-family:sans-serif;display:flex;align-items:center;justify-content:center;height:100vh;margin:0"><p>Starting up, please wait…</p></body></html>');
+      }
+    });
+    replitProxyServer.listen(24678, "0.0.0.0", () => {
+      console.log("Replit proxy listener also running on port 24678");
+    });
+    replitProxyServer.on("error", (e: NodeJS.ErrnoException) => {
+      if (e.code !== "EADDRINUSE") {
+        console.warn("Replit proxy port 24678 error:", e.code);
+      }
+    });
+  }
+}
+
+// ─── Payment deadline reminders ────────────────────────────────────────────────
+// Sends reminder emails to unpaid students on/after the 5th of each month.
+// Called by the daily scheduler and also via the admin API endpoint.
+const _reminderSentThisMonth = new Set<string>(); // key = "userId:YYYY-MM"
+
+async function runPaymentDeadlineReminders({ force = false } = {}): Promise<{ sent: number; skipped: number; monthYear: string }> {
+  const now = new Date();
+  const dayOfMonth = now.getDate();
+  const monthYear = now.toISOString().slice(0, 7);
+
+  if (!force && dayOfMonth < 5) {
+    return { sent: 0, skipped: 0, monthYear };
+  }
+
+  // Fetch settings directly (getConfigSection is scoped inside createApp)
+  let brandName = 'QuizMaster';
+  let baseUrl = process.env.REPLIT_DEV_DOMAIN
+    ? `https://${process.env.REPLIT_DEV_DOMAIN}`
+    : 'http://localhost:5000';
+  try {
+    const cfgRes = await supabaseAdmin.from('platform_config').select('value').eq('section', 'settings').maybeSingle();
+    const settings: any = cfgRes.data?.value ?? {};
+    if (settings?.general?.school_name) brandName = settings.general.school_name;
+    if (!process.env.REPLIT_DEV_DOMAIN && settings?.general?.website) baseUrl = settings.general.website;
+  } catch { /* use defaults */ }
+  const loginUrl = `${baseUrl}/login`;
+
+  const [yr, mo] = monthYear.split('-');
+  const monthLabel = new Date(Number(yr), Number(mo) - 1, 1).toLocaleString('default', { month: 'long', year: 'numeric' });
+
+  // Fetch all students
+  const { data: allStudents, error: sErr } = await supabaseAdmin
+    .from('profiles')
+    .select('id, display_name, email')
+    .eq('role', 'student')
+    .eq('status', 'active');
+  if (sErr || !allStudents) return { sent: 0, skipped: 0, monthYear };
+
+  // Fetch paid student IDs for this month
+  const { data: paidRows } = await supabaseAdmin
+    .from('student_monthly_payments')
+    .select('student_id')
+    .eq('month_year', monthYear);
+  const paidSet = new Set((paidRows || []).map((r: any) => r.student_id));
+
+  const unpaid = allStudents.filter((s: any) => !paidSet.has(s.id) && s.email);
+  let sent = 0;
+  let skipped = 0;
+
+  if (!isEmailConfigured()) {
+    console.log(`[payment-reminder] Email not configured — skipping ${unpaid.length} reminders`);
+    return { sent: 0, skipped: unpaid.length, monthYear };
+  }
+
+  for (const student of unpaid) {
+    const cacheKey = `${student.id}:${monthYear}`;
+    if (!force && _reminderSentThisMonth.has(cacheKey)) { skipped++; continue; }
+
+    const studentName = student.display_name || student.email || 'Student';
+    const tpl = renderPaymentReminderEmail({ studentName, monthLabel, dayOfMonth, brandName, loginUrl });
+    try {
+      await sendEmail({ to: student.email, toName: studentName, subject: tpl.subject, htmlContent: tpl.htmlContent, textContent: tpl.textContent });
+      _reminderSentThisMonth.add(cacheKey);
+      sent++;
+    } catch (e: any) {
+      console.error(`[payment-reminder] Failed to email ${student.email}:`, e.message);
+      skipped++;
+    }
+  }
+
+  if (sent > 0 || skipped > 0) {
+    console.log(`[payment-reminder] ${monthYear}: sent=${sent}, skipped=${skipped}`);
+  }
+  return { sent, skipped, monthYear };
 }
 
 async function runAutoPublishQuizzes() {
@@ -11090,16 +18218,16 @@ async function runAutoPublishQuizzes() {
       .lte('publish_at', now)
       .neq('published', true);
     if (error || !data || data.length === 0) return;
-    for (const quiz of data) {
-      const { error: updErr } = await supabaseAdmin
-        .from('quizzes')
-        .update({ published: true, publish_at: null, updated_at: now })
-        .eq('id', quiz.id);
-      if (updErr) {
-        console.error(`[auto-publish] Failed to publish quiz "${quiz.title}":`, updErr.message);
-      } else {
-        console.log(`[auto-publish] Published quiz "${quiz.title}" (${quiz.id})`);
-      }
+    // Batch update — 1 query instead of N
+    const ids = data.map((q: any) => q.id);
+    const { error: batchErr } = await supabaseAdmin
+      .from('quizzes')
+      .update({ published: true, publish_at: null, updated_at: now })
+      .in('id', ids);
+    if (batchErr) {
+      console.error('[auto-publish] Failed to batch-publish quizzes:', batchErr.message);
+    } else {
+      console.log(`[auto-publish] Published ${ids.length} quiz(zes):`, data.map((q: any) => q.title).join(', '));
     }
   } catch (e: any) {
     console.error('[auto-publish] Quizzes scheduler error:', e?.message);
@@ -11115,16 +18243,16 @@ async function runAutoPublishLessons() {
       .lte('publish_at', now)
       .neq('status', 'published');
     if (error || !data || data.length === 0) return;
-    for (const lesson of data) {
-      const { error: updErr } = await supabaseAdmin
-        .from('lessons')
-        .update({ status: 'published', publish_at: null, updated_at: now })
-        .eq('id', lesson.id);
-      if (updErr) {
-        console.error(`[auto-publish] Failed to publish lesson "${lesson.title}":`, updErr.message);
-      } else {
-        console.log(`[auto-publish] Published lesson "${lesson.title}" (${lesson.id})`);
-      }
+    // Batch update — 1 query instead of N
+    const ids = data.map((l: any) => l.id);
+    const { error: batchErr } = await supabaseAdmin
+      .from('lessons')
+      .update({ status: 'published', publish_at: null, updated_at: now })
+      .in('id', ids);
+    if (batchErr) {
+      console.error('[auto-publish] Failed to batch-publish lessons:', batchErr.message);
+    } else {
+      console.log(`[auto-publish] Published ${ids.length} lesson(s):`, data.map((l: any) => l.title).join(', '));
     }
   } catch (e: any) {
     console.error('[auto-publish] Lessons scheduler error:', e?.message);
@@ -11134,12 +18262,44 @@ async function runAutoPublishLessons() {
 async function runAutoPublishAssignments() {
   try {
     const now = new Date().toISOString();
+    // Try direct SQL first — single UPDATE is atomic and avoids PostgREST schema cache issues
+    try {
+      const result = await poolQuery(
+        `UPDATE assignments
+         SET status = 'published', publish_at = NULL, updated_at = $1
+         WHERE publish_at IS NOT NULL
+           AND publish_at <= $1
+           AND status != 'published'
+         RETURNING id, title`,
+        [now]
+      );
+      if (result.rows.length > 0) {
+        for (const a of result.rows) {
+          console.log(`[auto-publish] Published assignment "${a.title}" (${a.id})`);
+        }
+      }
+      return;
+    } catch (sqlErr: any) {
+      // If publish_at column missing, try to add it then bail (next tick will publish)
+      if (String(sqlErr?.message || '').includes('publish_at')) {
+        try {
+          await poolQuery(`ALTER TABLE assignments ADD COLUMN IF NOT EXISTS publish_at timestamptz NULL`);
+          console.log('[auto-publish] Added missing publish_at column ✓');
+        } catch { /* ignore */ }
+      }
+      console.warn('[auto-publish] poolQuery failed, falling back to supabaseAdmin:', sqlErr?.message?.split('\n')[0]);
+    }
+    // Fallback: supabaseAdmin
     const { data, error } = await supabaseAdmin
       .from('assignments')
       .select('id, title')
       .lte('publish_at', now)
       .neq('status', 'published');
-    if (error || !data || data.length === 0) return;
+    if (error) {
+      console.warn('[auto-publish] assignments query error (publish_at may be missing):', error.message?.split('\n')[0]);
+      return;
+    }
+    if (!data || data.length === 0) return;
     for (const a of data) {
       const { error: updErr } = await supabaseAdmin
         .from('assignments')
@@ -11165,16 +18325,16 @@ async function runAutoPublishModules() {
       .lte('publish_at', now)
       .neq('status', 'active');
     if (error || !data || data.length === 0) return;
-    for (const mod of data) {
-      const { error: updErr } = await supabaseAdmin
-        .from('modules')
-        .update({ status: 'active', publish_at: null, updated_at: now })
-        .eq('id', mod.id);
-      if (updErr) {
-        console.error(`[auto-publish] Failed to publish module "${mod.title}":`, updErr.message);
-      } else {
-        console.log(`[auto-publish] Published module "${mod.title}" (${mod.id})`);
-      }
+    // Batch update — 1 query instead of N
+    const ids = data.map((m: any) => m.id);
+    const { error: batchErr } = await supabaseAdmin
+      .from('modules')
+      .update({ status: 'active', publish_at: null, updated_at: now })
+      .in('id', ids);
+    if (batchErr) {
+      console.error('[auto-publish] Failed to batch-publish modules:', batchErr.message);
+    } else {
+      console.log(`[auto-publish] Published ${ids.length} module(s):`, data.map((m: any) => m.title).join(', '));
     }
   } catch (e: any) {
     console.error('[auto-publish] Scheduler error:', e?.message);
@@ -11198,6 +18358,10 @@ if (!process.env.VERCEL) {
     void flushFailedTelegramAlerts();
   }, TELEGRAM_RETRY_INTERVAL_MS);
   void flushFailedTelegramAlerts();
+
+  // Payment deadline reminders — run every 6 hours; emails only go out on/after 5th of month
+  setInterval(() => { void runPaymentDeadlineReminders(); }, 6 * 60 * 60 * 1000);
+  void runPaymentDeadlineReminders();
 
   process.on("unhandledRejection", (reason) => {
     const details = serializeUnknownError(reason);

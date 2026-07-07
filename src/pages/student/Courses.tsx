@@ -1,7 +1,9 @@
 import React, { useEffect, useState, useMemo } from 'react';
+import { useTranslation } from 'react-i18next';
 import { supabase } from '../../supabase';
 import StudentLayout from '../../components/layout/StudentLayout';
 import { authFetch } from '../../lib/apiUrl';
+import { isMissingCoursesStudentIdsError } from '../../lib/schemaErrors';
 import { selectPublishedQuizzesCompat } from '../../lib/quizzesCompat';
 import {
   BookOpen, Search, Clock, Users, Play, CheckCircle2,
@@ -108,6 +110,7 @@ function CourseCard({
   enrolling: boolean;
   key?: React.Key;
 }) {
+  const { t } = useTranslation();
   const meta = getMeta(course.level, index);
   const hasLessonProgress = course.totalLessonsProgress > 0;
   const pct = hasLessonProgress
@@ -154,7 +157,7 @@ function CourseCard({
           </span>
           {isCompleted && (
             <span className="inline-flex items-center gap-1 bg-white/20 backdrop-blur-sm border border-white/30 text-white text-[10px] font-bold px-2.5 py-1 rounded-xl">
-              <CheckCircle2 className="w-3 h-3" /> Done
+              <CheckCircle2 className="w-3 h-3" /> {t('common.done')}
             </span>
           )}
         </div>
@@ -169,9 +172,9 @@ function CourseCard({
               </span>
             </div>
             <div>
-              <div className="text-white/70 text-[10px] font-semibold uppercase tracking-wide">Progress</div>
+              <div className="text-white/70 text-[10px] font-semibold uppercase tracking-wide">{t('student.progress.progress')}</div>
               <div className="text-white text-xs font-bold">
-                {isCompleted ? 'Complete' : isStarted ? 'In progress' : 'Not started'}
+                {isCompleted ? t('student.courses.complete') : isStarted ? t('student.courses.inprogress') : t('student.courses.notstarted')}
               </div>
             </div>
           </div>
@@ -189,18 +192,18 @@ function CourseCard({
             {course.title}
           </h3>
           <p className="text-xs text-slate-400 font-medium mb-4 line-clamp-2 leading-relaxed">
-            {course.description || 'No description provided for this course.'}
+            {course.description || t('student.courses.noDescription')}
           </p>
 
           {/* Meta chips */}
           <div className="flex flex-wrap gap-2 mb-5">
             <span className="inline-flex items-center gap-1 bg-slate-50 border border-slate-100 text-slate-500 text-[11px] font-semibold px-2.5 py-1 rounded-lg">
               <Layers className="w-3 h-3" />
-              {course.total_lessons ?? 0} lessons
+              {t('student.courses.lessonsCount', { count: course.total_lessons ?? 0 })}
             </span>
             <span className="inline-flex items-center gap-1 bg-slate-50 border border-slate-100 text-slate-500 text-[11px] font-semibold px-2.5 py-1 rounded-lg">
               <BookOpen className="w-3 h-3" />
-              {course.quizCount} quiz{course.quizCount !== 1 ? 'zes' : ''}
+              {t('student.courses.quizzesCount', { count: course.quizCount })}
             </span>
             <span className="inline-flex items-center gap-1 bg-slate-50 border border-slate-100 text-slate-500 text-[11px] font-semibold px-2.5 py-1 rounded-lg">
               <Users className="w-3 h-3" />
@@ -213,7 +216,7 @@ function CourseCard({
         <div className="mb-4">
           <div className="flex items-center justify-between mb-1">
             <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wide">
-              {hasLessonProgress ? 'Lesson Progress' : 'Quiz Progress'}
+              {hasLessonProgress ? t('student.courses.lessonProgress') : t('student.courses.quizProgress')}
             </span>
             <span className="text-[10px] font-bold text-slate-500">
               {hasLessonProgress
@@ -243,11 +246,11 @@ function CourseCard({
             )}
           >
             {isCompleted ? (
-              <><CheckCircle2 className="w-4 h-4" /> View Completion</>
+              <><CheckCircle2 className="w-4 h-4" /> {t('student.courses.viewCompletion')}</>
             ) : isStarted ? (
-              <><Play className="w-4 h-4" /> Continue</>
+              <><Play className="w-4 h-4" /> {t('student.courses.continue')}</>
             ) : (
-              <><Sparkles className="w-4 h-4" /> Start Course</>
+              <><Sparkles className="w-4 h-4" /> {t('student.courses.startCourse')}</>
             )}
             <ChevronRight className="w-4 h-4 ml-auto" />
           </Link>
@@ -259,7 +262,7 @@ function CourseCard({
             className="flex items-center justify-center gap-2 w-full py-2.5 rounded-2xl text-sm font-bold transition-all bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-60 disabled:cursor-not-allowed shadow-lg shadow-emerald-200"
           >
             <UserPlus className="w-4 h-4" />
-            {enrolling ? 'Enrolling...' : 'Enroll'}
+            {enrolling ? t('student.courses.enrolling') : t('student.courses.enroll')}
           </button>
         )}
       </div>
@@ -286,6 +289,7 @@ function SkeletonCard() {
 }
 
 export default function StudentCourses() {
+  const { t } = useTranslation();
   const [courses, setCourses] = useState<CourseData[]>([]);
   const [studentName, setStudentName] = useState('');
   const [studentId, setStudentId] = useState('');
@@ -309,11 +313,11 @@ export default function StudentCourses() {
         .from('profiles')
         .select('display_name')
         .eq('id', uid)
-        .single();
+        .maybeSingle();
 
       if (profileSnap.data) setStudentName(profileSnap.data.display_name || '');
 
-      const [enrolledCoursesRes, enrolledClassesRes] = await Promise.all([
+      const [enrolledCoursesRes, enrolledClassesRes, availableRes] = await Promise.all([
         supabase
           .from('courses')
           .select('*')
@@ -322,15 +326,17 @@ export default function StudentCourses() {
           .from('classes')
           .select('course_id,student_ids')
           .contains('student_ids', [uid]),
+        authFetch('/api/student/courses/available').then(r => r.json()).catch(() => ({ courses: [] })),
       ]);
-      if (enrolledCoursesRes.error) {
+      // Treat schema-missing errors (student_ids column absent) as empty — fall through to available courses
+      if (enrolledCoursesRes.error && !isMissingCoursesStudentIdsError(enrolledCoursesRes.error)) {
         setLoading(false);
-        toast.error(enrolledCoursesRes.error.message || 'Failed to load courses');
+        toast.error(enrolledCoursesRes.error.message || t('errors.loadFailed'));
         return;
       }
-      if (enrolledClassesRes.error) {
+      if (enrolledClassesRes.error && !isMissingCoursesStudentIdsError(enrolledClassesRes.error)) {
         setLoading(false);
-        toast.error(enrolledClassesRes.error.message || 'Failed to load courses');
+        toast.error(enrolledClassesRes.error.message || t('errors.loadFailed'));
         return;
       }
 
@@ -348,6 +354,19 @@ export default function StudentCourses() {
           rawCourses = [...rawCourses, ...classLinkedCoursesRes.data];
         }
       }
+
+      // Merge in courses from the teacher's available courses list (courses not yet enrolled)
+      const availableCourses: any[] = Array.isArray(availableRes?.courses) ? availableRes.courses : [];
+      const enrolledIds = new Set(rawCourses.map((c: any) => String(c?.id || '')).filter(Boolean));
+      for (const ac of availableCourses) {
+        if (!ac?.id) continue;
+        const acId = String(ac.id);
+        if (!enrolledIds.has(acId)) {
+          rawCourses.push({ ...ac, student_ids: Array.isArray(ac.student_ids) ? ac.student_ids : [] });
+          enrolledIds.add(acId);
+        }
+      }
+
       rawCourses = rawCourses.filter((c: any) => String(c?.status || '').toLowerCase() === 'published');
       if (rawCourses.length === 0) { setCourses([]); setLoading(false); return; }
 
@@ -491,16 +510,16 @@ export default function StudentCourses() {
         method: 'POST',
       });
       const json = await res.json().catch(() => ({}));
-      if (!res.ok || !json?.success) throw new Error(json?.error || 'Failed to enroll');
+      if (!res.ok || !json?.success) throw new Error(json?.error || t('student.courses.enrollFailed'));
       const assignment = String(json?.classAssignment || '');
       if (assignment === 'assigned') {
-        toast.success('Enrollment successful. You were added to a class.');
+        toast.success(t('student.courses.enrollSuccessAssigned'));
       } else if (assignment === 'already_assigned') {
-        toast.success('Enrollment successful. You are already in this class.');
+        toast.success(t('student.courses.enrollSuccessAlready'));
       } else if (assignment === 'no_class_available') {
-        toast.success('Enrollment successful. Class assignment will be added soon.');
+        toast.success(t('student.courses.enrollSuccessNoClass'));
       } else {
-        toast.success('Enrollment successful');
+        toast.success(t('student.courses.enrollSuccess'));
       }
 
       setCourses((prev) =>

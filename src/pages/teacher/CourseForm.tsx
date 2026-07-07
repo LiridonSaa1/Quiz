@@ -1,12 +1,16 @@
 import React, { useEffect, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { useNavigate, useParams, useLocation, Link } from 'react-router-dom';
+import i18n from '../../i18n';
 import { supabase } from '../../supabase';
 import TeacherLayout from '../../components/layout/TeacherLayout';
 import {
   ChevronRight, BookOpen, Globe, Save, Send, Check,
-  X, Plus, Award, Settings2, Image, Type, BarChart2, Sparkles
+  X, Plus, Award, Settings2, Image, Type, BarChart2, Sparkles,
+  Download, CheckCircle2, Layers, FileText, HelpCircle, ExternalLink, RefreshCw
 } from 'lucide-react';
 import { toast } from 'sonner';
+import { motion, AnimatePresence } from 'motion/react';
 import { FormPageSkeleton } from '../../components/ui/Skeleton';
 import StyledSelect from '../../components/ui/StyledSelect';
 import { resolveTeacherIdCandidates } from '../../lib/teacherScope';
@@ -26,14 +30,14 @@ const GRADIENTS = [
 ];
 
 const LANGUAGES = ['English', 'Albanian', 'Spanish', 'French', 'German', 'Italian', 'Portuguese', 'Arabic', 'Chinese'];
-const LEVELS = ['Beginner', 'Intermediate', 'Advanced', 'All Levels'];
+const LEVELS = ['Beginner', 'Elementary', 'Pre-Intermediate', 'Intermediate', 'Upper-Intermediate', 'Advanced'];
 const CATEGORIES = ['Mathematics', 'Science', 'Programming', 'Language Arts', 'History', 'Arts', 'Music', 'Physical Education', 'Other'];
 
 const TABS = [
-  { id: 'basic', label: 'Basic Info', icon: Type },
-  { id: 'details', label: 'Details', icon: BarChart2 },
-  { id: 'appearance', label: 'Appearance', icon: Image },
-  { id: 'settings', label: 'Settings', icon: Settings2 },
+  { id: 'basic', get label() { return i18n.t('courses.basicInfo'); }, icon: Type },
+  { id: 'details', get label() { return i18n.t('courses.details'); }, icon: BarChart2 },
+  { id: 'appearance', get label() { return i18n.t('courses.appearance'); }, icon: Image },
+  { id: 'settings', get label() { return i18n.t('courses.settings'); }, icon: Settings2 },
 ];
 
 const initialForm = {
@@ -51,6 +55,7 @@ interface TeacherClassOption {
 }
 
 export default function TeacherCourseForm() {
+  const { t } = useTranslation();
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const location = useLocation();
@@ -64,8 +69,40 @@ export default function TeacherCourseForm() {
   const [aiOpen, setAiOpen] = useState(false);
   const [classes, setClasses] = useState<TeacherClassOption[]>([]);
   const [selectedClassId, setSelectedClassId] = useState('');
+  const [showHeadwayModal, setShowHeadwayModal] = useState(false);
+  const [headwayLevel, setHeadwayLevel] = useState('Beginner');
+  const [headwayImporting, setHeadwayImporting] = useState(false);
+  const [headwayDone, setHeadwayDone] = useState<{ modules: number; lessons: number } | null>(null);
+  const [headwayProgress, setHeadwayProgress] = useState<{ unit: number; total: number; title: string; phase: string } | null>(null);
+  const [contentStats, setContentStats] = useState<{ modules: number; lessons: number; quizzes: number; syncedAt: string | null; syncLevel: string | null; loading: boolean } | null>(null);
+  const [quickResyncing, setQuickResyncing] = useState(false);
+  const [confirmResync, setConfirmResync] = useState(false);
 
   const set = (key: string, value: any) => setForm(prev => ({ ...prev, [key]: value }));
+
+  const fetchContentStats = async () => {
+    if (!id) return;
+    setContentStats(prev => prev ? { ...prev, loading: true } : { modules: 0, lessons: 0, quizzes: 0, syncedAt: null, syncLevel: null, loading: true });
+    try {
+      const [modRes, lesRes, qzRes, syncRes] = await Promise.all([
+        supabase.from('modules').select('id', { count: 'exact', head: true }).eq('course_id', id),
+        supabase.from('lessons').select('id', { count: 'exact', head: true }).eq('course_id', id),
+        supabase.from('quizzes').select('id', { count: 'exact', head: true }).eq('course_id', id),
+        supabase.from('platform_config').select('value, updated_at').eq('section', `headway_sync:${id}`).maybeSingle(),
+      ]);
+      const syncVal = syncRes.data?.value as { syncedAt?: string; level?: string } | null;
+      setContentStats({
+        modules: modRes.count ?? 0,
+        lessons: lesRes.count ?? 0,
+        quizzes: qzRes.count ?? 0,
+        syncedAt: syncVal?.syncedAt ?? syncRes.data?.updated_at ?? null,
+        syncLevel: syncVal?.level ?? null,
+        loading: false,
+      });
+    } catch {
+      setContentStats(prev => prev ? { ...prev, loading: false } : null);
+    }
+  };
 
   // Pre-fill from AI state passed via navigation (from Courses list page)
   useEffect(() => {
@@ -84,7 +121,7 @@ export default function TeacherCourseForm() {
         is_free: d.is_free ?? prev.is_free,
         price: d.price ?? prev.price,
       }));
-      toast.success('AI has pre-filled the form for you!');
+      toast.success(t('courses.aiPrefillSuccess'));
       // Clear the state so refreshing doesn't re-apply
       window.history.replaceState({}, '');
     }
@@ -104,7 +141,7 @@ export default function TeacherCourseForm() {
       is_free: data.is_free,
       price: data.price,
     }));
-    toast.success('AI filled the form — review and adjust as needed!');
+    toast.success(t('courses.aiFillSuccess'));
     setActiveTab('basic');
   };
 
@@ -187,12 +224,26 @@ export default function TeacherCourseForm() {
     loadClasses();
   }, [isEditing]);
 
+  // Fetch content stats once the course is loaded
+  useEffect(() => {
+    if (isEditing && id && !loading) {
+      fetchContentStats();
+    }
+  }, [isEditing, id, loading]);
+
+  // Re-fetch stats after a successful Headway import
+  useEffect(() => {
+    if (headwayDone) fetchContentStats();
+  }, [headwayDone]);
+
+  const HEADWAY_LEVELS = new Set(['Beginner', 'Elementary', 'Pre-Intermediate', 'Intermediate', 'Upper-Intermediate', 'Advanced']);
+
   const handleSave = async (publishNow = false) => {
-    if (!form.name.trim()) { toast.error('Course title is required'); setActiveTab('basic'); return; }
+    if (!form.name.trim()) { toast.error(t('courses.courseTitle') + ' ' + t('common.required')); setActiveTab('basic'); return; }
     setSaving(true);
     try {
       const { data: { session } } = await supabase.auth.getSession();
-      if (!session) throw new Error('Not authenticated');
+      if (!session) throw new Error(t('common.error'));
 
       const payload = {
         title: form.name,
@@ -206,16 +257,16 @@ export default function TeacherCourseForm() {
       };
 
       if (isEditing) {
-        const res = await fetch(apiUrl(`/api/admin/update-course/${id}`), {
+        const res = await authFetch(`/api/teacher/courses/${id}`, {
           method: 'PATCH',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(payload),
         });
         const json = await res.json();
-        if (!res.ok) throw new Error(json.error || 'Failed to update course');
-        toast.success(publishNow ? 'Course published!' : 'Course saved');
+        if (!res.ok) throw new Error(json.error || t('common.error'));
+        toast.success(publishNow ? t('courses.publishCourse') : t('courses.saveCourse'));
       } else {
-        const res = await fetch(apiUrl('/api/admin/create-course'), {
+        const res = await authFetch('/api/teacher/courses', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -225,12 +276,33 @@ export default function TeacherCourseForm() {
           }),
         });
         const json = await res.json();
-        if (!res.ok) throw new Error(json.error || 'Failed to create course');
-        toast.success(publishNow ? 'Course created & published!' : 'Course saved as draft');
+        if (!res.ok) throw new Error(json.error || t('common.error'));
+
+        // Auto-populate Headway content if the level matches an Oxford Headway level
+        if (json.course?.id && HEADWAY_LEVELS.has(form.level)) {
+          toast.info(`Duke ngarkuar përmbajtjen Headway ${form.level}...`);
+          try {
+            const popRes = await authFetch(`/api/teacher/courses/${json.course.id}/headway-populate`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ userId: session.user.id, level: form.level }),
+            });
+            const popJson = await popRes.json();
+            if (popRes.ok && popJson.success) {
+              toast.success(`Kursi u krijua me ${popJson.modules} module dhe ${popJson.lessons} mësime nga Oxford Headway!`);
+            } else {
+              toast.warning(`Kursi u krijua por ngarkimi i Headway dështoi: ${popJson.error || 'gabim i panjohur'}`);
+            }
+          } catch {
+            toast.warning('Kursi u krijua por ngarkimi automatik i Headway dështoi.');
+          }
+        } else {
+          toast.success(publishNow ? t('courses.publishCourse') : t('courses.saveAsDraft'));
+        }
       }
       navigate('/teacher/courses');
     } catch (err: any) {
-      toast.error(err.message || 'Failed to save course');
+      toast.error(err.message || t('common.error'));
     } finally {
       setSaving(false);
     }
@@ -239,6 +311,117 @@ export default function TeacherCourseForm() {
   const addTag = () => {
     const tag = tagInput.trim();
     if (tag && !form.tags.includes(tag)) { set('tags', [...form.tags, tag]); setTagInput(''); }
+  };
+
+  const openHeadwayModal = () => {
+    setHeadwayDone(null);
+    const currentLevel = HEADWAY_LEVELS.has(form.level) ? form.level : 'Beginner';
+    setHeadwayLevel(currentLevel);
+    setShowHeadwayModal(true);
+  };
+
+  const handleQuickResync = async () => {
+    if (!id || !contentStats?.syncLevel || quickResyncing) return;
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session) { toast.error('Not signed in'); return; }
+    setQuickResyncing(true);
+    try {
+      const res = await authFetch(`/api/teacher/courses/${encodeURIComponent(id)}/headway-populate`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId: session.user.id, level: contentStats.syncLevel, stream: true }),
+      });
+      if (!res.ok) {
+        const json = await res.json().catch(() => ({}));
+        throw new Error(json?.error || 'Re-sync failed');
+      }
+      // Drain SSE stream silently — we only care about the done event
+      const reader = res.body?.getReader();
+      const decoder = new TextDecoder();
+      let buf = '';
+      if (reader) {
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          buf += decoder.decode(value, { stream: true });
+          const lines = buf.split('\n');
+          buf = lines.pop() ?? '';
+          for (const line of lines) {
+            const trimmed = line.replace(/^data:\s*/, '').trim();
+            if (!trimmed) continue;
+            try {
+              const evt = JSON.parse(trimmed);
+              if (evt.type === 'done') {
+                toast.success(`Headway ${contentStats.syncLevel} u ri-sinkronizua — ${evt.modules} module, ${evt.lessons} mësime`);
+                await fetchContentStats();
+              } else if (evt.type === 'error') {
+                throw new Error(evt.message || 'Re-sync failed');
+              }
+            } catch { /* skip malformed lines */ }
+          }
+        }
+      }
+    } catch (e: any) {
+      toast.error(e?.message || 'Re-sync failed');
+    } finally {
+      setQuickResyncing(false);
+      setConfirmResync(false);
+    }
+  };
+
+  const handleHeadwayImport = async () => {
+    if (!id) return;
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session) { toast.error('Not signed in'); return; }
+    setHeadwayImporting(true);
+    setHeadwayProgress(null);
+    try {
+      const res = await authFetch(`/api/teacher/courses/${encodeURIComponent(id)}/headway-populate`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId: session.user.id, level: headwayLevel, stream: true }),
+      });
+
+      if (!res.ok) {
+        const json = await res.json().catch(() => ({}));
+        throw new Error(json?.error || 'Import failed');
+      }
+
+      // Read SSE stream line-by-line
+      const reader = res.body?.getReader();
+      const decoder = new TextDecoder();
+      let buf = '';
+
+      if (reader) {
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          buf += decoder.decode(value, { stream: true });
+          const lines = buf.split('\n');
+          buf = lines.pop() ?? '';
+          for (const line of lines) {
+            const trimmed = line.replace(/^data:\s*/, '').trim();
+            if (!trimmed) continue;
+            try {
+              const evt = JSON.parse(trimmed);
+              if (evt.type === 'progress') {
+                setHeadwayProgress({ unit: evt.unit, total: evt.total, title: evt.title, phase: evt.phase ?? '' });
+              } else if (evt.type === 'done') {
+                setHeadwayDone({ modules: evt.modules ?? 0, lessons: evt.lessons ?? 0 });
+                toast.success(`Headway ${headwayLevel} u importua — ${evt.modules} module, ${evt.lessons} mësime`);
+              } else if (evt.type === 'error') {
+                throw new Error(evt.message || 'Import failed');
+              }
+            } catch { /* skip malformed lines */ }
+          }
+        }
+      }
+    } catch (e: any) {
+      toast.error(e?.message || 'Import failed');
+    } finally {
+      setHeadwayImporting(false);
+      setHeadwayProgress(null);
+    }
   };
 
   if (loading) {
@@ -253,9 +436,9 @@ export default function TeacherCourseForm() {
     <TeacherLayout>
       <div className="space-y-6">
         <div className="flex items-center gap-2 text-sm">
-          <Link to="/teacher/courses" className="text-slate-400 hover:text-slate-600 transition-colors">My Courses</Link>
+          <Link to="/teacher/courses" className="text-slate-400 hover:text-slate-600 transition-colors">{t('nav.myCourses')}</Link>
           <ChevronRight className="w-4 h-4 text-slate-300" />
-          <span className="text-slate-900 font-semibold">{isEditing ? 'Edit Course' : 'New Course'}</span>
+          <span className="text-slate-900 font-semibold">{isEditing ? t('courses.editCourse') : t('courses.addCourse')}</span>
         </div>
 
         <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
@@ -265,12 +448,12 @@ export default function TeacherCourseForm() {
               <div className="h-1.5 bg-gradient-to-r from-violet-500 via-purple-500 to-fuchsia-500" />
               <div className="p-5 flex items-center justify-between gap-4">
                 <div>
-                  <h1 className="text-xl font-bold text-slate-900">{isEditing ? 'Edit Course' : 'Create New Course'}</h1>
-                  <p className="text-slate-400 text-sm mt-0.5">{isEditing ? 'Update course details and settings.' : 'Fill in the details to create your course.'}</p>
+                  <h1 className="text-xl font-bold text-slate-900">{isEditing ? t('courses.editCourse') : t('courses.addCourse')}</h1>
+                  <p className="text-slate-400 text-sm mt-0.5">{isEditing ? t('courses.editCourseDesc') : t('courses.addCourseDesc')}</p>
                 </div>
                 <AITriggerButton
                   onClick={() => setAiOpen(true)}
-                  label={isEditing ? 'AI Rewrite' : 'AI Fill'}
+                  label={isEditing ? t('courses.aiRewrite') : t('courses.aiFill')}
                 />
               </div>
             </div>
@@ -278,10 +461,10 @@ export default function TeacherCourseForm() {
             <AIPanel
               open={aiOpen}
               onClose={() => setAiOpen(false)}
-              label="AI Course Assistant"
-              description="Describe your course and AI will fill all the fields"
-              placeholder='e.g. "Create a beginner Python programming course for high school students covering variables, loops, and functions with free access"'
-              buttonLabel="Fill Course"
+              label={t('courses.aiCourseAssistant')}
+              description={t('courses.aiCourseAssistantDesc')}
+              placeholder={t('courses.aiCourseAssistantPlaceholder')}
+              buttonLabel={t('courses.fillCourse')}
               onSubmit={handleAIFill}
             />
 
@@ -304,22 +487,22 @@ export default function TeacherCourseForm() {
                 {activeTab === 'basic' && (
                   <div className="space-y-5">
                     <div>
-                      <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">Course Title <span className="text-red-400">*</span></label>
+                      <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">{t('courses.courseTitle')} <span className="text-red-400">*</span></label>
                       <input type="text" value={form.name} onChange={e => set('name', e.target.value)}
                         className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-violet-500 transition-all font-medium"
-                        placeholder="e.g. Introduction to Algebra" />
+                        placeholder={t('courses.courseTitlePlaceholder')} />
                     </div>
                     <div>
-                      <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">Short Description</label>
+                      <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">{t('courses.shortDescription')}</label>
                       <input type="text" value={form.short_description} onChange={e => set('short_description', e.target.value)}
                         className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-violet-500 transition-all"
-                        placeholder="A brief one-line summary" />
+                        placeholder={t('courses.shortDescriptionPlaceholder')} />
                     </div>
                     <div>
-                      <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">Full Description</label>
+                      <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">{t('courses.fullDescription')}</label>
                       <textarea rows={5} value={form.description} onChange={e => set('description', e.target.value)}
                         className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-violet-500 transition-all resize-none leading-relaxed"
-                        placeholder="Describe what students will learn, prerequisites, and outcomes..." />
+                        placeholder={t('courses.fullDescriptionPlaceholder')} />
                     </div>
                   </div>
                 )}
@@ -328,7 +511,7 @@ export default function TeacherCourseForm() {
                   <div className="space-y-5">
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
                       <div>
-                        <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">Language</label>
+                        <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">{t('courses.language')}</label>
                         <StyledSelect value={form.language} onChange={e => set('language', e.target.value)}
                           wrapperClassName="w-full"
                           className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:ring-violet-500/30">
@@ -336,7 +519,7 @@ export default function TeacherCourseForm() {
                         </StyledSelect>
                       </div>
                       <div>
-                        <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">Level</label>
+                        <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">{t('courses.level')}</label>
                         <StyledSelect value={form.level} onChange={e => set('level', e.target.value)}
                           wrapperClassName="w-full"
                           className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:ring-violet-500/30">
@@ -345,7 +528,7 @@ export default function TeacherCourseForm() {
                       </div>
                     </div>
                     <div>
-                      <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">Category</label>
+                      <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">{t('courses.category')}</label>
                       <StyledSelect value={form.category} onChange={e => set('category', e.target.value)}
                         wrapperClassName="w-full"
                         className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:ring-violet-500/30">
@@ -354,14 +537,14 @@ export default function TeacherCourseForm() {
                     </div>
                     {!isEditing && (
                       <div>
-                        <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">Class Visibility</label>
+                        <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">{t('courses.classVisibility')}</label>
                         <StyledSelect
                           value={selectedClassId}
                           onChange={e => setSelectedClassId(e.target.value)}
                           wrapperClassName="w-full"
                           className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:ring-violet-500/30"
                         >
-                          <option value="">All my students</option>
+                          <option value="">{t('courses.allStudents')}</option>
                           {classes.map((cls) => (
                             <option key={cls.id} value={cls.id}>
                               {cls.name}
@@ -369,17 +552,17 @@ export default function TeacherCourseForm() {
                           ))}
                         </StyledSelect>
                         <p className="text-[11px] text-slate-400 mt-1.5">
-                          If you select a class, this course will be pre-assigned only to students from that class.
+                          {t('courses.classVisibilityDesc')}
                         </p>
                       </div>
                     )}
                     <div>
-                      <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-3">Pricing</label>
+                      <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-3">{t('courses.pricing')}</label>
                       <div className="flex gap-4 mb-4">
                         {[true, false].map(isFree => (
                           <button key={String(isFree)} type="button" onClick={() => set('is_free', isFree)}
                             className={`flex-1 py-3 rounded-xl text-sm font-semibold border-2 transition-all ${form.is_free === isFree ? 'border-violet-500 bg-violet-50 text-violet-700' : 'border-slate-200 text-slate-500 hover:border-slate-300'}`}>
-                            {isFree ? 'Free Course' : 'Paid Course'}
+                            {isFree ? t('courses.freeCourse') : t('courses.paidCourse')}
                           </button>
                         ))}
                       </div>
@@ -392,12 +575,12 @@ export default function TeacherCourseForm() {
                       )}
                     </div>
                     <div>
-                      <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">Tags</label>
+                      <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">{t('courses.tags')}</label>
                       <div className="flex gap-2 mb-3">
                         <input type="text" value={tagInput} onChange={e => setTagInput(e.target.value)}
                           onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); addTag(); } }}
                           className="flex-1 px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-violet-500 transition-all"
-                          placeholder="Add tag and press Enter" />
+                          placeholder={t('courses.tagsPlaceholder')} />
                         <button type="button" onClick={addTag} className="px-4 py-2.5 bg-violet-600 text-white rounded-xl text-sm font-semibold hover:bg-violet-700 transition-all"><Plus className="w-4 h-4" /></button>
                       </div>
                       {form.tags.length > 0 && (
@@ -417,7 +600,7 @@ export default function TeacherCourseForm() {
                 {activeTab === 'appearance' && (
                   <div className="space-y-5">
                     <div>
-                      <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-3">Course Color Theme</label>
+                      <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-3">{t('courses.courseColorTheme')}</label>
                       <div className="grid grid-cols-4 gap-3">
                         {GRADIENTS.map(g => (
                           <button key={g.value} type="button" onClick={() => set('gradient', g.value)}
@@ -435,7 +618,7 @@ export default function TeacherCourseForm() {
                       </div>
                     </div>
                     <div className="p-4 bg-slate-50 rounded-xl border border-slate-100">
-                      <p className="text-xs text-slate-500 mb-2 font-medium">Preview</p>
+                      <p className="text-xs text-slate-500 mb-2 font-medium">{t('courses.preview')}</p>
                       <div className={`h-24 rounded-xl bg-gradient-to-br ${form.gradient} flex items-center justify-center`}>
                         <BookOpen className="w-8 h-8 text-white opacity-80" />
                       </div>
@@ -446,23 +629,31 @@ export default function TeacherCourseForm() {
                 {activeTab === 'settings' && (
                   <div className="space-y-5">
                     <div>
-                      <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-3">Status</label>
+                      <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-3">{t('common.status')}</label>
                       <div className="flex gap-4">
                         {(['draft', 'published'] as const).map(s => (
                           <button key={s} type="button" onClick={() => set('status', s)}
                             className={`flex-1 py-3 rounded-xl text-sm font-semibold border-2 transition-all capitalize ${form.status === s ? 'border-violet-500 bg-violet-50 text-violet-700' : 'border-slate-200 text-slate-500 hover:border-slate-300'}`}>
-                            {s === 'published' ? '🟢 ' : '🟡 '}{s}
+                            {s === 'published' ? '🟢 ' : '🟡 '}{s === 'published' ? t('common.published') : t('common.draft')}
                           </button>
                         ))}
                       </div>
+                      {form.status === 'draft' && (
+                        <div className="mt-3 flex items-start gap-2.5 p-3 bg-amber-50 border border-amber-200 rounded-xl">
+                          <span className="text-amber-500 text-base leading-none mt-0.5">⚠️</span>
+                          <p className="text-xs text-amber-800 leading-relaxed">
+                            <span className="font-bold">Draft courses are invisible to students.</span> Switch to <span className="font-bold">Published</span> so your students can find and enroll in this course.
+                          </p>
+                        </div>
+                      )}
                     </div>
                     <div onClick={() => set('certificate_enabled', !form.certificate_enabled)}
                       className={`flex items-center justify-between p-4 rounded-xl border-2 cursor-pointer transition-all ${form.certificate_enabled ? 'border-violet-500 bg-violet-50' : 'border-slate-200 hover:border-slate-300'}`}>
                       <div className="flex items-center gap-3">
                         <Award className={`w-5 h-5 ${form.certificate_enabled ? 'text-violet-600' : 'text-slate-400'}`} />
                         <div>
-                          <div className={`text-sm font-semibold ${form.certificate_enabled ? 'text-violet-700' : 'text-slate-700'}`}>Enable Certificate</div>
-                          <div className="text-xs text-slate-400 mt-0.5">Students receive a certificate on completion</div>
+                          <div className={`text-sm font-semibold ${form.certificate_enabled ? 'text-violet-700' : 'text-slate-700'}`}>{t('courses.enableCertificate')}</div>
+                          <div className="text-xs text-slate-400 mt-0.5">{t('courses.enableCertificateDesc')}</div>
                         </div>
                       </div>
                       <div className={`w-11 h-6 rounded-full transition-all ${form.certificate_enabled ? 'bg-violet-600' : 'bg-slate-200'}`}>
@@ -475,14 +666,26 @@ export default function TeacherCourseForm() {
             </div>
 
             <div className="flex flex-col sm:flex-row gap-3">
-              <Link to="/teacher/courses" className="flex-1 px-5 py-3 bg-slate-100 text-slate-600 rounded-xl font-semibold text-sm hover:bg-slate-200 transition-all text-center">Cancel</Link>
+              <Link to="/teacher/courses" className="flex-1 px-5 py-3 bg-slate-100 text-slate-600 rounded-xl font-semibold text-sm hover:bg-slate-200 transition-all text-center">{t('common.cancel')}</Link>
+              {isEditing && (
+                <button
+                  type="button"
+                  onClick={openHeadwayModal}
+                  className="flex-1 flex items-center justify-center gap-2 px-5 py-3 rounded-xl font-semibold text-sm text-white transition-all active:scale-[0.98]"
+                  style={{ background: 'linear-gradient(135deg,#1e3a5f 0%,#1565c0 100%)', boxShadow: '0 4px 14px rgba(21,101,192,0.35)' }}
+                  title="Re-import Oxford Headway modules and lessons into this course"
+                >
+                  <Globe className="w-4 h-4" />
+                  Import Headway
+                </button>
+              )}
               <button type="button" disabled={saving} onClick={() => handleSave(false)}
                 className="flex-1 flex items-center justify-center gap-2 px-5 py-3 bg-white border border-slate-200 text-slate-700 rounded-xl font-semibold text-sm hover:bg-slate-50 transition-all disabled:opacity-50">
-                <Save className="w-4 h-4" />Save Draft
+                <Save className="w-4 h-4" />{t('courses.saveDraft')}
               </button>
               <button type="button" disabled={saving} onClick={() => handleSave(true)}
                 className="flex-1 flex items-center justify-center gap-2 px-5 py-3 bg-violet-600 text-white rounded-xl font-semibold text-sm hover:bg-violet-700 transition-all disabled:opacity-50 shadow-lg shadow-violet-200 active:scale-[0.98]">
-                <Send className="w-4 h-4" />{saving ? 'Saving...' : 'Publish Course'}
+                <Send className="w-4 h-4" />{saving ? t('common.loading') : t('courses.publishCourse')}
               </button>
             </div>
           </div>
@@ -491,24 +694,24 @@ export default function TeacherCourseForm() {
           <div className="space-y-5">
             <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden sticky top-20">
               <div className="p-5 border-b border-slate-50">
-                <h3 className="text-sm font-bold text-slate-700">Live Preview</h3>
-                <p className="text-xs text-slate-400 mt-0.5">How your course will appear</p>
+                <h3 className="text-sm font-bold text-slate-700">{t('courses.preview')}</h3>
+                <p className="text-xs text-slate-400 mt-0.5">{t('courses.previewDesc')}</p>
               </div>
               <div className="p-5">
                 <div className="rounded-2xl border border-slate-100 overflow-hidden shadow-sm">
                   <div className={`h-32 bg-gradient-to-br ${form.gradient} p-4 flex flex-col justify-between`}>
                     <div className="flex items-start justify-between">
                       <div className="p-2 bg-white/20 rounded-lg"><BookOpen className="w-4 h-4 text-white" /></div>
-                      <span className={`text-[9px] font-bold uppercase px-2 py-0.5 rounded-md ${form.status === 'published' ? 'bg-emerald-500/30 text-white' : 'bg-white/20 text-white'}`}>{form.status}</span>
+                      <span className={`text-[9px] font-bold uppercase px-2 py-0.5 rounded-md ${form.status === 'published' ? 'bg-emerald-500/30 text-white' : 'bg-white/20 text-white'}`}>{form.status === 'published' ? t('common.published') : t('common.draft')}</span>
                     </div>
                     {form.level !== 'All Levels' && <span className="text-[9px] font-semibold bg-white/20 text-white px-2 py-0.5 rounded-md w-fit">{form.level}</span>}
                   </div>
                   <div className="p-4 bg-white">
-                    <h4 className="font-bold text-slate-900 text-sm line-clamp-1">{form.name || 'Course Title'}</h4>
-                    <p className="text-slate-400 text-xs mt-1 line-clamp-2 leading-relaxed">{form.short_description || form.description || 'Description here...'}</p>
+                    <h4 className="font-bold text-slate-900 text-sm line-clamp-1">{form.name || t('courses.courseTitle')}</h4>
+                    <p className="text-slate-400 text-xs mt-1 line-clamp-2 leading-relaxed">{form.short_description || form.description || t('courses.description') + '...'}</p>
                     <div className="mt-3 flex items-center gap-3 text-xs text-slate-400 pt-3 border-t border-slate-50">
                       <span className="flex items-center gap-1"><Globe className="w-3 h-3" />{form.language}</span>
-                      {form.is_free ? <span className="text-emerald-600 font-semibold">Free</span> : <span className="text-violet-600 font-semibold">${form.price}</span>}
+                      {form.is_free ? <span className="text-emerald-600 font-semibold">{t('courses.free')}</span> : <span className="text-violet-600 font-semibold">${form.price}</span>}
                     </div>
                   </div>
                 </div>
@@ -518,14 +721,175 @@ export default function TeacherCourseForm() {
                   </div>
                 )}
                 <div className={`flex items-center gap-2 text-xs px-3 py-2 rounded-lg font-medium mt-3 ${form.certificate_enabled ? 'bg-amber-50 text-amber-700' : 'bg-slate-50 text-slate-400'}`}>
-                  <Award className="w-3.5 h-3.5" />{form.certificate_enabled ? 'Certificate included' : 'No certificate'}
+                  <Award className="w-3.5 h-3.5" />{form.certificate_enabled ? t('courses.certIncluded') : t('courses.noCert')}
                 </div>
               </div>
             </div>
+            {/* Content Overview Panel — edit mode only */}
+            {isEditing && (
+              <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
+                <div className="h-0.5 bg-gradient-to-r from-blue-500 to-cyan-400" />
+                <div className="p-5">
+                  <div className="flex items-center justify-between mb-4">
+                    <div>
+                      <h3 className="text-sm font-bold text-slate-800">Përmbajtja e kursit</h3>
+                      <p className="text-[11px] text-slate-400 mt-0.5">Module, mësime dhe kuize</p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={fetchContentStats}
+                      disabled={contentStats?.loading}
+                      className="p-1.5 rounded-lg hover:bg-slate-100 transition-colors disabled:opacity-40"
+                      title="Rifresko"
+                    >
+                      <RefreshCw className={`w-3.5 h-3.5 text-slate-400 ${contentStats?.loading ? 'animate-spin' : ''}`} />
+                    </button>
+                  </div>
+
+                  {contentStats ? (
+                    <div className="space-y-2.5">
+                      {/* Modules */}
+                      <div className="flex items-center gap-3 p-3 rounded-xl bg-indigo-50 border border-indigo-100">
+                        <div className="w-8 h-8 rounded-lg bg-indigo-100 flex items-center justify-center shrink-0">
+                          <Layers className="w-4 h-4 text-indigo-600" />
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-xs text-indigo-500 font-medium">Module</p>
+                          <p className="text-lg font-bold text-indigo-700 leading-tight">
+                            {contentStats.loading ? <span className="inline-block w-6 h-4 bg-indigo-200 rounded animate-pulse" /> : contentStats.modules}
+                          </p>
+                        </div>
+                      </div>
+
+                      {/* Lessons */}
+                      <div className="flex items-center gap-3 p-3 rounded-xl bg-emerald-50 border border-emerald-100">
+                        <div className="w-8 h-8 rounded-lg bg-emerald-100 flex items-center justify-center shrink-0">
+                          <FileText className="w-4 h-4 text-emerald-600" />
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-xs text-emerald-500 font-medium">Mësime</p>
+                          <p className="text-lg font-bold text-emerald-700 leading-tight">
+                            {contentStats.loading ? <span className="inline-block w-6 h-4 bg-emerald-200 rounded animate-pulse" /> : contentStats.lessons}
+                          </p>
+                        </div>
+                      </div>
+
+                      {/* Quizzes */}
+                      <div className="flex items-center gap-3 p-3 rounded-xl bg-amber-50 border border-amber-100">
+                        <div className="w-8 h-8 rounded-lg bg-amber-100 flex items-center justify-center shrink-0">
+                          <HelpCircle className="w-4 h-4 text-amber-600" />
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-xs text-amber-500 font-medium">Kuize</p>
+                          <p className="text-lg font-bold text-amber-700 leading-tight">
+                            {contentStats.loading ? <span className="inline-block w-6 h-4 bg-amber-200 rounded animate-pulse" /> : contentStats.quizzes}
+                          </p>
+                        </div>
+                      </div>
+
+                      {contentStats.modules === 0 && !contentStats.loading && (
+                        <p className="text-[11px] text-slate-400 text-center pt-1">
+                          Nuk ka ende përmbajtje. Kliko <strong>Import Headway</strong> për të ngarkuar kurrikulën Oxford.
+                        </p>
+                      )}
+
+                      {/* Last sync badge */}
+                      {contentStats.syncedAt && !contentStats.loading && (
+                        <div className={`rounded-xl border px-3 py-2.5 flex items-start gap-2 transition-colors ${confirmResync && !quickResyncing ? 'border-amber-200 bg-amber-50' : 'border-blue-100 bg-blue-50'}`}>
+                          <Globe className={`w-3.5 h-3.5 shrink-0 mt-0.5 ${quickResyncing ? 'text-blue-400 animate-spin' : confirmResync ? 'text-amber-500' : 'text-blue-500'}`} />
+                          <div className="min-w-0 flex-1">
+                            <div className="flex items-center justify-between gap-1 mb-0.5">
+                              <p className={`text-[10px] font-bold uppercase tracking-wide leading-none ${confirmResync && !quickResyncing ? 'text-amber-700' : 'text-blue-700'}`}>
+                                Oxford Headway {contentStats.syncLevel ? `· ${contentStats.syncLevel}` : ''}
+                              </p>
+                              {!confirmResync && !quickResyncing && (
+                                <button
+                                  onClick={() => setConfirmResync(true)}
+                                  disabled={headwayImporting}
+                                  title="Ri-sinkronizo Headway"
+                                  className="flex items-center gap-1 px-1.5 py-0.5 rounded-md text-[10px] font-semibold text-blue-600 hover:bg-blue-100 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                                >
+                                  <RefreshCw className="w-2.5 h-2.5" />
+                                  Ri-sync
+                                </button>
+                              )}
+                              {quickResyncing && (
+                                <span className="flex items-center gap-1 text-[10px] text-blue-500 font-medium">
+                                  <RefreshCw className="w-2.5 h-2.5 animate-spin" />
+                                  Duke sinkronizuar…
+                                </span>
+                              )}
+                            </div>
+
+                            {/* Inline confirm row */}
+                            {confirmResync && !quickResyncing && (
+                              <div className="mt-1.5 mb-1">
+                                <p className="text-[11px] text-amber-700 font-medium mb-1.5">
+                                  ⚠ Kjo do të fshijë dhe ri-ngarkojë të gjitha modulet dhe mësimet. Jeni i sigurt?
+                                </p>
+                                <div className="flex gap-1.5">
+                                  <button
+                                    onClick={() => void handleQuickResync()}
+                                    className="flex-1 py-1 rounded-lg text-[11px] font-bold text-white bg-amber-500 hover:bg-amber-600 transition-colors"
+                                  >
+                                    Po, Ri-sync
+                                  </button>
+                                  <button
+                                    onClick={() => setConfirmResync(false)}
+                                    className="flex-1 py-1 rounded-lg text-[11px] font-semibold text-slate-600 bg-white hover:bg-slate-50 border border-slate-200 transition-colors"
+                                  >
+                                    Anulo
+                                  </button>
+                                </div>
+                              </div>
+                            )}
+
+                            {!confirmResync && (
+                              <p className="text-[11px] text-blue-600">
+                                {quickResyncing ? (
+                                  <span className="italic text-blue-400">Importimi në vazhdim…</span>
+                                ) : (
+                                  <>
+                                    Sinkronizuar:{' '}
+                                    <span className="font-semibold">
+                                      {new Date(contentStats.syncedAt).toLocaleDateString('sq-AL', {
+                                        day: '2-digit', month: 'short', year: 'numeric',
+                                      })}{' '}
+                                      në {new Date(contentStats.syncedAt).toLocaleTimeString('sq-AL', {
+                                        hour: '2-digit', minute: '2-digit',
+                                      })}
+                                    </span>
+                                  </>
+                                )}
+                              </p>
+                            )}
+                          </div>
+                        </div>
+                      )}
+
+                      <Link
+                        to="/teacher/modules"
+                        className="flex items-center justify-center gap-1.5 w-full py-2.5 mt-1 rounded-xl text-xs font-semibold text-blue-700 bg-blue-50 hover:bg-blue-100 border border-blue-100 transition-all group"
+                      >
+                        Shiko modulet
+                        <ExternalLink className="w-3 h-3 group-hover:translate-x-0.5 group-hover:-translate-y-0.5 transition-transform" />
+                      </Link>
+                    </div>
+                  ) : (
+                    <div className="space-y-2.5">
+                      {[1, 2, 3].map(i => (
+                        <div key={i} className="h-16 rounded-xl bg-slate-100 animate-pulse" />
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
             <div className="bg-violet-50 border border-violet-100 rounded-2xl p-5">
-              <h4 className="text-sm font-bold text-violet-800 mb-3">Tips for success</h4>
+              <h4 className="text-sm font-bold text-violet-800 mb-3">{t('courses.tipsTitle')}</h4>
               <ul className="space-y-2 text-xs text-violet-700">
-                {['Write a clear, outcome-focused title', 'Use the short description to capture attention', 'Add tags to help students find your course', 'Enable certificates to motivate completion'].map((tip, i) => (
+                {[t('courses.tip1'), t('courses.tip2'), t('courses.tip3'), t('courses.tip4')].map((tip, i) => (
                   <li key={i} className="flex items-start gap-2"><Check className="w-3.5 h-3.5 mt-0.5 text-violet-500 shrink-0" />{tip}</li>
                 ))}
               </ul>
@@ -533,6 +897,177 @@ export default function TeacherCourseForm() {
           </div>
         </div>
       </div>
+
+      {/* Headway Import Modal */}
+      <AnimatePresence>
+        {showHeadwayModal && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[70] flex items-center justify-center p-4"
+            onClick={() => !headwayImporting && setShowHeadwayModal(false)}
+          >
+            <motion.div
+              initial={{ opacity: 0, scale: 0.9, y: 24 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.9, y: 24 }}
+              transition={{ type: 'spring', stiffness: 300, damping: 28 }}
+              className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden"
+              onClick={e => e.stopPropagation()}
+            >
+              <div className="h-1.5 w-full" style={{ background: 'linear-gradient(90deg,#1565c0,#42a5f5)' }} />
+              <div className="p-6">
+                {/* Header row */}
+                <div className="flex items-center gap-3 mb-5">
+                  <div className="w-12 h-12 rounded-xl flex items-center justify-center shrink-0"
+                    style={{ background: 'linear-gradient(135deg,#1e3a5f,#1565c0)' }}>
+                    <Globe className="w-6 h-6 text-white" />
+                  </div>
+                  <div>
+                    <h3 className="text-base font-bold text-slate-900">Import Oxford Headway</h3>
+                    <p className="text-xs text-slate-500">Krijon module, mësime &amp; kuize nga kurrikula Oxford</p>
+                  </div>
+                  <button
+                    type="button"
+                    disabled={headwayImporting}
+                    onClick={() => setShowHeadwayModal(false)}
+                    className="ml-auto p-2 rounded-xl hover:bg-slate-100 transition-colors disabled:opacity-40"
+                  >
+                    <X className="w-4 h-4 text-slate-500" />
+                  </button>
+                </div>
+
+                {headwayDone ? (
+                  <div className="text-center py-4">
+                    <div className="w-16 h-16 rounded-2xl flex items-center justify-center mx-auto mb-4"
+                      style={{ background: 'linear-gradient(135deg,#d1fae5,#a7f3d0)' }}>
+                      <CheckCircle2 className="w-8 h-8 text-emerald-600" />
+                    </div>
+                    <p className="text-lg font-bold text-slate-900 mb-1">Importi u krye!</p>
+                    <p className="text-sm text-slate-500 mb-1">
+                      <span className="font-semibold text-slate-700">{headwayDone.modules}</span> module dhe{' '}
+                      <span className="font-semibold text-slate-700">{headwayDone.lessons}</span> mësime u krijuan
+                    </p>
+                    <p className="text-xs text-slate-400 mb-6">Çdo mësim lidhet me faqen zyrtare të ushtrimeve Oxford</p>
+                    <button
+                      type="button"
+                      onClick={() => setShowHeadwayModal(false)}
+                      className="px-6 py-2.5 rounded-xl text-sm font-semibold text-white transition-all"
+                      style={{ background: 'linear-gradient(135deg,#1565c0,#42a5f5)' }}
+                    >
+                      Mbyll
+                    </button>
+                  </div>
+                ) : (
+                  <div className="space-y-4">
+                    {/* Course info banner */}
+                    <div className="rounded-xl bg-slate-50 border border-slate-200 px-4 py-3 flex items-center gap-3">
+                      <BookOpen className="w-4 h-4 text-slate-400 shrink-0" />
+                      <div className="min-w-0">
+                        <p className="text-xs text-slate-500">Kursi i zgjedhur</p>
+                        <p className="text-sm font-semibold text-slate-800 truncate">{form.name || 'Ky kurs'}</p>
+                      </div>
+                    </div>
+
+                    {/* Level selector */}
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-600 mb-1.5">Zgjidh nivelin Headway</label>
+                      <div className="grid grid-cols-2 gap-2">
+                        {(['Beginner','Elementary','Pre-Intermediate','Intermediate','Upper-Intermediate','Advanced'] as const).map(lvl => (
+                          <button
+                            key={lvl}
+                            type="button"
+                            disabled={headwayImporting}
+                            onClick={() => setHeadwayLevel(lvl)}
+                            className={`px-3 py-2 rounded-xl text-xs font-semibold transition-all border ${
+                              headwayLevel === lvl
+                                ? 'border-blue-600 bg-blue-600 text-white shadow'
+                                : 'border-slate-200 bg-slate-50 text-slate-600 hover:border-blue-400 hover:bg-blue-50'
+                            } disabled:opacity-50`}
+                          >
+                            {lvl}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* Info box */}
+                    <div className="rounded-xl bg-blue-50 border border-blue-100 px-4 py-3 text-xs text-blue-800 flex items-start gap-2">
+                      <BookOpen className="w-4 h-4 text-blue-500 shrink-0 mt-0.5" />
+                      <span>
+                        {headwayLevel === 'Beginner' ? '14 njësi' : '12 njësi'} do të krijohen si module.
+                        Çdo njësi merr mësime për Gramatikë, Fjalor, Anglisht të Përditshëm dhe Audio/Video — lidhur me faqet zyrtare Oxford.
+                      </span>
+                    </div>
+
+                    {/* Warning if course already has content */}
+                    <div className="rounded-xl bg-amber-50 border border-amber-100 px-4 py-3 text-xs text-amber-800 flex items-start gap-2">
+                      <span className="text-amber-500 shrink-0 mt-0.5">⚠️</span>
+                      <span>Ky veprim shton module dhe mësime të reja në kurs. Përmbajtja ekzistuese <strong>nuk fshihet</strong>.</span>
+                    </div>
+
+                    {/* Live progress bar — visible only while importing */}
+                    {headwayImporting && headwayProgress && (
+                      <div className="rounded-xl bg-slate-50 border border-slate-200 p-4 space-y-2">
+                        <div className="flex items-center justify-between text-xs font-semibold text-slate-600 mb-1">
+                          <span className="truncate max-w-[220px]">{headwayProgress.title}</span>
+                          <span className="shrink-0 ml-2 text-blue-600">{headwayProgress.unit} / {headwayProgress.total}</span>
+                        </div>
+                        <div className="w-full h-2.5 bg-slate-200 rounded-full overflow-hidden">
+                          <motion.div
+                            className="h-full rounded-full"
+                            style={{ background: 'linear-gradient(90deg,#1565c0,#42a5f5)' }}
+                            initial={{ width: 0 }}
+                            animate={{ width: `${Math.round((headwayProgress.unit / headwayProgress.total) * 100)}%` }}
+                            transition={{ duration: 0.4, ease: 'easeOut' }}
+                          />
+                        </div>
+                        <p className="text-[10px] text-slate-400 text-center">
+                          {headwayProgress.phase === 'module' && 'Duke krijuar modulin…'}
+                          {headwayProgress.phase === 'lessons' && 'Duke shtuar mësimet dhe ushtrimet…'}
+                          {headwayProgress.phase === 'done' && '✓ Njësia u importua'}
+                        </p>
+                      </div>
+                    )}
+
+                    {headwayImporting && !headwayProgress && (
+                      <div className="flex items-center justify-center gap-2 py-3 text-sm text-slate-500">
+                        <span className="w-4 h-4 rounded-full border-2 border-blue-500 border-t-transparent animate-spin" />
+                        Duke lidhur me Oxford…
+                      </div>
+                    )}
+
+                    <div className="flex gap-3 pt-1">
+                      <button
+                        type="button"
+                        disabled={headwayImporting}
+                        onClick={() => setShowHeadwayModal(false)}
+                        className="flex-1 py-2.5 rounded-xl text-sm font-semibold text-slate-600 bg-slate-100 hover:bg-slate-200 transition-all disabled:opacity-50"
+                      >
+                        Anulo
+                      </button>
+                      <button
+                        type="button"
+                        disabled={headwayImporting}
+                        onClick={() => void handleHeadwayImport()}
+                        className="flex-1 py-2.5 rounded-xl text-sm font-semibold text-white transition-all disabled:opacity-60 flex items-center justify-center gap-2"
+                        style={{ background: 'linear-gradient(135deg,#1565c0,#42a5f5)' }}
+                      >
+                        {headwayImporting ? (
+                          <><span className="w-4 h-4 rounded-full border-2 border-white border-t-transparent animate-spin" />Duke importuar…</>
+                        ) : (
+                          <><Download className="w-4 h-4" />Importo</>
+                        )}
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </TeacherLayout>
   );
 }

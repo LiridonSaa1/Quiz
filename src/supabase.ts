@@ -2,6 +2,32 @@ import { createClient, SupabaseClient } from '@supabase/supabase-js';
 
 let supabaseInstance: SupabaseClient | null = null;
 
+const isNetworkError = (error: any) =>
+  error?.message === 'Failed to fetch' || error?.message?.includes('NetworkError');
+
+const normalizeNetworkError = (error: any) => {
+  if (isNetworkError(error)) {
+    throw new Error('Network error: Failed to fetch from Supabase. Please check if your VITE_SUPABASE_URL is correct and reachable.');
+  }
+  throw error;
+};
+
+const isRealtimeChannelLike = (value: unknown) => {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const candidate = value as { on?: unknown; subscribe?: unknown };
+  return typeof candidate.on === 'function' && typeof candidate.subscribe === 'function';
+};
+
+const shouldWrapObject = (value: unknown, prop?: string | symbol) =>
+  Boolean(
+    value &&
+      typeof value === 'object' &&
+      !Array.isArray(value) &&
+      prop !== 'supabaseUrl' &&
+      prop !== 'supabaseKey' &&
+      !isRealtimeChannelLike(value),
+  );
+
 const wrapWithNetworkErrorHandler = (obj: any): any => {
   return new Proxy(obj, {
     get: (target, prop, receiver) => {
@@ -12,33 +38,24 @@ const wrapWithNetworkErrorHandler = (obj: any): any => {
           try {
             const result = value.apply(target, args);
             
-            // If it's a promise, catch network errors
             if (result instanceof Promise) {
               return result.catch((error: any) => {
-                if (error.message === 'Failed to fetch' || error.message?.includes('NetworkError')) {
-                  throw new Error('Network error: Failed to fetch from Supabase. Please check if your VITE_SUPABASE_URL is correct and reachable.');
-                }
-                throw error;
+                return normalizeNetworkError(error);
               });
             }
             
-            // If it's an object (like .from().select()), wrap it too
-            if (result && typeof result === 'object' && !Array.isArray(result)) {
+            if (shouldWrapObject(result)) {
               return wrapWithNetworkErrorHandler(result);
             }
             
             return result;
           } catch (error: any) {
-            if (error.message === 'Failed to fetch' || error.message?.includes('NetworkError')) {
-              throw new Error('Network error: Failed to fetch from Supabase. Please check if your VITE_SUPABASE_URL is correct and reachable.');
-            }
-            throw error;
+            return normalizeNetworkError(error);
           }
         };
       }
       
-      // Recursively wrap objects (like .auth)
-      if (value && typeof value === 'object' && !Array.isArray(value) && prop !== 'supabaseUrl' && prop !== 'supabaseKey') {
+      if (shouldWrapObject(value, prop)) {
         return wrapWithNetworkErrorHandler(value);
       }
       
@@ -47,23 +64,40 @@ const wrapWithNetworkErrorHandler = (obj: any): any => {
   });
 };
 
+function validateSupabaseUrl(raw: string | undefined): string {
+  const url = (raw ?? '').trim();
+  if (!url) {
+    throw new Error(
+      'VITE_SUPABASE_URL is not set. Add it to your environment variables (must be a valid https:// URL).'
+    );
+  }
+  if (!url.startsWith('https://') && !url.startsWith('http://')) {
+    throw new Error(
+      `VITE_SUPABASE_URL is invalid: "${url}". It must start with https:// (e.g. https://your-project.supabase.co).`
+    );
+  }
+  return url;
+}
+
+function validateSupabaseKey(raw: string | undefined): string {
+  const key = (raw ?? '').trim();
+  if (!key) {
+    throw new Error(
+      'VITE_SUPABASE_ANON_KEY is not set. Add it to your environment variables.'
+    );
+  }
+  return key;
+}
+
 const getSupabase = (): SupabaseClient => {
   if (!supabaseInstance) {
-    const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
-    const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
-
-    if (!supabaseUrl || !supabaseAnonKey) {
-      const msg = 'Supabase URL and Anon Key are missing. Please add VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY to the Settings > Secrets menu in AI Studio.';
-      console.error(msg);
-      throw new Error(msg);
-    }
-
+    const supabaseUrl = validateSupabaseUrl(import.meta.env.VITE_SUPABASE_URL);
+    const supabaseAnonKey = validateSupabaseKey(import.meta.env.VITE_SUPABASE_ANON_KEY);
     supabaseInstance = createClient(supabaseUrl, supabaseAnonKey);
   }
   return supabaseInstance;
 };
 
-// Export a proxy that lazily initializes the Supabase client on first access
 export const supabase = new Proxy({} as SupabaseClient, {
   get: (target, prop, receiver) => {
     const instance = getSupabase();
@@ -76,26 +110,20 @@ export const supabase = new Proxy({} as SupabaseClient, {
           const result = bound(...args);
           if (result instanceof Promise) {
             return result.catch((error: any) => {
-              if (error.message === 'Failed to fetch' || error.message?.includes('NetworkError')) {
-                throw new Error('Network error: Failed to fetch from Supabase. Please check if your VITE_SUPABASE_URL is correct and reachable.');
-              }
-              throw error;
+              return normalizeNetworkError(error);
             });
           }
-          if (result && typeof result === 'object' && !Array.isArray(result)) {
+          if (shouldWrapObject(result)) {
             return wrapWithNetworkErrorHandler(result);
           }
           return result;
         } catch (error: any) {
-          if (error.message === 'Failed to fetch' || error.message?.includes('NetworkError')) {
-            throw new Error('Network error: Failed to fetch from Supabase. Please check if your VITE_SUPABASE_URL is correct and reachable.');
-          }
-          throw error;
+          return normalizeNetworkError(error);
         }
       };
     }
     
-    if (value && typeof value === 'object' && !Array.isArray(value)) {
+    if (shouldWrapObject(value, prop)) {
       return wrapWithNetworkErrorHandler(value);
     }
     

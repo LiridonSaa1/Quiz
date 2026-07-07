@@ -45,9 +45,18 @@ The live Supabase DB has schema differences from what some pages expect. All aff
 - `courses.student_ids` column does not exist → enrolled courses show empty for students
 - `Notification` type now includes `title: string` and `read: boolean` fields
 
+## Navigation Hierarchy (Teacher)
+- `/teacher/modules` → **Course Cards** — shows all teacher courses as cards with module/lesson counts; clicking "View Modules" navigates to `/teacher/courses/:courseId/modules`
+- `/teacher/courses/:courseId/modules` → **Module Manager** — full CRUD for modules within that course; includes Back to Courses button
+- `/teacher/lessons` → **Module Cards** — shows all modules as cards; clicking "View Lessons" navigates to `/teacher/modules/:moduleId` (ModuleDetail with lessons)
+- `/teacher/lessons/:id/content` → **Lesson Content Manager** — now includes collapsible **Headway Resources panel** (level selector + links to Test Builder, Audio, Video, Grammar) and a new **Link** content type for embedding external URLs
+- `/teacher/headway-tests` → **Headway Tests & Resources** — browse and open OUP Test Builder, audio, video, grammar and vocabulary for all 6 Headway levels (Beginner → Advanced); embedded Test Builder iframe + unit quick-links
+- `/teacher/lessons` → **OUP Headway Library tab** — tab switcher between "My Lessons" and "OUP Headway Library". The library shows all 6 levels with a unit accordion; each unit lists Grammar, Vocabulary, Everyday English, Audio, Video, and Test Builder lesson cards. Clicking a card opens a detail modal with OUP exercise link, audio/video download buttons, and a "Save as Quiz" flow for Test Builder entries (course picker → saves quiz + questions to Supabase).
+
 ## Running the App
-- **Dev**: `npm run dev` — starts Express + Vite dev server on port 5000
-- **Build**: `npm run build` — builds to `dist/`
+- **Production (workflow)**: `npm start` — serves built `dist/` via Express on port 5000. **This is what the workflow runs.**
+- **Build**: `npm run build` — builds frontend to `dist/` (required before starting). After any frontend code change: run `npm run build`, then restart the workflow.
+- **Dev mode note**: `npm run dev` (Vite middleware with HMR) must NOT be used in Replit. Vite's HMR WebSocket on port 24678 cannot connect through Replit's proxy, causing the page to get stuck on reload whenever any file in the workspace changes. Always use `npm start` after a build.
 
 ## Required Environment Variables
 Set these in Replit Secrets:
@@ -82,10 +91,34 @@ Set these in Replit Secrets:
 - `session_reactions` — Emoji reactions per session
 - `live_sessions.class_id` — Added column linking sessions to classes
 
+## Performance & Scalability Fixes (May 2026)
+- **Live quiz badge state** persisted to Supabase `platform_config` (section `rq_badge:{userId}`), restored on server start
+- **Frontend polling** reduced from 2–3s → 20s fallback; primary delivery via Supabase Realtime broadcast
+- **Realtime subscription** in `RealtimeQuizHost` now covers lobby view as well as active quiz
+- **Admin student/teacher routes** paginated — query params `page` (0-indexed) + `limit` (10–200, default 100); response includes `total`, `page`, `limit`
+- **Admin analytics cache** TTL increased from 20s → 5 min (300s)
+- **Admin reports/students + reports/roles** now have 3-minute route-level cache
+- **Chat messages** denormalized: `sender_display_name` stored in the row; `getAuthUser` now returns `displayName` from profile cache
+- **`migrations/010_chat_sender_denorm.sql`** — adds `sender_display_name`, `sender_avatar_url` to `session_chat_messages`
+- **`migrations/011_extra_indexes.sql`** — adds indexes on `quiz_attempts(student_id,status)`, `notifications(user_id,read)`, `profiles(status)`, `profiles(role,status)`, `profiles(created_at)`, `courses(status)`, `classes(status)`
+
 ## Notes
 - Port 5000 is used for both frontend and backend (Express serves Vite middleware)
 - Vite is configured with `allowedHosts: true` for Replit proxy compatibility
 - The server listens on `0.0.0.0` to be accessible in the Replit environment
+
+## Render Deployment
+This is a full-stack app (Express backend + React frontend). Do NOT deploy as a static site.
+
+**Correct Render settings:**
+- **Environment**: Node
+- **Build Command**: `npm install` (skip `npm run build` — Vite production build OOMs on free tier)
+- **Start Command**: `npm run start` (runs `node scripts/start-dev.mjs` — uses esbuild to compile the server, then Express serves the API + frontend via Vite middleware)
+- **Environment Variables**: Add all secrets from Replit Secrets panel (VITE_SUPABASE_URL, VITE_SUPABASE_ANON_KEY, SUPABASE_SERVICE_ROLE_KEY, GEMINI_API_KEY, BREVO_API_KEY, BREVO_SENDER_EMAIL, BREVO_SENDER_NAME, SESSION_SECRET). Set `PORT=10000` if Render requires a specific port.
+
+**Why NOT `npx serve -s dist`:** `dist/` is gitignored and the Vite build OOMs on Render's free tier, so `dist/` is never created. `serve` without a valid directory falls back to serving the project root, which exposes the `artifacts/mockup-sandbox/` Component Preview Server page instead of the real app.
+
+**Why the Express server works:** `scripts/start-dev.mjs` uses esbuild to bundle `server.ts` (very fast, low memory), then runs the Express server which handles all `/api/*` routes AND serves the React frontend via Vite middleware — no separate build step needed.
 
 ## Two-Factor Authentication (2FA)
 Per-role 2FA toggle in `/admin/settings` → Security tab. Admin can enable separately for Student / Teacher / Admin.

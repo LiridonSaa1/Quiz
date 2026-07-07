@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
+import { useTranslation } from 'react-i18next';
 import { useParams, Link, useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
 import { format } from 'date-fns';
@@ -29,6 +30,7 @@ interface LiveSession {
 type RecordingState = 'idle' | 'recording' | 'uploading' | 'saved';
 
 export default function LiveSessionRoom() {
+  const { t } = useTranslation();
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
 
@@ -71,11 +73,11 @@ export default function LiveSessionRoom() {
           setSavedRecordings([json.session.recording_url]);
         }
       } else {
-        toast.error('Session not found');
+        toast.error(t('liveSessions.saveFailed'));
         navigate('/admin/live-sessions');
       }
     } catch {
-      toast.error('Failed to load session');
+      toast.error(t('liveSessions.saveFailed'));
     } finally {
       setLoading(false);
     }
@@ -94,7 +96,7 @@ export default function LiveSessionRoom() {
   };
 
   const endMeeting = async () => {
-    if (!confirm('End the live session?')) return;
+    if (!confirm(t('liveSessions.deleteConfirm'))) return;
     // Stop any recording
     if (recordingState === 'recording') await stopRecording();
     // Mark session as ended
@@ -141,9 +143,9 @@ export default function LiveSessionRoom() {
         setRecordingTime(t => t + 1);
       }, 1000);
 
-      toast.success('Recording started');
+      toast.success(t('liveSessions.startRecording'));
     } catch (e: any) {
-      if (e.name !== 'NotAllowedError') toast.error('Could not start recording: ' + e.message);
+      if (e.name !== 'NotAllowedError') toast.error(t('liveSessions.saveFailed'));
     }
   };
 
@@ -198,7 +200,7 @@ export default function LiveSessionRoom() {
 
       setTimeout(() => setRecordingState('idle'), 3000);
     } catch (e: any) {
-      toast.error(e.message || 'Upload failed');
+      toast.error(e.message || t('liveSessions.saveFailed'));
       setRecordingState('idle');
     }
   };
@@ -236,7 +238,7 @@ export default function LiveSessionRoom() {
         <div className="flex items-center gap-3">
           <Link to="/admin/live-sessions"
             className="flex items-center gap-1.5 text-slate-500 hover:text-slate-700 text-sm font-medium transition-colors">
-            <ChevronLeft className="w-4 h-4" /> Live Sessions
+            <ChevronLeft className="w-4 h-4" /> {t('liveSessions.title')}
           </Link>
         </div>
 
@@ -266,13 +268,13 @@ export default function LiveSessionRoom() {
               {!meetingActive && session.status !== 'ended' && session.status !== 'cancelled' && (
                 <button onClick={startMeeting}
                   className="flex items-center gap-2 px-5 py-2.5 bg-indigo-600 text-white rounded-xl font-semibold text-sm hover:bg-indigo-700 transition-all shadow-lg shadow-indigo-200 active:scale-[0.98]">
-                  <Play className="w-4 h-4" /> Start Meeting
+                  <Play className="w-4 h-4" /> {t('liveSessions.startMeeting')}
                 </button>
               )}
               {meetingActive && (
                 <button onClick={endMeeting}
                   className="flex items-center gap-2 px-5 py-2.5 bg-rose-600 text-white rounded-xl font-semibold text-sm hover:bg-rose-700 transition-all shadow-lg shadow-rose-200 active:scale-[0.98]">
-                  <MonitorStop className="w-4 h-4" /> End Session
+                  <MonitorStop className="w-4 h-4" /> {t('liveSessions.endMeeting')}
                 </button>
               )}
             </div>

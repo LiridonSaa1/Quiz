@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import AdminLayout from '../../components/layout/AdminLayout';
 import { cn } from '../../lib/utils';
 import { toast } from 'sonner';
@@ -32,6 +33,7 @@ const STATUS_CFG: Record<DnsStatus, { label: string; bg: string; text: string; d
 };
 
 export default function AdminDomain() {
+  const { t } = useTranslation();
   const [customDomain, setCustomDomain] = useState('learn.myschool.edu');
   const [inputDomain, setInputDomain] = useState('learn.myschool.edu');
   const [sslEnabled, setSslEnabled] = useState(true);

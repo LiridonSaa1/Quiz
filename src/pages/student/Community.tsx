@@ -1,10 +1,12 @@
 import React, { useEffect, useMemo, useState } from "react";
+import { useTranslation } from 'react-i18next';
 import StudentLayout from "../../components/layout/StudentLayout";
 import LessonDiscussionBoard from "../../components/discussion/LessonDiscussionBoard";
 import { authFetch } from "../../lib/apiUrl";
 import { MessageSquare, BookOpen, Loader2, Search } from "lucide-react";
 
 export default function StudentCommunity() {
+  const { t } = useTranslation();
   const [lessons, setLessons] = useState<
     Array<{ id: string; title: string; course_title?: string | null }>
   >([]);
@@ -56,9 +58,9 @@ export default function StudentCommunity() {
               <MessageSquare className="h-5 w-5 text-white" />
             </div>
             <div>
-              <h1 className="text-2xl font-black">Community</h1>
+              <h1 className="text-2xl font-black">{t('community.title')}</h1>
               <p className="text-indigo-200 text-sm">
-                Ask questions, share answers, help your classmates
+                {t('community.askQuestions')}
               </p>
             </div>
           </div>
@@ -70,7 +72,7 @@ export default function StudentCommunity() {
             <div className="flex items-center gap-2">
               <BookOpen className="h-4 w-4 text-indigo-500" />
               <span className="text-sm font-semibold text-slate-700">
-                Choose a lesson to discuss
+                {t('community.chooseLesson')}
               </span>
               {!loading && lessons.length > 0 && (
                 <span className="text-xs text-slate-400">
@@ -85,7 +87,7 @@ export default function StudentCommunity() {
                   type="text"
                   value={search}
                   onChange={(e) => setSearch(e.target.value)}
-                  placeholder="Filter lessons…"
+                  placeholder={t('community.filterLessons')}
                   className="rounded-lg border border-slate-200 pl-8 pr-3 py-1.5 text-sm w-48 focus:outline-none focus:ring-2 focus:ring-indigo-300"
                 />
               </div>
@@ -95,16 +97,16 @@ export default function StudentCommunity() {
           {loading ? (
             <div className="flex items-center gap-2 text-slate-400 text-sm">
               <Loader2 className="h-4 w-4 animate-spin" />
-              Loading your lessons…
+              {t('community.loadingLessons')}
             </div>
           ) : lessons.length === 0 ? (
             <div className="rounded-xl border border-dashed border-slate-200 bg-slate-50 p-6 text-center">
               <BookOpen className="h-8 w-8 text-slate-300 mx-auto mb-2" />
               <p className="text-sm font-semibold text-slate-500">
-                No lessons available
+                {t('community.noLessonsAvailable')}
               </p>
               <p className="text-xs text-slate-400 mt-1">
-                Enroll in a course to access lesson discussions.
+                {t('community.enrollCourse')}
               </p>
             </div>
           ) : (
@@ -131,13 +133,13 @@ export default function StudentCommunity() {
                 ))}
                 {filtered.length === 0 && (
                   <p className="text-sm text-slate-400 py-2">
-                    No lessons match "{search}"
+                    {t('community.noMatches', { search })}
                   </p>
                 )}
               </div>
               {lessons.length > 5 && (
                 <p className="mt-2 text-xs text-slate-400">
-                  Showing {filtered.length} of {lessons.length} lessons
+                  {t('community.showingCount', { count: filtered.length, total: lessons.length })}
                 </p>
               )}
             </>
@@ -151,8 +153,8 @@ export default function StudentCommunity() {
             lessonId={lessonId}
             title={
               selectedLesson
-                ? `Discussion: ${selectedLesson.title}`
-                : "Lesson Discussion"
+                ? `${t('community.chooseLesson')}: ${selectedLesson.title}`
+                : t('community.lessonDiscussion')
             }
           />
         )}

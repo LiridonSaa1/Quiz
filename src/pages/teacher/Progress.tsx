@@ -1,7 +1,9 @@
 import React, { useEffect, useMemo, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import TeacherLayout from '../../components/layout/TeacherLayout';
 import { supabase } from '../../supabase';
 import { toast } from 'sonner';
+import GenderAvatar from '../../components/ui/GenderAvatar';
 import {
   AdminListFilterBar,
   AdminListPageShell,
@@ -12,6 +14,7 @@ import {
 import { BarChart3, Search, Users, BookOpen, FileText, TrendingUp, CheckCircle2 } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { authFetch } from '../../lib/apiUrl';
+import { useNavigate } from 'react-router-dom';
 
 interface StudentProgressRow {
   studentId: string;
@@ -21,28 +24,79 @@ interface StudentProgressRow {
   passed: number;
   passRate: number;
   avgScore: number;
+  lastAttemptDate: string | null;
+  topCourseName: string | null;
+  submissionsCount: number;
+  assignmentsTotal: number;
+  submissionRate: number;
+  avgGrade: number;
 }
 
-const AVATAR_COLORS = [
-  'from-sky-500 to-blue-600',
-  'from-violet-500 to-purple-600',
-  'from-emerald-500 to-teal-600',
-  'from-amber-500 to-orange-600',
-  'from-rose-500 to-pink-600',
-  'from-indigo-500 to-blue-600',
-];
-const getAvatarColor = (str: string) => {
-  let h = 0;
-  for (let i = 0; i < str.length; i++) h = str.charCodeAt(i) + ((h << 5) - h);
-  return AVATAR_COLORS[Math.abs(h) % AVATAR_COLORS.length];
+type ProgressStatus = 'at_risk' | 'falling_behind' | 'good' | 'excellent';
+
+function getStatus(avgScore: number, attempts: number, submissionRate?: number, submissionsCount?: number): ProgressStatus {
+  const hasQuizData = attempts > 0;
+  const hasAssignmentData = (submissionsCount ?? 0) > 0;
+  if (!hasQuizData && !hasAssignmentData) return 'at_risk';
+  const score = hasQuizData ? avgScore : (submissionRate ?? 0);
+  if (score < 50) return 'at_risk';
+  if (score < 70) return 'falling_behind';
+  if (score < 85) return 'good';
+  return 'excellent';
+}
+
+const STATUS_CFG: Record<ProgressStatus, { label: string; bg: string; text: string; dot: string; border: string }> = {
+  at_risk:        { label: 'At Risk',        bg: 'bg-red-50',    text: 'text-red-600',    dot: 'bg-red-500',    border: '#ef4444' },
+  falling_behind: { label: 'Falling Behind', bg: 'bg-orange-50', text: 'text-orange-600', dot: 'bg-orange-400', border: '#f97316' },
+  good:           { label: 'Good Standing',  bg: 'bg-emerald-50',text: 'text-emerald-700',dot: 'bg-emerald-500',border: '#10b981' },
+  excellent:      { label: 'Excellent',      bg: 'bg-blue-50',   text: 'text-blue-700',   dot: 'bg-blue-500',   border: '#3b82f6' },
 };
 
+function getGrade(avgScore: number, attempts: number, avgGrade?: number, submissionsCount?: number): string {
+  const score = attempts > 0 ? avgScore : ((submissionsCount ?? 0) > 0 && (avgGrade ?? 0) > 0 ? avgGrade! : -1);
+  if (score < 0) return '—';
+  if (score >= 97) return 'A+';
+  if (avgScore >= 93) return 'A';
+  if (avgScore >= 90) return 'A-';
+  if (avgScore >= 87) return 'B+';
+  if (avgScore >= 83) return 'B';
+  if (avgScore >= 80) return 'B-';
+  if (avgScore >= 77) return 'C+';
+  if (avgScore >= 73) return 'C';
+  if (avgScore >= 70) return 'C-';
+  if (avgScore >= 67) return 'D+';
+  if (avgScore >= 63) return 'D';
+  if (avgScore >= 60) return 'D-';
+  return 'F';
+}
+
+function formatLastSeen(dateStr: string | null): string {
+  if (!dateStr) return 'Never';
+  const date = new Date(dateStr);
+  if (isNaN(date.getTime())) return 'Never';
+  const now = new Date();
+  const diffMs = now.getTime() - date.getTime();
+  const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+  if (diffDays === 0) return 'Today';
+  if (diffDays === 1) return 'Yesterday';
+  if (diffDays < 7) return `${diffDays} days ago`;
+  const diffWeeks = Math.floor(diffDays / 7);
+  if (diffWeeks === 1) return '1 week ago';
+  if (diffWeeks < 5) return `${diffWeeks} weeks ago`;
+  const diffMonths = Math.floor(diffDays / 30);
+  if (diffMonths === 1) return '1 month ago';
+  return `${diffMonths} months ago`;
+}
+
 export default function TeacherProgress() {
+  const { t } = useTranslation();
+  const navigate = useNavigate();
   const [loading, setLoading] = useState(true);
   const [rows, setRows] = useState<StudentProgressRow[]>([]);
   const [search, setSearch] = useState('');
   const [coursesCount, setCoursesCount] = useState(0);
   const [quizzesCount, setQuizzesCount] = useState(0);
+  const [assignmentsCount, setAssignmentsCount] = useState(0);
 
   useEffect(() => {
     const fetchData = async () => {
@@ -60,6 +114,7 @@ export default function TeacherProgress() {
         setRows(Array.isArray(progressJson.rows) ? progressJson.rows : []);
         setCoursesCount(Number(progressJson.coursesCount || 0));
         setQuizzesCount(Number(progressJson.quizzesCount || 0));
+        setAssignmentsCount(Number(progressJson.assignmentsCount || 0));
       } catch (error: unknown) {
         toast.error((error as Error)?.message || 'Failed to load student progress');
       } finally {
@@ -90,12 +145,12 @@ export default function TeacherProgress() {
   }), [rows]);
 
   const statItems = [
-    { label: 'Students', value: overall.students, gradient: 'from-indigo-500 to-violet-600', shadow: 'shadow-indigo-500/25', icon: Users },
-    { label: 'Attempts', value: overall.attempts, gradient: 'from-blue-500 to-cyan-600', shadow: 'shadow-blue-500/25', icon: FileText },
-    { label: 'Avg score %', value: overall.avgScore, gradient: 'from-emerald-500 to-teal-600', shadow: 'shadow-emerald-500/25', icon: TrendingUp },
-    { label: 'Pass rate %', value: overall.passRate, gradient: 'from-amber-500 to-orange-600', shadow: 'shadow-amber-500/25', icon: CheckCircle2 },
-    { label: 'Courses', value: coursesCount, gradient: 'from-violet-500 to-purple-600', shadow: 'shadow-violet-500/25', icon: BookOpen },
-    { label: 'Quizzes', value: quizzesCount, gradient: 'from-sky-500 to-indigo-600', shadow: 'shadow-sky-500/25', icon: BarChart3 },
+    { label: 'Students',      value: overall.students,  gradient: 'from-indigo-500 to-violet-600', shadow: 'shadow-indigo-500/25', icon: Users },
+    { label: 'Quiz Attempts', value: overall.attempts,  gradient: 'from-blue-500 to-cyan-600',     shadow: 'shadow-blue-500/25',   icon: FileText },
+    { label: 'Avg Score %',   value: overall.avgScore,  gradient: 'from-emerald-500 to-teal-600',  shadow: 'shadow-emerald-500/25',icon: TrendingUp },
+    { label: 'Pass Rate %',   value: overall.passRate,  gradient: 'from-amber-500 to-orange-600',  shadow: 'shadow-amber-500/25',  icon: CheckCircle2 },
+    { label: 'Courses',       value: coursesCount,       gradient: 'from-violet-500 to-purple-600', shadow: 'shadow-violet-500/25', icon: BookOpen },
+    { label: 'Assignments',   value: assignmentsCount,   gradient: 'from-sky-500 to-indigo-600',    shadow: 'shadow-sky-500/25',    icon: BarChart3 },
   ];
 
   return (
@@ -148,58 +203,90 @@ export default function TeacherProgress() {
             <>
               <div className={ADMIN_LIST_CARD_GRID}>
                 {filtered.map((row) => {
-                  const initials = row.studentName.split(' ').map((n) => n[0]).join('').substring(0, 2).toUpperCase();
+                  const hasQuiz = row.attempts > 0;
+                  const hasAssignment = (row.submissionsCount ?? 0) > 0;
+                  const status = getStatus(row.avgScore, row.attempts, row.submissionRate, row.submissionsCount);
+                  const sc = STATUS_CFG[status];
+                  const grade = getGrade(row.avgScore, row.attempts, row.avgGrade, row.submissionsCount);
+                  const lastSeen = formatLastSeen(row.lastAttemptDate);
+                  // Use quiz pass rate if available, otherwise assignment submission rate
+                  const progressPct = hasQuiz ? row.passRate : (hasAssignment ? row.submissionRate : 0);
+                  const progressLabel = hasQuiz
+                    ? (row.topCourseName || 'Quiz attempts')
+                    : hasAssignment
+                      ? `${row.submissionsCount}/${row.assignmentsTotal || '?'} assignments submitted`
+                      : 'No activity yet';
+                  const progressBarColor = hasQuiz ? 'bg-slate-800' : hasAssignment ? 'bg-emerald-500' : 'bg-slate-300';
+
                   return (
-                    <div key={row.studentId} className={ADMIN_LIST_ITEM_CARD}>
+                    <div
+                      key={row.studentId}
+                      className={ADMIN_LIST_ITEM_CARD}
+                      style={{ borderLeftWidth: '4px', borderLeftColor: sc.border }}
+                    >
+                      {/* Header: avatar + name + status badge */}
                       <div className="flex items-start gap-3">
-                        <div
-                          className={cn(
-                            'w-12 h-12 rounded-xl bg-gradient-to-br flex items-center justify-center text-white text-sm font-bold shrink-0',
-                            getAvatarColor(row.studentName),
-                          )}
-                        >
-                          {initials}
-                        </div>
+                        <GenderAvatar name={row.studentName} size="md" />
                         <div className="min-w-0 flex-1">
-                          <p className="font-semibold text-slate-900 text-sm">{row.studentName}</p>
-                          <p className="text-xs text-slate-400 truncate">{row.studentEmail}</p>
-                        </div>
-                      </div>
-                      <div className="mt-4 space-y-2 text-xs text-slate-600 border-t border-slate-100 pt-3">
-                        <div className="flex justify-between gap-2">
-                          <span className="text-slate-400 font-semibold uppercase tracking-wider">Attempts</span>
-                          <span className="font-medium text-slate-800">{row.attempts}</span>
-                        </div>
-                        <div className="flex justify-between gap-2">
-                          <span className="text-slate-400 font-semibold uppercase tracking-wider">Passed</span>
-                          <span className="font-medium text-slate-800">{row.passed}</span>
-                        </div>
-                        <div className="flex justify-between gap-2 items-center">
-                          <span className="text-slate-400 font-semibold uppercase tracking-wider">Avg score</span>
-                          <span
-                            className={cn(
-                              'font-bold',
-                              row.avgScore >= 70 ? 'text-emerald-600' : row.avgScore >= 50 ? 'text-amber-600' : 'text-rose-600',
-                            )}
-                          >
-                            {row.attempts > 0 ? `${row.avgScore}%` : '—'}
+                          <p className="font-bold text-slate-900 text-sm leading-tight">{row.studentName}</p>
+                          <span className={cn(
+                            'inline-flex items-center gap-1.5 mt-1.5 px-2 py-0.5 rounded-full text-xs font-semibold',
+                            sc.bg, sc.text,
+                          )}>
+                            <span className={cn('w-1.5 h-1.5 rounded-full shrink-0', sc.dot)} />
+                            {sc.label}
                           </span>
                         </div>
-                        <div className="flex flex-col gap-1.5 pt-1">
-                          <span className="text-slate-400 font-semibold uppercase tracking-wider">Pass rate</span>
-                          <div className="flex items-center gap-2">
-                            <div className="flex-1 h-2 rounded-full bg-slate-100 overflow-hidden">
-                              <div
-                                className={cn(
-                                  'h-full rounded-full transition-all',
-                                  row.passRate >= 70 ? 'bg-emerald-500' : row.passRate >= 50 ? 'bg-amber-500' : 'bg-rose-500',
-                                )}
-                                style={{ width: `${row.passRate}%` }}
-                              />
-                            </div>
-                            <span className="text-xs font-bold text-slate-700 w-10 text-right">{row.passRate}%</span>
-                          </div>
+                      </div>
+
+                      {/* Progress bar — quiz pass rate or assignment submission rate */}
+                      <div className="mt-4">
+                        <div className="flex justify-between items-center mb-1.5">
+                          <span className="text-xs text-slate-500 truncate max-w-[70%]">{progressLabel}</span>
+                          <span className="text-xs font-semibold text-slate-700 shrink-0">{progressPct}%</span>
                         </div>
+                        <div className="h-1.5 rounded-full bg-slate-200 overflow-hidden">
+                          <div
+                            className={cn('h-full rounded-full transition-all', progressBarColor)}
+                            style={{ width: `${progressPct}%` }}
+                          />
+                        </div>
+                      </div>
+
+                      {/* Mini stats row */}
+                      <div className="mt-3 flex items-center gap-3 text-[10px] text-slate-400 flex-wrap">
+                        {hasQuiz && (
+                          <span className="flex items-center gap-1">
+                            <span className="font-bold text-slate-600">{row.attempts}</span> quiz attempt{row.attempts !== 1 ? 's' : ''}
+                          </span>
+                        )}
+                        {hasAssignment && (
+                          <span className="flex items-center gap-1">
+                            <span className="font-bold text-emerald-600">{row.submissionsCount}</span> assignment{row.submissionsCount !== 1 ? 's' : ''}
+                          </span>
+                        )}
+                        {!hasQuiz && !hasAssignment && (
+                          <span className="italic">No submissions yet</span>
+                        )}
+                      </div>
+
+                      {/* Bottom: Grade + Last Seen + Details */}
+                      <div className="flex items-center gap-4 mt-3 pt-3 border-t border-slate-100">
+                        <div className="shrink-0">
+                          <div className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">Grade</div>
+                          <div className="text-sm font-bold text-slate-800 mt-0.5">{grade}</div>
+                        </div>
+                        <div className="shrink-0">
+                          <div className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">Last Seen</div>
+                          <div className="text-xs font-medium text-slate-600 mt-0.5">{lastSeen}</div>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => navigate(`/teacher/progress/${encodeURIComponent(row.studentId)}`)}
+                          className="ml-auto shrink-0 px-3 py-1.5 rounded-lg text-xs font-semibold text-violet-600 hover:bg-violet-50 hover:text-violet-700 border border-violet-200 transition-colors"
+                        >
+                          Details
+                        </button>
                       </div>
                     </div>
                   );

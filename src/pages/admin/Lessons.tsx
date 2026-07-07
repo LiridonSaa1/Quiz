@@ -1,14 +1,16 @@
 import React, { useEffect, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import AdminLayout from '../../components/layout/AdminLayout';
 import {
   Plus, Search, PlayCircle, Trash2, Edit2, X, Save,
   BookOpen, Layers, Video, FileText, HelpCircle, Clock,
-  Lock, Unlock, ChevronRight,
+  Lock, Unlock, ChevronRight, Loader2,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { Lesson } from '../../types';
 import { cn } from '../../lib/utils';
 import { motion, AnimatePresence, useMotionValue, useSpring, useTransform } from 'motion/react';
+import { authFetch } from '../../lib/apiUrl';
 
 function AnimatedCount({ value }: { value: number }) {
   const motionVal = useMotionValue(0);
@@ -42,19 +44,19 @@ const slugify = (text: string) =>
   text.toLowerCase().replace(/[^\w\s-]/g, '').replace(/\s+/g, '-').replace(/-+/g, '-').trim();
 
 const LESSON_TYPES = [
-  { value: 'video', label: 'Video', icon: Video, color: 'text-blue-600', bg: 'bg-blue-50', border: 'border-blue-100', accentGradient: 'linear-gradient(90deg,#3b82f6,#60a5fa)' },
-  { value: 'text', label: 'Text', icon: FileText, color: 'text-amber-600', bg: 'bg-amber-50', border: 'border-amber-100', accentGradient: 'linear-gradient(90deg,#f59e0b,#fbbf24)' },
-  { value: 'quiz', label: 'Quiz', icon: HelpCircle, color: 'text-violet-600', bg: 'bg-violet-50', border: 'border-violet-100', accentGradient: 'linear-gradient(90deg,#7c3aed,#a78bfa)' },
+  { value: 'video', labelKey: 'lessons.video', icon: Video, color: 'text-blue-600', bg: 'bg-blue-50', border: 'border-blue-100', accentGradient: 'linear-gradient(90deg,#3b82f6,#60a5fa)' },
+  { value: 'text', labelKey: 'lessons.text', icon: FileText, color: 'text-amber-600', bg: 'bg-amber-50', border: 'border-amber-100', accentGradient: 'linear-gradient(90deg,#f59e0b,#fbbf24)' },
+  { value: 'quiz', labelKey: 'lessons.quiz', icon: HelpCircle, color: 'text-violet-600', bg: 'bg-violet-50', border: 'border-violet-100', accentGradient: 'linear-gradient(90deg,#7c3aed,#a78bfa)' },
 ];
 
 const getLessonType = (type: string) =>
   LESSON_TYPES.find(t => t.value === type) || LESSON_TYPES[0];
 
 const STAT_CONFIG = [
-  { label: 'Total Lessons', gradient: 'from-indigo-500 to-indigo-600', iconBg: 'bg-white/20', shadow: 'shadow-indigo-500/25', icon: PlayCircle },
-  { label: 'Video', gradient: 'from-blue-500 to-blue-600', iconBg: 'bg-white/20', shadow: 'shadow-blue-500/25', icon: Video },
-  { label: 'Text', gradient: 'from-amber-500 to-amber-600', iconBg: 'bg-white/20', shadow: 'shadow-amber-500/25', icon: FileText },
-  { label: 'Quiz', gradient: 'from-violet-500 to-violet-600', iconBg: 'bg-white/20', shadow: 'shadow-violet-500/25', icon: HelpCircle },
+  { labelKey: 'dashboard.totalLessons', gradient: 'from-indigo-500 to-indigo-600', iconBg: 'bg-white/20', shadow: 'shadow-indigo-500/25', icon: PlayCircle },
+  { labelKey: 'lessons.video', gradient: 'from-blue-500 to-blue-600', iconBg: 'bg-white/20', shadow: 'shadow-blue-500/25', icon: Video },
+  { labelKey: 'lessons.text', gradient: 'from-amber-500 to-amber-600', iconBg: 'bg-white/20', shadow: 'shadow-amber-500/25', icon: FileText },
+  { labelKey: 'lessons.quiz', gradient: 'from-violet-500 to-violet-600', iconBg: 'bg-white/20', shadow: 'shadow-violet-500/25', icon: HelpCircle },
 ];
 
 const emptyForm = {
@@ -70,6 +72,7 @@ const emptyForm = {
 type ModuleRow = { id: string; title: string; course_id: string };
 
 export default function AdminLessons() {
+  const { t } = useTranslation();
   const [lessons, setLessons] = useState<Lesson[]>([]);
   const [coursesForFilter, setCoursesForFilter] = useState<{ id: string; title: string }[]>([]);
   const [modules, setModules] = useState<ModuleRow[]>([]);
@@ -84,11 +87,14 @@ export default function AdminLessons() {
   const [formCourseId, setFormCourseId] = useState('');
   const [formModuleId, setFormModuleId] = useState('');
   const [saving, setSaving] = useState(false);
+  const [deleting, setDeleting] = useState<string | null>(null);
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+  const lessonToDelete = lessons.find(l => l.id === confirmDeleteId);
 
   const fetchData = async () => {
     setLoading(true);
     try {
-      const adminMetaRes = await fetch('/api/admin/modules');
+      const adminMetaRes = await authFetch('/api/admin/modules');
       const adminMeta = await adminMetaRes.json();
       if (!adminMetaRes.ok || !adminMeta.success) {
         throw new Error(adminMeta.error || `Request failed (${adminMetaRes.status})`);
@@ -178,9 +184,9 @@ export default function AdminLessons() {
   };
 
   const handleSave = async () => {
-    if (!form.title.trim()) { toast.error('Title is required'); return; }
-    if (!formCourseId) { toast.error('Please select a course'); return; }
-    if (!formModuleId) { toast.error('Please select a module'); return; }
+    if (!form.title.trim()) { toast.error(t('lessons.titleRequired')); return; }
+    if (!formCourseId) { toast.error(t('lessons.selectCourse')); return; }
+    if (!formModuleId) { toast.error(t('lessons.selectModule')); return; }
     setSaving(true);
     try {
       const payload = {
@@ -196,7 +202,7 @@ export default function AdminLessons() {
       };
 
       if (editing) {
-        const res = await fetch(`/api/admin/lessons/${editing.id}`, {
+        const res = await authFetch(`/api/admin/lessons/${editing.id}`, {
           method: 'PATCH',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -206,9 +212,9 @@ export default function AdminLessons() {
         });
         const json = await res.json();
         if (!res.ok || !json.success) throw new Error(json.error || 'Failed to update lesson');
-        toast.success('Lesson updated');
+        toast.success(t('lessons.lessonUpdated'));
       } else {
-        const res = await fetch('/api/admin/lessons', {
+        const res = await authFetch('/api/admin/lessons', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -218,7 +224,7 @@ export default function AdminLessons() {
         });
         const json = await res.json();
         if (!res.ok || !json.success) throw new Error(json.error || 'Failed to create lesson');
-        toast.success('Lesson created');
+        toast.success(t('lessons.lessonCreated'));
       }
       closeModal();
       fetchData();
@@ -231,30 +237,34 @@ export default function AdminLessons() {
   };
 
   const handleDelete = async (id: string) => {
-    if (!window.confirm('Delete this lesson? This cannot be undone.')) return;
+    if (!id) return;
+    setConfirmDeleteId(null);
+    setDeleting(id);
     try {
-      const res = await fetch(`/api/admin/lessons/${id}`, { method: 'DELETE' });
+      const res = await authFetch(`/api/admin/lessons/${id}`, { method: 'DELETE' });
       const json = await res.json();
       if (!res.ok || !json.success) throw new Error(json.error || 'Failed to delete lesson');
-      toast.success('Lesson deleted');
+      toast.success(t('lessons.lessonDeleted'));
       fetchData();
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Failed to delete lesson';
       toast.error(msg);
+    } finally {
+      setDeleting(null);
     }
   };
 
   const handleToggleStatus = async (lesson: Lesson) => {
     const newStatus = lesson.status === 'published' ? 'draft' : 'published';
     try {
-      const res = await fetch(`/api/admin/lessons/${lesson.id}`, {
+      const res = await authFetch(`/api/admin/lessons/${lesson.id}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ status: newStatus }),
       });
       const json = await res.json();
       if (!res.ok || !json.success) throw new Error(json.error || 'Failed to update status');
-      toast.success(`Lesson ${newStatus === 'published' ? 'published' : 'set to draft'}`);
+      toast.success(newStatus === 'published' ? t('lessons.lessonPublished') : t('lessons.lessonSetToDraft'));
       fetchData();
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Failed to update status';
@@ -264,14 +274,14 @@ export default function AdminLessons() {
 
   const handleToggleFreePreview = async (lesson: Lesson) => {
     try {
-      const res = await fetch(`/api/admin/lessons/${lesson.id}`, {
+      const res = await authFetch(`/api/admin/lessons/${lesson.id}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ is_free_preview: !lesson.isFreePreview }),
       });
       const json = await res.json();
       if (!res.ok || !json.success) throw new Error(json.error || 'Failed to update');
-      toast.success(lesson.isFreePreview ? 'Free preview removed' : 'Set as free preview');
+      toast.success(lesson.isFreePreview ? t('lessons.freePreviewRemoved') : t('lessons.setAsFreePreview'));
       fetchData();
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Failed to update';
@@ -332,13 +342,13 @@ export default function AdminLessons() {
                   <nav className="flex items-center gap-1.5 text-xs font-semibold mb-3" aria-label="Breadcrumb">
                     <span className="text-indigo-400 tracking-wider uppercase">Admin Portal</span>
                     <ChevronRight className="w-3.5 h-3.5 text-indigo-500/50" />
-                    <span className="text-indigo-200 tracking-wider uppercase">Lessons</span>
+                    <span className="text-indigo-200 tracking-wider uppercase">{t('lessons.title')}</span>
                   </nav>
                   <h1 className="text-3xl sm:text-4xl font-extrabold text-white tracking-tight leading-tight">
-                    Lessons
+                    {t('lessons.title')}
                   </h1>
                   <p className="text-indigo-200 text-sm mt-2 max-w-md">
-                    Create and manage lessons across all courses and modules.
+                    {t('lessons.manageDesc')}
                   </p>
                 </div>
                 <motion.button
@@ -354,7 +364,7 @@ export default function AdminLessons() {
                   }}
                 >
                   <Plus className="w-4 h-4" />
-                  New Lesson
+                  {t('lessons.newLesson')}
                 </motion.button>
               </div>
             </div>
@@ -369,8 +379,8 @@ export default function AdminLessons() {
               >
                 <BookOpen className="w-5 h-5 text-amber-500 mt-0.5 shrink-0" />
                 <div>
-                  <p className="text-sm font-semibold text-amber-800">No courses found</p>
-                  <p className="text-xs text-amber-600 mt-0.5">Add courses and modules before creating lessons.</p>
+                  <p className="text-sm font-semibold text-amber-800">{t('lessons.noCoursesFound')}</p>
+                  <p className="text-xs text-amber-600 mt-0.5">{t('lessons.noCoursesFirst')}</p>
                 </div>
               </motion.div>
             )}
@@ -425,12 +435,12 @@ export default function AdminLessons() {
                 backdropFilter: 'blur(12px)',
               }}
             >
-              <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mr-1">Filters</p>
+              <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mr-1">{t('dashboard.filters')}</p>
               <div className="relative flex-1 min-w-[180px]">
                 <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-indigo-400" />
                 <input
                   type="text"
-                  placeholder="Search lessons..."
+                  placeholder={t('lessons.searchPlaceholder')}
                   value={search}
                   onChange={e => setSearch(e.target.value)}
                   className="w-full pl-11 pr-4 py-2.5 rounded-full text-sm border border-indigo-100 bg-white/80 focus:outline-none focus:ring-2 focus:ring-violet-400 focus:border-transparent transition-all shadow-sm placeholder-slate-400"
@@ -441,7 +451,7 @@ export default function AdminLessons() {
                 onChange={e => { setCourseFilter(e.target.value); setModuleFilter('all'); }}
                 className="px-4 py-2.5 rounded-full text-sm border border-indigo-100 bg-white/80 focus:outline-none focus:ring-2 focus:ring-violet-400 focus:border-transparent transition-all shadow-sm text-slate-700"
               >
-                <option value="all">All Courses</option>
+                <option value="all">{t('lessons.allCourses')}</option>
                 {coursesForFilter.map(c => <option key={c.id} value={c.id}>{c.title}</option>)}
               </select>
               <select
@@ -449,7 +459,7 @@ export default function AdminLessons() {
                 onChange={e => setModuleFilter(e.target.value)}
                 className="px-4 py-2.5 rounded-full text-sm border border-indigo-100 bg-white/80 focus:outline-none focus:ring-2 focus:ring-violet-400 focus:border-transparent transition-all shadow-sm text-slate-700"
               >
-                <option value="all">All Modules</option>
+                <option value="all">{t('lessons.allModules')}</option>
                 {(courseFilter !== 'all' ? modules.filter(m => m.course_id === courseFilter) : modules)
                   .map(m => <option key={m.id} value={m.id}>{m.title}</option>)}
               </select>
@@ -458,7 +468,7 @@ export default function AdminLessons() {
                 onChange={e => setTypeFilter(e.target.value)}
                 className="px-4 py-2.5 rounded-full text-sm border border-indigo-100 bg-white/80 focus:outline-none focus:ring-2 focus:ring-violet-400 focus:border-transparent transition-all shadow-sm text-slate-700"
               >
-                <option value="all">All Types</option>
+                <option value="all">{t('lessons.allTypes')}</option>
                 {LESSON_TYPES.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
               </select>
               {hasActiveFilters && (
@@ -467,7 +477,7 @@ export default function AdminLessons() {
                   onClick={() => { setSearch(''); setCourseFilter('all'); setModuleFilter('all'); setTypeFilter('all'); }}
                   className="flex items-center gap-1.5 px-3 py-2 rounded-full text-xs font-semibold text-slate-500 hover:text-slate-800 hover:bg-slate-100 transition-all"
                 >
-                  <X className="w-3.5 h-3.5" /> Clear
+                  <X className="w-3.5 h-3.5" /> {t('modules.clear')}
                 </button>
               )}
             </motion.div>
@@ -487,12 +497,12 @@ export default function AdminLessons() {
               >
                 <EmptyIllustration />
                 <h3 className="text-xl font-extrabold text-slate-800 mt-6 mb-2">
-                  {hasActiveFilters ? 'No results found' : 'No lessons yet'}
+                  {hasActiveFilters ? t('lessons.noResults') : t('lessons.noLessonsYet')}
                 </h3>
                 <p className="text-slate-400 text-sm mb-8 max-w-xs text-center">
                   {hasActiveFilters
-                    ? "Try adjusting your search or filters."
-                    : 'Create your first lesson to start building content inside modules.'}
+                    ? t('lessons.tryAdjustingFilters')
+                    : t('lessons.createFirstLesson')}
                 </p>
                 {coursesForFilter.length > 0 && !hasActiveFilters && (
                   <motion.button
@@ -506,7 +516,7 @@ export default function AdminLessons() {
                       boxShadow: '0 8px 24px rgba(99,102,241,0.35)',
                     }}
                   >
-                    <Plus className="w-4 h-4" /> Create Your First Lesson
+                    <Plus className="w-4 h-4" /> {t('lessons.createYourFirstLesson')}
                   </motion.button>
                 )}
               </motion.div>
@@ -600,7 +610,7 @@ export default function AdminLessons() {
                           </button>
                           <button
                             type="button"
-                            onClick={() => handleDelete(lesson.id)}
+                            onClick={() => setConfirmDeleteId(lesson.id)}
                             className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-xl text-xs font-semibold text-red-500 bg-red-50 hover:bg-red-100 transition-all"
                           >
                             <Trash2 className="w-3.5 h-3.5" /> Delete
@@ -622,7 +632,7 @@ export default function AdminLessons() {
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4"
+            className="fixed inset-0 lg:left-60 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4"
           >
             <motion.div
               initial={{ opacity: 0, scale: 0.95, y: 16 }}
@@ -788,6 +798,51 @@ export default function AdminLessons() {
                 >
                   <Save className="w-4 h-4" />
                   {saving ? 'Saving...' : editing ? 'Save Changes' : 'Create Lesson'}
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+      <AnimatePresence>
+        {confirmDeleteId && (
+          <motion.div
+            initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+            className="fixed inset-0 lg:left-60 z-50 flex items-center justify-center p-4"
+            style={{ background: 'rgba(15,10,40,0.55)', backdropFilter: 'blur(6px)' }}
+          >
+            <motion.div
+              initial={{ scale: 0.9, opacity: 0, y: 16 }}
+              animate={{ scale: 1, opacity: 1, y: 0 }}
+              exit={{ scale: 0.9, opacity: 0, y: 16 }}
+              transition={{ type: 'spring', stiffness: 340, damping: 28 }}
+              className="bg-white rounded-2xl shadow-2xl p-6 w-full max-w-sm"
+            >
+              <div className="flex flex-col items-center text-center gap-3 mb-5">
+                <div className="w-14 h-14 rounded-2xl flex items-center justify-center shadow-lg shadow-red-500/30"
+                  style={{ background: 'linear-gradient(135deg,#fca5a5,#ef4444)' }}>
+                  <Trash2 className="w-7 h-7 text-white" />
+                </div>
+                <div>
+                  <p className="font-bold text-slate-800 text-lg">Delete lesson?</p>
+                  <p className="text-slate-500 text-sm mt-1">This action cannot be undone.</p>
+                </div>
+                {lessonToDelete && (
+                  <span className="px-3 py-1 rounded-full text-sm font-semibold bg-red-50 text-red-700 border border-red-200">
+                    {lessonToDelete.title}
+                  </span>
+                )}
+              </div>
+              <div className="flex gap-3">
+                <button type="button" onClick={() => setConfirmDeleteId(null)}
+                  className="flex-1 py-2.5 rounded-xl text-sm font-semibold text-slate-600 bg-slate-100 hover:bg-slate-200 transition-all">
+                  Cancel
+                </button>
+                <button type="button" onClick={() => confirmDeleteId && handleDelete(confirmDeleteId)}
+                  disabled={!!deleting}
+                  className="flex-1 py-2.5 rounded-xl text-sm font-bold text-white shadow-lg shadow-red-500/30 transition-all disabled:opacity-60 active:scale-95"
+                  style={{ background: 'linear-gradient(135deg,#ef4444,#dc2626)' }}>
+                  {deleting ? <Loader2 className="w-4 h-4 animate-spin mx-auto" /> : 'Yes, delete'}
                 </button>
               </div>
             </motion.div>

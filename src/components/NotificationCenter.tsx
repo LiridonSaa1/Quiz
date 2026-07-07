@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { useTranslation } from 'react-i18next';
 import { supabase } from '../supabase';
 import { Notification } from '../types';
 import { motion, AnimatePresence } from 'motion/react';
@@ -9,6 +10,7 @@ import {
 import { cn } from '../lib/utils';
 import { formatDistanceToNow } from 'date-fns';
 import { useNavigate } from 'react-router-dom';
+import { isMissingNotificationsColumnError } from '../lib/notificationSchema';
 
 const TYPE_CFG = {
   info:    { icon: Info,          bg: 'bg-blue-50',    text: 'text-blue-600',   ring: 'ring-blue-200',   dot: 'bg-blue-500',    pill: 'bg-blue-50 text-blue-700 border-blue-200'    },
@@ -20,6 +22,7 @@ const TYPE_CFG = {
 type NotifType = keyof typeof TYPE_CFG;
 
 const getTypeCfg = (type: string) => TYPE_CFG[type as NotifType] ?? TYPE_CFG.info;
+const getLegacyReadState = (row: any) => (typeof row?.read === 'boolean' ? row.read : Boolean(row?.read_at));
 
 function BellIcon({ unread, shaking }: { unread: number; shaking: boolean }) {
   return (
@@ -117,6 +120,7 @@ function NotifItem({
 }
 
 export default function NotificationCenter() {
+  const { t } = useTranslation();
   const navigate = useNavigate();
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [isOpen, setIsOpen] = useState(false);
@@ -128,6 +132,16 @@ export default function NotificationCenter() {
   const panelRef = useRef<HTMLDivElement>(null);
 
   const unreadCount = notifications.filter(n => !n.read).length;
+  const getFallbackTitle = useCallback((row: any) => {
+    const explicit = String(row?.title || '').trim();
+    if (explicit) return explicit;
+
+    const type = String(row?.type || '').toLowerCase();
+    if (type === 'success') return t('notificationCenter.filterSuccess');
+    if (type === 'warning') return t('notificationCenter.filterWarning');
+    if (type === 'error') return t('notificationCenter.filterError');
+    return t('notificationCenter.filterInfo');
+  }, [t]);
 
   const isNotificationRelevantForRole = useCallback((n: Notification, role: string) => {
     if (!role) return true;
@@ -146,49 +160,58 @@ export default function NotificationCenter() {
       .eq('user_id', userId)
       .order('created_at', { ascending: false })
       .limit(30);
-    if (error) return;
-    const mapped = data.map((d: any) => ({
+    if (error) {
+      console.error('Failed to fetch notifications:', error);
+      return;
+    }
+    const rows = Array.isArray(data) ? data : [];
+    const mapped = rows.map((d: any) => ({
       id: d.id,
       userId: d.user_id,
-      title: d.title,
-      message: d.message,
-      type: d.type,
-      read: d.read,
+      title: getFallbackTitle(d),
+      message: String(d.message || ''),
+      type: String(d.type || 'info'),
+      read: getLegacyReadState(d),
+      readAt: d.read_at || undefined,
       actionUrl: d.action_url || '',
-      createdAt: d.created_at,
+      createdAt: d.created_at || d.read_at || new Date().toISOString(),
     } as Notification));
     const currentRole = userRole || '';
     setNotifications(mapped.filter((n) => isNotificationRelevantForRole(n, currentRole)));
-  }, [isNotificationRelevantForRole, userRole]);
+  }, [getFallbackTitle, isNotificationRelevantForRole, userRole]);
 
   useEffect(() => {
     let active = true;
     const setup = async () => {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (!session || !active) return;
-      const uid = session.user.id;
-      const profile = await supabase
-        .from('profiles')
-        .select('role')
-        .eq('id', uid)
-        .maybeSingle();
-      const role = String(profile.data?.role || '').toLowerCase();
-      if (role) setUserRole(role);
-      await fetchNotifications(uid);
-      if (!active) return;
-
       try {
-        const existing = (supabase.getChannels() as any[]).find(c => c.topic === `realtime:notifications:${uid}`);
-        if (existing) await supabase.removeChannel(existing);
-      } catch {}
+        const { data: { session } } = await supabase.auth.getSession();
+        if (!session || !active) return;
+        const uid = session.user.id;
+        const profile = await supabase
+          .from('profiles')
+          .select('role')
+          .eq('id', uid)
+          .maybeSingle();
+        const role = String(profile.data?.role || '').toLowerCase();
+        if (role) setUserRole(role);
+        await fetchNotifications(uid);
+        if (!active) return;
 
-      const ch = supabase
-        .channel(`notifications:${uid}`)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'notifications', filter: `user_id=eq.${uid}` }, () => {
-          if (active) fetchNotifications(uid);
-        })
-        .subscribe();
-      if (active) channelRef.current = ch; else supabase.removeChannel(ch);
+        try {
+          const existing = (supabase.getChannels() as any[]).find(c => c.topic === `realtime:notifications:${uid}`);
+          if (existing) await supabase.removeChannel(existing);
+        } catch {}
+
+        const ch = supabase
+          .channel(`notifications:${uid}`)
+          .on('postgres_changes', { event: '*', schema: 'public', table: 'notifications', filter: `user_id=eq.${uid}` }, () => {
+            if (active) fetchNotifications(uid);
+          })
+          .subscribe();
+        if (active) channelRef.current = ch; else supabase.removeChannel(ch);
+      } catch (error) {
+        console.error('Notification channel setup failed:', error);
+      }
     };
     setup();
     return () => { active = false; if (channelRef.current) { supabase.removeChannel(channelRef.current); channelRef.current = null; } };
@@ -234,7 +257,13 @@ export default function NotificationCenter() {
   }, [isOpen]);
 
   const markAsRead = async (id: string) => {
-    await supabase.from('notifications').update({ read: true }).eq('id', id);
+    let { error } = await supabase.from('notifications').update({ read: true }).eq('id', id);
+    if (error && isMissingNotificationsColumnError(error, 'read')) {
+      ({ error } = await supabase.from('notifications').update({ read_at: new Date().toISOString() }).eq('id', id));
+    }
+    if (error) {
+      console.error('Failed to mark notification as read:', error);
+    }
     const target = notifications.find((n) => n.id === id);
     setNotifications(prev => prev.map(n => n.id === id ? { ...n, read: true } : n));
     if (target?.actionUrl) navigate(target.actionUrl);
@@ -243,7 +272,21 @@ export default function NotificationCenter() {
   const markAllAsRead = async () => {
     const { data: { session } } = await supabase.auth.getSession();
     if (!session) return;
-    await supabase.from('notifications').update({ read: true }).eq('user_id', session.user.id).eq('read', false);
+    let { error } = await supabase
+      .from('notifications')
+      .update({ read: true })
+      .eq('user_id', session.user.id)
+      .eq('read', false);
+    if (error && isMissingNotificationsColumnError(error, 'read')) {
+      ({ error } = await supabase
+        .from('notifications')
+        .update({ read_at: new Date().toISOString() })
+        .eq('user_id', session.user.id)
+        .is('read_at', null));
+    }
+    if (error) {
+      console.error('Failed to mark all notifications as read:', error);
+    }
     setNotifications(prev => prev.map(n => ({ ...n, read: true })));
   };
 
@@ -262,11 +305,11 @@ export default function NotificationCenter() {
   const visible = filter === 'all' ? notifications : notifications.filter(n => n.type === filter);
 
   const FILTER_TABS: { key: 'all' | NotifType; label: string }[] = [
-    { key: 'all',     label: 'All'     },
-    { key: 'info',    label: 'Info'    },
-    { key: 'success', label: 'Success' },
-    { key: 'warning', label: 'Warning' },
-    { key: 'error',   label: 'Error'   },
+    { key: 'all',     label: t('notificationCenter.filterAll')     },
+    { key: 'info',    label: t('notificationCenter.filterInfo')    },
+    { key: 'success', label: t('notificationCenter.filterSuccess') },
+    { key: 'warning', label: t('notificationCenter.filterWarning') },
+    { key: 'error',   label: t('notificationCenter.filterError')   },
   ];
 
   return (
@@ -305,9 +348,9 @@ export default function NotificationCenter() {
                     <Bell className="w-3.5 h-3.5 text-white" />
                   </div>
                   <div>
-                    <h3 className="text-sm font-bold text-white leading-none">Notifications</h3>
+                    <h3 className="text-sm font-bold text-white leading-none">{t('notificationCenter.title')}</h3>
                     <p className="text-[10px] text-slate-400 mt-0.5">
-                      {unreadCount > 0 ? `${unreadCount} unread` : 'All caught up!'}
+                      {unreadCount > 0 ? t('notificationCenter.unreadCount', { count: unreadCount }) : t('notificationCenter.allCaughtUp')}
                     </p>
                   </div>
                 </div>
@@ -315,13 +358,13 @@ export default function NotificationCenter() {
                   {unreadCount > 0 && (
                     <button onClick={markAllAsRead}
                       className="flex items-center gap-1 bg-white/10 hover:bg-white/20 text-white text-[10px] font-semibold px-2.5 py-1.5 rounded-lg transition-all border border-white/10">
-                      <Check className="w-3 h-3" /> Mark all read
+                      <Check className="w-3 h-3" /> {t('notificationCenter.markAllRead')}
                     </button>
                   )}
                   {notifications.length > 0 && (
                     <button onClick={clearAll}
                       className="flex items-center gap-1 bg-white/10 hover:bg-rose-500/30 text-white/70 hover:text-white text-[10px] font-semibold px-2.5 py-1.5 rounded-lg transition-all border border-white/10">
-                      <Trash2 className="w-3 h-3" /> Clear
+                      <Trash2 className="w-3 h-3" /> {t('notificationCenter.clear')}
                     </button>
                   )}
                 </div>
@@ -374,10 +417,10 @@ export default function NotificationCenter() {
                       <BellOff className="w-6 h-6 text-slate-400" />
                     </motion.div>
                     <p className="text-slate-700 font-bold text-sm">
-                      {filter === 'all' ? 'No notifications yet' : `No ${filter} notifications`}
+                      {filter === 'all' ? t('notificationCenter.noNotifications') : t('notificationCenter.noNotificationsOfType', { type: t(`notificationCenter.filter${filter.charAt(0).toUpperCase() + filter.slice(1)}`) })}
                     </p>
                     <p className="text-slate-400 text-xs mt-1">
-                      {filter === 'all' ? "You're all caught up! Check back later." : 'Try selecting a different filter.'}
+                      {filter === 'all' ? t('notificationCenter.caughtUp') : t('notificationCenter.tryOtherFilter')}
                     </p>
                   </motion.div>
                 ) : (
@@ -391,9 +434,9 @@ export default function NotificationCenter() {
             {/* Footer */}
             {notifications.length > 0 && (
               <div className="border-t border-slate-100 px-4 py-2.5 bg-slate-50/60 flex items-center justify-between">
-                <span className="text-[11px] text-slate-400 font-medium">{notifications.length} total notifications</span>
+                <span className="text-[11px] text-slate-400 font-medium">{t('notificationCenter.totalNotifications', { count: notifications.length })}</span>
                 <span className="flex items-center gap-1 text-[11px] text-slate-400 font-medium">
-                  <Sparkles className="w-3 h-3" /> Live updates on
+                  <Sparkles className="w-3 h-3" /> {t('notificationCenter.liveUpdatesOn')}
                 </span>
               </div>
             )}

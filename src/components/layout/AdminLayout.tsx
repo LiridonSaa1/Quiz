@@ -1,132 +1,137 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
-import AIChatbot from '../AIChatbot';
+import { useTranslation } from 'react-i18next';
 import { supabase } from '../../supabase';
 import { cn } from '../../lib/utils';
 import NotificationCenter from '../NotificationCenter';
-import { authFetch } from '../../lib/apiUrl';
+import BackendStatus from '../BackendStatus';
+import LanguageDropdown from '../LanguageDropdown';
+import { authFetch, authFetchJsonCached } from '../../lib/apiUrl';
 import { defaultFeatureFlags, extractFeatureFlags, FeatureFlags } from '../../lib/platformFeatures';
 import { useBranding } from '../../lib/useBranding';
-import { 
-  LayoutDashboard, 
-  BookOpen, 
-  Layers, 
-  PlayCircle, 
-  FileText, 
-  Users, 
-  ShieldCheck, 
-  School, 
-  ClipboardList, 
-  CalendarCheck, 
-  Award, 
-  Video, 
-  MessageSquare, 
-  Megaphone, 
-  BarChart3, 
-  FileBarChart, 
-  DollarSign,
-  Receipt, 
-  Settings, 
-  Palette, 
-  Lock, 
-  User, 
-  Shield, 
-  LogOut,
-  Menu,
-  X,
-  GraduationCap
+import {
+  LayoutDashboard, BookOpen, Layers, PlayCircle, FileText, Users, ShieldCheck,
+  School, ClipboardList, CalendarCheck, Award, Video, MessageSquare, Megaphone,
+  BarChart3, FileBarChart, DollarSign, Receipt, Settings, Palette, Lock,
+  User, Shield, LogOut, Menu, X, GraduationCap, Presentation, CreditCard, Clock,
+  HelpCircle
 } from 'lucide-react';
 
-const adminNavSections = [
-  {
-    title: 'MAIN',
-    items: [
-      { icon: LayoutDashboard, label: 'Dashboard', path: '/admin' },
-      { icon: BookOpen, label: 'Courses', path: '/admin/courses' },
-      { icon: Layers, label: 'Modules', path: '/admin/modules' },
-      { icon: PlayCircle, label: 'Lessons', path: '/admin/lessons' },
-      { icon: FileText, label: 'Quizzes', path: '/admin/quizzes' },
-    ]
-  },
-  {
-    title: 'USERS',
-    items: [
-      { icon: Users, label: 'Students', path: '/admin/students' },
-      { icon: ShieldCheck, label: 'Teachers', path: '/admin/teachers' },
-      { icon: School, label: 'Classes', path: '/admin/classes' },
-    ]
-  },
-  {
-    title: 'LEARNING',
-    items: [
-      { icon: ClipboardList, label: 'Assignments', path: '/admin/assignments' },
-      { icon: CalendarCheck, label: 'Attendance', path: '/admin/attendance' },
-      { icon: Award, label: 'Certificates', path: '/admin/certificates' },
-    ]
-  },
-  {
-    title: 'INTERACTION',
-    items: [
-      { icon: Video, label: 'Live Sessions', path: '/admin/live-sessions' },
-      { icon: MessageSquare, label: 'Community', path: '/admin/community' },
-      { icon: Megaphone, label: 'Announcements', path: '/admin/announcements' },
-    ]
-  },
-  {
-    title: 'ANALYTICS',
-    items: [
-      { icon: BarChart3, label: 'Analytics', path: '/admin/analytics' },
-      { icon: FileBarChart, label: 'Reports', path: '/admin/reports' },
-    ]
-  },
-  {
-    title: 'BUSINESS',
-    items: [
-      { icon: DollarSign, label: 'Payments', path: '/admin/payments' },
-      { icon: Receipt, label: 'Invoices', path: '/admin/invoices' },
-    ]
-  },
-  {
-    title: 'SYSTEM',
-    items: [
-      { icon: Settings, label: 'Settings', path: '/admin/settings' },
-      { icon: Palette, label: 'Branding', path: '/admin/branding' },
-      { icon: Lock, label: 'Roles & Permissions', path: '/admin/roles' },
-    ]
-  },
-  {
-    title: 'ACCOUNT',
-    items: [
-      { icon: User, label: 'Profile', path: '/admin/profile' },
-      { icon: Shield, label: 'Security', path: '/admin/security' },
-    ]
-  }
-];
-
 export default function AdminLayout({ children }: { children: React.ReactNode }) {
+  const { t } = useTranslation();
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [features, setFeatures] = useState<FeatureFlags>(defaultFeatureFlags);
   const branding = useBranding();
   const brandLogoUrl = branding.logoUrl;
   const location = useLocation();
   const navigate = useNavigate();
+  const overlayRef = useRef<HTMLDivElement>(null);
+
+  const adminNavSections = [
+    {
+      key: 'main',
+      items: [
+        { icon: LayoutDashboard, label: t('nav.dashboard'),       path: '/admin' },
+        { icon: BookOpen,        label: t('nav.courses'),         path: '/admin/courses' },
+        { icon: Layers,          label: t('nav.modules'),         path: '/admin/modules' },
+        { icon: PlayCircle,      label: t('nav.lessons'),         path: '/admin/lessons' },
+        { icon: FileText,        label: t('nav.quizzes'),         path: '/admin/quizzes' },
+      ]
+    },
+    {
+      key: 'users',
+      items: [
+        { icon: Users,       label: t('nav.students'),  path: '/admin/students' },
+        { icon: ShieldCheck, label: t('nav.teachers'),  path: '/admin/teachers' },
+        { icon: School,      label: t('nav.classes'),   path: '/admin/classes' },
+      ]
+    },
+    {
+      key: 'learning',
+      items: [
+        { icon: ClipboardList, label: t('nav.assignments'),    path: '/admin/assignments' },
+        { icon: Presentation,  label: t('nav.presentations'),  path: '/admin/presentations' },
+        { icon: CalendarCheck, label: t('nav.attendance'),     path: '/admin/attendance' },
+        { icon: Award,         label: t('nav.certificates'),   path: '/admin/certificates' },
+      ]
+    },
+    {
+      key: 'interaction',
+      items: [
+        { icon: Video,         label: t('nav.liveSessions'),   path: '/admin/live-sessions' },
+        { icon: MessageSquare, label: t('nav.community'),      path: '/admin/community' },
+        { icon: Megaphone,     label: t('nav.announcements'),  path: '/admin/announcements' },
+      ]
+    },
+    {
+      key: 'analytics',
+      items: [
+        { icon: BarChart3,    label: t('nav.analytics'), path: '/admin/analytics' },
+        { icon: FileBarChart, label: t('nav.reports'),   path: '/admin/reports' },
+      ]
+    },
+    {
+      key: 'business',
+      items: [
+        { icon: DollarSign,  label: t('nav.payments'),        path: '/admin/payments' },
+        { icon: Receipt,     label: t('nav.invoices'),        path: '/admin/invoices' },
+        { icon: CreditCard,  label: 'Pagesat Mujore',         path: '/admin/student-payments' },
+        { icon: Clock,       label: 'Orët e Mësuesve',        path: '/admin/teacher-hours' },
+      ]
+    },
+    {
+      key: 'system',
+      items: [
+        { icon: Settings, label: t('nav.settings'),         path: '/admin/settings' },
+        { icon: Palette,  label: t('nav.branding'),         path: '/admin/branding' },
+        { icon: Lock,     label: t('nav.rolesPermissions'), path: '/admin/roles' },
+      ]
+    },
+    {
+      key: 'account',
+      items: [
+        { icon: User,        label: t('nav.profile'),  path: '/admin/profile' },
+        { icon: Shield,      label: t('nav.security'), path: '/admin/security' },
+        { icon: HelpCircle,  label: 'Udhëzues',        path: '/admin/guide' },
+      ]
+    }
+  ];
+
+  // Close sidebar on route change (mobile)
+  useEffect(() => {
+    setIsSidebarOpen(false);
+  }, [location.pathname]);
+
+  // Close sidebar on ESC key
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setIsSidebarOpen(false); };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, []);
+
+  // Lock body scroll when sidebar is open on mobile
+  useEffect(() => {
+    if (isSidebarOpen) {
+      document.body.style.overflow = 'hidden';
+    } else {
+      document.body.style.overflow = '';
+    }
+    return () => { document.body.style.overflow = ''; };
+  }, [isSidebarOpen]);
 
   useEffect(() => {
     let mounted = true;
     const loadSettings = async () => {
       try {
-        const settingsRes = await authFetch('/api/admin/config/settings');
-        const settingsJson = await settingsRes.json();
+        const json = await authFetchJsonCached('/api/admin/config/settings', { ttlMs: 5 * 60 * 1000 });
         if (!mounted) return;
-        if (settingsRes.ok && settingsJson?.success) {
-          setFeatures(extractFeatureFlags(settingsJson.value));
-        }
-      } catch {
-        // keep default features
-      }
+        if (json?.success) setFeatures(extractFeatureFlags(json.value));
+      } catch { /* keep default features */ }
     };
     loadSettings();
-    const onSettingsUpdated = () => loadSettings();
+    const onSettingsUpdated = () => authFetchJsonCached('/api/admin/config/settings', { ttlMs: 5 * 60 * 1000, forceRefresh: true })
+      .then((json: any) => { if (mounted && json?.success) setFeatures(extractFeatureFlags(json.value)); })
+      .catch(() => {});
     window.addEventListener('settings-updated', onSettingsUpdated);
     return () => {
       mounted = false;
@@ -152,19 +157,20 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
     }))
     .filter((section) => section.items.length > 0);
 
-  const NavItem = ({ item, onClick }: { item: any; key?: React.Key; onClick?: () => void }) => (
+  const NavItem = ({ item, onClick }: { item: any; onClick?: () => void }) => (
     <Link
       to={item.path}
       onClick={onClick}
       className={cn(
-        "flex items-center gap-3 px-3 py-2 rounded-lg transition-all text-sm font-medium",
+        'flex items-center gap-3 px-3 rounded-lg transition-all text-sm font-medium',
+        'min-h-[44px] py-2',
         location.pathname === item.path
-          ? "bg-indigo-600 text-white shadow-lg shadow-indigo-900/30"
-          : "text-slate-400 hover:bg-slate-700/60 hover:text-white"
+          ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-900/30'
+          : 'text-slate-400 hover:bg-slate-700/60 hover:text-white active:bg-slate-700'
       )}
     >
       <item.icon className="w-4 h-4 shrink-0" />
-      <span>{item.label}</span>
+      <span className="truncate">{item.label}</span>
     </Link>
   );
 
@@ -172,24 +178,24 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
     <div className="flex flex-col h-full min-h-0">
       <div className="p-5 border-b border-slate-700/50 shrink-0">
         <div className="flex items-center gap-3">
-          <div className="w-9 h-9 bg-indigo-600 rounded-xl flex items-center justify-center shadow-lg shadow-indigo-900/40">
+          <div className="w-9 h-9 bg-indigo-600 rounded-xl flex items-center justify-center shadow-lg shadow-indigo-900/40 shrink-0 overflow-hidden">
             {brandLogoUrl ? (
               <img src={brandLogoUrl} alt="Brand logo" className="w-full h-full object-contain rounded-xl" />
             ) : (
               <GraduationCap className="w-5 h-5 text-white" />
             )}
           </div>
-          <div>
-            <h1 className="text-base font-bold text-white leading-tight">{branding.schoolName}</h1>
-            <p className="text-[10px] text-slate-400 font-medium uppercase tracking-widest">Admin Panel</p>
+          <div className="min-w-0">
+            <h1 className="text-base font-bold text-white leading-tight truncate">{branding.schoolName}</h1>
+            <p className="text-[10px] text-slate-400 font-medium uppercase tracking-widest">{t('nav.adminPanel')}</p>
           </div>
         </div>
       </div>
       <nav className="flex-1 min-h-0 px-3 py-4 space-y-5 overflow-y-auto scrollbar-none">
         {visibleSections.map((section) => (
-          <div key={section.title} className="space-y-0.5">
+          <div key={section.key} className="space-y-0.5">
             <h3 className="px-3 text-[9px] font-bold text-slate-500 uppercase tracking-widest mb-1.5">
-              {section.title}
+              {t(`nav.sections.${section.key}`)}
             </h3>
             {section.items.map((item) => (
               <NavItem key={item.path} item={item} onClick={onLinkClick} />
@@ -200,69 +206,102 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
       <div className="px-3 py-3 border-t border-slate-700/50 shrink-0">
         <button
           onClick={handleLogout}
-          className="flex items-center gap-3 px-3 py-2 w-full text-slate-400 hover:bg-red-500/10 hover:text-red-400 rounded-lg transition-all text-sm font-medium"
+          className="flex items-center gap-3 px-3 py-2 min-h-[44px] w-full text-slate-400 hover:bg-red-500/10 hover:text-red-400 active:bg-red-500/20 rounded-lg transition-all text-sm font-medium"
         >
-          <LogOut className="w-4 h-4" />
-          <span>Sign out</span>
+          <LogOut className="w-4 h-4 shrink-0" />
+          <span>{t('nav.signOut')}</span>
         </button>
       </div>
     </div>
   );
 
+  const currentLabel = visibleSections.flatMap(s => s.items).find(i => i.path === location.pathname)?.label || t('nav.dashboard');
+
   return (
-    <div className="min-h-screen bg-slate-50 flex">
-      {/* Sidebar Desktop */}
+    <div className="min-h-screen bg-slate-50 flex overflow-x-hidden">
+
+      {/* ── Desktop Sidebar ── */}
       <aside className="hidden lg:flex flex-col w-60 bg-slate-800 fixed h-full z-30 overflow-hidden">
         <SidebarContent />
       </aside>
 
-      {/* Top Bar Desktop */}
+      {/* ── Desktop Top Bar ── */}
       <header className="hidden lg:flex fixed top-0 right-0 left-60 h-14 bg-white border-b border-slate-200 items-center justify-between px-6 z-20">
+        <span className="text-sm font-semibold text-slate-500">{currentLabel}</span>
         <div className="flex items-center gap-2">
-          <span className="text-sm font-semibold text-slate-500">
-            {visibleSections.flatMap(s => s.items).find(i => i.path === location.pathname)?.label || 'Dashboard'}
-          </span>
+          <BackendStatus />
+          <LanguageDropdown variant="light" />
+          <NotificationCenter />
         </div>
-        <NotificationCenter />
       </header>
 
-      {/* Mobile Header */}
-      <div className="lg:hidden fixed top-0 left-0 right-0 h-14 bg-slate-800 flex items-center justify-between px-4 z-50">
-        <div className="flex items-center gap-2.5">
-          <div className="w-8 h-8 bg-indigo-600 rounded-lg flex items-center justify-center">
-            {brandLogoUrl ? (
-              <img src={brandLogoUrl} alt="Brand logo" className="w-full h-full object-contain rounded-lg" />
-            ) : (
-              <GraduationCap className="w-4 h-4 text-white" />
-            )}
+      {/* ── Mobile Header (safe-area aware) ── */}
+      <div
+        className="lg:hidden fixed top-0 left-0 right-0 z-50 bg-slate-800 flex flex-col justify-end mobile-header"
+        style={{ paddingLeft: 'env(safe-area-inset-left)', paddingRight: 'env(safe-area-inset-right)' }}
+      >
+        <div className="flex items-center justify-between px-4 h-14">
+          <div className="flex items-center gap-2.5 min-w-0">
+            <div className="w-8 h-8 bg-indigo-600 rounded-lg flex items-center justify-center shrink-0 overflow-hidden">
+              {brandLogoUrl ? (
+                <img src={brandLogoUrl} alt="Brand logo" className="w-full h-full object-contain rounded-lg" />
+              ) : (
+                <GraduationCap className="w-4 h-4 text-white" />
+              )}
+            </div>
+            <h1 className="text-base font-bold text-white truncate">{branding.schoolName}</h1>
           </div>
-          <h1 className="text-base font-bold text-white">{branding.schoolName}</h1>
-        </div>
-        <div className="flex items-center gap-3">
-          <NotificationCenter />
-          <button onClick={() => setIsSidebarOpen(!isSidebarOpen)} className="p-1.5 hover:bg-slate-700 rounded-lg">
-            {isSidebarOpen ? <X className="w-5 h-5 text-slate-300" /> : <Menu className="w-5 h-5 text-slate-300" />}
-          </button>
+          <div className="flex items-center gap-1 shrink-0">
+            <LanguageDropdown variant="dark" />
+            <NotificationCenter />
+            <button
+              onClick={() => setIsSidebarOpen(!isSidebarOpen)}
+              className="touch-target rounded-lg hover:bg-slate-700 active:bg-slate-600 transition-colors"
+              aria-label={isSidebarOpen ? 'Close menu' : 'Open menu'}
+              aria-expanded={isSidebarOpen}
+            >
+              {isSidebarOpen
+                ? <X className="w-5 h-5 text-slate-300" />
+                : <Menu className="w-5 h-5 text-slate-300" />}
+            </button>
+          </div>
         </div>
       </div>
 
-      {/* Mobile Sidebar */}
+      {/* ── Mobile Sidebar with slide animation ── */}
       {isSidebarOpen && (
-        <div className="lg:hidden fixed inset-0 bg-black/60 z-40 backdrop-blur-sm" onClick={() => setIsSidebarOpen(false)}>
-          <aside className="w-64 bg-slate-800 h-full flex flex-col overflow-hidden" onClick={e => e.stopPropagation()}>
+        <div
+          ref={overlayRef}
+          className="lg:hidden fixed inset-0 z-40 sidebar-overlay"
+          style={{ background: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(4px)', WebkitBackdropFilter: 'blur(4px)' }}
+          onClick={() => setIsSidebarOpen(false)}
+          aria-label="Close sidebar"
+        >
+          <aside
+            className="w-72 max-w-[85vw] bg-slate-800 h-full flex flex-col overflow-hidden sidebar-panel"
+            onClick={e => e.stopPropagation()}
+            aria-label="Navigation sidebar"
+          >
             <SidebarContent onLinkClick={() => setIsSidebarOpen(false)} />
           </aside>
         </div>
       )}
 
-      {/* Main Content */}
-      <main className="flex-1 lg:ml-60 px-3 sm:px-4 md:px-6 lg:px-8 py-4 pt-18 lg:pt-18" style={{paddingTop: '3.5rem'}}>
-        <div className="max-w-8xl mx-auto pt-6">
+      {/* ── Main Content ── */}
+      <main
+        className="flex-1 lg:ml-60 min-h-screen overflow-x-hidden"
+        style={{
+          paddingTop: 'var(--header-h)',
+          paddingLeft: 'env(safe-area-inset-left)',
+          paddingRight: 'env(safe-area-inset-right)',
+        }}
+      >
+        {/* Desktop top offset */}
+        <div className="hidden lg:block" style={{ height: '3.5rem' }} />
+        <div className="px-3 sm:px-4 md:px-6 lg:px-8 py-6">
           {children}
         </div>
       </main>
-
-      <AIChatbot userRole="admin" />
     </div>
   );
 }

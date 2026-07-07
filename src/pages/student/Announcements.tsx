@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from "react";
+import { useTranslation } from 'react-i18next';
 import StudentLayout from "../../components/layout/StudentLayout";
 import { authFetch } from "../../lib/apiUrl";
 import { motion, AnimatePresence } from "motion/react";
@@ -293,6 +294,7 @@ function AnnouncementCard({
 }
 
 export default function StudentAnnouncements() {
+  const { t } = useTranslation();
   const [announcements, setAnnouncements] = useState<Announcement[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
@@ -343,21 +345,21 @@ export default function StudentAnnouncements() {
           <div>
             <div className="flex items-center gap-2">
               <h1 className="text-2xl font-bold text-slate-900">
-                Announcements
+                {t('student.announcements.announcements')}
               </h1>
               {urgentCount > 0 && (
                 <span className="inline-flex items-center gap-1 px-2.5 py-1 bg-rose-100 text-rose-700 rounded-full text-xs font-bold animate-pulse">
                   <Zap className="w-3 h-3" />
-                  {urgentCount} Urgent
+                  {urgentCount} {t('student.announcements.urgent')}
                 </span>
               )}
             </div>
             <p className="text-slate-500 text-sm">
               {loading
-                ? "Loading…"
+                ? t('student.announcements.loading')
                 : announcements.length === 0
-                  ? "No announcements at the moment."
-                  : `${announcements.length} announcement${announcements.length !== 1 ? "s" : ""} from your school`}
+                  ? t('student.announcements.noAnnouncementsAtMoment')
+                  : t('student.announcements.announcementCount', { count: announcements.length }) + t('student.announcements.fromYourSchool')}
             </p>
           </div>
         </div>
@@ -369,7 +371,7 @@ export default function StudentAnnouncements() {
             <input
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              placeholder="Search announcements…"
+              placeholder={t('student.announcements.searchPlaceholder')}
               className="w-full pl-9 pr-3 py-2.5 rounded-xl border border-slate-200 bg-white text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400 focus:border-transparent"
             />
           </div>
@@ -378,17 +380,17 @@ export default function StudentAnnouncements() {
             onChange={(e) => setPriorityFilter(e.target.value)}
             className="px-3 py-2.5 rounded-xl border border-slate-200 bg-white text-sm text-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-400"
           >
-            <option value="all">All Priorities</option>
-            <option value="normal">Normal</option>
-            <option value="important">Important</option>
-            <option value="urgent">Urgent</option>
+            <option value="all">{t('student.announcements.allPriorities')}</option>
+            <option value="normal">{t('student.announcements.normal')}</option>
+            <option value="important">{t('student.announcements.important')}</option>
+            <option value="urgent">{t('student.announcements.urgent')}</option>
           </select>
           <select
             value={typeFilter}
             onChange={(e) => setTypeFilter(e.target.value)}
             className="px-3 py-2.5 rounded-xl border border-slate-200 bg-white text-sm text-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-400"
           >
-            <option value="all">All Types</option>
+            <option value="all">{t('student.announcements.allTypes')}</option>
             {Object.entries(ANN_TYPE_CFG).map(([k, v]) => (
               <option key={k} value={k}>
                 {v.emoji} {v.label}
@@ -412,11 +414,11 @@ export default function StudentAnnouncements() {
         ) : filtered.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-24 text-slate-400">
             <Megaphone className="w-14 h-14 mb-3 opacity-20" />
-            <p className="font-semibold text-base">No announcements</p>
+            <p className="font-semibold text-base">{t('student.announcements.noAnnouncementsFound')}</p>
             <p className="text-sm mt-1">
               {search || priorityFilter !== "all" || typeFilter !== "all"
-                ? "Try clearing your filters"
-                : "Check back later for updates from your school"}
+                ? t('student.announcements.tryClearing')
+                : t('student.announcements.checkBackLater')}
             </p>
           </div>
         ) : (

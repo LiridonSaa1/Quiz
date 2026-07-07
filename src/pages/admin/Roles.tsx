@@ -4,6 +4,7 @@ import { cn } from '../../lib/utils';
 import { toast } from 'sonner';
 import { authFetch } from '../../lib/apiUrl';
 import LoadingButton from '../../components/ui/LoadingButton';
+import { useTranslation } from 'react-i18next';
 import {
   ShieldCheck, Users, GraduationCap, Crown,
   Check, X, Save, Info, Lock, Unlock
@@ -197,9 +198,16 @@ const ROLE_META: Record<Role, { label: string; icon: React.ElementType; color: s
 const GROUPS = [...new Set(PERMISSIONS.map(p => p.group))];
 
 export default function AdminRoles() {
+  const { t } = useTranslation();
   const [perms, setPerms] = useState<RolePermissions>(defaultPermissions);
   const [activeRole, setActiveRole] = useState<Role>('teacher');
   const [saving, setSaving] = useState(false);
+
+  const ROLE_META_LOCAL: Record<Role, { label: string; desc: string }> = {
+    admin: { label: t('roles.meta.admin.label'), desc: t('roles.meta.admin.desc') },
+    teacher: { label: t('roles.meta.teacher.label'), desc: t('roles.meta.teacher.desc') },
+    student: { label: t('roles.meta.student.label'), desc: t('roles.meta.student.desc') },
+  };
 
   const togglePerm = (permId: string) => {
     if (activeRole === 'admin') return; // admin always has all
@@ -215,7 +223,7 @@ export default function AdminRoles() {
       ...prev,
       [activeRole]: Object.fromEntries(PERMISSIONS.map(p => [p.id, true]))
     }));
-    toast.success('All permissions granted.');
+    toast.success(t('success.saved'));
   };
 
   const revokeAll = () => {
@@ -224,7 +232,7 @@ export default function AdminRoles() {
       ...prev,
       [activeRole]: Object.fromEntries(PERMISSIONS.map(p => [p.id, false]))
     }));
-    toast.success('All permissions revoked.');
+    toast.success(t('success.saved'));
   };
 
   const handleSave = async () => {
@@ -236,11 +244,11 @@ export default function AdminRoles() {
         body: JSON.stringify({ value: { perms } }),
       });
       const json = await res.json();
-      if (!res.ok || !json?.success) throw new Error(json?.error || 'Failed to save roles');
+      if (!res.ok || !json?.success) throw new Error(json?.error || t('errors.saveFailed'));
       window.dispatchEvent(new CustomEvent('roles-updated'));
-      toast.success('Role permissions saved.');
+      toast.success(t('success.saved'));
     } catch (e: any) {
-      toast.error(e?.message || 'Failed to save role permissions');
+      toast.error(e?.message || t('errors.saveFailed'));
     } finally {
       setSaving(false);
     }
@@ -264,6 +272,7 @@ export default function AdminRoles() {
   }, []);
 
   const roleMeta = ROLE_META[activeRole];
+  const roleMetaLocal = ROLE_META_LOCAL[activeRole];
   const RoleIcon = roleMeta.icon;
   const grantedCount = PERMISSIONS.filter(p => perms[activeRole][p.id]).length;
 
@@ -273,8 +282,8 @@ export default function AdminRoles() {
         {/* Header */}
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
           <div>
-            <h1 className="text-2xl font-bold text-slate-900">Roles & Permissions</h1>
-            <p className="text-sm text-slate-500 mt-0.5">Control what each role can access and do</p>
+            <h1 className="text-2xl font-bold text-slate-900">{t('roles.title')}</h1>
+            <p className="text-sm text-slate-500 mt-0.5">{t('roles.subtitle')}</p>
           </div>
           <LoadingButton
             onClick={handleSave}
@@ -282,7 +291,7 @@ export default function AdminRoles() {
             icon={<Save className="w-4 h-4" />}
             className="bg-indigo-600 hover:bg-indigo-700 px-4 py-2.5"
           >
-            Save Changes
+            {t('roles.saveChanges')}
           </LoadingButton>
         </div>
 
@@ -290,6 +299,7 @@ export default function AdminRoles() {
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
           {(Object.entries(ROLE_META) as [Role, typeof ROLE_META[Role]][]).map(([role, meta]) => {
             const Icon = meta.icon;
+            const metaLocal = ROLE_META_LOCAL[role];
             const count = PERMISSIONS.filter(p => perms[role][p.id]).length;
             const isActive = activeRole === role;
             return (
@@ -307,12 +317,12 @@ export default function AdminRoles() {
                   </div>
                   {meta.locked && (
                     <span className="flex items-center gap-1 text-xs text-slate-400 font-medium">
-                      <Lock className="w-3 h-3" /> Locked
+                      <Lock className="w-3 h-3" /> {t('roles.locked')}
                     </span>
                   )}
                 </div>
-                <p className={cn('font-bold text-sm', isActive ? 'text-indigo-700' : 'text-slate-800')}>{meta.label}</p>
-                <p className="text-xs text-slate-400 mt-0.5">{meta.desc}</p>
+                <p className={cn('font-bold text-sm', isActive ? 'text-indigo-700' : 'text-slate-800')}>{metaLocal.label}</p>
+                <p className="text-xs text-slate-400 mt-0.5">{metaLocal.desc}</p>
                 <div className="mt-3 flex items-center gap-2">
                   <div className="flex-1 h-1.5 bg-slate-100 rounded-full overflow-hidden">
                     <div className="h-full bg-indigo-500 rounded-full transition-all" style={{ width: `${(count / PERMISSIONS.length) * 100}%` }} />
@@ -333,23 +343,23 @@ export default function AdminRoles() {
                 <RoleIcon className="w-4 h-4" />
               </div>
               <div>
-                <p className="font-bold text-slate-900 text-sm">{roleMeta.label} Permissions</p>
-                <p className="text-xs text-slate-400">{grantedCount} of {PERMISSIONS.length} permissions granted</p>
+                <p className="font-bold text-slate-900 text-sm">{t('roles.permissions', { role: roleMetaLocal.label })}</p>
+                <p className="text-xs text-slate-400">{t('roles.grantedOfTotal', { granted: grantedCount, total: PERMISSIONS.length })}</p>
               </div>
             </div>
             {activeRole !== 'admin' ? (
               <div className="flex gap-2">
                 <button onClick={revokeAll} className="inline-flex items-center gap-1.5 text-xs font-semibold text-rose-600 hover:bg-rose-50 px-3 py-1.5 rounded-lg transition-colors border border-rose-100">
-                  <X className="w-3.5 h-3.5" /> Revoke All
+                  <X className="w-3.5 h-3.5" /> {t('roles.revokeAll')}
                 </button>
                 <button onClick={grantAll} className="inline-flex items-center gap-1.5 text-xs font-semibold text-emerald-600 hover:bg-emerald-50 px-3 py-1.5 rounded-lg transition-colors border border-emerald-100">
-                  <Check className="w-3.5 h-3.5" /> Grant All
+                  <Check className="w-3.5 h-3.5" /> {t('roles.grantAll')}
                 </button>
               </div>
             ) : (
               <div className="flex items-center gap-1.5 text-xs text-violet-600 font-semibold bg-violet-50 px-3 py-1.5 rounded-lg">
                 <Lock className="w-3.5 h-3.5" />
-                Admin has all permissions
+                {t('roles.adminHasAll')}
               </div>
             )}
           </div>
@@ -418,7 +428,7 @@ export default function AdminRoles() {
         {/* Info */}
         <div className="flex items-start gap-3 bg-blue-50 border border-blue-100 rounded-xl p-4 text-sm text-blue-700">
           <Info className="w-4 h-4 mt-0.5 shrink-0" />
-          <p>Permission changes take effect the next time a user logs in. The Administrator role always has full access and cannot be restricted.</p>
+          <p>{t('roles.info')}</p>
         </div>
       </div>
     </AdminLayout>

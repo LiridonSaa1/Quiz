@@ -1,0 +1,194 @@
+Analyze the current Headway course import system and extend the importer logic so it also imports:
+
+1. Test Builder content
+2. Audio and Video Downloads
+
+from the Oxford Headway platform:
+https://elt.oup.com/student/headway/?cc=global&selLanguage=en
+
+The importer currently imports modules, lessons, quizzes, videos, and other resources, but it is NOT importing:
+- Test Builder
+- Audio and Video Downloads
+
+Your task is to fully automate these missing imports for the selected Headway level (example: Pre-Intermediate):
+https://elt.oup.com/student/headway/preint4/?cc=global&selLanguage=en
+
+GOALS:
+
+========================================
+1. IMPORT TEST BUILDER
+========================================
+
+Find the “Test Builder” section for the selected level and import all available tests/quizzes.
+
+Store them inside:
+Teacher Dashboard → Quizzes
+
+Required structure:
+- Quiz Title
+- Quiz Description
+- Quiz Type
+- Unit/Module relation
+- Questions
+- Multiple choice answers
+- Correct answers
+- Score settings
+- Time limit if available
+- Listening quiz relation if audio exists
+
+If the Test Builder contains:
+- PDF tests
+- interactive tests
+- downloadable resources
+
+store them correctly inside the quiz system.
+
+Each imported quiz must automatically connect to:
+- the correct Course
+- correct Module
+- correct Lesson (if applicable)
+
+========================================
+2. IMPORT AUDIO & VIDEO DOWNLOADS
+========================================
+
+Analyze the logic from:
+https://elt.oup.com/student/headway/preint4/download?cc=global&selLanguage=en
+
+Import ALL:
+- audio files
+- listening tracks
+- pronunciation files
+- workbook audio
+- student book audio
+- video downloads
+
+Then automatically attach them to the correct lesson.
+
+IMPORTANT:
+The system must intelligently detect:
+- Unit number
+- Lesson number
+- Media type
+- Resource category
+
+Example:
+If audio belongs to:
+Unit 5 → Lesson “Listening and Speaking”
+
+then automatically place that audio inside:
+Course → Module 5 → Specific Lesson → Lesson Media Section
+
+========================================
+3. LESSON MEDIA INTEGRATION
+========================================
+
+Inside each lesson create:
+- Audio Player
+- Video Player
+- Download Section
+- Transcript Section (if available)
+
+Supported formats:
+- mp3
+- mp4
+- pdf
+- zip
+
+Each lesson should show:
+- Lesson videos
+- Lesson audios
+- Download resources
+
+similar to the original Headway structure.
+
+========================================
+4. AUTO MATCHING SYSTEM
+========================================
+
+Build a smart matching algorithm that:
+- detects Unit numbers from titles/files
+- maps downloads to the correct lesson
+- avoids duplicates
+- updates existing lessons if media already exists
+
+Examples:
+“Unit 7_SB_Audio_01.mp3”
+→ automatically attach to Unit 7 lesson.
+
+========================================
+5. DATABASE STRUCTURE
+========================================
+
+Ensure proper database relations:
+
+Course
+ └── Modules
+      └── Lessons
+            ├── Videos
+            ├── Audios
+            ├── Downloads
+            └── Quizzes
+
+Teacher Quizzes should be separated from Student lesson quizzes.
+
+========================================
+6. IMPORTER IMPROVEMENTS
+========================================
+
+Add:
+- retry handling
+- scraping validation
+- duplicate prevention
+- failed import logs
+- progress indicator
+- background queue processing
+
+Large imports should NOT freeze the app.
+
+========================================
+7. UI REQUIREMENTS
+========================================
+
+Inside Teacher Panel:
+- show imported quizzes
+- edit quizzes
+- assign quizzes to students/classes
+
+Inside Lesson Page:
+- audio player
+- video player
+- downloadable resources
+- media preview
+- loading states
+
+========================================
+8. PERFORMANCE
+========================================
+
+Optimize importer:
+- async/background jobs
+- batched inserts
+- caching
+- avoid unnecessary requests
+- store files efficiently
+
+Do NOT save duplicate files into storage.
+
+========================================
+9. FINAL RESULT
+========================================
+
+After selecting a Headway level:
+(example: Pre-Intermediate)
+
+the system should automatically import:
+- modules
+- lessons
+- videos
+- audios
+- downloads
+- test builder quizzes
+- lesson resources
+
+and organize everything exactly like the Oxford Headway learning structure.

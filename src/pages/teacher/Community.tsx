@@ -1,10 +1,12 @@
 import React, { useEffect, useMemo, useState } from "react";
+import { useTranslation } from 'react-i18next';
 import TeacherLayout from "../../components/layout/TeacherLayout";
 import LessonDiscussionBoard from "../../components/discussion/LessonDiscussionBoard";
 import { authFetch } from "../../lib/apiUrl";
 import { MessageSquare, BookOpen, Loader2, Search } from "lucide-react";
 
 export default function TeacherCommunity() {
+  const { t } = useTranslation();
   const [lessons, setLessons] = useState<
     Array<{ id: string; title: string; course_title?: string | null }>
   >([]);

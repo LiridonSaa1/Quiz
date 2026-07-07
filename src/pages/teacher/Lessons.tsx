@@ -1,20 +1,23 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useMemo, useRef } from 'react';
+import { useTranslation } from 'react-i18next';
 import { supabase } from '../../supabase';
 import { authFetch, readApiError } from '../../lib/apiUrl';
 import LoadingButton from '../../components/ui/LoadingButton';
 import { resolveTeacherIdCandidates } from '../../lib/teacherScope';
 import TeacherLayout from '../../components/layout/TeacherLayout';
+import HeadwayDriveImport from '../../components/teacher/HeadwayDriveImport';
 import {
   Plus, Search, PlayCircle, Trash2, Edit2, X, Save,
   BookOpen, Layers, Video, FileText, HelpCircle, Clock,
-  Lock, Unlock, ChevronRight, Calendar, AlertTriangle
+  Lock, Unlock, ChevronRight, ChevronLeft, Calendar, AlertTriangle,
+  Headphones, Film, Music, HardDrive, Pause, Play,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { Lesson } from '../../types';
 import { cn } from '../../lib/utils';
 import { motion, AnimatePresence, useMotionValue, useSpring, useTransform } from 'motion/react';
 import { useTeacherPermissions } from '../../lib/teacherPermissions';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 
 function AnimatedCount({ value }: { value: number }) {
   const motionVal = useMotionValue(0);
@@ -72,17 +75,21 @@ const emptyForm = {
 };
 
 export default function TeacherLessons() {
+  const { t } = useTranslation();
+  const navigate = useNavigate();
   const [lessons, setLessons] = useState<Lesson[]>([]);
   const [courses, setCourses] = useState<any[]>([]);
   const [modules, setModules] = useState<any[]>([]);
   const [classes, setClasses] = useState<Array<{ id: string; name: string; course_id: string | null }>>([]);
   const [userId, setUserId] = useState('');
   const [loading, setLoading] = useState(true);
+  const [activeTab, setActiveTab] = useState<'myLessons' | 'headway'>('myLessons');
   const [search, setSearch] = useState('');
   const [courseFilter, setCourseFilter] = useState('all');
   const [classFilter, setClassFilter] = useState('all');
   const [moduleFilter, setModuleFilter] = useState('all');
   const [typeFilter, setTypeFilter] = useState('all');
+  const [currentPage, setCurrentPage] = useState(1);
   const [showModal, setShowModal] = useState(false);
   const [editing, setEditing] = useState<Lesson | null>(null);
   const [form, setForm] = useState(emptyForm);
@@ -91,6 +98,14 @@ export default function TeacherLessons() {
   const [saving, setSaving] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<Lesson | null>(null);
   const [deleting, setDeleting] = useState(false);
+  const [hwSummary, setHwSummary] = useState<Record<string, { audioCount: number; videoCount: number; level: string; unit: number | null }>>({});
+  const [hwPopup, setHwPopup] = useState<string | null>(null); // lessonId with popup open
+  const popupRef = useRef<HTMLDivElement>(null);
+  const [showDriveModal, setShowDriveModal] = useState(false);
+  const [drivePopupMedia, setDrivePopupMedia] = useState<Array<{ id: string; name: string; url: string | null; type: 'audio' | 'video'; mime_type: string | null }>>([]);
+  const [drivePopupLoading, setDrivePopupLoading] = useState(false);
+  const [playingMedia, setPlayingMedia] = useState<string | null>(null);
+  const audioRefs = useRef<Record<string, HTMLAudioElement | null>>({});
   const { can } = useTeacherPermissions();
 
   const fetchData = async () => {
@@ -165,7 +180,7 @@ export default function TeacherLessons() {
       }
 
       setModules(modulesData);
-      setLessons(lessonsData.map((l: any) => ({
+      const mappedLessons = lessonsData.map((l: any) => ({
         id: l.id,
         courseId: l.course_id,
         moduleId: l.module_id,
@@ -180,9 +195,24 @@ export default function TeacherLessons() {
         publishAt: (l.publish_at as string | null | undefined) ?? null,
         createdAt: l.created_at,
         updatedAt: l.updated_at,
-      })));
+      }));
+      setLessons(mappedLessons);
+
+      // Fetch Headway media summary for all lessons (one batch call)
+      if (mappedLessons.length > 0) {
+        try {
+          const summaryRes = await authFetch('/api/teacher/headway/lessons-media-summary', {
+            method: 'POST',
+            body: JSON.stringify({ lessonIds: mappedLessons.map((l: any) => l.id) }),
+          });
+          if (summaryRes.ok) {
+            const summaryJson = await summaryRes.json().catch(() => ({}));
+            if (summaryJson?.summary) setHwSummary(summaryJson.summary);
+          }
+        } catch { /* ignore — non-critical */ }
+      }
     } catch {
-      toast.error('Failed to load lessons');
+      toast.error(t('lessons.failedToLoadLessons'));
     } finally {
       setLoading(false);
     }
@@ -190,8 +220,84 @@ export default function TeacherLessons() {
 
   useEffect(() => { fetchData(); }, []);
 
+  // Close popup when clicking outside
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (popupRef.current && !popupRef.current.contains(e.target as Node)) setHwPopup(null);
+    };
+    if (hwPopup) document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [hwPopup]);
+
+  // Fetch actual media files when a lesson popup opens
+  useEffect(() => {
+    if (!hwPopup) { setDrivePopupMedia([]); return; }
+    let cancelled = false;
+    setDrivePopupLoading(true);
+    setDrivePopupMedia([]);
+    setPlayingMedia(null);
+    authFetch(`/api/teacher/headway/lesson-media/${encodeURIComponent(hwPopup)}`)
+      .then(r => r.ok ? r.json() : { files: [] })
+      .then((json: any) => { if (!cancelled) setDrivePopupMedia(json?.files ?? []); })
+      .catch(() => { if (!cancelled) setDrivePopupMedia([]); })
+      .finally(() => { if (!cancelled) setDrivePopupLoading(false); });
+    return () => { cancelled = true; };
+  }, [hwPopup]);
+  useEffect(() => { setCurrentPage(1); }, [search, courseFilter, classFilter, moduleFilter, typeFilter]);
+
   const modulesForCourse = (courseId: string) =>
     modules.filter(m => m.course_id === courseId);
+
+  const getCourseTitle = (courseId: string) =>
+    courses.find((c: any) => c.id === courseId)?.name ||
+    courses.find((c: any) => c.id === courseId)?.title || 'Unknown Course';
+
+  const ITEMS_PER_PAGE = 12;
+
+  const availableTypes = useMemo(() => {
+    const contextLessons = lessons.filter(l => {
+      const matchCourse = courseFilter === 'all' || l.courseId === courseFilter;
+      const selectedClass = classes.find((c) => c.id === classFilter);
+      const matchClass = classFilter === 'all' || (selectedClass?.course_id ? l.courseId === selectedClass.course_id : false);
+      const matchModule = moduleFilter === 'all' || l.moduleId === moduleFilter;
+      return matchCourse && matchClass && matchModule;
+    });
+    return LESSON_TYPES.filter(lt => contextLessons.some(l => l.type === lt.value));
+  }, [lessons, courseFilter, classFilter, moduleFilter]);
+
+  useEffect(() => {
+    if (typeFilter !== 'all' && availableTypes.length > 0 && !availableTypes.some(t => t.value === typeFilter)) {
+      setTypeFilter('all');
+    }
+  }, [availableTypes, typeFilter]);
+
+  const filtered = lessons.filter(l => {
+    const matchSearch = l.title.toLowerCase().includes(search.toLowerCase()) ||
+      (l.shortDescription || '').toLowerCase().includes(search.toLowerCase());
+    const matchCourse = courseFilter === 'all' || l.courseId === courseFilter;
+    const selectedClass = classes.find((c) => c.id === classFilter);
+    const matchClass = classFilter === 'all' || (selectedClass?.course_id ? l.courseId === selectedClass.course_id : false);
+    const matchModule = moduleFilter === 'all' || l.moduleId === moduleFilter;
+    const matchType = typeFilter === 'all' || l.type === typeFilter;
+    return matchSearch && matchCourse && matchClass && matchModule && matchType;
+  });
+
+  const totalPages = Math.ceil(filtered.length / ITEMS_PER_PAGE);
+  const paginatedFiltered = filtered.slice((currentPage - 1) * ITEMS_PER_PAGE, currentPage * ITEMS_PER_PAGE);
+
+  const groupedLessons = (() => {
+    const map = new Map<string, typeof paginatedFiltered>();
+    paginatedFiltered.forEach(l => {
+      const key = l.courseId || 'unknown';
+      if (!map.has(key)) map.set(key, []);
+      map.get(key)!.push(l);
+    });
+    return Array.from(map.entries()).map(([courseId, items]) => ({
+      courseId,
+      courseTitle: getCourseTitle(courseId),
+      items,
+    }));
+  })();
 
   const openCreate = () => {
     setEditing(null);
@@ -239,10 +345,10 @@ export default function TeacherLessons() {
   };
 
   const handleSave = async () => {
-    if (!form.title.trim()) { toast.error('Title is required'); return; }
-    if (!formCourseId) { toast.error('Please select a course'); return; }
-    if (!formModuleId) { toast.error('Please select a module'); return; }
-    if (form.autoPublish && !form.publishAt) { toast.error('Please select a date and time for auto-publish'); return; }
+    if (!form.title.trim()) { toast.error(t('lessons.titleRequired')); return; }
+    if (!formCourseId) { toast.error(t('lessons.selectCourse')); return; }
+    if (!formModuleId) { toast.error(t('lessons.selectModule')); return; }
+    if (form.autoPublish && !form.publishAt) { toast.error(t('lessons.selectPublishDateTime')); return; }
     setSaving(true);
     try {
       const payload: Record<string, unknown> = {
@@ -268,19 +374,19 @@ export default function TeacherLessons() {
           body: JSON.stringify(payload),
         });
         if (!res.ok) throw new Error(await readApiError(res));
-        toast.success('Lesson updated');
+        toast.success(t('lessons.lessonUpdated'));
       } else {
         const res = await authFetch('/api/teacher/lessons', {
           method: 'POST',
           body: JSON.stringify(payload),
         });
         if (!res.ok) throw new Error(await readApiError(res));
-        toast.success('Lesson created');
+        toast.success(t('lessons.lessonCreated'));
       }
       closeModal();
       fetchData();
     } catch (err: any) {
-      toast.error(err.message || 'Failed to save lesson');
+      toast.error(err.message || t('lessons.failedToSaveLesson'));
     } finally {
       setSaving(false);
     }
@@ -296,11 +402,11 @@ export default function TeacherLessons() {
     try {
       const res = await authFetch(`/api/teacher/lessons/${deleteTarget.id}?userId=${encodeURIComponent(userId)}`, { method: 'DELETE' });
       if (!res.ok) throw new Error(await readApiError(res));
-      toast.success('Lesson deleted');
+      toast.success(t('lessons.lessonDeleted'));
       setDeleteTarget(null);
       fetchData();
     } catch (err: any) {
-      toast.error(err.message || 'Failed to delete lesson');
+      toast.error(err.message || t('lessons.failedToDeleteLesson'));
     } finally {
       setDeleting(false);
     }
@@ -314,9 +420,9 @@ export default function TeacherLessons() {
         body: JSON.stringify({ status: newStatus }),
       });
       if (!res.ok) throw new Error(await readApiError(res));
-      toast.success(`Lesson ${newStatus === 'published' ? 'published' : 'set to draft'}`);
+      toast.success(newStatus === 'published' ? t('lessons.lessonPublished') : t('lessons.lessonSetToDraft'));
       fetchData();
-    } catch (err: any) { toast.error(err.message || 'Failed to update status'); }
+    } catch (err: any) { toast.error(err.message || t('lessons.failedToUpdateStatus')); }
   };
 
   const handleToggleFreePreview = async (lesson: Lesson) => {
@@ -326,24 +432,13 @@ export default function TeacherLessons() {
         body: JSON.stringify({ is_free_preview: !lesson.isFreePreview }),
       });
       if (!res.ok) throw new Error(await readApiError(res));
-      toast.success(lesson.isFreePreview ? 'Free preview removed' : 'Set as free preview');
+      toast.success(lesson.isFreePreview ? t('lessons.freePreviewRemoved') : t('lessons.setAsFreePreview'));
       fetchData();
-    } catch (err: any) { toast.error(err.message || 'Failed to update'); }
+    } catch (err: any) { toast.error(err.message || t('lessons.failedToUpdateStatus')); }
   };
 
   const getModuleName = (id: string) =>
     modules.find(m => m.id === id)?.title || 'Unknown';
-
-  const filtered = lessons.filter(l => {
-    const matchSearch = l.title.toLowerCase().includes(search.toLowerCase()) ||
-      (l.shortDescription || '').toLowerCase().includes(search.toLowerCase());
-    const matchCourse = courseFilter === 'all' || l.courseId === courseFilter;
-    const selectedClass = classes.find((c) => c.id === classFilter);
-    const matchClass = classFilter === 'all' || (selectedClass?.course_id ? l.courseId === selectedClass.course_id : false);
-    const matchModule = moduleFilter === 'all' || l.moduleId === moduleFilter;
-    const matchType = typeFilter === 'all' || l.type === typeFilter;
-    return matchSearch && matchCourse && matchClass && matchModule && matchType;
-  });
 
   const stats = [
     { ...STAT_CONFIG[0], value: lessons.length },
@@ -373,28 +468,40 @@ export default function TeacherLessons() {
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-6">
                 <div>
                   <nav className="flex items-center gap-1.5 text-xs font-semibold mb-3" aria-label="Breadcrumb">
-                    <span className="text-indigo-400 tracking-wider uppercase">Teacher Portal</span>
+                    <span className="text-indigo-400 tracking-wider uppercase">{t('lessons.teacherPortal')}</span>
                     <ChevronRight className="w-3.5 h-3.5 text-indigo-500/50" />
-                    <span className="text-indigo-200 tracking-wider uppercase">Lessons</span>
+                    <span className="text-indigo-200 tracking-wider uppercase">{t('lessons.title')}</span>
                   </nav>
-                  <h1 className="text-3xl sm:text-4xl font-extrabold text-white tracking-tight leading-tight">Lessons</h1>
+                  <h1 className="text-3xl sm:text-4xl font-extrabold text-white tracking-tight leading-tight">{t('lessons.title')}</h1>
                   <p className="text-indigo-200 text-sm mt-2 max-w-md">
-                    Create and manage lesson content inside your modules to guide students through your courses.
+                    {t('lessons.createManageContent')}
                   </p>
                 </div>
-                {can('actions.teacher.lessons.manage') && (
+                <div className="flex items-center gap-3 flex-wrap">
                   <motion.button
-                    onClick={openCreate}
-                    disabled={courses.length === 0}
+                    onClick={() => setShowDriveModal(true)}
                     whileHover={{ scale: 1.04, y: -2 }}
                     whileTap={{ scale: 0.97 }}
-                    className="inline-flex items-center gap-2 px-6 py-3 rounded-2xl font-bold text-sm text-white shrink-0 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
-                    style={{ background: 'linear-gradient(135deg, #818cf8 0%, #a78bfa 100%)', boxShadow: '0 8px 32px rgba(139,92,246,0.45), 0 2px 8px rgba(0,0,0,0.15)' }}
+                    className="inline-flex items-center gap-2 px-5 py-3 rounded-2xl font-bold text-sm text-white shrink-0 transition-all"
+                    style={{ background: 'linear-gradient(135deg, #0ea5e9 0%, #6366f1 100%)', boxShadow: '0 8px 32px rgba(99,102,241,0.35)' }}
                   >
-                    <Plus className="w-4 h-4" />
-                    New Lesson
+                    <HardDrive className="w-4 h-4" />
+                    Drive Library
                   </motion.button>
-                )}
+                  {can('actions.teacher.lessons.manage') && (
+                    <motion.button
+                      onClick={openCreate}
+                      disabled={courses.length === 0}
+                      whileHover={{ scale: 1.04, y: -2 }}
+                      whileTap={{ scale: 0.97 }}
+                      className="inline-flex items-center gap-2 px-6 py-3 rounded-2xl font-bold text-sm text-white shrink-0 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
+                      style={{ background: 'linear-gradient(135deg, #818cf8 0%, #a78bfa 100%)', boxShadow: '0 8px 32px rgba(139,92,246,0.45), 0 2px 8px rgba(0,0,0,0.15)' }}
+                    >
+                      <Plus className="w-4 h-4" />
+                      {t('lessons.newLesson')}
+                    </motion.button>
+                  )}
+                </div>
               </div>
             </div>
           </div>
@@ -402,18 +509,20 @@ export default function TeacherLessons() {
           {/* Main Content */}
           <div className="px-6 sm:px-8 lg:px-10 py-8 space-y-8 bg-slate-50">
 
-            {!loading && courses.length === 0 && (
+
+
+            {activeTab === 'myLessons' && !loading && courses.length === 0 && (
               <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className="bg-amber-50 border border-amber-200 rounded-2xl p-5 flex items-start gap-3">
                 <BookOpen className="w-5 h-5 text-amber-500 mt-0.5 shrink-0" />
                 <div>
-                  <p className="text-sm font-semibold text-amber-800">No courses found</p>
-                  <p className="text-xs text-amber-600 mt-0.5">You need at least one course and module before adding lessons.</p>
+                  <p className="text-sm font-semibold text-amber-800">{t('lessons.noCoursesFound')}</p>
+                  <p className="text-xs text-amber-600 mt-0.5">{t('lessons.needCourseModule')}</p>
                 </div>
               </motion.div>
             )}
 
-            {/* Stats */}
-            <motion.div className="grid grid-cols-2 lg:grid-cols-4 gap-4" initial="hidden" animate="visible" variants={{ hidden: {}, visible: { transition: { staggerChildren: 0.08 } } }}>
+            {/* Stats — My Lessons tab only */}
+            {activeTab === 'myLessons' && <motion.div className="grid grid-cols-2 lg:grid-cols-4 gap-4" initial="hidden" animate="visible" variants={{ hidden: {}, visible: { transition: { staggerChildren: 0.08 } } }}>
               {stats.map((stat) => {
                 const Icon = stat.icon;
                 return (
@@ -436,38 +545,39 @@ export default function TeacherLessons() {
                   </motion.div>
                 );
               })}
-            </motion.div>
+            </motion.div>}
 
+            {activeTab === 'myLessons' && (<>
             {/* Filter Bar */}
             <motion.div
               initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.2, duration: 0.4 }}
               className="rounded-2xl border border-white/60 shadow-sm p-4 flex flex-wrap gap-3 items-center"
               style={{ background: 'rgba(255,255,255,0.75)', backdropFilter: 'blur(12px)' }}
             >
-              <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mr-1">Filters</p>
+              <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mr-1">{t('lessons.filters')}</p>
               <div className="relative flex-1 min-w-[180px]">
                 <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-indigo-400" />
                 <input
-                  type="text" placeholder="Search lessons..." value={search}
+                  type="text" placeholder={t('lessons.searchLessons')} value={search}
                   onChange={e => setSearch(e.target.value)}
                   className="w-full pl-11 pr-4 py-2.5 rounded-full text-sm border border-indigo-100 bg-white/80 focus:outline-none focus:ring-2 focus:ring-violet-400 focus:border-transparent transition-all shadow-sm placeholder-slate-400"
                 />
               </div>
               <select value={courseFilter} onChange={e => { setCourseFilter(e.target.value); setClassFilter('all'); setModuleFilter('all'); }}
                 className="px-4 py-2.5 rounded-full text-sm border border-indigo-100 bg-white/80 focus:outline-none focus:ring-2 focus:ring-violet-400 focus:border-transparent transition-all shadow-sm text-slate-700">
-                <option value="all">All Courses</option>
+                <option value="all">{t('lessons.allCourses')}</option>
                 {courses.map(c => <option key={c.id} value={c.id}>{c.name || c.title}</option>)}
               </select>
               {classes.length > 0 && (
                 <select value={classFilter} onChange={e => { setClassFilter(e.target.value); setModuleFilter('all'); }}
                   className="px-4 py-2.5 rounded-full text-sm border border-indigo-100 bg-white/80 focus:outline-none focus:ring-2 focus:ring-violet-400 focus:border-transparent transition-all shadow-sm text-slate-700">
-                  <option value="all">All Classes</option>
+                  <option value="all">{t('lessons.allClasses')}</option>
                   {classes.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
                 </select>
               )}
               <select value={moduleFilter} onChange={e => setModuleFilter(e.target.value)}
                 className="px-4 py-2.5 rounded-full text-sm border border-indigo-100 bg-white/80 focus:outline-none focus:ring-2 focus:ring-violet-400 focus:border-transparent transition-all shadow-sm text-slate-700">
-                <option value="all">All Modules</option>
+                <option value="all">{t('lessons.allModules')}</option>
                 {(classFilter !== 'all'
                   ? (() => { const sc = classes.find(c => c.id === classFilter); return sc?.course_id ? modules.filter(m => m.course_id === sc.course_id) : []; })()
                   : courseFilter !== 'all' ? modules.filter(m => m.course_id === courseFilter) : modules
@@ -475,8 +585,10 @@ export default function TeacherLessons() {
               </select>
               <select value={typeFilter} onChange={e => setTypeFilter(e.target.value)}
                 className="px-4 py-2.5 rounded-full text-sm border border-indigo-100 bg-white/80 focus:outline-none focus:ring-2 focus:ring-violet-400 focus:border-transparent transition-all shadow-sm text-slate-700">
-                <option value="all">All Types</option>
-                {LESSON_TYPES.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
+                <option value="all">{t('lessons.allTypes')}</option>
+                {(availableTypes.length > 0 ? availableTypes : LESSON_TYPES).map(lt => (
+                  <option key={lt.value} value={lt.value}>{lt.label}</option>
+                ))}
               </select>
               {hasActiveFilters && (
                 <button onClick={() => { setSearch(''); setCourseFilter('all'); setClassFilter('all'); setModuleFilter('all'); setTypeFilter('all'); }}
@@ -486,105 +598,331 @@ export default function TeacherLessons() {
               )}
             </motion.div>
 
-            {/* Lessons Grid */}
+            {/* Lessons Grid — individual lesson cards */}
             {loading ? (
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-5">
-                {Array(6).fill(0).map((_, i) => <div key={i} className="bg-white rounded-2xl border border-slate-100 h-52 animate-pulse" />)}
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                {Array(9).fill(0).map((_, i) => <div key={i} className="bg-white rounded-2xl border border-slate-100 h-44 animate-pulse" />)}
               </div>
             ) : filtered.length === 0 ? (
               <motion.div initial={{ opacity: 0, scale: 0.97 }} animate={{ opacity: 1, scale: 1 }} transition={{ duration: 0.4 }}
                 className="py-20 flex flex-col items-center justify-center bg-white rounded-2xl border border-dashed border-indigo-200 shadow-sm">
                 <EmptyIllustration />
-                <h3 className="text-xl font-extrabold text-slate-800 mt-6 mb-2">{hasActiveFilters ? 'No results found' : 'No lessons yet'}</h3>
+                <h3 className="text-xl font-extrabold text-slate-800 mt-6 mb-2">
+                  {modules.length === 0 ? 'No modules yet' : 'No lessons found'}
+                </h3>
                 <p className="text-slate-400 text-sm mb-8 max-w-xs text-center">
-                  {hasActiveFilters ? "Try adjusting your search or filters." : 'Create your first lesson to start building content inside your modules.'}
+                  {modules.length === 0
+                    ? 'Create modules first under a course, then add lessons inside each module.'
+                    : hasActiveFilters
+                      ? 'Try adjusting your filters or search query.'
+                      : 'No lessons have been created yet. Click "+ New Lesson" to get started.'}
                 </p>
-                {courses.length > 0 && !hasActiveFilters && can('actions.teacher.lessons.manage') && (
-                  <motion.button onClick={openCreate} whileHover={{ scale: 1.04, y: -2 }} whileTap={{ scale: 0.97 }}
+                {modules.length === 0 ? (
+                  <Link to="/teacher/modules"
                     className="inline-flex items-center gap-2 px-6 py-3 rounded-2xl font-bold text-sm text-white"
                     style={{ background: 'linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%)', boxShadow: '0 8px 24px rgba(99,102,241,0.35)' }}>
-                    <Plus className="w-4 h-4" /> Create Your First Lesson
-                  </motion.button>
-                )}
+                    <Layers className="w-4 h-4" /> Go to Courses & Modules
+                  </Link>
+                ) : hasActiveFilters ? (
+                  <button onClick={() => { setSearch(''); setCourseFilter('all'); setClassFilter('all'); setModuleFilter('all'); setTypeFilter('all'); }}
+                    className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl font-bold text-sm text-indigo-600 border border-indigo-200 hover:bg-indigo-50 transition-colors">
+                    <X className="w-4 h-4" /> Clear filters
+                  </button>
+                ) : null}
               </motion.div>
             ) : (
-              <motion.div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-5"
-                initial="hidden" animate="visible" variants={{ hidden: {}, visible: { transition: { staggerChildren: 0.07 } } }}>
-                {filtered.map((lesson) => {
+              <motion.div
+                className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4"
+                initial="hidden" animate="visible"
+                variants={{ hidden: {}, visible: { transition: { staggerChildren: 0.05 } } }}>
+                {paginatedFiltered.map((lesson) => {
                   const lt = getLessonType(lesson.type);
+                  const LIcon = lt.icon;
                   const isPublished = lesson.status === 'published';
+                  const modTitle = getModuleName(lesson.moduleId);
+                  const courseTitle = getCourseTitle(lesson.courseId);
+                  const hw = hwSummary[lesson.id] ?? null;
+                  const hasHwMedia = hw && (hw.audioCount > 0 || hw.videoCount > 0);
                   return (
-                    <motion.div key={lesson.id}
-                      variants={{ hidden: { opacity: 0, y: 20 }, visible: { opacity: 1, y: 0, transition: { duration: 0.35, ease: 'easeOut' } } }}
-                      whileHover={{ y: -4, boxShadow: '0 20px 48px rgba(99,102,241,0.15)' }}
-                      className="group relative bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden flex flex-col transition-all duration-200">
-                      <div className="h-1.5 w-full" style={{ background: lt.accentGradient }} />
-                      <div className="p-5 flex flex-col flex-1">
-                        <div className="flex items-start justify-between mb-3">
-                          <div className={cn('w-11 h-11 rounded-xl flex items-center justify-center shrink-0', lt.bg)}>
-                            <lt.icon className={cn('w-5 h-5', lt.color)} />
+                    <motion.div
+                      key={lesson.id}
+                      variants={{ hidden: { opacity: 0, y: 16 }, visible: { opacity: 1, y: 0, transition: { duration: 0.3, ease: 'easeOut' } } }}
+                      whileHover={{ y: -3, boxShadow: '0 16px 40px rgba(99,102,241,0.12)' }}
+                      className="group bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden flex flex-col transition-all duration-200">
+                      {/* Accent bar */}
+                      <div className="h-1 w-full" style={{ background: lt.accentGradient }} />
+                      <div className="p-4 flex flex-col flex-1 gap-3">
+                        {/* Header row */}
+                        <div className="flex items-start gap-3">
+                          <div className={cn('w-10 h-10 rounded-xl flex items-center justify-center shrink-0', lt.bg)}>
+                            <LIcon className={cn('w-5 h-5', lt.color)} />
                           </div>
-                          {can('actions.teacher.lessons.manage') && (
-                            <button onClick={() => handleToggleStatus(lesson)}
-                              className={cn('inline-flex items-center gap-1.5 text-[11px] font-bold px-2.5 py-1 rounded-full transition-all',
-                                isPublished ? 'bg-emerald-50 text-emerald-700 hover:bg-emerald-100' : 'bg-amber-50 text-amber-700 hover:bg-amber-100')}>
-                              <span className={cn('w-1.5 h-1.5 rounded-full', isPublished ? 'bg-emerald-500' : 'bg-amber-500')} />
-                              {isPublished ? 'Published' : 'Draft'}
-                            </button>
-                          )}
+                          <div className="flex-1 min-w-0">
+                            <h3 className="text-sm font-bold text-slate-900 line-clamp-2 leading-snug">{lesson.title}</h3>
+                            <p className="text-[11px] text-slate-400 mt-0.5 truncate">{modTitle} · {courseTitle}</p>
+                          </div>
+                          <span className={cn(
+                            'shrink-0 inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full',
+                            isPublished ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-700'
+                          )}>
+                            <span className={cn('w-1.5 h-1.5 rounded-full', isPublished ? 'bg-emerald-500' : 'bg-amber-500')} />
+                            {isPublished ? 'Live' : 'Draft'}
+                          </span>
                         </div>
-                        <h3 className="text-sm font-bold text-slate-900 line-clamp-2 mb-1 leading-snug">{lesson.title}</h3>
-                        {lesson.shortDescription && <p className="text-xs text-slate-400 line-clamp-2 mb-2">{lesson.shortDescription}</p>}
-                        <div className="mt-auto space-y-2 pt-3 border-t border-slate-50">
-                          <div className="flex items-center justify-between">
-                            <span className="inline-flex items-center gap-1.5 px-2 py-1 bg-slate-100 text-slate-600 rounded-lg text-[11px] font-medium max-w-[130px] truncate">
-                              <Layers className="w-3 h-3 shrink-0" />
-                              <span className="truncate">{getModuleName(lesson.moduleId)}</span>
+
+                        {/* Meta row */}
+                        <div className="flex items-center gap-3 text-[11px] text-slate-400">
+                          {lesson.durationMinutes > 0 && (
+                            <span className="flex items-center gap-1">
+                              <Clock className="w-3 h-3" /> {lesson.durationMinutes}m
                             </span>
-                            <span className="inline-flex items-center gap-1 text-xs text-slate-400">
-                              <Clock className="w-3.5 h-3.5 text-slate-300" />
-                              {lesson.durationMinutes} min
+                          )}
+                          <span className={cn('px-2 py-0.5 rounded-full font-semibold uppercase tracking-wide text-[10px]', lt.bg, lt.color, lt.border, 'border')}>
+                            {lt.label}
+                          </span>
+                          {lesson.isFreePreview && (
+                            <span className="flex items-center gap-1 text-violet-500 font-semibold">
+                              <Unlock className="w-3 h-3" /> Free
                             </span>
-                          </div>
-                          <div className="flex items-center gap-1">
-                            {can('actions.teacher.lessons.manage') && (
-                              <button onClick={() => handleToggleFreePreview(lesson)}
-                                title={lesson.isFreePreview ? 'Remove free preview' : 'Set as free preview'}
-                                className={cn('inline-flex items-center gap-1.5 text-[11px] font-semibold px-2.5 py-1 rounded-full transition-all',
-                                  lesson.isFreePreview ? 'bg-emerald-50 text-emerald-700 hover:bg-emerald-100' : 'bg-slate-100 text-slate-400 hover:bg-slate-200')}>
-                                {lesson.isFreePreview ? <Unlock className="w-3 h-3" /> : <Lock className="w-3 h-3" />}
-                                {lesson.isFreePreview ? 'Free Preview' : 'Locked'}
+                          )}
+
+                          {/* Headway media badge */}
+                          {hasHwMedia && (
+                            <div className="relative ml-auto">
+                              <button
+                                onClick={() => setHwPopup(prev => prev === lesson.id ? null : lesson.id)}
+                                className="flex items-center gap-1 px-2 py-0.5 rounded-full bg-violet-100 text-violet-700 font-bold text-[10px] hover:bg-violet-200 transition-colors border border-violet-200"
+                                title="Headway media imported"
+                              >
+                                <Music className="w-2.5 h-2.5" />
+                                HW Media
                               </button>
-                            )}
+
+                              {/* Popup */}
+                              {hwPopup === lesson.id && (
+                                <div
+                                  ref={popupRef}
+                                  className="absolute bottom-full right-0 mb-2 z-50 bg-white rounded-2xl shadow-xl border border-slate-200 p-4 w-64"
+                                  onClick={e => e.stopPropagation()}
+                                >
+                                  {/* Header */}
+                                  <div className="flex items-center gap-2 mb-3">
+                                    <div className="w-7 h-7 rounded-xl bg-gradient-to-br from-violet-500 to-fuchsia-500 flex items-center justify-center">
+                                      <Music className="w-3.5 h-3.5 text-white" />
+                                    </div>
+                                    <div>
+                                      <p className="text-xs font-bold text-slate-800">Headway Media</p>
+                                      {hw.level && (
+                                        <p className="text-[10px] text-slate-500">
+                                          Level: <span className="font-semibold text-violet-600">{hw.level}</span>
+                                          {hw.unit ? ` · Unit ${hw.unit}` : ''}
+                                        </p>
+                                      )}
+                                    </div>
+                                  </div>
+
+                                  {/* Counts */}
+                                  <div className="grid grid-cols-2 gap-2 mb-3">
+                                    <div className={cn(
+                                      'rounded-xl p-2.5 text-center border',
+                                      hw.audioCount > 0 ? 'bg-violet-50 border-violet-200' : 'bg-slate-50 border-slate-200 opacity-50'
+                                    )}>
+                                      <Headphones className={cn('w-4 h-4 mx-auto mb-1', hw.audioCount > 0 ? 'text-violet-600' : 'text-slate-400')} />
+                                      <p className={cn('text-sm font-black', hw.audioCount > 0 ? 'text-violet-700' : 'text-slate-400')}>{hw.audioCount}</p>
+                                      <p className="text-[10px] text-slate-500 font-medium">Audio</p>
+                                    </div>
+                                    <div className={cn(
+                                      'rounded-xl p-2.5 text-center border',
+                                      hw.videoCount > 0 ? 'bg-rose-50 border-rose-200' : 'bg-slate-50 border-slate-200 opacity-50'
+                                    )}>
+                                      <Film className={cn('w-4 h-4 mx-auto mb-1', hw.videoCount > 0 ? 'text-rose-600' : 'text-slate-400')} />
+                                      <p className={cn('text-sm font-black', hw.videoCount > 0 ? 'text-rose-700' : 'text-slate-400')}>{hw.videoCount}</p>
+                                      <p className="text-[10px] text-slate-500 font-medium">Video</p>
+                                    </div>
+                                  </div>
+
+                                  {/* Actual media files list */}
+                                  <div className="mt-3 space-y-1.5 max-h-56 overflow-y-auto">
+                                    {drivePopupLoading ? (
+                                      <div className="flex items-center gap-2 text-[11px] text-slate-400 py-2">
+                                        <span className="w-3 h-3 border-2 border-slate-300 border-t-violet-500 rounded-full animate-spin" />
+                                        Loading media…
+                                      </div>
+                                    ) : drivePopupMedia.length === 0 ? (
+                                      <p className="text-[10px] text-slate-400 italic py-1">No media files linked yet. Import from Drive Library.</p>
+                                    ) : (
+                                      drivePopupMedia.map((f) => {
+                                        const isPlaying = playingMedia === f.id;
+                                        const isVid = f.type === 'video';
+                                        const streamUrl = `/api/teacher/headway/drive-stream/${f.id.startsWith('drive_') ? f.id.slice(6) : f.id}`;
+                                        const driveId = (() => {
+                                          if (f.url?.includes('id=')) return f.url.split('id=')[1];
+                                          return f.id;
+                                        })();
+                                        const proxyUrl = `/api/teacher/headway/drive-stream/${driveId}`;
+                                        return (
+                                          <div key={f.id} className={cn(
+                                            'flex items-center gap-2 px-2.5 py-1.5 rounded-xl border transition-all',
+                                            isVid ? 'bg-rose-50 border-rose-100' : 'bg-violet-50 border-violet-100'
+                                          )}>
+                                            {isVid
+                                              ? <Film className="w-3 h-3 text-rose-500 shrink-0" />
+                                              : <Music className="w-3 h-3 text-violet-500 shrink-0" />
+                                            }
+                                            <p className="text-[10px] text-slate-700 font-medium flex-1 truncate" title={f.name}>{f.name}</p>
+                                            {!isVid && (
+                                              <button
+                                                onClick={() => {
+                                                  const audio = audioRefs.current[f.id];
+                                                  if (!audio) {
+                                                    const a = new Audio(proxyUrl);
+                                                    audioRefs.current[f.id] = a;
+                                                    a.play().catch(() => {});
+                                                    a.onended = () => setPlayingMedia(null);
+                                                    setPlayingMedia(f.id);
+                                                  } else if (isPlaying) {
+                                                    audio.pause();
+                                                    setPlayingMedia(null);
+                                                  } else {
+                                                    audio.currentTime = 0;
+                                                    audio.play().catch(() => {});
+                                                    setPlayingMedia(f.id);
+                                                  }
+                                                }}
+                                                className={cn(
+                                                  'w-5 h-5 rounded-full flex items-center justify-center shrink-0 transition-colors',
+                                                  isPlaying ? 'bg-violet-500 text-white' : 'bg-violet-200 text-violet-700 hover:bg-violet-300'
+                                                )}
+                                              >
+                                                {isPlaying
+                                                  ? <Pause className="w-2 h-2" />
+                                                  : <Play className="w-2 h-2 ml-px" />
+                                                }
+                                              </button>
+                                            )}
+                                            {isVid && (
+                                              <a
+                                                href={proxyUrl}
+                                                target="_blank"
+                                                rel="noopener noreferrer"
+                                                className="w-5 h-5 rounded-full bg-rose-200 text-rose-700 hover:bg-rose-300 flex items-center justify-center shrink-0 transition-colors"
+                                              >
+                                                <Play className="w-2 h-2 ml-px" />
+                                              </a>
+                                            )}
+                                          </div>
+                                        );
+                                      })
+                                    )}
+                                  </div>
+                                </div>
+                              )}
+                            </div>
+                          )}
+                        </div>
+
+                        {/* Action buttons */}
+                        {can('actions.teacher.lessons.manage') && (
+                          <div className="flex items-center gap-1.5 pt-1 border-t border-slate-50">
+                            <Link
+                              to={`/teacher/lessons/${encodeURIComponent(lesson.id)}/content`}
+                              className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-xl text-xs font-bold text-white transition-all hover:opacity-90"
+                              style={{ background: 'linear-gradient(135deg,#6366f1,#8b5cf6)' }}>
+                              <BookOpen className="w-3.5 h-3.5" /> Manage
+                            </Link>
+                            <button
+                              onClick={() => openEdit(lesson)}
+                              className="p-2 rounded-xl bg-slate-50 text-slate-500 hover:bg-indigo-50 hover:text-indigo-600 transition-colors border border-slate-100"
+                              title="Edit lesson">
+                              <Edit2 className="w-3.5 h-3.5" />
+                            </button>
+                            <button
+                              onClick={() => void handleToggleFreePreview(lesson)}
+                              className={cn('p-2 rounded-xl border transition-colors', lesson.isFreePreview ? 'bg-violet-50 text-violet-600 border-violet-100 hover:bg-violet-100' : 'bg-slate-50 text-slate-400 border-slate-100 hover:bg-slate-100')}
+                              title={lesson.isFreePreview ? 'Remove free preview' : 'Set as free preview'}>
+                              {lesson.isFreePreview ? <Unlock className="w-3.5 h-3.5" /> : <Lock className="w-3.5 h-3.5" />}
+                            </button>
+                            <button
+                              onClick={() => handleDelete(lesson)}
+                              className="p-2 rounded-xl bg-slate-50 text-slate-400 hover:bg-rose-50 hover:text-rose-600 transition-colors border border-slate-100"
+                              title="Delete lesson">
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
                           </div>
-                        </div>
-                        <div className="flex items-center gap-2 pt-3 sm:opacity-0 sm:group-hover:opacity-100 opacity-100 transition-all duration-200 sm:translate-y-1 sm:group-hover:translate-y-0">
-                          <Link to={`/teacher/lessons/${encodeURIComponent(lesson.id)}/content`}
-                            className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-xl text-xs font-semibold text-slate-700 bg-slate-100 hover:bg-slate-200 transition-all">
-                            Manage Content
-                          </Link>
-                          {can('actions.teacher.lessons.manage') && (
-                            <button onClick={() => openEdit(lesson)}
-                              className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-xl text-xs font-semibold text-indigo-600 bg-indigo-50 hover:bg-indigo-100 transition-all">
-                              <Edit2 className="w-3.5 h-3.5" /> Edit
-                            </button>
-                          )}
-                          {can('actions.teacher.lessons.manage') && (
-                            <button onClick={() => handleDelete(lesson)}
-                              className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-xl text-xs font-semibold text-red-500 bg-red-50 hover:bg-red-100 transition-all">
-                              <Trash2 className="w-3.5 h-3.5" /> Delete
-                            </button>
-                          )}
-                        </div>
+                        )}
                       </div>
                     </motion.div>
                   );
                 })}
               </motion.div>
             )}
+
+            {/* Pagination */}
+            {!loading && totalPages > 1 && (
+              <div className="flex items-center justify-center gap-2 pt-4">
+                <button onClick={() => { setCurrentPage(p => Math.max(1, p - 1)); window.scrollTo({ top: 0, behavior: 'smooth' }); }} disabled={currentPage === 1}
+                  className="w-9 h-9 flex items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-500 hover:bg-slate-50 disabled:opacity-40 transition-all shadow-sm">
+                  <ChevronLeft className="w-4 h-4" />
+                </button>
+                {Array.from({ length: totalPages }, (_, i) => i + 1).map(page => (
+                  <button key={page} onClick={() => { setCurrentPage(page); window.scrollTo({ top: 0, behavior: 'smooth' }); }}
+                    className={cn('w-9 h-9 flex items-center justify-center rounded-xl text-sm font-semibold transition-all',
+                      currentPage === page ? 'bg-indigo-600 text-white shadow-md' : 'border border-slate-200 bg-white text-slate-600 hover:bg-slate-50')}>
+                    {page}
+                  </button>
+                ))}
+                <button onClick={() => { setCurrentPage(p => Math.min(totalPages, p + 1)); window.scrollTo({ top: 0, behavior: 'smooth' }); }} disabled={currentPage === totalPages}
+                  className="w-9 h-9 flex items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-500 hover:bg-slate-50 disabled:opacity-40 transition-all shadow-sm">
+                  <ChevronRight className="w-4 h-4" />
+                </button>
+              </div>
+            )}
+            </>)}
           </div>
         </div>
       </div>
+
+      {/* ── Drive Library Modal ────────────────────────────────────────────── */}
+      <AnimatePresence>
+        {showDriveModal && (
+          <motion.div
+            initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[60] flex items-center justify-center p-4"
+            onClick={() => setShowDriveModal(false)}
+          >
+            <motion.div
+              initial={{ opacity: 0, scale: 0.94, y: 24 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.94, y: 24 }}
+              transition={{ type: 'spring', stiffness: 280, damping: 26 }}
+              className="bg-white rounded-3xl shadow-2xl w-full max-w-2xl flex flex-col overflow-hidden"
+              onClick={e => e.stopPropagation()}
+            >
+              {/* Header */}
+              <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100 shrink-0"
+                style={{ background: 'linear-gradient(135deg,#0ea5e9 0%,#6366f1 100%)' }}>
+                <div className="flex items-center gap-3">
+                  <div className="w-9 h-9 rounded-xl bg-white/20 flex items-center justify-center">
+                    <HardDrive className="w-5 h-5 text-white" />
+                  </div>
+                  <div>
+                    <h2 className="text-base font-bold text-white">Drive Library</h2>
+                    <p className="text-xs text-white/70">Import & manage Headway audio and video from Google Drive</p>
+                  </div>
+                </div>
+                <button onClick={() => setShowDriveModal(false)}
+                  className="p-2 rounded-xl bg-white/10 hover:bg-white/20 transition-colors">
+                  <X className="w-5 h-5 text-white" />
+                </button>
+              </div>
+              {/* Body */}
+              <div className="overflow-y-auto max-h-[80vh] p-6">
+                <HeadwayDriveImport />
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* Edit/Create Modal */}
       <AnimatePresence>
@@ -793,37 +1131,56 @@ export default function TeacherLessons() {
       <AnimatePresence>
         {deleteTarget && (
           <motion.div
-            initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-            className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[60] flex items-center justify-center p-4"
-            onClick={() => !deleting && setDeleteTarget(null)}>
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[60] flex items-center justify-center p-4"
+            style={{ background: 'rgba(15,10,40,0.55)', backdropFilter: 'blur(6px)' }}
+            onClick={() => !deleting && setDeleteTarget(null)}
+          >
             <motion.div
-              initial={{ opacity: 0, scale: 0.9, y: 24 }} animate={{ opacity: 1, scale: 1, y: 0 }}
-              exit={{ opacity: 0, scale: 0.9, y: 24 }} transition={{ type: 'spring', stiffness: 300, damping: 28 }}
-              className="bg-white rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden"
-              onClick={e => e.stopPropagation()}>
-              <div className="h-1.5 w-full" style={{ background: 'linear-gradient(90deg,#ef4444,#f97316)' }} />
-              <div className="p-6">
-                <div className="flex justify-center mb-4">
-                  <div className="w-16 h-16 rounded-2xl flex items-center justify-center"
-                    style={{ background: 'linear-gradient(135deg,#fee2e2,#fecaca)' }}>
-                    <AlertTriangle className="w-8 h-8 text-red-500" />
+              initial={{ opacity: 0, scale: 0.92, y: 24 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.92, y: 24 }}
+              transition={{ type: 'spring', stiffness: 340, damping: 28 }}
+              className="relative w-full max-w-sm overflow-hidden rounded-2xl shadow-2xl"
+              onClick={e => e.stopPropagation()}
+            >
+              <div className="absolute inset-0 pointer-events-none" style={{ background: 'linear-gradient(135deg,#fef2f2 0%,#fff5f5 60%,#fff 100%)' }} />
+              <div className="absolute top-0 right-0 w-40 h-40 rounded-full pointer-events-none opacity-30" style={{ background: 'radial-gradient(circle,#fca5a5,transparent 70%)', transform: 'translate(30%,-30%)' }} />
+              <div className="relative px-7 pt-8 pb-7 flex flex-col items-center text-center gap-5">
+                <div className="relative">
+                  <div className="w-16 h-16 rounded-2xl flex items-center justify-center shadow-lg" style={{ background: 'linear-gradient(135deg,#ef4444,#dc2626)' }}>
+                    <Trash2 className="w-7 h-7 text-white" />
                   </div>
+                  <div className="absolute -inset-1 rounded-2xl opacity-20 blur-md" style={{ background: 'linear-gradient(135deg,#ef4444,#dc2626)' }} />
                 </div>
-                <h3 className="text-center text-lg font-bold text-slate-900 mb-1">Delete this lesson?</h3>
-                <p className="text-center text-sm text-slate-500 mb-1">
-                  <span className="font-semibold text-slate-700">"{deleteTarget.title}"</span>
-                </p>
-                <p className="text-center text-xs text-red-400 font-medium mb-6">This cannot be undone.</p>
-                <div className="flex gap-3">
-                  <button type="button" disabled={deleting} onClick={() => setDeleteTarget(null)}
-                    className="flex-1 py-2.5 rounded-xl text-sm font-semibold text-slate-600 bg-slate-100 hover:bg-slate-200 transition-all disabled:opacity-50">
+                <div className="space-y-1.5">
+                  <h2 className="text-[17px] font-bold text-slate-800 leading-snug">Delete this lesson?</h2>
+                  <p className="text-sm font-semibold text-red-600 bg-red-50 border border-red-100 rounded-lg px-3 py-1.5 inline-block max-w-[220px] truncate">
+                    "{deleteTarget.title}"
+                  </p>
+                  <p className="text-sm text-slate-500 leading-relaxed pt-1">
+                    This lesson and all its content will be <span className="font-semibold text-slate-700">permanently deleted</span>. This action cannot be undone.
+                  </p>
+                </div>
+                <div className="w-full flex gap-3 pt-1">
+                  <button
+                    type="button"
+                    disabled={deleting}
+                    onClick={() => setDeleteTarget(null)}
+                    className="flex-1 py-2.5 rounded-xl text-sm font-semibold text-slate-600 bg-slate-100 hover:bg-slate-200 transition-all disabled:opacity-50"
+                  >
                     Cancel
                   </button>
-                  <button type="button" disabled={deleting} onClick={() => void confirmDelete()}
-                    className="flex-1 py-2.5 rounded-xl text-sm font-semibold text-white transition-all disabled:opacity-60 flex items-center justify-center gap-2"
-                    style={{ background: 'linear-gradient(135deg,#ef4444,#dc2626)' }}>
-                    <Trash2 className="w-4 h-4" />
-                    {deleting ? 'Deleting...' : 'Delete'}
+                  <button
+                    type="button"
+                    disabled={deleting}
+                    onClick={() => void confirmDelete()}
+                    className="flex-1 py-2.5 rounded-xl text-sm font-bold text-white shadow-lg shadow-red-500/30 transition-all disabled:opacity-60 active:scale-95 flex items-center justify-center"
+                    style={{ background: 'linear-gradient(135deg,#ef4444,#dc2626)' }}
+                  >
+                    {deleting ? <span className="inline-block w-4 h-4 border-2 border-white/40 border-t-white rounded-full animate-spin" /> : 'Yes, delete'}
                   </button>
                 </div>
               </div>

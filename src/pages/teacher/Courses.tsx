@@ -1,4 +1,5 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useMemo } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Link, useNavigate } from 'react-router-dom';
 import { supabase } from '../../supabase';
 import TeacherLayout from '../../components/layout/TeacherLayout';
@@ -11,7 +12,7 @@ import { cn } from '../../lib/utils';
 import { motion, AnimatePresence } from 'motion/react';
 import { toast } from 'sonner';
 import { resolveTeacherIdCandidates } from '../../lib/teacherScope';
-import { authFetch } from '../../lib/apiUrl';
+import { apiUrl, authFetch } from '../../lib/apiUrl';
 import { AIPanel, AITriggerButton } from '../../components/AIPanel';
 import { generateCourseData } from '../../lib/gemini';
 import { useTeacherPermissions } from '../../lib/teacherPermissions';
@@ -34,6 +35,7 @@ const getCourseGradient = (id: string) => {
 };
 
 export default function TeacherCourses() {
+  const { t } = useTranslation();
   const [courses, setCourses] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
@@ -72,7 +74,7 @@ export default function TeacherCourses() {
 
       const { data, error } = await supabase
         .from('courses')
-        .select('*')
+        .select('id, title, name, description, status, teacher_id, created_at, updated_at, student_ids, total_students, thumbnail_url, category, level')
         .in('teacher_id', scopedIds)
         .order('created_at', { ascending: false });
 
@@ -117,7 +119,8 @@ export default function TeacherCourses() {
       if (res.ok) {
         toast.success('Course deleted');
         setCourseToDelete(null);
-        fetchCourses();
+        // Optimistic removal — no full refetch needed
+        setCourses(prev => prev.filter(c => c.id !== courseId));
         return;
       }
 
@@ -153,7 +156,8 @@ export default function TeacherCourses() {
       }
       toast.success('Course deleted');
       setCourseToDelete(null);
-      fetchCourses();
+      // Optimistic removal — no full refetch needed
+      setCourses(prev => prev.filter(c => c.id !== courseId));
     } catch (e: any) {
       fail(e?.message || 'Failed to delete');
     } finally {
@@ -163,6 +167,8 @@ export default function TeacherCourses() {
 
   const toggleStatus = async (course: any) => {
     const newStatus = course.status === 'published' ? 'draft' : 'published';
+    // Optimistic update — no refetch needed
+    setCourses(prev => prev.map(c => c.id === course.id ? { ...c, status: newStatus } : c));
     try {
       const res = await authFetch(`/api/teacher/courses/${encodeURIComponent(course.id)}/status`, {
         method: 'PATCH',
@@ -170,46 +176,47 @@ export default function TeacherCourses() {
       });
       const json = await res.json().catch(() => ({}));
       if (!res.ok || !json?.success) {
+        // Revert optimistic update on error
+        setCourses(prev => prev.map(c => c.id === course.id ? { ...c, status: course.status } : c));
         throw new Error(json?.error || 'Failed to update status');
       }
       toast.success(`Course ${newStatus === 'published' ? 'published' : 'set to draft'}`);
-      fetchCourses();
     } catch (e: any) {
       toast.error(e?.message || 'Failed to update status');
     }
   };
 
-  const filtered = courses.filter(c => {
+  const filtered = useMemo(() => courses.filter(c => {
     const q = search.toLowerCase();
     const matchSearch = (c.name || c.title || '').toLowerCase().includes(q) || (c.description || '').toLowerCase().includes(q);
     const matchStatus = statusFilter === 'All' || c.status === statusFilter;
     return matchSearch && matchStatus;
-  });
+  }), [courses, search, statusFilter]);
 
-  const stats = [
-    { label: 'My Courses', value: courses.length, icon: BookOpen, iconBg: 'bg-violet-100 text-violet-600', grad: 'from-violet-500 to-purple-500', ring: 'ring-violet-100' },
-    { label: 'Published', value: courses.filter(c => c.status === 'published').length, icon: CheckCircle2, iconBg: 'bg-emerald-100 text-emerald-600', grad: 'from-emerald-500 to-teal-500', ring: 'ring-emerald-100' },
-    { label: 'Drafts', value: courses.filter(c => c.status !== 'published').length, icon: FileText, iconBg: 'bg-amber-100 text-amber-600', grad: 'from-amber-500 to-orange-500', ring: 'ring-amber-100' },
-    { label: 'Total Students', value: courses.reduce((acc, c) => acc + (c.student_ids?.length || c.total_students || 0), 0), icon: GraduationCap, iconBg: 'bg-indigo-100 text-indigo-600', grad: 'from-indigo-500 to-blue-500', ring: 'ring-indigo-100' },
-  ];
+  const stats = useMemo(() => [
+    { label: t('courses.title'), value: courses.length, icon: BookOpen, iconBg: 'bg-violet-100 text-violet-600', grad: 'from-violet-500 to-purple-500', ring: 'ring-violet-100' },
+    { label: t('common.published'), value: courses.filter(c => c.status === 'published').length, icon: CheckCircle2, iconBg: 'bg-emerald-100 text-emerald-600', grad: 'from-emerald-500 to-teal-500', ring: 'ring-emerald-100' },
+    { label: t('common.draft'), value: courses.filter(c => c.status !== 'published').length, icon: FileText, iconBg: 'bg-amber-100 text-amber-600', grad: 'from-amber-500 to-orange-500', ring: 'ring-amber-100' },
+    { label: t('courses.totalStudents'), value: courses.reduce((acc, c) => acc + (c.student_ids?.length || c.total_students || 0), 0), icon: GraduationCap, iconBg: 'bg-indigo-100 text-indigo-600', grad: 'from-indigo-500 to-blue-500', ring: 'ring-indigo-100' },
+  ], [courses, t]);
 
   return (
     <TeacherLayout>
       <div className="space-y-6">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
           <div>
-            <h1 className="text-2xl font-bold text-slate-900">My Courses</h1>
-            <p className="text-slate-500 text-sm mt-1">Build and manage your educational courses.</p>
+            <h1 className="text-2xl font-bold text-slate-900">{t('nav.myCourses')}</h1>
+            <p className="text-slate-500 text-sm mt-1">{t('dashboard.greetingMsg')}</p>
           </div>
           <div className="flex items-center gap-2">
             {can('actions.teacher.courses.create') && (
-              <AITriggerButton onClick={() => setAiOpen(true)} label="AI Create" />
+              <AITriggerButton onClick={() => setAiOpen(true)} label={t('courses.aiCreate')} />
             )}
             {can('actions.teacher.courses.create') && (
               <Link to="/teacher/courses/new"
               className="inline-flex items-center gap-2 px-5 py-2.5 bg-slate-900 text-white rounded-xl font-semibold text-sm hover:bg-slate-800 transition-all shadow-lg shadow-slate-200 active:scale-[0.98]">
               <Plus className="w-4 h-4" />
-              New Course
+              {t('courses.addCourse')}
               </Link>
             )}
           </div>
@@ -218,10 +225,10 @@ export default function TeacherCourses() {
         <AIPanel
           open={aiOpen}
           onClose={() => setAiOpen(false)}
-          label="AI Course Creator"
-          description="Describe your course — AI will fill the form automatically"
-          placeholder='e.g. "Create an intermediate JavaScript course for web developers covering async/await, APIs, and DOM manipulation, with tags and free access"'
-          buttonLabel="Create Course"
+          label={t('courses.aiCourseCreator')}
+          description={t('courses.aiCourseCreatorDesc')}
+          placeholder={t('courses.aiCoursePlaceholder')}
+          buttonLabel={t('courses.addCourse')}
           onSubmit={handleAICreate}
         />
 
@@ -247,7 +254,7 @@ export default function TeacherCourses() {
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
             <input
               type="text"
-              placeholder="Search courses..."
+              placeholder={t('courses.searchPlaceholder')}
               value={search}
               onChange={e => setSearch(e.target.value)}
               className="w-full pl-9 pr-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-violet-500/30 focus:border-violet-400 transition-all placeholder-slate-400"
@@ -265,7 +272,7 @@ export default function TeacherCourses() {
                     : 'bg-slate-100 text-slate-500 hover:bg-slate-200'
                 )}
               >
-                {f.charAt(0).toUpperCase() + f.slice(1)}
+                {f === 'All' ? t('common.all') : f === 'published' ? t('common.published') : t('common.draft')}
               </button>
             ))}
           </div>
@@ -289,12 +296,12 @@ export default function TeacherCourses() {
             <div className="w-16 h-16 bg-violet-50 rounded-2xl flex items-center justify-center mx-auto mb-4">
               <BookOpen className="w-8 h-8 text-violet-300" />
             </div>
-            <h3 className="text-lg font-bold text-slate-700 mb-1">No courses yet</h3>
-            <p className="text-slate-400 text-sm mb-6">{search ? `No results for "${search}"` : 'Create your first course to get started.'}</p>
+            <h3 className="text-lg font-bold text-slate-700 mb-1">{t('courses.noCourses')}</h3>
+            <p className="text-slate-400 text-sm mb-6">{search ? t('common.noResults') : t('courses.noCourses')}</p>
             {can('actions.teacher.courses.create') && (
               <Link to="/teacher/courses/new"
               className="inline-flex items-center gap-2 px-5 py-2.5 bg-violet-600 text-white rounded-xl font-semibold text-sm hover:bg-violet-700 transition-all">
-              <Plus className="w-4 h-4" /> Create Course
+              <Plus className="w-4 h-4" /> {t('courses.addCourse')}
               </Link>
             )}
           </div>
@@ -313,6 +320,7 @@ export default function TeacherCourses() {
                   canEdit={can('actions.teacher.courses.edit')}
                   canDelete={can('actions.teacher.courses.delete')}
                   canPublish={can('actions.teacher.courses.publish')}
+                  t={t}
                 />
               ))}
             </AnimatePresence>
@@ -322,11 +330,11 @@ export default function TeacherCourses() {
             <table className="w-full text-left">
               <thead>
                 <tr className="bg-slate-50 text-xs font-bold text-slate-400 uppercase tracking-wider">
-                  <th className="px-5 py-3.5">Course</th>
-                  <th className="px-5 py-3.5">Level</th>
-                  <th className="px-5 py-3.5">Students</th>
-                  <th className="px-5 py-3.5">Status</th>
-                  <th className="px-5 py-3.5 text-right">Actions</th>
+                  <th className="px-5 py-3.5">{t('courses.courseTitle')}</th>
+                  <th className="px-5 py-3.5">{t('courses.level')}</th>
+                  <th className="px-5 py-3.5">{t('courses.students')}</th>
+                  <th className="px-5 py-3.5">{t('common.status')}</th>
+                  <th className="px-5 py-3.5 text-right">{t('common.actions')}</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-50">
@@ -349,12 +357,23 @@ export default function TeacherCourses() {
                       <td className="px-5 py-4">
                         {course.level ? <span className="text-xs bg-slate-100 text-slate-600 px-2.5 py-1 rounded-lg font-medium">{course.level}</span> : <span className="text-slate-300 text-xs">—</span>}
                       </td>
-                      <td className="px-5 py-4"><span className="flex items-center gap-1.5 text-sm text-slate-600"><Users className="w-3.5 h-3.5 text-slate-400" />{students}</span></td>
                       <td className="px-5 py-4">
-                        <span className={`inline-flex items-center gap-1.5 text-xs font-semibold px-2.5 py-1 rounded-lg ${course.status === 'published' ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-700'}`}>
-                          <span className={`w-1.5 h-1.5 rounded-full ${course.status === 'published' ? 'bg-emerald-500' : 'bg-amber-500'}`} />
-                          {course.status || 'draft'}
-                        </span>
+                        {students > 0
+                          ? <span className="flex items-center gap-1.5 text-sm text-slate-600"><Users className="w-3.5 h-3.5 text-slate-400" />{students}</span>
+                          : <span className="text-slate-300 text-xs">—</span>}
+                      </td>
+                      <td className="px-5 py-4">
+                        <div className="flex flex-col gap-1.5">
+                          <span className={`inline-flex items-center gap-1.5 text-xs font-semibold px-2.5 py-1 rounded-lg w-fit ${course.status === 'published' ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-700'}`}>
+                            <span className={`w-1.5 h-1.5 rounded-full ${course.status === 'published' ? 'bg-emerald-500' : 'bg-amber-500'}`} />
+                            {course.status === 'published' ? t('common.published') : t('common.draft')}
+                          </span>
+                          {course.status !== 'published' && (
+                            <span className="inline-flex items-center gap-1 text-[10px] font-medium text-amber-600">
+                              <EyeOff className="w-3 h-3" /> Students can't see this
+                            </span>
+                          )}
+                        </div>
                       </td>
                       <td className="px-5 py-4 text-right">
                         <div className="flex items-center justify-end gap-1 opacity-0 group-hover:opacity-100 transition-all">
@@ -378,7 +397,7 @@ export default function TeacherCourses() {
             <button
               type="button"
               className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm"
-              aria-label="Close"
+              aria-label={t('common.close')}
               disabled={deleting}
               onClick={() => !deleting && setCourseToDelete(null)}
             />
@@ -389,11 +408,11 @@ export default function TeacherCourses() {
                 </div>
                 <div className="min-w-0 flex-1">
                   <h3 id="delete-course-title" className="text-lg font-bold text-slate-900">
-                    Delete this course?
+                    {t('courses.deleteCourse')}?
                   </h3>
                   <p className="text-slate-600 text-sm mt-2 leading-relaxed">
                     <span className="font-semibold text-slate-800">&ldquo;{courseToDelete.title}&rdquo;</span>{' '}
-                    will be permanently removed. Modules, lessons, and enrollments tied to it may be affected. This cannot be undone.
+                    {t('courses.deleteConfirmMsg')}
                   </p>
                 </div>
               </div>
@@ -404,7 +423,7 @@ export default function TeacherCourses() {
                   onClick={() => setCourseToDelete(null)}
                   className="px-4 py-2.5 rounded-xl text-sm font-semibold text-slate-700 bg-slate-100 hover:bg-slate-200 transition-colors disabled:opacity-50"
                 >
-                  Cancel
+                  {t('common.cancel')}
                 </button>
                 <button
                   type="button"
@@ -412,7 +431,7 @@ export default function TeacherCourses() {
                   onClick={() => void performDeleteCourse()}
                   className="px-4 py-2.5 rounded-xl text-sm font-semibold text-white bg-red-600 hover:bg-red-700 transition-colors disabled:opacity-50"
                 >
-                  {deleting ? 'Deleting…' : 'Delete course'}
+                  {deleting ? t('common.loading') : t('common.delete')}
                 </button>
               </div>
             </div>
@@ -448,6 +467,7 @@ function MiniAvatar({ seed, sizePx = 24 }: { seed: string; sizePx?: number }) {
 }
 
 function TeacherCourseCard({ course, gradient, index, onEdit, onDelete, onToggleStatus, canEdit, canDelete, canPublish }: any) {
+  const { t } = useTranslation();
   const [menuOpen, setMenuOpen] = useState(false);
   const name = course.name || course.title || 'Untitled';
   const students = course.student_ids?.length || course.total_students || 0;
@@ -530,26 +550,46 @@ function TeacherCourseCard({ course, gradient, index, onEdit, onDelete, onToggle
         </AnimatePresence>
       </div>
 
+      {/* Draft warning banner */}
+      {!isPublished && (
+        <div className="mx-4 mt-3 flex items-center justify-between gap-2 px-3 py-2 bg-amber-50 border border-amber-200 rounded-xl">
+          <div className="flex items-center gap-1.5 min-w-0">
+            <EyeOff className="w-3.5 h-3.5 text-amber-600 shrink-0" />
+            <span className="text-xs font-semibold text-amber-700 truncate">Students can't see this</span>
+          </div>
+          {canPublish && (
+            <button
+              onClick={e => { e.stopPropagation(); onToggleStatus(); }}
+              className="shrink-0 text-[11px] font-bold px-2.5 py-1 bg-amber-600 text-white rounded-lg hover:bg-amber-700 transition-all whitespace-nowrap"
+            >
+              Publish
+            </button>
+          )}
+        </div>
+      )}
+
       {/* Card Body */}
       <div className="p-5 flex flex-col flex-1">
         <h3 className="font-bold text-slate-900 text-sm line-clamp-1 mb-1 group-hover:text-violet-700 transition-colors">{name}</h3>
         <p className="text-slate-400 text-xs line-clamp-2 leading-relaxed flex-1">{course.description || 'No description provided.'}</p>
 
-        {/* Progress bar */}
-        <div className="mt-4">
-          <div className="flex items-center justify-between mb-1.5">
-            <span className="text-[10px] font-semibold text-slate-400 uppercase tracking-wide">Enrollment</span>
-            <span className="text-[10px] font-bold text-slate-500">{students} students</span>
+        {/* Progress bar — only show when at least 1 student enrolled */}
+        {students > 0 && (
+          <div className="mt-4">
+            <div className="flex items-center justify-between mb-1.5">
+              <span className="text-[10px] font-semibold text-slate-400 uppercase tracking-wide">Enrollment</span>
+              <span className="text-[10px] font-bold text-slate-500">{students} students</span>
+            </div>
+            <div className="h-1.5 bg-slate-100 rounded-full overflow-hidden">
+              <motion.div
+                initial={{ width: 0 }}
+                animate={{ width: `${progress}%` }}
+                transition={{ delay: index * 0.06 + 0.3, duration: 0.6, ease: 'easeOut' }}
+                className="h-full rounded-full bg-gradient-to-r from-violet-500 to-indigo-500"
+              />
+            </div>
           </div>
-          <div className="h-1.5 bg-slate-100 rounded-full overflow-hidden">
-            <motion.div
-              initial={{ width: 0 }}
-              animate={{ width: `${progress}%` }}
-              transition={{ delay: index * 0.06 + 0.3, duration: 0.6, ease: 'easeOut' }}
-              className="h-full rounded-full bg-gradient-to-r from-violet-500 to-indigo-500"
-            />
-          </div>
-        </div>
+        )}
 
         {/* Footer */}
         <div className="flex items-center justify-between pt-4 mt-2 border-t border-slate-50">
@@ -566,7 +606,7 @@ function TeacherCourseCard({ course, gradient, index, onEdit, onDelete, onToggle
             ) : (
               <div className="flex items-center gap-1 text-xs text-slate-400">
                 <Users className="w-3.5 h-3.5" />
-                <span>No students</span>
+                <span>{t('dashboard.noStudentsYet')}</span>
               </div>
             )}
             {course.certificate_enabled && (

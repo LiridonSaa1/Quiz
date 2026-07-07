@@ -1,50 +1,73 @@
 import React from 'react';
 import { Loader2 } from 'lucide-react';
 import { cn } from '../../lib/utils';
+import { useTranslation } from 'react-i18next';
 
-const LOADING_TEXT_MAP: Record<string, string> = {
-  'save':       'Saving...',
-  'save changes': 'Saving...',
-  'submit':     'Submitting...',
-  'update':     'Updating...',
-  'delete':     'Deleting...',
-  'remove':     'Removing...',
-  'upload':     'Uploading...',
-  'generate':   'Generating...',
-  'create':     'Creating...',
-  'add':        'Adding...',
-  'send':       'Sending...',
-  'publish':    'Publishing...',
-  'export':     'Exporting...',
-  'approve':    'Approving...',
-  'reject':     'Rejecting...',
-  'assign':     'Assigning...',
-  'sign in':    'Signing in...',
-  'login':      'Signing in...',
-  'log in':     'Signing in...',
-  'register':   'Registering...',
-  'reset':      'Resetting...',
-  'verify':     'Verifying...',
-  'confirm':    'Confirming...',
-  'invite':     'Inviting...',
-  'mark':       'Marking...',
-  'grade':      'Grading...',
-  'issue':      'Issuing...',
-  'revoke':     'Revoking...',
-  'enroll':     'Enrolling...',
-  'import':     'Importing...',
-  'download':   'Downloading...',
-  'apply':      'Applying...',
-  'post':       'Posting...',
+const LOADING_KEY_MAP: Record<string, string> = {
+  'save': 'loadingBtn.saving',
+  'save changes': 'loadingBtn.saving',
+  'ruaj': 'loadingBtn.saving',
+  'ruaj ndryshimet': 'loadingBtn.saving',
+  'submit': 'loadingBtn.submitting',
+  'dërgo': 'loadingBtn.submitting',
+  'update': 'loadingBtn.updating',
+  'përditëso': 'loadingBtn.updating',
+  'delete': 'loadingBtn.deleting',
+  'fshi': 'loadingBtn.deleting',
+  'remove': 'loadingBtn.removing',
+  'hiq': 'loadingBtn.removing',
+  'upload': 'loadingBtn.uploading',
+  'ngarko': 'loadingBtn.uploading',
+  'generate': 'loadingBtn.generating',
+  'gjenero': 'loadingBtn.generating',
+  'create': 'loadingBtn.creating',
+  'krijo': 'loadingBtn.creating',
+  'add': 'loadingBtn.adding',
+  'shto': 'loadingBtn.adding',
+  'send': 'loadingBtn.sending',
+  'dërgo mesazh': 'loadingBtn.sending',
+  'publish': 'loadingBtn.publishing',
+  'publiko': 'loadingBtn.publishing',
+  'export': 'loadingBtn.exporting',
+  'eksporto': 'loadingBtn.exporting',
+  'approve': 'loadingBtn.approving',
+  'mirato': 'loadingBtn.approving',
+  'reject': 'loadingBtn.rejecting',
+  'refuzo': 'loadingBtn.rejecting',
+  'assign': 'loadingBtn.assigning',
+  'cakto': 'loadingBtn.assigning',
+  'sign in': 'loadingBtn.signingIn',
+  'kyçu': 'loadingBtn.signingIn',
+  'login': 'loadingBtn.signingIn',
+  'register': 'loadingBtn.registering',
+  'regjistrohu': 'loadingBtn.registering',
+  'reset': 'loadingBtn.resetting',
+  'rivendos': 'loadingBtn.resetting',
+  'verify': 'loadingBtn.verifying',
+  'verifiko': 'loadingBtn.verifying',
+  'confirm': 'loadingBtn.confirming',
+  'konfirmo': 'loadingBtn.confirming',
+  'invite': 'loadingBtn.inviting',
+  'fto': 'loadingBtn.inviting',
+  'mark': 'loadingBtn.marking',
+  'shëno': 'loadingBtn.marking',
+  'grade': 'loadingBtn.grading',
+  'vlerëso': 'loadingBtn.grading',
+  'issue': 'loadingBtn.issuing',
+  'lësho': 'loadingBtn.issuing',
+  'revoke': 'loadingBtn.revoking',
+  'revoko': 'loadingBtn.revoking',
+  'enroll': 'loadingBtn.enrolling',
+  'regjistro': 'loadingBtn.enrolling',
+  'import': 'loadingBtn.importing',
+  'importo': 'loadingBtn.importing',
+  'download': 'loadingBtn.downloading',
+  'shkarko': 'loadingBtn.downloading',
+  'apply': 'loadingBtn.applying',
+  'apliko': 'loadingBtn.applying',
+  'post': 'loadingBtn.posting',
+  'posto': 'loadingBtn.posting',
 };
-
-function inferLoadingText(label: string): string {
-  const lower = label.toLowerCase().trim();
-  for (const [key, val] of Object.entries(LOADING_TEXT_MAP)) {
-    if (lower === key || lower.startsWith(key + ' ')) return val;
-  }
-  return 'Loading...';
-}
 
 type ButtonVariant = 'primary' | 'danger' | 'secondary' | 'ghost' | 'outline' | 'success' | 'warning';
 type ButtonSize    = 'xs' | 'sm' | 'md' | 'lg';
@@ -96,8 +119,18 @@ export const LoadingButton = React.forwardRef<HTMLButtonElement, LoadingButtonPr
     },
     ref
   ) => {
+    const { t } = useTranslation();
     const isDisabled = disabled || loading;
     const label = typeof children === 'string' ? children : '';
+
+    const inferLoadingText = (lbl: string): string => {
+      const lower = lbl.toLowerCase().trim();
+      for (const [key, i18nKey] of Object.entries(LOADING_KEY_MAP)) {
+        if (lower === key || lower.startsWith(key + ' ')) return t(i18nKey, { defaultValue: t('common.loading') });
+      }
+      return t('common.loading');
+    };
+
     const resolvedLoadingText = loadingText ?? inferLoadingText(label);
 
     return (
@@ -124,7 +157,7 @@ export const LoadingButton = React.forwardRef<HTMLButtonElement, LoadingButtonPr
             <Loader2
               className="animate-spin shrink-0"
               style={{ width: size === 'xs' ? 12 : size === 'sm' ? 14 : 16, height: size === 'xs' ? 12 : size === 'sm' ? 14 : 16 }}
-              aria-label="Loading"
+              aria-label={t('common.loading')}
             />
             <span>{resolvedLoadingText}</span>
           </>

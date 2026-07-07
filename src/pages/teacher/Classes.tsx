@@ -1,9 +1,10 @@
 import React, { useEffect, useState, useMemo } from 'react';
+import { useTranslation } from 'react-i18next';
 import { supabase } from '../../supabase';
 import TeacherLayout from '../../components/layout/TeacherLayout';
 import LoadingButton from '../../components/ui/LoadingButton';
 import { toast } from 'sonner';
-import { motion } from 'motion/react';
+import { motion, AnimatePresence } from 'motion/react';
 import {
   AdminListFilterBar,
   AdminListPageShell,
@@ -15,7 +16,7 @@ import {
   School, Plus, Search, Filter, Users, BookOpen, CalendarDays,
   MoreHorizontal, X, Pencil, Trash2, Eye,
   Clock, CheckCircle2, AlertCircle, Archive, TrendingUp,
-  Link2, Copy, Check,
+  Link2, Copy, Check, Upload, Loader2,
 } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import StyledSelect from '../../components/ui/StyledSelect';
@@ -70,7 +71,6 @@ const formatDate = (d: string | null) =>
 const emptyForm = {
   name: '',
   description: '',
-  course_id: '',
   status: 'active' as ClassStatus,
   start_date: '',
   end_date: '',
@@ -78,6 +78,7 @@ const emptyForm = {
 };
 
 export default function TeacherClasses() {
+  const { t } = useTranslation();
   const [teacherId, setTeacherId] = useState<string | null>(null);
   const [classes, setClasses] = useState<ClassRecord[]>([]);
   const [courses, setCourses] = useState<Course[]>([]);
@@ -91,6 +92,13 @@ export default function TeacherClasses() {
   const [viewClass, setViewClass] = useState<ClassRecord | null>(null);
   const [activeMenu, setActiveMenu] = useState<string | null>(null);
   const [copiedInvite, setCopiedInvite] = useState<string | null>(null);
+  const [csvClass, setCsvClass] = useState<ClassRecord | null>(null);
+  const [csvEmails, setCsvEmails] = useState('');
+  const [csvEnrolling, setCsvEnrolling] = useState(false);
+  const [csvResult, setCsvResult] = useState<{ enrolled: number; notFound: string[]; notStudents: string[] } | null>(null);
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+  const [deleting, setDeleting] = useState(false);
+  const classToDelete = classes.find(c => c.id === confirmDeleteId);
 
   useEffect(() => {
     const init = async () => {
@@ -108,16 +116,19 @@ export default function TeacherClasses() {
     try {
       const scopedIds = await resolveTeacherIdCandidates(tid);
 
-      const classesHttp = await authFetch('/api/teacher/classes');
+      // Fetch classes + courses in parallel — eliminates sequential waterfall
+      const [classesHttp, coursesHttp] = await Promise.all([
+        authFetch('/api/teacher/classes'),
+        authFetch(`/api/teacher/courses?userId=${encodeURIComponent(tid)}`).catch(() => null),
+      ]);
       if (!classesHttp.ok) throw new Error(await readApiError(classesHttp));
       const classesJson = await classesHttp.json();
       const classesRows = Array.isArray(classesJson?.classes) ? classesJson.classes : [];
 
       let allCourses: Course[] = [];
       try {
-        const backendRes = await authFetch(`/api/teacher/courses?userId=${encodeURIComponent(tid)}`);
-        if (backendRes.ok) {
-          const backendJson = await backendRes.json();
+        if (coursesHttp && coursesHttp.ok) {
+          const backendJson = await coursesHttp.json();
           if (backendJson?.success && Array.isArray(backendJson.courses)) {
             allCourses = backendJson.courses.map((c: any) => ({
               id: c.id,
@@ -166,8 +177,8 @@ export default function TeacherClasses() {
 
       const enriched = classesRows.map((cls: Record<string, unknown>) => {
         const row = normalizeClassRow(cls) as ClassRecord;
-        const classStudentIds = Array.isArray(row.student_ids) ? row.student_ids.map((sid: unknown) => String(sid)) : [];
-        const courseStudentIds = row.course_id ? (courseMap[String(row.course_id)]?.studentIds || []) : [];
+        const classStudentIds = [...new Set((Array.isArray(row.student_ids) ? row.student_ids : []).map((sid: unknown) => String(sid)).filter(Boolean))];
+        const courseStudentIds = [...new Set((row.course_id ? (courseMap[String(row.course_id)]?.studentIds || []) : []).filter(Boolean))];
         const hasSingleClassForCourse = row.course_id ? (classCountPerCourse[String(row.course_id)] || 0) === 1 : false;
         const enrollmentCount =
           classStudentIds.length > 0
@@ -200,7 +211,6 @@ export default function TeacherClasses() {
     setForm({
       name: cls.name,
       description: cls.description || '',
-      course_id: cls.course_id || '',
       status: cls.status,
       start_date: cls.start_date ? cls.start_date.slice(0, 10) : '',
       end_date: cls.end_date ? cls.end_date.slice(0, 10) : '',
@@ -219,7 +229,6 @@ export default function TeacherClasses() {
       const payload: any = {
         name: form.name.trim(),
         description: form.description.trim() || null,
-        course_id: form.course_id || null,
         status: form.status || 'upcoming',
         start_date: form.start_date || null,
         end_date: form.end_date || null,
@@ -247,17 +256,42 @@ export default function TeacherClasses() {
     }
   };
 
-  const handleDelete = async (cls: ClassRecord) => {
-    if (!confirm(`Delete "${cls.name}"? This cannot be undone.`)) return;
+  const handleDelete = async (id: string) => {
+    if (!id) return;
+    setConfirmDeleteId(null);
+    setDeleting(true);
     try {
-      const { error } = await supabase.from('classes').delete().eq('id', cls.id);
+      const { error } = await supabase.from('classes').delete().eq('id', id);
       if (error) throw error;
       toast.success('Class deleted');
       if (teacherId) fetchData(teacherId);
     } catch (err: any) {
       toast.error(err.message);
+    } finally {
+      setDeleting(false);
+      setActiveMenu(null);
     }
-    setActiveMenu(null);
+  };
+
+  const handleCsvEnroll = async () => {
+    if (!csvClass) return;
+    setCsvEnrolling(true);
+    setCsvResult(null);
+    try {
+      const res = await authFetch(`/api/teacher/classes/${encodeURIComponent(csvClass.id)}/enroll-csv`, {
+        method: 'POST',
+        body: JSON.stringify({ emails: csvEmails }),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json?.error || 'Enrollment failed');
+      setCsvResult({ enrolled: json.enrolled, notFound: json.notFound || [], notStudents: json.notStudents || [] });
+      toast.success(`Enrolled ${json.enrolled} student${json.enrolled !== 1 ? 's' : ''}`);
+      if (teacherId) fetchData(teacherId);
+    } catch (e: any) {
+      toast.error(e?.message || 'Failed to enroll students');
+    } finally {
+      setCsvEnrolling(false);
+    }
   };
 
   const handleStatusChange = async (cls: ClassRecord, status: ClassStatus) => {
@@ -430,6 +464,14 @@ export default function TeacherClasses() {
                         </button>
                         <button
                           type="button"
+                          onClick={() => { setCsvClass(cls); setCsvEmails(''); setCsvResult(null); }}
+                          className="p-2 rounded-lg text-slate-400 hover:text-teal-600 hover:bg-teal-50 transition-all"
+                          title="Enroll students via CSV/email list"
+                        >
+                          <Upload className="w-4 h-4" />
+                        </button>
+                        <button
+                          type="button"
                           onClick={() => openEdit(cls)}
                           className="p-2 rounded-lg text-slate-400 hover:text-violet-600 hover:bg-violet-50 transition-all"
                           title="Edit"
@@ -462,7 +504,7 @@ export default function TeacherClasses() {
                               <div className="border-t border-slate-100 mt-1 pt-1">
                                 <button
                                   type="button"
-                                  onClick={() => handleDelete(cls)}
+                                  onClick={() => { setConfirmDeleteId(cls.id); setActiveMenu(null); }}
                                   className="w-full text-left px-4 py-2 text-sm text-red-500 hover:bg-red-50 flex items-center gap-2"
                                 >
                                   <Trash2 className="w-4 h-4" />
@@ -564,18 +606,6 @@ export default function TeacherClasses() {
                     placeholder="Optional short description..."
                     className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/30 focus:border-indigo-400 transition-all resize-none"
                   />
-                </div>
-
-                <div>
-                  <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1.5">Course</label>
-                  <StyledSelect
-                    value={form.course_id}
-                    onChange={e => setForm({ ...form, course_id: e.target.value })}
-                    wrapperClassName="w-full"
-                  >
-                    <option value="">None</option>
-                    {courses.map(c => <option key={c.id} value={c.id}>{c.title}</option>)}
-                  </StyledSelect>
                 </div>
 
                 <div className="grid grid-cols-2 gap-3">
@@ -708,6 +738,116 @@ export default function TeacherClasses() {
           </div>
         </div>
       )}
+
+      {/* CSV Enrollment Modal */}
+      {csvClass && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl w-full max-w-md overflow-hidden shadow-2xl border border-slate-100">
+            <div className="px-6 py-5 border-b border-slate-100 flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className="w-9 h-9 bg-teal-50 rounded-xl flex items-center justify-center">
+                  <Upload className="w-[18px] h-[18px] text-teal-600" />
+                </div>
+                <div>
+                  <h2 className="text-base font-bold text-slate-900">Enroll by Email</h2>
+                  <p className="text-xs text-slate-400 mt-0.5">{csvClass.name}</p>
+                </div>
+              </div>
+              <button type="button" onClick={() => { setCsvClass(null); setCsvResult(null); }} className="p-2 hover:bg-slate-100 rounded-xl transition-colors">
+                <X className="w-4 h-4 text-slate-400" />
+              </button>
+            </div>
+            <div className="px-6 py-5 space-y-4">
+              <div>
+                <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1.5">Student Emails</label>
+                <textarea
+                  rows={6}
+                  value={csvEmails}
+                  onChange={e => setCsvEmails(e.target.value)}
+                  placeholder={"student1@example.com\nstudent2@example.com\nor comma-separated"}
+                  className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm font-mono focus:outline-none focus:ring-2 focus:ring-teal-500/30 focus:border-teal-400 transition-all resize-none"
+                />
+                <p className="text-xs text-slate-400 mt-1">One email per line, or comma/semicolon separated. Students must already have accounts.</p>
+              </div>
+              {csvResult && (
+                <div className="rounded-xl border border-slate-100 bg-slate-50 p-3 space-y-1 text-sm">
+                  <p className="font-semibold text-emerald-600">✓ {csvResult.enrolled} student{csvResult.enrolled !== 1 ? 's' : ''} enrolled</p>
+                  {csvResult.notFound.length > 0 && (
+                    <p className="text-amber-600 text-xs">Not found: {csvResult.notFound.join(', ')}</p>
+                  )}
+                  {csvResult.notStudents.length > 0 && (
+                    <p className="text-slate-500 text-xs">Not student role: {csvResult.notStudents.join(', ')}</p>
+                  )}
+                </div>
+              )}
+              <div className="flex gap-3 pt-1">
+                <button
+                  type="button"
+                  onClick={() => void handleCsvEnroll()}
+                  disabled={csvEnrolling || !csvEmails.trim()}
+                  className="flex-1 flex items-center justify-center gap-2 px-4 py-2.5 bg-teal-600 text-white rounded-xl font-semibold text-sm hover:bg-teal-700 disabled:opacity-50 transition-all shadow-md shadow-teal-200"
+                >
+                  {csvEnrolling ? <span className="w-4 h-4 rounded-full border-2 border-white border-t-transparent animate-spin" /> : <Upload className="w-4 h-4" />}
+                  {csvEnrolling ? 'Enrolling...' : 'Enroll Students'}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => { setCsvClass(null); setCsvResult(null); }}
+                  className="px-4 py-2.5 bg-slate-100 text-slate-600 rounded-xl font-semibold text-sm hover:bg-slate-200 transition-all"
+                >
+                  Close
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      <AnimatePresence>
+        {confirmDeleteId && (
+          <motion.div
+            initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+            className="fixed inset-0 z-50 flex items-center justify-center p-4"
+            style={{ background: 'rgba(15,10,40,0.55)', backdropFilter: 'blur(6px)' }}
+          >
+            <motion.div
+              initial={{ scale: 0.9, opacity: 0, y: 16 }}
+              animate={{ scale: 1, opacity: 1, y: 0 }}
+              exit={{ scale: 0.9, opacity: 0, y: 16 }}
+              transition={{ type: 'spring', stiffness: 340, damping: 28 }}
+              className="bg-white rounded-2xl shadow-2xl p-6 w-full max-w-sm"
+            >
+              <div className="flex flex-col items-center text-center gap-3 mb-5">
+                <div className="w-14 h-14 rounded-2xl flex items-center justify-center shadow-lg shadow-red-500/30"
+                  style={{ background: 'linear-gradient(135deg,#fca5a5,#ef4444)' }}>
+                  <Trash2 className="w-7 h-7 text-white" />
+                </div>
+                <div>
+                  <p className="font-bold text-slate-800 text-lg">Delete class?</p>
+                  <p className="text-slate-500 text-sm mt-1">This action cannot be undone.</p>
+                </div>
+                {classToDelete && (
+                  <span className="px-3 py-1 rounded-full text-sm font-semibold bg-red-50 text-red-700 border border-red-200">
+                    {classToDelete.name}
+                  </span>
+                )}
+              </div>
+              <div className="flex gap-3">
+                <button type="button" onClick={() => setConfirmDeleteId(null)}
+                  className="flex-1 py-2.5 rounded-xl text-sm font-semibold text-slate-600 bg-slate-100 hover:bg-slate-200 transition-all">
+                  Cancel
+                </button>
+                <button type="button" onClick={() => confirmDeleteId && handleDelete(confirmDeleteId)}
+                  disabled={deleting}
+                  className="flex-1 py-2.5 rounded-xl text-sm font-bold text-white shadow-lg shadow-red-500/30 transition-all disabled:opacity-60 active:scale-95"
+                  style={{ background: 'linear-gradient(135deg,#ef4444,#dc2626)' }}>
+                  {deleting ? <Loader2 className="w-4 h-4 animate-spin mx-auto" /> : 'Yes, delete'}
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {activeMenu && (
         <div className="fixed inset-0 z-10" aria-hidden onClick={() => setActiveMenu(null)} />

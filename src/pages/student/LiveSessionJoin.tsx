@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { useParams, useNavigate } from 'react-router-dom';
 import { supabase } from '../../supabase';
 import { authFetch, readApiError } from '../../lib/apiUrl';
@@ -7,11 +8,21 @@ import { motion, AnimatePresence } from 'motion/react';
 import {
   Video, Hand, MessageSquare, Smile, ChevronLeft, ChevronRight,
   Send, Loader2, Users, Clock, BookOpen, Radio, CheckCircle2,
-  CalendarDays
+  CalendarDays, Copy, ExternalLink, ClipboardCheck, PlayCircle,
+  Wifi, WifiOff, WifiZero
 } from 'lucide-react';
 import { cn } from '../../lib/utils';
-import { format, formatDistanceToNow } from 'date-fns';
+import { format } from 'date-fns';
 import StudentLayout from '../../components/layout/StudentLayout';
+
+declare global {
+  interface Window {
+    JitsiMeetExternalAPI: new (domain: string, options: object) => {
+      dispose: () => void;
+      executeCommand: (cmd: string, ...args: unknown[]) => void;
+    };
+  }
+}
 
 interface LiveSession {
   id: string;
@@ -21,8 +32,10 @@ interface LiveSession {
   scheduled_at: string;
   duration_minutes: number;
   recording_url: string | null;
+  recording_urls: string[];
   started_at: string | null;
   host_id: string | null;
+  jitsi_room_name: string | null;
   host: { id: string; display_name: string } | null;
   course: { id: string; title: string } | null;
 }
@@ -39,17 +52,24 @@ interface ChatMessage {
 const REACTIONS = ['👏', '❤️', '😂', '🎉', '😮', '👍', '🔥'];
 
 export default function StudentLiveSessionJoin() {
+  const { t } = useTranslation();
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
 
+  // ── All state declarations first (Rules of Hooks: no hooks after conditional) ──
   const [session, setSession] = useState<LiveSession | null>(null);
   const [loading, setLoading] = useState(true);
   const [userId, setUserId] = useState('');
   const [userDisplayName, setUserDisplayName] = useState('');
   const [joined, setJoined] = useState(false);
+  const [showNavWarning, setShowNavWarning] = useState(false);
   const [joining, setJoining] = useState(false);
   const [handRaised, setHandRaised] = useState(false);
   const [showReactions, setShowReactions] = useState(false);
+  // Session controls pushed by teacher
+  const [chatEnabled, setChatEnabled] = useState(true);
+  const [reactionsEnabled, setReactionsEnabled] = useState(true);
+  const [raiseHandEnabled, setRaiseHandEnabled] = useState(true);
   const [floatingReactions, setFloatingReactions] = useState<{ id: string; emoji: string }[]>([]);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
@@ -57,24 +77,27 @@ export default function StudentLiveSessionJoin() {
   const [sendingChat, setSendingChat] = useState(false);
   const [chatRealtimeConnected, setChatRealtimeConnected] = useState(false);
   const [timeRemaining, setTimeRemaining] = useState<number | null>(null);
+  const [networkQuality, setNetworkQuality] = useState<'good' | 'fair' | 'poor' | null>(null);
+  const [linkCopied, setLinkCopied] = useState(false);
+  const defaultJitsiRoomName = `quizmaster-session-${id?.slice(0, 8)}`;
+  const [activeRoomName, setActiveRoomName] = useState(defaultJitsiRoomName);
+  const [jaasDomain, setJaasDomain] = useState<string | null>(null);
+  const [jaasAppId, setJaasAppId] = useState<string | null>(null);
+  const [liveQuizPush, setLiveQuizPush] = useState<{ quizId: string; quizTitle: string; sessionId: string } | null>(null);
+
+  // ── Refs ──
   const chatEndRef = useRef<HTMLDivElement | null>(null);
+  const jitsiContainerRef = useRef<HTMLDivElement | null>(null);
+  const jitsiApiRef = useRef<ReturnType<typeof window.JitsiMeetExternalAPI> | null>(null);
+  const micMutedRef = useRef(false); // tracks actual Jitsi audio state for teacher-mute sync
 
-  useEffect(() => {
-    if (!session || session.status !== 'live' || !session.started_at) {
-      setTimeRemaining(null);
-      return;
-    }
-    
-    const interval = setInterval(() => {
-      const start = new Date(session.started_at!).getTime();
-      const end = start + session.duration_minutes * 60 * 1000;
-      const now = Date.now();
-      const remaining = Math.max(0, Math.floor((end - now) / 1000));
-      setTimeRemaining(remaining);
-    }, 1000);
-
-    return () => clearInterval(interval);
-  }, [session]);
+  // ── Derived constants (no hooks below) ──
+  const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(
+    typeof navigator !== 'undefined' ? navigator.userAgent : ''
+  );
+  const jitsiMeetUrl = (jaasDomain === '8x8.vc' && jaasAppId)
+    ? `https://8x8.vc/${jaasAppId}/${activeRoomName}`
+    : `https://meet.jit.si/${activeRoomName}`;
 
   const formatTime = (s: number) => {
     const m = Math.floor(s / 60).toString().padStart(2, '0');
@@ -82,8 +105,150 @@ export default function StudentLiveSessionJoin() {
     return `${m}:${sec}`;
   };
 
-  const jitsiRoomName = `quizmaster-session-${id?.slice(0, 8)}`;
-  const jitsiUrl = `https://meet.jit.si/${jitsiRoomName}#config.prejoinPageEnabled=false&config.startWithAudioMuted=false&config.startWithVideoMuted=false&interfaceConfig.SHOW_JITSI_WATERMARK=false`;
+  // ── Effects ──
+
+  // Block browser tab close / refresh while joined
+  useEffect(() => {
+    const handler = (e: BeforeUnloadEvent) => {
+      if (joined) {
+        e.preventDefault();
+        e.returnValue = '';
+      }
+    };
+    window.addEventListener('beforeunload', handler);
+    return () => window.removeEventListener('beforeunload', handler);
+  }, [joined]);
+
+  // Intercept browser back button while joined
+  useEffect(() => {
+    if (!joined) return;
+    const handler = () => { setShowNavWarning(true); window.history.pushState(null, '', window.location.href); };
+    window.history.pushState(null, '', window.location.href);
+    window.addEventListener('popstate', handler);
+    return () => window.removeEventListener('popstate', handler);
+  }, [joined]);
+
+  // Countdown timer while session is live
+  useEffect(() => {
+    if (!session || session.status !== 'live' || !session.started_at) {
+      setTimeRemaining(null);
+      return;
+    }
+    const interval = setInterval(() => {
+      const start = new Date(session.started_at!).getTime();
+      const end = start + session.duration_minutes * 60 * 1000;
+      const now = Date.now();
+      const remaining = Math.max(0, Math.floor((end - now) / 1000));
+      setTimeRemaining(remaining);
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [session]);
+
+  // Sync activeRoomName when teacher reconnects (jitsi_room_name changes via Realtime)
+  useEffect(() => {
+    if (session?.jitsi_room_name && session.jitsi_room_name !== activeRoomName) {
+      setActiveRoomName(session.jitsi_room_name);
+      // Force reinit by clearing existing API instance
+      if (jitsiApiRef.current) { jitsiApiRef.current.dispose(); jitsiApiRef.current = null; }
+    }
+  }, [session?.jitsi_room_name]);
+
+  // Initialize Jitsi External API when student joins (desktop only — mobile opens in new tab)
+  useEffect(() => {
+    if (!joined || isMobile || !jitsiContainerRef.current || jitsiApiRef.current) return;
+    const container = jitsiContainerRef.current;
+    let destroyed = false;
+
+    const initWithToken = () => {
+      const domain = 'meet.jit.si';
+
+      if (destroyed) return;
+
+      const init = () => {
+        if (destroyed) return;
+        const JitsiAPI = window.JitsiMeetExternalAPI;
+        if (!JitsiAPI) { console.error('JitsiMeetExternalAPI not available'); return; }
+        const options: Record<string, unknown> = {
+          roomName: activeRoomName,
+          parentNode: container,
+          width: '100%',
+          height: '100%',
+          userInfo: { displayName: userDisplayName },
+          configOverwrite: {
+            prejoinPageEnabled: false,
+            startWithAudioMuted: false,
+            startWithVideoMuted: false,
+            disableDeepLinking: true,
+            disableThirdPartyRequests: true,
+            analytics: { disabled: true },
+            notifications: [],
+            enableNoisyMicDetection: false,
+            enableNoAudioDetection: false,
+            enableAuth: false,
+            enableFeaturesBasedOnToken: false,
+            p2p: { enabled: true },
+            lobbyChatEnabled: false,
+            enableLobbyChat: false,
+          },
+          interfaceConfigOverwrite: {
+            SHOW_JITSI_WATERMARK: false,
+            SHOW_WATERMARK_FOR_GUESTS: false,
+            TOOLBAR_BUTTONS: [],
+            DISABLE_JOIN_LEAVE_NOTIFICATIONS: true,
+            HIDE_INVITE_MORE_HEADER: true,
+            SHOW_PROMOTIONAL_CLOSE_PAGE: false,
+            SHOW_CHROME_EXTENSION_BANNER: false,
+            MOBILE_APP_PROMO: false,
+            ENABLE_FEEDBACK_ANIMATION: false,
+            DEFAULT_LOGO_URL: '',
+            JITSI_WATERMARK_LINK: '',
+          },
+        };
+        const api = new JitsiAPI(domain, options);
+        setTimeout(() => {
+          const iframe = container.querySelector('iframe');
+          if (iframe) {
+            iframe.setAttribute('allow', 'camera *; microphone *; fullscreen *; display-capture *; autoplay *; clipboard-write *');
+          }
+        }, 1500);
+        // Track mic state so teacher-mute sync can toggle correctly
+        (api as any).addListener('audioMuteStatusChanged', (e: unknown) => {
+          micMutedRef.current = Boolean((e as any)?.muted);
+        });
+        // Network quality listener
+        (api as any).addListener('connectionQualityChanged', (e: unknown) => {
+          const ev = e as { quality?: number };
+          const q = ev.quality ?? 100;
+          if (q >= 60) setNetworkQuality('good');
+          else if (q >= 30) setNetworkQuality('fair');
+          else setNetworkQuality('poor');
+        });
+        jitsiApiRef.current = api;
+      };
+
+      const scriptId = 'jitsi-external-api';
+      const existingScript = document.getElementById(scriptId) as HTMLScriptElement | null;
+      const scriptSrc = `https://${domain}/external_api.js`;
+      if (existingScript && existingScript.src.includes(domain)) {
+        init();
+      } else {
+        if (existingScript) existingScript.remove();
+        const script = document.createElement('script');
+        script.id = scriptId;
+        script.src = scriptSrc;
+        script.async = true;
+        script.onload = init;
+        document.head.appendChild(script);
+      }
+    };
+
+    initWithToken();
+
+    return () => {
+      destroyed = true;
+      if (jitsiApiRef.current) { jitsiApiRef.current.dispose(); jitsiApiRef.current = null; }
+    };
+  }, [joined, userDisplayName, activeRoomName]);
 
   useEffect(() => {
     const init = async () => {
@@ -130,6 +295,37 @@ export default function StudentLiveSessionJoin() {
       }, (payload) => {
         const updated = payload.new as LiveSession;
         setSession(prev => prev ? { ...prev, ...updated } : prev);
+
+        // ── Teacher ended the session → kick student out ──
+        if ((payload.new as any).status === 'ended') {
+          toast.info('📴 Mësuesi mbylli sesionin. Po largoheni...', { duration: 4000 });
+          if (jitsiApiRef.current) { jitsiApiRef.current.dispose(); jitsiApiRef.current = null; }
+          setTimeout(() => navigate('/student/live-sessions'), 3000);
+          return;
+        }
+
+        // Sync session controls
+        const u = payload.new as any;
+        if (u.chat_enabled !== undefined) {
+          const next = u.chat_enabled !== false;
+          setChatEnabled(next);
+          if (!next) toast.warning('💬 Mësuesi bllokoi chat-in');
+        }
+        if (u.reactions_enabled !== undefined) {
+          const next = u.reactions_enabled !== false;
+          setReactionsEnabled(next);
+          if (!next) toast.warning('😶 Mësuesi bllokoi reaksionet');
+        }
+        if (u.raise_hand_enabled !== undefined) {
+          const next = u.raise_hand_enabled !== false;
+          setRaiseHandEnabled(next);
+          if (!next) { toast.warning('✋ Mësuesi bllokoi ngritjen e dorës'); setHandRaised(false); }
+        }
+        // Check for pushed quiz (live_quiz_id set on session)
+        if (u.live_quiz_id && u.live_quiz_title) {
+          setLiveQuizPush({ quizId: u.live_quiz_id, quizTitle: u.live_quiz_title, sessionId: id! });
+          toast.info(`📝 Mësuesi nisi kuizin: ${u.live_quiz_title}`);
+        }
       })
       .subscribe((status) => {
         if (status === 'SUBSCRIBED') {
@@ -144,6 +340,29 @@ export default function StudentLiveSessionJoin() {
 
     return () => { supabase.removeChannel(channel); };
   }, [id]);
+
+  // Teacher mute/unmute: listen for is_muted changes on own participant row
+  useEffect(() => {
+    if (!id || !userId) return;
+    const channel = supabase
+      .channel(`student-mute-${id}-${userId}`)
+      .on('postgres_changes', {
+        event: 'UPDATE',
+        schema: 'public',
+        table: 'session_participants',
+        filter: `session_id=eq.${id}`,
+      }, (payload) => {
+        const row = payload.new as any;
+        if (row.user_id !== userId) return;
+        const shouldBeMuted = Boolean(row.is_muted);
+        if (shouldBeMuted !== micMutedRef.current && jitsiApiRef.current) {
+          (jitsiApiRef.current as any).executeCommand('toggleAudio');
+          toast.info(shouldBeMuted ? '🔇 Mësuesi ju bëri mute' : '🎤 Mësuesi ju dha mikrofonin');
+        }
+      })
+      .subscribe();
+    return () => { supabase.removeChannel(channel); };
+  }, [id, userId]);
 
   // Log leave on unmount
   useEffect(() => {
@@ -164,12 +383,15 @@ export default function StudentLiveSessionJoin() {
       const json = await res.json();
       if (json.success) {
         setSession(json.session);
+        setChatEnabled(json.session.chat_enabled !== false);
+        setReactionsEnabled(json.session.reactions_enabled !== false);
+        setRaiseHandEnabled(json.session.raise_hand_enabled !== false);
       } else {
-        toast.error('Session not found');
+        toast.error(t('errors.notFound'));
         navigate('/student/live-sessions');
       }
     } catch {
-      toast.error('Failed to load session');
+      toast.error(t('errors.loadFailed'));
     } finally {
       setLoading(false);
     }
@@ -193,7 +415,7 @@ export default function StudentLiveSessionJoin() {
       });
       setJoined(true);
     } catch {
-      toast.error('Failed to join session');
+      toast.error(t('errors.saveFailed'));
     } finally {
       setJoining(false);
     }
@@ -212,8 +434,17 @@ export default function StudentLiveSessionJoin() {
         const errText = await readApiError(res);
         throw new Error(errText || 'Failed to send message');
       }
+      const json = await res.json();
       setChatInput('');
-      if (!chatRealtimeConnected) {
+      // Optimistically add to UI from API response — dedup guard in Realtime handler prevents duplicates
+      if (json.success && json.message) {
+        const sent = json.message;
+        const sentWithSender = {
+          ...sent,
+          sender: sent.sender || { id: userId, display_name: userDisplayName || 'You', avatar_url: null },
+        };
+        setChatMessages(prev => prev.some(m => m.id === sent.id) ? prev : [...prev, sentWithSender]);
+      } else if (!chatRealtimeConnected) {
         void fetchChat();
       }
     } catch (error: any) {
@@ -240,7 +471,7 @@ export default function StudentLiveSessionJoin() {
       <StudentLayout>
         <div className="flex items-center justify-center h-64 gap-3 text-slate-400">
           <Loader2 className="w-6 h-6 animate-spin text-emerald-500" />
-          Loading session...
+          {t('liveSessionStudent.loadingSession')}
         </div>
       </StudentLayout>
     );
@@ -258,7 +489,7 @@ export default function StudentLiveSessionJoin() {
           onClick={() => navigate('/student/live-sessions')}
           className="inline-flex items-center gap-1.5 text-slate-500 hover:text-slate-700 text-sm font-medium transition-colors"
         >
-          <ChevronLeft className="w-4 h-4" /> Live Classes
+          <ChevronLeft className="w-4 h-4" /> {t('liveSessionStudent.liveClasses')}
         </button>
 
         {/* Session Info */}
@@ -276,14 +507,14 @@ export default function StudentLiveSessionJoin() {
                   isEnded ? 'bg-slate-100 text-slate-600' :
                   'bg-blue-100 text-blue-700'
                 )}>
-                  {isLive ? '🔴 Live Now' : isEnded ? 'Ended' : 'Upcoming'}
+                  {isLive ? t('liveSessions.liveNow2') : isEnded ? t('liveSessions.ended') : t('liveSessions.upcoming2')}
                 </span>
                 {isLive && timeRemaining !== null && (
                   <span className={cn(
                     'px-2.5 py-0.5 rounded-full text-xs font-bold tracking-wide',
                     timeRemaining < 300 ? 'bg-rose-100 text-rose-700 animate-pulse' : 'bg-slate-100 text-slate-600'
                   )}>
-                    ⏱ {formatTime(timeRemaining)} remaining
+                    {t('liveSessions.timeRemaining', { time: formatTime(timeRemaining) })}
                   </span>
                 )}
               </div>
@@ -318,8 +549,8 @@ export default function StudentLiveSessionJoin() {
             <div className="flex items-center gap-3 text-white">
               <Radio className="w-6 h-6 animate-pulse" />
               <div>
-                <p className="font-bold">Session is Live Now!</p>
-                <p className="text-rose-100 text-sm">Join to participate with your class</p>
+                <p className="font-bold">{t('liveSessionStudent.sessionIsLiveNow')}</p>
+                <p className="text-rose-100 text-sm">{t('liveSessionStudent.joinToParticipate')}</p>
               </div>
             </div>
             <button
@@ -328,35 +559,86 @@ export default function StudentLiveSessionJoin() {
               className="flex items-center gap-2 px-5 py-2.5 bg-white text-rose-600 rounded-xl font-bold text-sm hover:bg-rose-50 transition-all shadow-lg disabled:opacity-70"
             >
               {joining ? <Loader2 className="w-4 h-4 animate-spin" /> : <Video className="w-4 h-4" />}
-              Join Now
+              {t('liveSessionStudent.joinNow')}
             </button>
           </motion.div>
         )}
 
         {/* Ended - Show Recording */}
-        {isEnded && session.recording_url && (
-          <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-5">
-            <h3 className="text-sm font-bold text-slate-900 mb-3 flex items-center gap-2">
-              <CheckCircle2 className="w-4 h-4 text-emerald-500" /> Session Recording
-            </h3>
-            <video src={session.recording_url} controls className="w-full rounded-xl" style={{ maxHeight: 400 }} />
-          </div>
-        )}
+        {isEnded && (() => {
+          const allUrls: string[] = Array.isArray(session.recording_urls) && session.recording_urls.length > 0
+            ? session.recording_urls
+            : session.recording_url ? [session.recording_url] : [];
+          if (allUrls.length === 0) return null;
+          return (
+            <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-5">
+              <h3 className="text-sm font-bold text-slate-900 mb-3 flex items-center gap-2">
+                <CheckCircle2 className="w-4 h-4 text-emerald-500" /> {t('liveSessionStudent.sessionRecording')}
+                {allUrls.length > 1 && (
+                  <span className="ml-1 text-xs font-normal text-slate-500">({allUrls.length} {t('liveSessions.recordings', { count: allUrls.length })})</span>
+                )}
+              </h3>
+              <div className="flex flex-col gap-4">
+                {allUrls.map((url, i) => (
+                  <div key={url}>
+                    {allUrls.length > 1 && (
+                      <p className="text-xs text-slate-500 mb-1 font-medium">Part {i + 1}</p>
+                    )}
+                    <video src={url} controls className="w-full rounded-xl" style={{ maxHeight: 400 }} />
+                  </div>
+                ))}
+              </div>
+            </div>
+          );
+        })()}
 
-        {/* Video Room (when joined or live) */}
+        {/* Video Room (when live) */}
         {isLive && (
-          <div className="bg-slate-900 rounded-2xl overflow-hidden shadow-2xl relative" style={{ minHeight: 520 }}>
+          <div className="bg-slate-900 rounded-2xl overflow-hidden shadow-2xl relative" style={{ height: 'calc(100vh - 260px)', minHeight: 560 }}>
             {joined ? (
-              <div className="flex" style={{ height: 520 }}>
-                <div className="flex-1 relative">
-                  <iframe
-                    src={jitsiUrl}
-                    allow="camera *; microphone *; fullscreen *; display-capture *; autoplay *; clipboard-write *"
-                    className="w-full h-full border-0"
-                    title="Live Session"
-                  />
+              <div className="flex h-full">
+                <div className="flex-1 relative h-full">
+                  {/* Mobile: open in new tab instead of embedding Jitsi */}
+                  {isMobile ? (
+                    <div className="w-full h-full flex flex-col items-center justify-center gap-6 p-6 bg-slate-900">
+                      <div className="w-20 h-20 rounded-full bg-emerald-600/20 border-2 border-emerald-500 flex items-center justify-center">
+                        <Video className="w-10 h-10 text-emerald-400" />
+                      </div>
+                      <div className="text-center">
+                        <p className="text-xl font-bold text-white mb-2">{t('liveSessionStudent.sessionIsLiveNow')}</p>
+                        <p className="text-white/50 text-sm">{t('liveSessionStudent.openMeetingDesc')}</p>
+                      </div>
+                      <a
+                        href={jitsiMeetUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="flex items-center gap-2.5 px-8 py-4 bg-emerald-500 hover:bg-emerald-600 text-white rounded-2xl font-bold text-base transition-all shadow-xl shadow-emerald-900/40"
+                      >
+                        <Video className="w-5 h-5" />
+                        {t('liveSessionStudent.openMeeting')}
+                      </a>
+                      <p className="text-white/30 text-xs text-center">{t('liveSessionStudent.openMeetingHint')}</p>
+                    </div>
+                  ) : (
+                    /* Desktop: embed Jitsi External API */
+                    <div ref={jitsiContainerRef} className="w-full h-full" />
+                  )}
+                  {/* Network quality badge (desktop, when joined) */}
+                  {!isMobile && networkQuality && (
+                    <div className={cn(
+                      'absolute top-3 left-3 flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold z-10 backdrop-blur-sm',
+                      networkQuality === 'good' ? 'bg-emerald-600/80 text-white' :
+                      networkQuality === 'fair' ? 'bg-amber-500/80 text-white' :
+                      'bg-rose-600/80 text-white'
+                    )}>
+                      {networkQuality === 'good' ? <Wifi className="w-3 h-3" /> :
+                       networkQuality === 'fair' ? <Wifi className="w-3 h-3" /> :
+                       <WifiOff className="w-3 h-3" />}
+                      {networkQuality === 'good' ? 'Good' : networkQuality === 'fair' ? 'Fair' : 'Poor'}
+                    </div>
+                  )}
                   {/* Floating Reactions */}
-                  <div className="absolute bottom-20 right-4 pointer-events-none">
+                  <div className="absolute bottom-20 right-4 pointer-events-none z-10">
                     <AnimatePresence>
                       {floatingReactions.map(r => (
                         <motion.div
@@ -381,7 +663,7 @@ export default function StudentLiveSessionJoin() {
                       initial={{ width: 0 }}
                       animate={{ width: 280 }}
                       exit={{ width: 0 }}
-                      className="bg-slate-800 flex flex-col overflow-hidden border-l border-slate-700"
+                      className="bg-slate-800 flex flex-col overflow-hidden border-l border-slate-700 h-full shrink-0"
                     >
                       <div className="p-3 border-b border-slate-700 flex items-center justify-between shrink-0">
                         <span className="text-white text-sm font-semibold flex items-center gap-2">
@@ -393,7 +675,7 @@ export default function StudentLiveSessionJoin() {
                       </div>
                       <div className="flex-1 overflow-y-auto p-3 space-y-3">
                         {chatMessages.length === 0 ? (
-                          <p className="text-slate-500 text-xs text-center mt-8">No messages yet</p>
+                          <p className="text-slate-500 text-xs text-center mt-8">{t('liveSessionStudent.noMessagesYet')}</p>
                         ) : (
                           chatMessages.map(msg => (
                             <div key={msg.id} className={cn('flex gap-2', msg.sender_id === userId ? 'flex-row-reverse' : '')}>
@@ -419,7 +701,7 @@ export default function StudentLiveSessionJoin() {
                           <input
                             value={chatInput}
                             onChange={e => setChatInput(e.target.value)}
-                            placeholder="Message..."
+                            placeholder={t('liveSessionStudent.messagePlaceholder')}
                             className="flex-1 bg-slate-700 border border-slate-600 rounded-lg px-2.5 py-1.5 text-xs text-white placeholder-slate-500 focus:outline-none focus:ring-1 focus:ring-emerald-500/30"
                           />
                           <button type="submit" disabled={sendingChat || !chatInput.trim()}
@@ -433,13 +715,13 @@ export default function StudentLiveSessionJoin() {
                 </AnimatePresence>
               </div>
             ) : (
-              <div className="h-[520px] flex flex-col items-center justify-center gap-5 text-white/70">
+              <div className="h-full flex flex-col items-center justify-center gap-5 text-white/70">
                 <div className="w-20 h-20 rounded-full bg-white/5 flex items-center justify-center">
                   <Video className="w-10 h-10 text-white/30" />
                 </div>
                 <div className="text-center">
-                  <p className="text-lg font-semibold text-white mb-1">Session is Live</p>
-                  <p className="text-sm text-white/50">Click Join Now to enter the room</p>
+                  <p className="text-lg font-semibold text-white mb-1">{t('liveSessionStudent.sessionIsLive')}</p>
+                  <p className="text-sm text-white/50">{t('liveSessionStudent.clickJoinToEnter')}</p>
                 </div>
               </div>
             )}
@@ -452,9 +734,10 @@ export default function StudentLiveSessionJoin() {
             {/* Raise Hand */}
             <button
               onClick={async () => {
+                if (!raiseHandEnabled) { toast.warning('✋ Mësuesi ka bllokuar ngritjen e dorës'); return; }
                 const next = !handRaised;
                 setHandRaised(next);
-                toast.info(next ? 'Hand raised ✋' : 'Hand lowered');
+                toast.info(next ? t('liveSessionStudent.handRaised') : t('liveSessionStudent.handLowered'));
                 if (userId) {
                   authFetch(`/api/teacher/live-sessions/${id}/participants/${userId}`, {
                     method: 'PATCH',
@@ -464,25 +747,37 @@ export default function StudentLiveSessionJoin() {
               }}
               className={cn(
                 'flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold transition-all',
-                handRaised
-                  ? 'bg-amber-100 text-amber-700 border border-amber-200'
-                  : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                !raiseHandEnabled
+                  ? 'bg-slate-100 text-slate-400 cursor-not-allowed opacity-60'
+                  : handRaised
+                    ? 'bg-amber-100 text-amber-700 border border-amber-200'
+                    : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
               )}
             >
               <Hand className="w-4 h-4" />
-              {handRaised ? 'Lower Hand' : 'Raise Hand'}
+              {handRaised ? t('liveSessionStudent.lowerHand') : t('liveSessionStudent.raiseHand')}
+              {!raiseHandEnabled && <span className="text-[10px] text-rose-500 font-normal">bllokuar</span>}
             </button>
 
             {/* Reactions */}
             <div className="relative">
               <button
-                onClick={() => setShowReactions(v => !v)}
-                className="flex items-center gap-2 px-4 py-2.5 bg-slate-100 text-slate-600 hover:bg-slate-200 rounded-xl text-sm font-semibold transition-all"
+                onClick={() => {
+                  if (!reactionsEnabled) { toast.warning('😶 Mësuesi ka bllokuar reaksionet'); return; }
+                  setShowReactions(v => !v);
+                }}
+                className={cn(
+                  'flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold transition-all',
+                  !reactionsEnabled
+                    ? 'bg-slate-100 text-slate-400 cursor-not-allowed opacity-60'
+                    : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                )}
               >
-                <Smile className="w-4 h-4" /> Reactions
+                <Smile className="w-4 h-4" /> {t('liveSessionStudent.reactions')}
+                {!reactionsEnabled && <span className="text-[10px] text-rose-500 font-normal">bllokuar</span>}
               </button>
               <AnimatePresence>
-                {showReactions && (
+                {showReactions && reactionsEnabled && (
                   <motion.div
                     initial={{ opacity: 0, y: 8 }}
                     animate={{ opacity: 1, y: 0 }}
@@ -501,18 +796,40 @@ export default function StudentLiveSessionJoin() {
 
             {/* Chat toggle */}
             <button
-              onClick={() => setSidebarOpen(v => !v)}
+              onClick={() => {
+                if (!chatEnabled) { toast.warning('💬 Mësuesi ka bllokuar chat-in'); return; }
+                setSidebarOpen(v => !v);
+              }}
               className={cn(
                 'flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold transition-all',
-                sidebarOpen
-                  ? 'bg-emerald-100 text-emerald-700 border border-emerald-200'
-                  : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                !chatEnabled
+                  ? 'bg-slate-100 text-slate-400 cursor-not-allowed opacity-60'
+                  : sidebarOpen
+                    ? 'bg-emerald-100 text-emerald-700 border border-emerald-200'
+                    : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
               )}
             >
-              <MessageSquare className="w-4 h-4" /> Chat
-              {chatMessages.length > 0 && (
+              <MessageSquare className="w-4 h-4" /> {t('liveSessionStudent.chat')}
+              {!chatEnabled && <span className="text-[10px] text-rose-500 font-normal">bllokuar</span>}
+              {chatEnabled && chatMessages.length > 0 && (
                 <span className="px-1.5 py-0.5 text-[10px] bg-emerald-500 text-white rounded-full">{chatMessages.length}</span>
               )}
+            </button>
+
+            {/* Copy invite link */}
+            <button
+              onClick={() => {
+                const url = `${window.location.origin}/student/live-sessions/${id}`;
+                navigator.clipboard.writeText(url).then(() => {
+                  setLinkCopied(true);
+                  toast.success('Linku u kopjua!');
+                  setTimeout(() => setLinkCopied(false), 3000);
+                }).catch(() => toast.error('Nuk u kopjua'));
+              }}
+              className="flex items-center gap-2 px-4 py-2.5 bg-slate-100 text-slate-600 hover:bg-slate-200 rounded-xl text-sm font-semibold transition-all"
+            >
+              {linkCopied ? <ClipboardCheck className="w-4 h-4 text-emerald-600" /> : <Copy className="w-4 h-4" />}
+              {linkCopied ? 'U kopjua!' : 'Kopjo linkun'}
             </button>
           </div>
         )}
@@ -521,13 +838,84 @@ export default function StudentLiveSessionJoin() {
         {!isLive && !isEnded && (
           <div className="bg-blue-50 border border-blue-100 rounded-2xl p-5 text-center">
             <CalendarDays className="w-8 h-8 mx-auto mb-2 text-blue-400" />
-            <p className="font-semibold text-blue-800">Session scheduled</p>
+            <p className="font-semibold text-blue-800">{t('liveSessionStudent.sessionScheduled')}</p>
             <p className="text-sm text-blue-600 mt-1">
-              Starts {formatDistanceToNow(new Date(session.scheduled_at), { addSuffix: true })}
+              {t('liveSessionStudent.startsIn', { time: formatDistanceToNow(new Date(session.scheduled_at), { addSuffix: true }) })}
             </p>
           </div>
         )}
       </div>
+
+      {/* Push-quiz modal */}
+      <AnimatePresence>
+        {liveQuizPush && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-[200] p-4"
+          >
+            <motion.div
+              initial={{ scale: 0.9, y: 20 }}
+              animate={{ scale: 1, y: 0 }}
+              exit={{ scale: 0.9, y: 20 }}
+              className="bg-white rounded-2xl shadow-2xl w-full max-w-sm p-6 text-center"
+            >
+              <div className="w-14 h-14 rounded-full bg-violet-100 flex items-center justify-center mx-auto mb-4">
+                <PlayCircle className="w-7 h-7 text-violet-600" />
+              </div>
+              <h3 className="text-lg font-bold text-slate-900 mb-1">Kuiz i ri nga mësuesi!</h3>
+              <p className="text-slate-500 text-sm mb-5">
+                <span className="font-semibold text-slate-700">{liveQuizPush.quizTitle}</span> — mësuesi ka nisur këtë kuiz gjatë sesionit live.
+              </p>
+              <div className="flex gap-3">
+                <button
+                  onClick={() => setLiveQuizPush(null)}
+                  className="flex-1 px-4 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-sm font-semibold transition"
+                >
+                  Më vonë
+                </button>
+                <a
+                  href={`/student/quiz/${liveQuizPush.quizId}`}
+                  className="flex-1 flex items-center justify-center gap-2 px-4 py-2.5 bg-violet-600 hover:bg-violet-700 text-white rounded-xl text-sm font-semibold transition"
+                  onClick={() => setLiveQuizPush(null)}
+                >
+                  <ExternalLink className="w-4 h-4" /> Hap kuizin
+                </a>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Navigation warning confirmation */}
+      {showNavWarning && (
+        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-[200] p-4">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm p-6 text-center">
+            <div className="w-14 h-14 rounded-full bg-red-100 flex items-center justify-center mx-auto mb-4">
+              <Video className="w-7 h-7 text-red-500" />
+            </div>
+            <h3 className="text-lg font-bold text-slate-900 mb-2">Po largohesh nga sesioni?</h3>
+            <p className="text-slate-500 text-sm mb-6">
+              Nëse largohesh, do të shkëputesh nga sesioni live. A je i sigurt?
+            </p>
+            <div className="flex gap-3">
+              <button
+                onClick={() => setShowNavWarning(false)}
+                className="flex-1 px-4 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-sm font-semibold transition"
+              >
+                Qëndro
+              </button>
+              <button
+                onClick={() => { setShowNavWarning(false); navigate('/student/live-sessions'); }}
+                className="flex-1 px-4 py-2.5 bg-red-600 hover:bg-red-700 text-white rounded-xl text-sm font-semibold transition"
+              >
+                Largohu
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </StudentLayout>
   );
 }

@@ -5,70 +5,39 @@ import LoadingButton from '../../components/ui/LoadingButton';
 import { toast } from 'sonner';
 import { authFetch } from '../../lib/apiUrl';
 import { defaultFeatureFlags, FeatureFlags } from '../../lib/platformFeatures';
+import { useTranslation } from 'react-i18next';
 import {
   Settings, Globe, Bell, Shield, Database, Mail,
   Clock, Languages, Save, ToggleLeft, ToggleRight,
   ChevronRight, School, Phone, MapPin, AlertTriangle,
-  GraduationCap, Briefcase, Crown, Info
+  GraduationCap, Briefcase, Crown, Info, Trash2, X
 } from 'lucide-react';
 
 type Role = 'student' | 'teacher' | 'admin';
 type RoleBoolMap = Record<Role, boolean>;
 type RoleNumMap = Record<Role, number>;
 
-const ROLES: { id: Role; label: string; icon: React.ElementType; color: string }[] = [
-  { id: 'student', label: 'Students', icon: GraduationCap, color: 'emerald' },
-  { id: 'teacher', label: 'Teachers', icon: Briefcase,    color: 'violet' },
-  { id: 'admin',   label: 'Admins',   icon: Crown,        color: 'amber' },
-];
-
-function asRoleBool(v: any, fallback = false): RoleBoolMap {
-  if (v && typeof v === 'object' && 'student' in v) {
-    return { student: !!v.student, teacher: !!v.teacher, admin: !!v.admin };
-  }
-  if (typeof v === 'boolean') return { student: v, teacher: v, admin: v };
-  return { student: fallback, teacher: fallback, admin: fallback };
-}
-
-function asRoleNum(v: any, fallback: number): RoleNumMap {
-  if (v && typeof v === 'object' && 'student' in v) {
-    return {
-      student: Number.isFinite(Number(v.student)) ? Number(v.student) : fallback,
-      teacher: Number.isFinite(Number(v.teacher)) ? Number(v.teacher) : fallback,
-      admin:   Number.isFinite(Number(v.admin))   ? Number(v.admin)   : fallback,
-    };
-  }
-  if (Number.isFinite(Number(v))) {
-    const n = Number(v);
-    return { student: n, teacher: n, admin: n };
-  }
-  return { student: fallback, teacher: fallback, admin: fallback };
-}
-
 interface GeneralForm {
   school_name: string;
   tagline: string;
   contact_email: string;
   support_phone: string;
-  address: string;
   website: string;
-  timezone: string;
+  address: string;
   language: string;
+  timezone: string;
   date_format: string;
 }
 
-interface NotifSettings {
-  email_new_enrollment: boolean;
-  email_quiz_submitted: boolean;
-  email_certificate_issued: boolean;
-  email_payment_received: boolean;
-  system_maintenance_alerts: boolean;
-  weekly_report: boolean;
-}
+const LANGUAGES = ['English', 'Albanian', 'German', 'French', 'Spanish'];
+const TIMEZONES = ['UTC', 'Europe/Tirane', 'Europe/Berlin', 'America/New_York'];
+const DATE_FORMATS = ['DD/MM/YYYY', 'MM/DD/YYYY', 'YYYY-MM-DD'];
 
-const TIMEZONES = ['UTC', 'America/New_York', 'America/Chicago', 'America/Los_Angeles', 'Europe/London', 'Europe/Berlin', 'Asia/Tokyo', 'Asia/Dubai', 'Australia/Sydney'];
-const LANGUAGES = ['English', 'French', 'German', 'Spanish', 'Arabic', 'Albanian', 'Turkish'];
-const DATE_FORMATS = ['MMM D, YYYY', 'DD/MM/YYYY', 'MM/DD/YYYY', 'YYYY-MM-DD'];
+const ROLES: { id: Role; label: string; icon: React.ElementType }[] = [
+  { id: 'student', label: 'Student', icon: GraduationCap },
+  { id: 'teacher', label: 'Teacher', icon: Briefcase },
+  { id: 'admin',   label: 'Admin',   icon: Crown },
+];
 
 const TABS = [
   { id: 'general',       label: 'General',       icon: School },
@@ -79,6 +48,7 @@ const TABS = [
 ];
 
 export default function AdminSettings() {
+  const { t } = useTranslation();
   const [activeTab, setActiveTab] = useState('general');
   const [saving, setSaving] = useState(false);
   const [maintenance, setMaintenance] = useState(false);
@@ -90,39 +60,71 @@ export default function AdminSettings() {
   const [maxLoginAttempts, setMaxLoginAttempts] = useState<RoleNumMap>({ student: 5, teacher: 5, admin: 5 });
   const [telegramErrorAlerts, setTelegramErrorAlerts] = useState(true);
   const [features, setFeatures] = useState<FeatureFlags>(defaultFeatureFlags);
+  const [showClearModal, setShowClearModal] = useState(false);
+  const [clearConfirmText, setClearConfirmText] = useState('');
+  const [clearing, setClearing] = useState(false);
+
+  const TABS_LOCAL = [
+    { id: 'general',       label: t('settings.tabs.general'),       icon: School },
+    { id: 'notifications', label: t('settings.tabs.notifications'),  icon: Bell },
+    { id: 'email',         label: t('settings.tabs.email'),          icon: Mail },
+    { id: 'security',      label: t('settings.tabs.security'),       icon: Shield },
+    { id: 'advanced',      label: t('settings.tabs.advanced'),       icon: Database },
+  ];
+
+  const NOTIF_LABELS_LOCAL: Record<string, { label: string; desc: string }> = {
+    email_new_enrollment: { label: t('settings.notifications.enrollment'), desc: t('settings.notifications.enrollmentDesc') },
+    email_quiz_submitted: { label: t('settings.notifications.enrollment'), desc: t('settings.notifications.enrollmentDesc') },
+    email_certificate_issued: { label: t('settings.notifications.enrollment'), desc: t('settings.notifications.enrollmentDesc') },
+    email_payment_received: { label: t('settings.notifications.payments'), desc: t('settings.notifications.paymentsDesc') },
+    system_maintenance_alerts: { label: t('settings.notifications.system'), desc: t('settings.notifications.systemDesc') },
+    weekly_report: { label: t('settings.notifications.system'), desc: t('settings.notifications.systemDesc') },
+  };
 
   const [general, setGeneral] = useState<GeneralForm>({
     school_name: 'QuizMaster Academy',
     tagline: 'The smart way to teach & learn',
-    contact_email: 'admin@quizmaster.edu',
-    support_phone: '+1 (555) 010-2030',
-    address: '123 Education Blvd, Suite 400, New York, NY 10001',
-    website: 'www.quizmaster.edu',
-    timezone: 'America/New_York',
+    contact_email: 'admin@quizmaster.com',
+    support_phone: '+355 69 123 4567',
+    website: 'https://quizmaster-academy.com',
+    address: 'Tirana, Albania',
     language: 'English',
-    date_format: 'MMM D, YYYY',
+    timezone: 'Europe/Tirane',
+    date_format: 'DD/MM/YYYY',
   });
 
-  const [notifs, setNotifs] = useState<NotifSettings>({
-    email_new_enrollment: true,
-    email_quiz_submitted: true,
-    email_certificate_issued: true,
-    email_payment_received: true,
-    system_maintenance_alerts: true,
-    weekly_report: false,
+  const [notifs, setNotifs] = useState<Record<string, RoleBoolMap>>({
+    email_new_enrollment: { student: true, teacher: true, admin: true },
+    email_quiz_submitted: { student: false, teacher: true, admin: true },
+    email_certificate_issued: { student: true, teacher: false, admin: true },
+    email_payment_received: { student: true, teacher: false, admin: true },
+    system_maintenance_alerts: { student: false, teacher: false, admin: true },
+    weekly_report: { student: false, teacher: false, admin: true },
   });
 
   const [emailSettings, setEmailSettings] = useState({
-    smtp_host: 'smtp.mailgun.org',
+    smtp_host: 'smtp.gmail.com',
     smtp_port: '587',
-    smtp_user: 'postmaster@quizmaster.edu',
+    smtp_user: '',
     smtp_password: '',
     from_name: 'QuizMaster Academy',
-    from_email: 'noreply@quizmaster.edu',
-    reply_to: 'support@quizmaster.edu',
+    from_email: 'noreply@quizmaster.com',
+    reply_to: 'support@quizmaster.com',
     brevo_api_key: '',
+    brevo_sender_name: 'QuizMaster',
     brevo_sender_email: '',
-    brevo_sender_name: '',
+  });
+
+  const [notifChannels, setNotifChannels] = useState({
+    email_enabled: true,
+    viber_enabled: false,
+    viber_token: '',
+    whatsapp_enabled: false,
+    whatsapp_token: '',
+    whatsapp_phone_id: '',
+    gmail_enabled: false,
+    gmail_user: '',
+    gmail_password: '',
   });
 
   const handleSave = async () => {
@@ -136,18 +138,29 @@ export default function AdminSettings() {
             general,
             notifications: notifs,
             email: emailSettings,
-            security: { requireEmailVerify, registrationOpen, strongPasswords, autoLogout, sessionTimeoutMinutes, maxLoginAttempts },
-            advanced: { maintenance, telegramErrorAlerts },
+            notification_channels: notifChannels,
+            security: {
+              registrationOpen,
+              requireEmailVerify,
+              strongPasswords,
+              autoLogout,
+              sessionTimeoutMinutes,
+              maxLoginAttempts,
+            },
+            advanced: {
+              maintenance,
+              telegramErrorAlerts,
+            },
             features,
           },
         }),
       });
       const json = await res.json();
-      if (!res.ok || !json?.success) throw new Error(json?.error || 'Failed to save settings');
+      if (!res.ok || !json?.success) throw new Error(json?.error || t('settings.toasts.failed'));
       window.dispatchEvent(new CustomEvent('settings-updated'));
-      toast.success('Settings saved successfully.');
+      toast.success(t('settings.toasts.saved'));
     } catch (e: any) {
-      toast.error(e?.message || 'Failed to save settings');
+      toast.error(e?.message || t('settings.toasts.failed'));
     } finally {
       setSaving(false);
     }
@@ -156,14 +169,27 @@ export default function AdminSettings() {
   useEffect(() => {
     (async () => {
       try {
-        const res = await authFetch('/api/admin/config/settings');
+        const res = await fetch('/api/admin/config/settings');
         const json = await res.json();
-        if (!res.ok || !json?.success || !json?.value) return;
-        const v = json.value as any;
-        if (v.general) setGeneral((prev) => ({ ...prev, ...v.general }));
-        if (v.notifications) setNotifs((prev) => ({ ...prev, ...v.notifications }));
-        if (v.email) setEmailSettings((prev) => ({ ...prev, ...v.email }));
+        // GET returns { success, section, value }; PUT returns { success, config: { section, value } }
+        const v = json.value ?? json.config?.value;
+        if (!json.success || !v) return;
+        if (v.general) setGeneral(prev => ({ ...prev, ...v.general }));
+        if (v.notifications) setNotifs(prev => ({ ...prev, ...v.notifications }));
+        if (v.email) setEmailSettings(prev => ({ ...prev, ...v.email }));
+        if (v.notification_channels) setNotifChannels(prev => ({ ...prev, ...v.notification_channels }));
         if (v.security) {
+          const asRoleBool = (obj: any, def: boolean): RoleBoolMap => ({
+            student: typeof obj?.student === 'boolean' ? obj.student : def,
+            teacher: typeof obj?.teacher === 'boolean' ? obj.teacher : def,
+            admin:   typeof obj?.admin   === 'boolean' ? obj.admin   : def,
+          });
+          const asRoleNum = (obj: any, def: number): RoleNumMap => ({
+            student: typeof obj?.student === 'number' ? obj.student : def,
+            teacher: typeof obj?.teacher === 'number' ? obj.teacher : def,
+            admin:   typeof obj?.admin   === 'number' ? obj.admin   : def,
+          });
+
           if (typeof v.security.requireEmailVerify === 'boolean') setRequireEmailVerify(v.security.requireEmailVerify);
           if (typeof v.security.registrationOpen === 'boolean') setRegistrationOpen(v.security.registrationOpen);
           setStrongPasswords(asRoleBool(v.security.strongPasswords, true));
@@ -189,14 +215,34 @@ export default function AdminSettings() {
     })();
   }, []);
 
+  const handleClearDatabase = async () => {
+    if (clearConfirmText !== 'DELETE') return;
+    setClearing(true);
+    try {
+      const res = await authFetch('/api/admin/clear-database', {
+        method: 'POST',
+        body: JSON.stringify({ confirmation: 'DELETE' }),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error || 'Failed');
+      toast.success(`Database cleared — ${json.deletedUsers ?? 0} user(s) removed. Admin accounts preserved.`);
+      setShowClearModal(false);
+      setClearConfirmText('');
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to clear database');
+    } finally {
+      setClearing(false);
+    }
+  };
+
   return (
     <AdminLayout>
       <div className="p-6 space-y-6">
         {/* Header */}
         <div className="flex items-center justify-between">
           <div>
-            <h1 className="text-2xl font-bold text-slate-900">Settings</h1>
-            <p className="text-sm text-slate-500 mt-0.5">Configure your platform preferences</p>
+            <h1 className="text-2xl font-bold text-slate-900">{t('settings.title')}</h1>
+            <p className="text-sm text-slate-500 mt-0.5">{t('settings.subtitle')}</p>
           </div>
           <LoadingButton
             onClick={handleSave}
@@ -204,7 +250,7 @@ export default function AdminSettings() {
             icon={<Save className="w-4 h-4" />}
             className="bg-indigo-600 hover:bg-indigo-700 px-4 py-2.5"
           >
-            Save Changes
+            {t('settings.saveChanges')}
           </LoadingButton>
         </div>
 
@@ -212,7 +258,7 @@ export default function AdminSettings() {
           {/* Sidebar Tabs */}
           <div className="lg:w-56 shrink-0">
             <nav className="bg-white rounded-2xl border border-slate-100 shadow-sm p-2 space-y-0.5">
-              {TABS.map(tab => {
+              {TABS_LOCAL.map(tab => {
                 const Icon = tab.icon;
                 return (
                   <button
@@ -238,42 +284,42 @@ export default function AdminSettings() {
             {/* GENERAL */}
             {activeTab === 'general' && (
               <>
-                <Section title="School Information" subtitle="Basic details about your institution">
+                <Section title={t('settings.general.schoolInfo')} subtitle={t('settings.general.schoolInfoDesc')}>
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <Field label="School Name" icon={School}>
+                    <Field label={t('settings.general.schoolName')} icon={School}>
                       <input value={general.school_name} onChange={e => setGeneral(p => ({ ...p, school_name: e.target.value }))} className={inputCls} />
                     </Field>
-                    <Field label="Tagline">
+                    <Field label={t('settings.general.tagline')}>
                       <input value={general.tagline} onChange={e => setGeneral(p => ({ ...p, tagline: e.target.value }))} className={inputCls} />
                     </Field>
-                    <Field label="Contact Email" icon={Mail}>
+                    <Field label={t('settings.general.contactEmail')} icon={Mail}>
                       <input type="email" value={general.contact_email} onChange={e => setGeneral(p => ({ ...p, contact_email: e.target.value }))} className={inputCls} />
                     </Field>
-                    <Field label="Support Phone" icon={Phone}>
+                    <Field label={t('settings.general.supportPhone')} icon={Phone}>
                       <input value={general.support_phone} onChange={e => setGeneral(p => ({ ...p, support_phone: e.target.value }))} className={inputCls} />
                     </Field>
-                    <Field label="Website" icon={Globe}>
+                    <Field label={t('settings.general.website')} icon={Globe}>
                       <input value={general.website} onChange={e => setGeneral(p => ({ ...p, website: e.target.value }))} className={inputCls} />
                     </Field>
-                    <Field label="Address" icon={MapPin}>
+                    <Field label={t('settings.general.address')} icon={MapPin}>
                       <input value={general.address} onChange={e => setGeneral(p => ({ ...p, address: e.target.value }))} className={inputCls} />
                     </Field>
                   </div>
                 </Section>
 
-                <Section title="Localization" subtitle="Language, timezone and date format">
+                <Section title={t('settings.general.localization')} subtitle={t('settings.general.localizationDesc')}>
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                    <Field label="Language" icon={Languages}>
+                    <Field label={t('settings.general.language')} icon={Languages}>
                       <select value={general.language} onChange={e => setGeneral(p => ({ ...p, language: e.target.value }))} className={inputCls}>
                         {LANGUAGES.map(l => <option key={l}>{l}</option>)}
                       </select>
                     </Field>
-                    <Field label="Timezone" icon={Clock}>
+                    <Field label={t('settings.general.timezone')} icon={Clock}>
                       <select value={general.timezone} onChange={e => setGeneral(p => ({ ...p, timezone: e.target.value }))} className={inputCls}>
                         {TIMEZONES.map(t => <option key={t}>{t}</option>)}
                       </select>
                     </Field>
-                    <Field label="Date Format">
+                    <Field label={t('settings.general.dateFormat')}>
                       <select value={general.date_format} onChange={e => setGeneral(p => ({ ...p, date_format: e.target.value }))} className={inputCls}>
                         {DATE_FORMATS.map(f => <option key={f}>{f}</option>)}
                       </select>
@@ -281,16 +327,16 @@ export default function AdminSettings() {
                   </div>
                 </Section>
 
-                <Section title="Registration" subtitle="Control how students can join">
+                <Section title={t('settings.general.registration')} subtitle={t('settings.general.registrationDesc')}>
                   <Toggle
-                    label="Open Registration"
-                    description="Allow new students to register without an invitation"
+                    label={t('settings.general.openRegistration')}
+                    description={t('settings.general.openRegistrationDesc')}
                     value={registrationOpen}
                     onChange={setRegistrationOpen}
                   />
                   <Toggle
-                    label="Require Email Verification"
-                    description="Students must verify their email before accessing content"
+                    label={t('settings.general.requireEmailVerify')}
+                    description={t('settings.general.requireEmailVerifyDesc')}
                     value={requireEmailVerify}
                     onChange={setRequireEmailVerify}
                   />
@@ -300,44 +346,100 @@ export default function AdminSettings() {
 
             {/* NOTIFICATIONS */}
             {activeTab === 'notifications' && (
-              <Section title="Email Notifications" subtitle="Choose which events trigger email alerts">
-                <Toggle label={NOTIF_LABELS.email_new_enrollment.label}      description={NOTIF_LABELS.email_new_enrollment.desc}      value={notifs.email_new_enrollment}      onChange={v => setNotifs(p => ({ ...p, email_new_enrollment: v }))} />
-                <Toggle label={NOTIF_LABELS.email_quiz_submitted.label}      description={NOTIF_LABELS.email_quiz_submitted.desc}      value={notifs.email_quiz_submitted}      onChange={v => setNotifs(p => ({ ...p, email_quiz_submitted: v }))} />
-                <Toggle label={NOTIF_LABELS.email_certificate_issued.label}  description={NOTIF_LABELS.email_certificate_issued.desc}  value={notifs.email_certificate_issued}  onChange={v => setNotifs(p => ({ ...p, email_certificate_issued: v }))} />
-                <Toggle label={NOTIF_LABELS.email_payment_received.label}    description={NOTIF_LABELS.email_payment_received.desc}    value={notifs.email_payment_received}    onChange={v => setNotifs(p => ({ ...p, email_payment_received: v }))} />
-                <Toggle label={NOTIF_LABELS.system_maintenance_alerts.label} description={NOTIF_LABELS.system_maintenance_alerts.desc} value={notifs.system_maintenance_alerts} onChange={v => setNotifs(p => ({ ...p, system_maintenance_alerts: v }))} />
-                <Toggle label={NOTIF_LABELS.weekly_report.label}             description={NOTIF_LABELS.weekly_report.desc}             value={notifs.weekly_report}             onChange={v => setNotifs(p => ({ ...p, weekly_report: v }))} />
-              </Section>
+              <>
+                {/* Legend */}
+                <div className="bg-gradient-to-br from-indigo-50 to-blue-50 border border-indigo-100 rounded-2xl p-4 flex items-start gap-3">
+                  <div className="w-9 h-9 rounded-xl bg-white flex items-center justify-center shrink-0 shadow-sm">
+                    <Bell className="w-4 h-4 text-indigo-600" />
+                  </div>
+                  <div>
+                    <p className="text-sm font-bold text-slate-900">{t('settings.notifications.controlTitle')}</p>
+                    <p className="text-xs text-slate-500 mt-0.5 leading-relaxed">
+                      {t('settings.notifications.controlDesc')}
+                      <span className="inline-flex items-center gap-1 ml-1">
+                        <span className="inline-block w-2 h-2 rounded-full bg-emerald-500" /> {t('settings.notifications.roles.students')}
+                        <span className="inline-block w-2 h-2 rounded-full bg-violet-500 ml-1" /> {t('settings.notifications.roles.teachers')}
+                        <span className="inline-block w-2 h-2 rounded-full bg-amber-500 ml-1" /> {t('settings.notifications.roles.admins')}
+                      </span>
+                    </p>
+                  </div>
+                </div>
+
+                <Section title={t('settings.notifications.enrollment')} subtitle={t('settings.notifications.enrollmentDesc')}>
+                  <RoleToggleRow
+                    label={NOTIF_LABELS_LOCAL.email_new_enrollment.label}
+                    description={NOTIF_LABELS_LOCAL.email_new_enrollment.desc}
+                    value={notifs.email_new_enrollment}
+                    onChange={v => setNotifs(p => ({ ...p, email_new_enrollment: v }))}
+                  />
+                  <RoleToggleRow
+                    label={NOTIF_LABELS_LOCAL.email_quiz_submitted.label}
+                    description={NOTIF_LABELS_LOCAL.email_quiz_submitted.desc}
+                    value={notifs.email_quiz_submitted}
+                    onChange={v => setNotifs(p => ({ ...p, email_quiz_submitted: v }))}
+                  />
+                  <RoleToggleRow
+                    label={NOTIF_LABELS_LOCAL.email_certificate_issued.label}
+                    description={NOTIF_LABELS_LOCAL.email_certificate_issued.desc}
+                    value={notifs.email_certificate_issued}
+                    onChange={v => setNotifs(p => ({ ...p, email_certificate_issued: v }))}
+                  />
+                </Section>
+
+                <Section title={t('settings.notifications.payments')} subtitle={t('settings.notifications.paymentsDesc')}>
+                  <RoleToggleRow
+                    label={NOTIF_LABELS_LOCAL.email_payment_received.label}
+                    description={NOTIF_LABELS_LOCAL.email_payment_received.desc}
+                    value={notifs.email_payment_received}
+                    onChange={v => setNotifs(p => ({ ...p, email_payment_received: v }))}
+                  />
+                </Section>
+
+                <Section title={t('settings.notifications.system')} subtitle={t('settings.notifications.systemDesc')}>
+                  <RoleToggleRow
+                    label={NOTIF_LABELS_LOCAL.system_maintenance_alerts.label}
+                    description={NOTIF_LABELS_LOCAL.system_maintenance_alerts.desc}
+                    value={notifs.system_maintenance_alerts}
+                    onChange={v => setNotifs(p => ({ ...p, system_maintenance_alerts: v }))}
+                  />
+                  <RoleToggleRow
+                    label={NOTIF_LABELS_LOCAL.weekly_report.label}
+                    description={NOTIF_LABELS_LOCAL.weekly_report.desc}
+                    value={notifs.weekly_report}
+                    onChange={v => setNotifs(p => ({ ...p, weekly_report: v }))}
+                  />
+                </Section>
+              </>
             )}
 
             {/* EMAIL */}
             {activeTab === 'email' && (
               <>
-                <Section title="SMTP Configuration" subtitle="Configure outgoing email server">
+                <Section title={t('settings.email.smtpTitle')} subtitle={t('settings.email.smtpDesc')}>
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <Field label="SMTP Host">
+                    <Field label={t('settings.email.host')}>
                       <input value={emailSettings.smtp_host} onChange={e => setEmailSettings(p => ({ ...p, smtp_host: e.target.value }))} className={inputCls} />
                     </Field>
-                    <Field label="SMTP Port">
+                    <Field label={t('settings.email.port')}>
                       <input value={emailSettings.smtp_port} onChange={e => setEmailSettings(p => ({ ...p, smtp_port: e.target.value }))} className={inputCls} />
                     </Field>
-                    <Field label="SMTP Username">
+                    <Field label={t('settings.email.user')}>
                       <input value={emailSettings.smtp_user} onChange={e => setEmailSettings(p => ({ ...p, smtp_user: e.target.value }))} className={inputCls} />
                     </Field>
-                    <Field label="SMTP Password">
+                    <Field label={t('settings.email.password')}>
                       <input type="password" placeholder="••••••••" value={emailSettings.smtp_password} onChange={e => setEmailSettings(p => ({ ...p, smtp_password: e.target.value }))} className={inputCls} />
                     </Field>
                   </div>
                 </Section>
-                <Section title="Sender Details" subtitle="How emails appear to recipients">
+                <Section title={t('settings.email.senderTitle')} subtitle={t('settings.email.senderDesc')}>
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <Field label="From Name">
+                    <Field label={t('settings.email.fromName')}>
                       <input value={emailSettings.from_name} onChange={e => setEmailSettings(p => ({ ...p, from_name: e.target.value }))} className={inputCls} />
                     </Field>
-                    <Field label="From Email">
+                    <Field label={t('settings.email.fromEmail')}>
                       <input type="email" value={emailSettings.from_email} onChange={e => setEmailSettings(p => ({ ...p, from_email: e.target.value }))} className={inputCls} />
                     </Field>
-                    <Field label="Reply-To Email">
+                    <Field label={t('settings.email.replyTo')}>
                       <input type="email" value={emailSettings.reply_to} onChange={e => setEmailSettings(p => ({ ...p, reply_to: e.target.value }))} className={inputCls} />
                     </Field>
                   </div>
@@ -348,14 +450,14 @@ export default function AdminSettings() {
                         <Shield className="w-4 h-4 text-indigo-600" />
                       </div>
                       <div>
-                        <p className="text-sm font-bold text-slate-900">OTP Email Provider (Brevo)</p>
+                        <p className="text-sm font-bold text-slate-900">{t('settings.email.otpTitle')}</p>
                         <p className="text-xs text-slate-500 mt-0.5 leading-relaxed">
-                          Used to deliver Two-Factor Authentication codes. When filled in, these values override server-side environment variables.
+                          {t('settings.email.otpDesc')}
                         </p>
                       </div>
                     </div>
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                      <Field label="Brevo API Key">
+                      <Field label={t('settings.email.apiKey')}>
                         <input
                           type="password"
                           autoComplete="off"
@@ -365,7 +467,7 @@ export default function AdminSettings() {
                           className={inputCls}
                         />
                       </Field>
-                      <Field label="Brevo Sender Name">
+                      <Field label={t('settings.email.otpSenderName')}>
                         <input
                           placeholder="QuizMaster"
                           value={emailSettings.brevo_sender_name}
@@ -374,7 +476,7 @@ export default function AdminSettings() {
                         />
                       </Field>
                       <div className="md:col-span-2">
-                        <Field label="Brevo Sender Email (verified in Brevo)">
+                        <Field label={t('settings.email.otpSenderEmail')}>
                           <input
                             type="email"
                             placeholder="otp@yourdomain.com"
@@ -387,7 +489,158 @@ export default function AdminSettings() {
                     </div>
                   </div>
 
-                  <button className="mt-3 text-sm text-indigo-600 font-semibold hover:underline">Send Test Email</button>
+                  <button className="mt-3 text-sm text-indigo-600 font-semibold hover:underline">{t('settings.email.sendTest')}</button>
+                </Section>
+
+                {/* ── Notification Channels ── */}
+                <Section title="Kanalet e Njoftimeve të Kredencialeve" icon={Bell}>
+                  <p className="text-sm text-slate-500 mb-4">
+                    Kur krijoni një mësues ose student, kredencialet dërgohen automatikisht përmes kanaleve të aktivizuara më poshtë.
+                  </p>
+
+                  {/* Email via Brevo */}
+                  <div className="rounded-xl border border-slate-200 overflow-hidden mb-3">
+                    <div className="flex items-center justify-between px-4 py-3 bg-slate-50">
+                      <div className="flex items-center gap-2">
+                        <span className="text-lg">✉️</span>
+                        <div>
+                          <p className="text-sm font-semibold text-slate-800">Email (Brevo)</p>
+                          <p className="text-xs text-slate-500">Dërgon email me kredencialet tek adresa e regjistruar</p>
+                        </div>
+                      </div>
+                      <label className="relative inline-flex items-center cursor-pointer">
+                        <input type="checkbox" className="sr-only peer"
+                          checked={notifChannels.email_enabled}
+                          onChange={e => setNotifChannels(p => ({ ...p, email_enabled: e.target.checked }))} />
+                        <div className="w-10 h-6 bg-slate-200 peer-checked:bg-indigo-600 rounded-full transition-colors after:content-[''] after:absolute after:top-0.5 after:left-0.5 after:bg-white after:rounded-full after:w-5 after:h-5 after:transition-transform peer-checked:after:translate-x-4" />
+                      </label>
+                    </div>
+                    {notifChannels.email_enabled && (
+                      <div className="px-4 py-3 border-t border-slate-100 bg-white">
+                        <p className="text-xs text-slate-500">Konfigurimet e Brevo janë në seksionin <strong>Brevo API</strong> mbi këtë.</p>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Viber */}
+                  <div className="rounded-xl border border-slate-200 overflow-hidden mb-3">
+                    <div className="flex items-center justify-between px-4 py-3 bg-slate-50">
+                      <div className="flex items-center gap-2">
+                        <span className="text-lg">💬</span>
+                        <div>
+                          <p className="text-sm font-semibold text-slate-800">Viber Bot</p>
+                          <p className="text-xs text-slate-500">Dërgon mesazh Viber (përdoruesi duhet të ketë abonuar bot-in)</p>
+                        </div>
+                      </div>
+                      <label className="relative inline-flex items-center cursor-pointer">
+                        <input type="checkbox" className="sr-only peer"
+                          checked={notifChannels.viber_enabled}
+                          onChange={e => setNotifChannels(p => ({ ...p, viber_enabled: e.target.checked }))} />
+                        <div className="w-10 h-6 bg-slate-200 peer-checked:bg-violet-600 rounded-full transition-colors after:content-[''] after:absolute after:top-0.5 after:left-0.5 after:bg-white after:rounded-full after:w-5 after:h-5 after:transition-transform peer-checked:after:translate-x-4" />
+                      </label>
+                    </div>
+                    {notifChannels.viber_enabled && (
+                      <div className="px-4 py-3 border-t border-slate-100 bg-white">
+                        <Field label="Viber Bot Auth Token">
+                          <input
+                            type="password"
+                            placeholder="Token nga Viber Developer Panel"
+                            value={notifChannels.viber_token}
+                            onChange={e => setNotifChannels(p => ({ ...p, viber_token: e.target.value }))}
+                            className={inputCls}
+                          />
+                        </Field>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* WhatsApp */}
+                  <div className="rounded-xl border border-slate-200 overflow-hidden mb-3">
+                    <div className="flex items-center justify-between px-4 py-3 bg-slate-50">
+                      <div className="flex items-center gap-2">
+                        <span className="text-lg">📱</span>
+                        <div>
+                          <p className="text-sm font-semibold text-slate-800">WhatsApp (Meta Cloud API)</p>
+                          <p className="text-xs text-slate-500">Kërkon numrin e telefonit të ruajtur gjatë regjistrimit</p>
+                        </div>
+                      </div>
+                      <label className="relative inline-flex items-center cursor-pointer">
+                        <input type="checkbox" className="sr-only peer"
+                          checked={notifChannels.whatsapp_enabled}
+                          onChange={e => setNotifChannels(p => ({ ...p, whatsapp_enabled: e.target.checked }))} />
+                        <div className="w-10 h-6 bg-slate-200 peer-checked:bg-green-600 rounded-full transition-colors after:content-[''] after:absolute after:top-0.5 after:left-0.5 after:bg-white after:rounded-full after:w-5 after:h-5 after:transition-transform peer-checked:after:translate-x-4" />
+                      </label>
+                    </div>
+                    {notifChannels.whatsapp_enabled && (
+                      <div className="px-4 py-3 border-t border-slate-100 bg-white grid grid-cols-1 md:grid-cols-2 gap-3">
+                        <Field label="WhatsApp Access Token">
+                          <input
+                            type="password"
+                            placeholder="Token nga Meta Developer Console"
+                            value={notifChannels.whatsapp_token}
+                            onChange={e => setNotifChannels(p => ({ ...p, whatsapp_token: e.target.value }))}
+                            className={inputCls}
+                          />
+                        </Field>
+                        <Field label="WhatsApp Phone Number ID">
+                          <input
+                            type="text"
+                            placeholder="p.sh. 123456789012345"
+                            value={notifChannels.whatsapp_phone_id}
+                            onChange={e => setNotifChannels(p => ({ ...p, whatsapp_phone_id: e.target.value }))}
+                            className={inputCls}
+                          />
+                        </Field>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Gmail */}
+                  <div className="rounded-xl border border-slate-200 overflow-hidden">
+                    <div className="flex items-center justify-between px-4 py-3 bg-slate-50">
+                      <div className="flex items-center gap-2">
+                        <span className="text-lg">📧</span>
+                        <div>
+                          <p className="text-sm font-semibold text-slate-800">Gmail (SMTP)</p>
+                          <p className="text-xs text-slate-500">Dërgon email nga llogaria Gmail me App Password</p>
+                        </div>
+                      </div>
+                      <label className="relative inline-flex items-center cursor-pointer">
+                        <input type="checkbox" className="sr-only peer"
+                          checked={notifChannels.gmail_enabled}
+                          onChange={e => setNotifChannels(p => ({ ...p, gmail_enabled: e.target.checked }))} />
+                        <div className="w-10 h-6 bg-slate-200 peer-checked:bg-red-500 rounded-full transition-colors after:content-[''] after:absolute after:top-0.5 after:left-0.5 after:bg-white after:rounded-full after:w-5 after:h-5 after:transition-transform peer-checked:after:translate-x-4" />
+                      </label>
+                    </div>
+                    {notifChannels.gmail_enabled && (
+                      <div className="px-4 py-3 border-t border-slate-100 bg-white grid grid-cols-1 md:grid-cols-2 gap-3">
+                        <Field label="Gmail Adresa">
+                          <input
+                            type="email"
+                            placeholder="you@gmail.com"
+                            value={notifChannels.gmail_user}
+                            onChange={e => setNotifChannels(p => ({ ...p, gmail_user: e.target.value }))}
+                            className={inputCls}
+                          />
+                        </Field>
+                        <Field label="App Password (16 karaktere)">
+                          <input
+                            type="password"
+                            placeholder="xxxx xxxx xxxx xxxx"
+                            value={notifChannels.gmail_password}
+                            onChange={e => setNotifChannels(p => ({ ...p, gmail_password: e.target.value }))}
+                            className={inputCls}
+                          />
+                        </Field>
+                        <div className="md:col-span-2">
+                          <p className="text-xs text-slate-500">
+                            Aktivizo <strong>2-Step Verification</strong> në Google Account, pastaj krijo <strong>App Password</strong> nga &nbsp;
+                            <a href="https://myaccount.google.com/apppasswords" target="_blank" rel="noopener noreferrer" className="text-indigo-600 hover:underline">myaccount.google.com/apppasswords</a>.
+                          </p>
+                        </div>
+                      </div>
+                    )}
+                  </div>
                 </Section>
               </>
             )}
@@ -400,32 +653,32 @@ export default function AdminSettings() {
                     <Shield className="w-4 h-4 text-indigo-600" />
                   </div>
                   <div>
-                    <p className="text-sm font-bold text-slate-900">Per-role security policies</p>
+                    <p className="text-sm font-bold text-slate-900">{t('settings.security.policiesTitle')}</p>
                     <p className="text-xs text-slate-500 mt-0.5 leading-relaxed">
-                      Each rule below can be configured separately for <span className="font-semibold text-emerald-700">Students</span>, <span className="font-semibold text-violet-700">Teachers</span>, and <span className="font-semibold text-amber-700">Admins</span>. Toggle the role chip to enable/disable, or set a different value per role.
+                      {t('settings.security.policiesDesc')}
                     </p>
                   </div>
                 </div>
 
-                <Section title="Authentication" subtitle="Login and account security policies — applied per role">
+                <Section title={t('settings.security.strongPasswords')} subtitle={t('settings.security.strongPasswordsDesc')}>
                   <RoleToggleRow
-                    label="Require Strong Passwords"
-                    description="Force passwords to be at least 8 characters and include uppercase, a number, and a symbol when users sign up or change their password."
+                    label={t('settings.security.requireStrongPasswords')}
+                    description={t('settings.security.requireStrongPasswordsDesc')}
                     value={strongPasswords}
                     onChange={setStrongPasswords}
                   />
                   <RoleToggleRow
-                    label="Auto Logout on Inactivity"
-                    description="Automatically sign the user out after a period of inactivity to protect unattended sessions on shared devices."
+                    label={t('settings.security.autoLogout')}
+                    description={t('settings.security.autoLogoutDesc')}
                     value={autoLogout}
                     onChange={setAutoLogout}
                   />
                 </Section>
 
-                <Section title="Session Settings" subtitle="Control active session limits — applied per role">
+                <Section title={t('settings.security.sessionTitle')} subtitle={t('settings.security.sessionDesc')}>
                   <RoleNumberRow
-                    label="Session Timeout (minutes)"
-                    description="How long a user can stay idle before being signed out. Lower = stricter security; higher = better convenience."
+                    label={t('settings.security.sessionTimeout')}
+                    description={t('settings.security.sessionTimeoutDesc')}
                     value={sessionTimeoutMinutes}
                     onChange={setSessionTimeoutMinutes}
                     min={1}
@@ -433,8 +686,8 @@ export default function AdminSettings() {
                     suffix="min"
                   />
                   <RoleNumberRow
-                    label="Max Login Attempts"
-                    description="How many wrong password attempts before the account is temporarily locked. Lower = better protection against brute-force; higher = fewer accidental lockouts."
+                    label={t('settings.security.maxLoginAttempts')}
+                    description={t('settings.security.maxLoginAttemptsDesc')}
                     value={maxLoginAttempts}
                     onChange={setMaxLoginAttempts}
                     min={1}
@@ -448,69 +701,171 @@ export default function AdminSettings() {
             {/* ADVANCED */}
             {activeTab === 'advanced' && (
               <>
-                <Section title="Maintenance Mode" subtitle="Take the platform offline for maintenance">
+                <Section title={t('settings.advanced.maintenanceTitle')} subtitle={t('settings.advanced.maintenanceSubtitle')}>
                   <div className={cn('rounded-xl p-4 border', maintenance ? 'bg-rose-50 border-rose-200' : 'bg-slate-50 border-slate-200')}>
                     <Toggle
-                      label="Enable Maintenance Mode"
-                      description="Students and teachers will see a maintenance notice until this is disabled"
+                      label={t('settings.advanced.maintenance')}
+                      description={t('settings.advanced.maintenanceDesc')}
                       value={maintenance}
-                      onChange={v => { setMaintenance(v); if (v) toast.warning('Maintenance mode enabled — users cannot access the platform.'); }}
+                      onChange={v => { setMaintenance(v); if (v) toast.warning(t('settings.advanced.maintenanceEnabledToast')); }}
                     />
                     {maintenance && (
                       <div className="mt-3 flex items-start gap-2 bg-rose-100 text-rose-700 rounded-lg px-3 py-2.5 text-sm">
                         <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" />
-                        Platform is currently offline for all students and teachers.
+                        {t('settings.advanced.maintenanceNotice')}
                       </div>
                     )}
                   </div>
                 </Section>
-                <Section title="Feature Toggles" subtitle="Enable or disable important modules across the platform">
+                <Section title={t('settings.features.title')} subtitle={t('settings.features.subtitle')}>
                   <Toggle
-                    label="Community"
-                    description="Show community pages for students, teachers, and admins"
+                    label={t('settings.features.community')}
+                    description={t('settings.features.communityDesc')}
                     value={features.communityEnabled}
                     onChange={v => setFeatures(p => ({ ...p, communityEnabled: v }))}
                   />
                   <Toggle
-                    label="Live Sessions"
-                    description="Enable live sessions and live classes navigation and routes"
+                    label={t('settings.features.live')}
+                    description={t('settings.features.liveDesc')}
                     value={features.liveSessionsEnabled}
                     onChange={v => setFeatures(p => ({ ...p, liveSessionsEnabled: v }))}
                   />
                   <Toggle
-                    label="Announcements"
-                    description="Enable announcement pages for admins and teachers"
+                    label={t('settings.features.announcements')}
+                    description={t('settings.features.announcementsDesc')}
                     value={features.announcementsEnabled}
                     onChange={v => setFeatures(p => ({ ...p, announcementsEnabled: v }))}
                   />
                   <Toggle
-                    label="Payments & Invoices"
-                    description="Enable business pages and payment/invoice management"
+                    label={t('settings.features.payments')}
+                    description={t('settings.features.paymentsDesc')}
                     value={features.paymentsEnabled}
                     onChange={v => setFeatures(p => ({ ...p, paymentsEnabled: v }))}
                   />
                   <Toggle
-                    label="Telegram Error Alerts"
-                    description="Send backend error alerts to Telegram when incidents happen"
+                    label={t('settings.advanced.telegram')}
+                    description={t('settings.advanced.telegramDesc')}
                     value={telegramErrorAlerts}
                     onChange={setTelegramErrorAlerts}
                   />
                 </Section>
-                <Section title="Data & Storage" subtitle="Manage platform data settings">
+                <Section title={t('settings.advanced.dataStorage')} subtitle={t('settings.advanced.dataStorageDesc')}>
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <Field label="Max File Upload Size (MB)">
+                    <Field label={t('settings.advanced.maxFileUpload')}>
                       <input type="number" defaultValue={50} className={inputCls} />
                     </Field>
-                    <Field label="Allowed File Types">
+                    <Field label={t('settings.advanced.allowedFileTypes')}>
                       <input defaultValue="pdf, jpg, png, mp4, docx" className={inputCls} />
                     </Field>
                   </div>
                   <div className="mt-4 pt-4 border-t border-slate-100 flex gap-3">
-                    <button className="text-sm text-indigo-600 font-semibold hover:underline">Export All Data</button>
-                    <button className="text-sm text-rose-600 font-semibold hover:underline">Clear Cache</button>
+                    <button className="text-sm text-indigo-600 font-semibold hover:underline">{t('settings.advanced.exportData')}</button>
+                    <button className="text-sm text-rose-600 font-semibold hover:underline">{t('settings.advanced.clearCache')}</button>
                   </div>
                 </Section>
+
+                {/* ── Danger Zone ── */}
+                <div className="rounded-2xl border-2 border-rose-200 bg-rose-50/40 p-6 space-y-4">
+                  <div className="flex items-center gap-3 pb-3 border-b border-rose-200">
+                    <div className="w-8 h-8 rounded-xl bg-rose-100 flex items-center justify-center">
+                      <AlertTriangle className="w-4 h-4 text-rose-600" />
+                    </div>
+                    <div>
+                      <h3 className="text-base font-bold text-rose-700">Danger Zone</h3>
+                      <p className="text-xs text-rose-500">These actions are permanent and cannot be undone</p>
+                    </div>
+                  </div>
+
+                  <div className="flex items-start justify-between gap-6">
+                    <div>
+                      <p className="text-sm font-semibold text-slate-800">Clear All Database Data</p>
+                      <p className="text-xs text-slate-500 mt-0.5">
+                        Deletes <strong>all</strong> courses, lessons, quizzes, students, teachers, results, and every other record.
+                        Your admin account will be kept.
+                      </p>
+                    </div>
+                    <button
+                      onClick={() => { setShowClearModal(true); setClearConfirmText(''); }}
+                      className="flex-shrink-0 inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-rose-600 hover:bg-rose-700 text-white text-sm font-semibold transition-colors"
+                    >
+                      <Trash2 className="w-4 h-4" /> Clear Database
+                    </button>
+                  </div>
+                </div>
               </>
+            )}
+
+            {/* ── Clear Database Confirmation Modal ── */}
+            {showClearModal && (
+              <div className="fixed inset-0 lg:left-60 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
+                <div className="bg-white rounded-3xl border border-slate-200 shadow-2xl w-full max-w-md p-6 space-y-5">
+                  <div className="flex items-start justify-between">
+                    <div className="flex items-center gap-3">
+                      <div className="w-10 h-10 rounded-2xl bg-rose-100 flex items-center justify-center">
+                        <Trash2 className="w-5 h-5 text-rose-600" />
+                      </div>
+                      <div>
+                        <h2 className="text-lg font-black text-slate-900">Clear All Data</h2>
+                        <p className="text-xs text-slate-500">This cannot be undone</p>
+                      </div>
+                    </div>
+                    <button onClick={() => setShowClearModal(false)} className="p-1.5 rounded-xl hover:bg-slate-100 transition-colors">
+                      <X className="w-4 h-4 text-slate-500" />
+                    </button>
+                  </div>
+
+                  <div className="bg-rose-50 border border-rose-200 rounded-2xl p-4 space-y-2">
+                    <p className="text-sm font-semibold text-rose-700 flex items-center gap-2">
+                      <AlertTriangle className="w-4 h-4" /> What will be deleted:
+                    </p>
+                    <ul className="text-xs text-rose-600 space-y-1 list-disc list-inside">
+                      <li>All courses, modules, lessons and content</li>
+                      <li>All quizzes, questions and attempts</li>
+                      <li>All students and teachers (their accounts)</li>
+                      <li>All assignments, attendance, certificates</li>
+                      <li>All live sessions, chat, notifications</li>
+                    </ul>
+                    <p className="text-xs font-semibold text-emerald-700 pt-1">
+                      ✓ Admin accounts will be preserved
+                    </p>
+                  </div>
+
+                  <div className="space-y-2">
+                    <label className="block text-xs font-bold text-slate-700 uppercase tracking-wide">
+                      Type <span className="text-rose-600 font-mono">DELETE</span> to confirm
+                    </label>
+                    <input
+                      type="text"
+                      value={clearConfirmText}
+                      onChange={e => setClearConfirmText(e.target.value)}
+                      placeholder="Type DELETE here"
+                      className="w-full px-4 py-2.5 rounded-xl border-2 border-slate-200 focus:border-rose-400 focus:outline-none text-sm font-mono text-slate-800"
+                      autoFocus
+                      onKeyDown={e => { if (e.key === 'Enter' && clearConfirmText === 'DELETE') void handleClearDatabase(); }}
+                    />
+                  </div>
+
+                  <div className="flex gap-3">
+                    <button
+                      onClick={() => setShowClearModal(false)}
+                      className="flex-1 px-4 py-2.5 rounded-xl border border-slate-200 text-sm font-semibold text-slate-700 hover:bg-slate-50 transition-colors"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      onClick={() => void handleClearDatabase()}
+                      disabled={clearConfirmText !== 'DELETE' || clearing}
+                      className="flex-1 px-4 py-2.5 rounded-xl bg-rose-600 hover:bg-rose-700 disabled:opacity-40 disabled:cursor-not-allowed text-white text-sm font-semibold transition-colors inline-flex items-center justify-center gap-2"
+                    >
+                      {clearing ? (
+                        <><div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" /> Clearing…</>
+                      ) : (
+                        <><Trash2 className="w-4 h-4" /> Clear All Data</>
+                      )}
+                    </button>
+                  </div>
+                </div>
+              </div>
             )}
           </div>
         </div>
@@ -521,18 +876,9 @@ export default function AdminSettings() {
 
 const inputCls = 'w-full px-3.5 py-2.5 text-sm border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-400 bg-white text-slate-800 placeholder:text-slate-400';
 
-const NOTIF_LABELS: Record<string, { label: string; desc: string }> = {
-  email_new_enrollment:       { label: 'New Enrollment',         desc: 'Notify when a student enrolls in a course' },
-  email_quiz_submitted:       { label: 'Quiz Submitted',         desc: 'Notify when a student submits a quiz attempt' },
-  email_certificate_issued:   { label: 'Certificate Issued',     desc: 'Notify when a certificate is issued to a student' },
-  email_payment_received:     { label: 'Payment Received',       desc: 'Notify when a payment is successfully processed' },
-  system_maintenance_alerts:  { label: 'Maintenance Alerts',     desc: 'Receive alerts about system health and maintenance' },
-  weekly_report:              { label: 'Weekly Summary Report',  desc: 'Receive a weekly digest of platform activity' },
-};
-
-function Section({ title, subtitle, children }: { title: string; subtitle?: string; children: React.ReactNode }) {
+function Section({ title, subtitle, children, className }: { title: string; subtitle?: string; children: React.ReactNode; className?: string }) {
   return (
-    <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-6 space-y-4">
+    <div className={cn("bg-white rounded-2xl border border-slate-100 shadow-sm p-6 space-y-4", className)}>
       <div className="pb-3 border-b border-slate-100">
         <h3 className="text-base font-bold text-slate-900">{title}</h3>
         {subtitle && <p className="text-xs text-slate-400 mt-0.5">{subtitle}</p>}
@@ -551,16 +897,19 @@ function Field({ label, icon: Icon, children }: { label: string; icon?: React.El
   );
 }
 
-function Toggle({ label, description, value, onChange }: { label: string; description: string; value: boolean; onChange: (v: boolean) => void }) {
+function Toggle({ label, description, value, onChange, variant = 'primary' }: { label: string; description?: string; value: boolean; onChange: (v: boolean) => void; variant?: 'primary' | 'danger' }) {
   return (
     <div className="flex items-start justify-between gap-4 py-3 border-b border-slate-50 last:border-0">
       <div>
         <p className="text-sm font-semibold text-slate-800">{label}</p>
-        <p className="text-xs text-slate-400 mt-0.5">{description}</p>
+        {description && <p className="text-xs text-slate-400 mt-0.5">{description}</p>}
       </div>
       <button
         onClick={() => onChange(!value)}
-        className={cn('shrink-0 w-11 h-6 rounded-full transition-colors relative mt-0.5', value ? 'bg-indigo-600' : 'bg-slate-200')}
+        className={cn(
+          'shrink-0 w-11 h-6 rounded-full transition-colors relative mt-0.5',
+          value ? (variant === 'danger' ? 'bg-rose-600' : 'bg-indigo-600') : 'bg-slate-200'
+        )}
       >
         <span className={cn('absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full shadow-sm transition-transform', value ? 'translate-x-5' : 'translate-x-0')} />
       </button>
@@ -578,6 +927,7 @@ function RoleToggleRow({ label, description, value, onChange }: {
   label: string; description: string;
   value: RoleBoolMap; onChange: (v: RoleBoolMap) => void;
 }) {
+  const { t } = useTranslation();
   const allOn  = ROLES.every(r => value[r.id]);
   const allOff = ROLES.every(r => !value[r.id]);
   const enabledCount = ROLES.filter(r => value[r.id]).length;
@@ -592,7 +942,7 @@ function RoleToggleRow({ label, description, value, onChange }: {
               'text-[10px] font-bold px-2 py-0.5 rounded-md',
               allOn ? 'bg-emerald-50 text-emerald-700' : allOff ? 'bg-slate-100 text-slate-500' : 'bg-amber-50 text-amber-700'
             )}>
-              {allOn ? 'ALL ON' : allOff ? 'OFF' : `${enabledCount}/3`}
+              {allOn ? t('settings.common.allOn') : allOff ? t('settings.common.off') : `${enabledCount}/3`}
             </span>
           </div>
           <p className="text-xs text-slate-400 leading-relaxed pr-2">{description}</p>
@@ -615,7 +965,7 @@ function RoleToggleRow({ label, description, value, onChange }: {
                 title={`${on ? 'Disable for' : 'Enable for'} ${r.label}`}
               >
                 <Icon className="w-3 h-3" />
-                {r.label}
+                {t(`settings.notifications.roles.${r.id}s`)}
               </button>
             );
           })}
@@ -630,6 +980,7 @@ function RoleNumberRow({ label, description, value, onChange, min = 1, max = 999
   value: RoleNumMap; onChange: (v: RoleNumMap) => void;
   min?: number; max?: number; suffix?: string;
 }) {
+  const { t } = useTranslation();
   const same = value.student === value.teacher && value.teacher === value.admin;
 
   return (
@@ -638,7 +989,7 @@ function RoleNumberRow({ label, description, value, onChange, min = 1, max = 999
         <p className="text-sm font-bold text-slate-800">{label}</p>
         {same && (
           <span className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-slate-100 text-slate-500">
-            SAME FOR ALL
+            {t('settings.common.sameForAll')}
           </span>
         )}
       </div>
@@ -666,7 +1017,7 @@ function RoleNumberRow({ label, description, value, onChange, min = 1, max = 999
               <Icon className={cn('w-4 h-4 shrink-0', iconColor[r.id])} />
               <div className="flex-1 min-w-0">
                 <div className="text-[10px] font-bold text-slate-500 uppercase tracking-wide leading-none">
-                  {r.label}
+                  {t(`settings.notifications.roles.${r.id}s`)}
                 </div>
                 <div className="flex items-baseline gap-1.5 mt-0.5">
                   <input

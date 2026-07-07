@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import AdminLayout from '../../components/layout/AdminLayout';
 import {
   Plus, Search, Layers, Trash2, Edit2,
@@ -8,6 +9,7 @@ import { toast } from 'sonner';
 import { Module } from '../../types';
 import { cn } from '../../lib/utils';
 import { motion, AnimatePresence, useMotionValue, useSpring, useTransform } from 'motion/react';
+import { authFetch } from '../../lib/apiUrl';
 
 function AnimatedCount({ value }: { value: number }) {
   const motionVal = useMotionValue(0);
@@ -28,28 +30,28 @@ const isPublishedStatus = (s: string) => s === 'published' || s === 'active';
 
 const STAT_CONFIG = [
   {
-    label: 'Total Modules',
+    labelKey: 'dashboard.totalModules',
     gradient: 'from-indigo-500 to-indigo-600',
     iconBg: 'bg-white/20',
     shadow: 'shadow-indigo-500/25',
     icon: Layers,
   },
   {
-    label: 'Published',
+    labelKey: 'common.published',
     gradient: 'from-emerald-500 to-emerald-600',
     iconBg: 'bg-white/20',
     shadow: 'shadow-emerald-500/25',
     icon: PlayCircle,
   },
   {
-    label: 'Drafts',
+    labelKey: 'dashboard.drafts',
     gradient: 'from-amber-500 to-amber-600',
     iconBg: 'bg-white/20',
     shadow: 'shadow-amber-500/25',
     icon: X,
   },
   {
-    label: 'Total Lessons',
+    labelKey: 'dashboard.totalLessons',
     gradient: 'from-violet-500 to-violet-600',
     iconBg: 'bg-white/20',
     shadow: 'shadow-violet-500/25',
@@ -72,6 +74,7 @@ function EmptyIllustration() {
 }
 
 export default function AdminModules() {
+  const { t } = useTranslation();
   const [modules, setModules] = useState<Module[]>([]);
   const [courses, setCourses] = useState<Record<string, { title: string; teacher: string }>>({});
   const [loading, setLoading] = useState(true);
@@ -96,7 +99,7 @@ export default function AdminModules() {
   const fetchData = async () => {
     setLoading(true);
     try {
-      const res = await fetch('/api/admin/modules');
+      const res = await authFetch('/api/admin/modules');
       const json = await res.json();
       if (!res.ok || !json.success) throw new Error(json.error || 'Failed to load modules');
 
@@ -182,9 +185,9 @@ export default function AdminModules() {
   };
 
   const handleSave = async () => {
-    if (!form.title.trim()) { toast.error('Title is required'); return; }
-    if (!formCourseId) { toast.error('Please select a course'); return; }
-    if (form.autoPublish && !form.publishAt) { toast.error('Please select a date and time for auto-publish'); return; }
+    if (!form.title.trim()) { toast.error(t('modules.titleRequired')); return; }
+    if (!formCourseId) { toast.error(t('modules.selectCourseError')); return; }
+    if (form.autoPublish && !form.publishAt) { toast.error(t('lessons.selectPublishDateTime')); return; }
     setSaving(true);
     try {
       const statusDb = form.status === 'draft' ? 'inactive' : 'active';
@@ -200,23 +203,23 @@ export default function AdminModules() {
       };
 
       if (editing) {
-        const res = await fetch(`/api/admin/modules/${encodeURIComponent(editing.id)}`, {
+        const res = await authFetch(`/api/admin/modules/${encodeURIComponent(editing.id)}`, {
           method: 'PATCH',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(payload),
         });
         const json = await res.json();
         if (!res.ok || !json.success) throw new Error(json.error || 'Failed to update module');
-        toast.success('Module updated');
+        toast.success(t('modules.moduleUpdated'));
       } else {
-        const res = await fetch('/api/admin/modules', {
+        const res = await authFetch('/api/admin/modules', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(payload),
         });
         const json = await res.json();
         if (!res.ok || !json.success) throw new Error(json.error || 'Failed to create module');
-        toast.success('Module created');
+        toast.success(t('modules.moduleCreated'));
       }
       closeModal();
       fetchData();
@@ -236,10 +239,10 @@ export default function AdminModules() {
     if (!deleteTarget) return;
     setDeleting(true);
     try {
-      const res = await fetch(`/api/admin/modules/${encodeURIComponent(deleteTarget.id)}`, { method: 'DELETE' });
+      const res = await authFetch(`/api/admin/modules/${encodeURIComponent(deleteTarget.id)}`, { method: 'DELETE' });
       const json = await res.json();
       if (!res.ok || !json.success) throw new Error(json.error || 'Failed to delete module');
-      toast.success('Module deleted');
+      toast.success(t('success.deleted'));
       setDeleteTarget(null);
       fetchData();
     } catch (e: unknown) {
@@ -254,14 +257,14 @@ export default function AdminModules() {
     const nextPublished = !isPublishedStatus(mod.status);
     const statusDb = nextPublished ? 'active' : 'inactive';
     try {
-      const res = await fetch(`/api/admin/modules/${encodeURIComponent(mod.id)}`, {
+      const res = await authFetch(`/api/admin/modules/${encodeURIComponent(mod.id)}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ status: statusDb }),
       });
       const json = await res.json();
       if (!res.ok || !json.success) throw new Error(json.error || 'Failed to update status');
-      toast.success(`Module ${nextPublished ? 'published' : 'set to draft'}`);
+      toast.success(nextPublished ? t('modules.moduleActivated') : t('modules.moduleDeactivated'));
       fetchData();
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : 'Failed to update status';
@@ -321,13 +324,13 @@ export default function AdminModules() {
                   <nav className="flex items-center gap-1.5 text-xs font-semibold mb-3" aria-label="Breadcrumb">
                     <span className="text-indigo-400 tracking-wider uppercase">Admin Portal</span>
                     <ChevronRight className="w-3.5 h-3.5 text-indigo-500/50" />
-                    <span className="text-indigo-200 tracking-wider uppercase">Modules</span>
+                    <span className="text-indigo-200 tracking-wider uppercase">{t('modules.title')}</span>
                   </nav>
                   <h1 className="text-3xl sm:text-4xl font-extrabold text-white tracking-tight leading-tight">
-                    Modules
+                    {t('modules.title')}
                   </h1>
                   <p className="text-indigo-200 text-sm mt-2 max-w-md">
-                    Manage modules across all courses and teachers from one place.
+                    {t('modules.manageDesc')}
                   </p>
                 </div>
                 <motion.button
@@ -342,7 +345,7 @@ export default function AdminModules() {
                   }}
                 >
                   <Plus className="w-4 h-4" />
-                  Create Module
+                  {t('modules.createModuleBtn')}
                 </motion.button>
               </div>
             </div>
@@ -357,8 +360,8 @@ export default function AdminModules() {
               >
                 <BookOpen className="w-5 h-5 text-amber-500 mt-0.5 shrink-0" />
                 <div>
-                  <p className="text-sm font-semibold text-amber-800">No courses found</p>
-                  <p className="text-xs text-amber-600 mt-0.5">Add a course before creating modules.</p>
+                  <p className="text-sm font-semibold text-amber-800">{t('modules.noCoursesFound')}</p>
+                  <p className="text-xs text-amber-600 mt-0.5">{t('modules.addCourse')}</p>
                 </div>
               </motion.div>
             )}
@@ -413,12 +416,12 @@ export default function AdminModules() {
                 backdropFilter: 'blur(12px)',
               }}
             >
-              <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mr-1">Filters</p>
+              <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mr-1">{t('dashboard.filters')}</p>
               <div className="relative flex-1 min-w-[200px]">
                 <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-indigo-400" />
                 <input
                   type="text"
-                  placeholder="Search modules..."
+                  placeholder={t('modules.searchPlaceholder')}
                   value={search}
                   onChange={e => setSearch(e.target.value)}
                   className="w-full pl-11 pr-4 py-2.5 rounded-full text-sm border border-indigo-100 bg-white/80 focus:outline-none focus:ring-2 focus:ring-violet-400 focus:border-transparent transition-all shadow-sm placeholder-slate-400"
@@ -429,7 +432,7 @@ export default function AdminModules() {
                 onChange={e => setCourseFilter(e.target.value)}
                 className="px-4 py-2.5 rounded-full text-sm border border-indigo-100 bg-white/80 focus:outline-none focus:ring-2 focus:ring-violet-400 focus:border-transparent transition-all shadow-sm text-slate-700"
               >
-                <option value="all">All Courses</option>
+                <option value="all">{t('modules.allCourses')}</option>
                 {courseOptions.map(c => (
                   <option key={c.id} value={c.id}>{c.title}</option>
                 ))}
@@ -439,9 +442,9 @@ export default function AdminModules() {
                 onChange={e => setStatusFilter(e.target.value)}
                 className="px-4 py-2.5 rounded-full text-sm border border-indigo-100 bg-white/80 focus:outline-none focus:ring-2 focus:ring-violet-400 focus:border-transparent transition-all shadow-sm text-slate-700"
               >
-                <option value="all">All statuses</option>
-                <option value="published">Published</option>
-                <option value="draft">Draft</option>
+                <option value="all">{t('modules.allStatuses')}</option>
+                <option value="published">{t('modules.published')}</option>
+                <option value="draft">{t('modules.draft')}</option>
               </select>
               {hasActiveFilters && (
                 <button
@@ -449,7 +452,7 @@ export default function AdminModules() {
                   onClick={() => { setSearch(''); setCourseFilter('all'); setStatusFilter('all'); }}
                   className="flex items-center gap-1.5 px-3 py-2 rounded-full text-xs font-semibold text-slate-500 hover:text-slate-800 hover:bg-slate-100 transition-all"
                 >
-                  <X className="w-3.5 h-3.5" /> Clear
+                  <X className="w-3.5 h-3.5" /> {t('modules.clear')}
                 </button>
               )}
             </motion.div>
@@ -469,12 +472,12 @@ export default function AdminModules() {
               >
                 <EmptyIllustration />
                 <h3 className="text-xl font-extrabold text-slate-800 mt-6 mb-2">
-                  {hasActiveFilters ? 'No results found' : 'No modules yet'}
+                  {hasActiveFilters ? t('modules.noResultsFound') : t('modules.noModulesYet')}
                 </h3>
                 <p className="text-slate-400 text-sm mb-8 max-w-xs text-center">
                   {hasActiveFilters
-                    ? "Try adjusting your search or filters."
-                    : 'Create a module to organize course content.'}
+                    ? t('modules.tryAdjustingSearch')
+                    : t('modules.createModuleOrganize')}
                 </p>
                 {courseOptions.length > 0 && !hasActiveFilters && (
                   <motion.button
@@ -488,7 +491,7 @@ export default function AdminModules() {
                       boxShadow: '0 8px 24px rgba(99,102,241,0.35)',
                     }}
                   >
-                    <Plus className="w-4 h-4" /> Create Your First Module
+                    <Plus className="w-4 h-4" /> {t('modules.createYourFirstModule')}
                   </motion.button>
                 )}
               </motion.div>
@@ -609,7 +612,7 @@ export default function AdminModules() {
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4"
+            className="fixed inset-0 lg:left-60 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4"
           >
             <motion.div
               initial={{ opacity: 0, scale: 0.95, y: 16 }}
@@ -627,8 +630,8 @@ export default function AdminModules() {
                     <Layers className="w-5 h-5 text-indigo-600" />
                   </div>
                   <div>
-                    <h2 className="text-base font-bold text-slate-900">{editing ? 'Edit Module' : 'New Module'}</h2>
-                    <p className="text-xs text-slate-400">{editing ? 'Update module details' : 'Add a module to a course'}</p>
+                    <h2 className="text-base font-bold text-slate-900">{editing ? t('modules.editModule') : t('modules.newModule')}</h2>
+                    <p className="text-xs text-slate-400">{editing ? t('modules.updateModuleDetails') : t('modules.addModuleToCourse')}</p>
                   </div>
                 </div>
                 <button type="button" onClick={closeModal} className="p-2 hover:bg-slate-100 rounded-lg transition-all">
@@ -638,13 +641,13 @@ export default function AdminModules() {
 
               <div className="p-6 space-y-4">
                 <div>
-                  <label className="block text-xs font-semibold text-slate-600 mb-1.5">Course <span className="text-red-500">*</span></label>
+                  <label className="block text-xs font-semibold text-slate-600 mb-1.5">{t('modules.courseLabel')} <span className="text-red-500">*</span></label>
                   <select
                     value={formCourseId}
                     onChange={e => setFormCourseId(e.target.value)}
                     className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-violet-500 transition-all"
                   >
-                    <option value="">Select a course...</option>
+                    <option value="">{t('modules.selectCourse')}</option>
                     {courseOptions.map(c => (
                       <option key={c.id} value={c.id}>{c.title}</option>
                     ))}
@@ -652,33 +655,33 @@ export default function AdminModules() {
                 </div>
 
                 <div>
-                  <label className="block text-xs font-semibold text-slate-600 mb-1.5">Title <span className="text-red-500">*</span></label>
+                  <label className="block text-xs font-semibold text-slate-600 mb-1.5">{t('modules.titleLabel')} <span className="text-red-500">*</span></label>
                   <input
                     type="text"
                     value={form.title}
                     onChange={e => setForm(f => ({ ...f, title: e.target.value }))}
-                    placeholder="e.g. Introduction to React Hooks"
+                    placeholder={t('modules.moduleTitlePlaceholder')}
                     className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-violet-500 transition-all"
                   />
                   {form.title && (
-                    <p className="text-[10px] text-slate-400 mt-1">Slug: <span className="font-mono">{slugify(form.title)}</span></p>
+                    <p className="text-[10px] text-slate-400 mt-1">{t('modules.slug')} <span className="font-mono">{slugify(form.title)}</span></p>
                   )}
                 </div>
 
                 <div>
-                  <label className="block text-xs font-semibold text-slate-600 mb-1.5">Description</label>
+                  <label className="block text-xs font-semibold text-slate-600 mb-1.5">{t('modules.descLabel')}</label>
                   <textarea
                     rows={3}
                     value={form.description}
                     onChange={e => setForm(f => ({ ...f, description: e.target.value }))}
-                    placeholder="Optional: describe what students will learn..."
+                    placeholder={t('modules.moduleDescPlaceholder')}
                     className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-violet-500 transition-all resize-none"
                   />
                 </div>
 
                 <div className="grid grid-cols-2 gap-4">
                   <div>
-                    <label className="block text-xs font-semibold text-slate-600 mb-1.5">Order</label>
+                    <label className="block text-xs font-semibold text-slate-600 mb-1.5">{t('modules.orderLabel')}</label>
                     <input
                       type="number"
                       min={1}
@@ -688,14 +691,14 @@ export default function AdminModules() {
                     />
                   </div>
                   <div>
-                    <label className="block text-xs font-semibold text-slate-600 mb-1.5">Status</label>
+                    <label className="block text-xs font-semibold text-slate-600 mb-1.5">{t('modules.statusLabel')}</label>
                     <select
                       value={form.status}
                       onChange={e => setForm(f => ({ ...f, status: e.target.value as 'published' | 'draft' }))}
                       className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-violet-500 transition-all"
                     >
-                      <option value="published">Published</option>
-                      <option value="draft">Draft</option>
+                      <option value="published">{t('modules.published')}</option>
+                      <option value="draft">{t('modules.draft')}</option>
                     </select>
                   </div>
                 </div>
@@ -734,10 +737,10 @@ export default function AdminModules() {
                         'text-sm font-semibold transition-colors',
                         form.autoPublish ? 'text-violet-700' : 'text-slate-600'
                       )}>
-                        Auto-publish
+                        {t('modules.autoPublish')}
                       </span>
                       <p className="text-[11px] text-slate-400 mt-0.5">
-                        Publiko automatikisht në datën dhe orën e zgjedhur
+                        {t('modules.autoPublishDesc')}
                       </p>
                     </div>
                   </label>
@@ -781,7 +784,7 @@ export default function AdminModules() {
                   onClick={closeModal}
                   className="px-4 py-2.5 text-sm font-semibold text-slate-600 hover:bg-slate-100 rounded-xl transition-all"
                 >
-                  Cancel
+                  {t('modules.cancel')}
                 </button>
                 <button
                   type="button"
@@ -791,7 +794,7 @@ export default function AdminModules() {
                   style={{ background: 'linear-gradient(135deg,#6366f1,#8b5cf6)' }}
                 >
                   <Save className="w-4 h-4" />
-                  {saving ? 'Saving...' : editing ? 'Save Changes' : 'Create Module'}
+                  {saving ? t('modules.saving') : editing ? t('modules.saveChanges') : t('modules.createModule')}
                 </button>
               </div>
             </motion.div>
@@ -806,7 +809,7 @@ export default function AdminModules() {
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[60] flex items-center justify-center p-4"
+            className="fixed inset-0 lg:left-60 bg-black/60 backdrop-blur-sm z-[60] flex items-center justify-center p-4"
             onClick={() => !deleting && setDeleteTarget(null)}
           >
             <motion.div
@@ -831,13 +834,13 @@ export default function AdminModules() {
 
                 {/* Text */}
                 <h3 className="text-center text-lg font-bold text-slate-900 mb-1">
-                  Delete this module?
+                  {t('modules.deleteThisModule')}
                 </h3>
                 <p className="text-center text-sm text-slate-500 mb-1">
                   <span className="font-semibold text-slate-700">"{deleteTarget.title}"</span>
                 </p>
                 <p className="text-center text-xs text-red-400 font-medium mb-6">
-                  This cannot be undone.
+                  {t('modules.cannotBeUndone')}
                 </p>
 
                 {/* Buttons */}
@@ -848,7 +851,7 @@ export default function AdminModules() {
                     onClick={() => setDeleteTarget(null)}
                     className="flex-1 py-2.5 rounded-xl text-sm font-semibold text-slate-600 bg-slate-100 hover:bg-slate-200 transition-all disabled:opacity-50"
                   >
-                    Cancel
+                    {t('modules.cancel')}
                   </button>
                   <button
                     type="button"
@@ -858,7 +861,7 @@ export default function AdminModules() {
                     style={{ background: 'linear-gradient(135deg,#ef4444,#dc2626)' }}
                   >
                     <Trash2 className="w-4 h-4" />
-                    {deleting ? 'Deleting...' : 'Delete'}
+                    {deleting ? t('modules.deleting') : t('modules.delete')}
                   </button>
                 </div>
               </div>

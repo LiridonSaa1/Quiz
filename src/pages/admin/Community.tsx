@@ -1,7 +1,8 @@
 import React, { useEffect, useState } from 'react';
 import AdminLayout from '../../components/layout/AdminLayout';
 import { toast } from 'sonner';
-import { motion } from 'motion/react';
+import { motion, AnimatePresence } from 'motion/react';
+import { useTranslation } from 'react-i18next';
 import {
   AdminListFilterBar,
   AdminListPageShell,
@@ -14,7 +15,7 @@ import { formatDistanceToNow } from 'date-fns';
 import {
   MessageSquare, Plus, Search, Trash2, Pencil, X,
   ThumbsUp, MessageCircle, Pin, Archive,
-  HelpCircle, BookMarked, Sparkles, Globe
+  HelpCircle, BookMarked, Sparkles, Globe, Loader2,
 } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { apiUrl, authFetch } from '../../lib/apiUrl';
@@ -70,6 +71,7 @@ const emptyForm = {
 };
 
 export default function AdminCommunity() {
+  const { t } = useTranslation();
   const [posts, setPosts] = useState<Post[]>([]);
   const [members, setMembers] = useState<{ id: string; displayName: string; email: string }[]>([]);
   const [loading, setLoading] = useState(true);
@@ -81,6 +83,8 @@ export default function AdminCommunity() {
   const [form, setForm] = useState(emptyForm);
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState<string | null>(null);
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+  const postToDelete = posts.find(p => p.id === confirmDeleteId);
 
   const set = (k: string, v: any) => setForm(p => ({ ...p, [k]: v }));
 
@@ -89,18 +93,18 @@ export default function AdminCommunity() {
   const fetchAll = async () => {
     setLoading(true);
     try {
-      const res = await fetch('/api/admin/community');
+      const res = await authFetch('/api/admin/community');
       const json = await res.json();
       if (json.success) setPosts(json.posts || []);
-      else toast.error(json.error || 'Failed to load posts');
-    } catch { toast.error('Failed to load community posts'); }
+      else toast.error(json.error || t('errors.loadFailed'));
+    } catch { toast.error(t('errors.loadFailed')); }
     finally { setLoading(false); }
   };
 
   const fetchMembers = async () => {
     try {
       const [tRes, sRes] = await Promise.all([
-        fetch('/api/admin/teachers'),
+        authFetch('/api/admin/teachers'),
         authFetch(apiUrl('/api/admin/students')),
       ]);
       const [t, s] = await Promise.all([tRes.json(), sRes.json()]);
@@ -120,32 +124,33 @@ export default function AdminCommunity() {
   };
 
   const handleSave = async () => {
-    if (!form.title.trim()) { toast.error('Title is required'); return; }
+    if (!form.title.trim()) { toast.error(t('community.titleRequiredCommunity')); return; }
     setSaving(true);
     try {
       const payload = { ...form, author_id: form.author_id || null, content: form.content || null };
       const url = editing ? `/api/admin/community/${editing.id}` : '/api/admin/community';
       const method = editing ? 'PATCH' : 'POST';
-      const res = await fetch(url, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+      const res = await authFetch(url, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
       const json = await res.json();
       if (!json.success) throw new Error(json.error);
-      toast.success(editing ? 'Post updated' : 'Post created');
+      toast.success(editing ? t('community.postUpdated') : t('community.postCreated'));
       setShowModal(false);
       fetchAll();
-    } catch (e: any) { toast.error(e.message || 'Save failed'); }
+    } catch (e: any) { toast.error(e.message || t('errors.saveFailed')); }
     finally { setSaving(false); }
   };
 
   const handleDelete = async (id: string) => {
-    if (!confirm('Delete this post?')) return;
+    if (!id) return;
+    setConfirmDeleteId(null);
     setDeleting(id);
     try {
-      const res = await fetch(`/api/admin/community/${id}`, { method: 'DELETE' });
+      const res = await authFetch(`/api/admin/community/${id}`, { method: 'DELETE' });
       const json = await res.json();
       if (!json.success) throw new Error(json.error);
-      toast.success('Post deleted');
+      toast.success(t('community.postDeletedSuccess'));
       setPosts(p => p.filter(x => x.id !== id));
-    } catch (e: any) { toast.error(e.message || 'Delete failed'); }
+    } catch (e: any) { toast.error(e.message || t('community.deletePostFailed')); }
     finally { setDeleting(null); }
   };
 
@@ -172,9 +177,9 @@ export default function AdminCommunity() {
   return (
     <AdminLayout>
       <AdminListPageShell
-        breadcrumbLabel="Community"
-        title="Community"
-        description="Manage discussions, Q&As, and community posts."
+        breadcrumbLabel={t('nav.community')}
+        title={t('community.title')}
+        description={t('community.manageCommunity')}
         statsGridClassName="grid grid-cols-2 sm:grid-cols-4 gap-4"
         stats={statItems}
         action={
@@ -189,7 +194,7 @@ export default function AdminCommunity() {
               boxShadow: '0 8px 32px rgba(139,92,246,0.45), 0 2px 8px rgba(0,0,0,0.15)',
             }}
           >
-            <Plus className="w-4 h-4" /> New Post
+            <Plus className="w-4 h-4" /> {t('community.newPost')}
           </motion.button>
         }
         filterBar={
@@ -199,16 +204,16 @@ export default function AdminCommunity() {
               <input
                 value={search}
                 onChange={e => setSearch(e.target.value)}
-                placeholder="Search posts or authors..."
+                placeholder={t('community.searchPostsAuthors')}
                 className={ADMIN_LIST_SEARCH_INPUT}
               />
             </div>
             <select value={categoryFilter} onChange={e => setCategoryFilter(e.target.value)} className={ADMIN_LIST_SELECT}>
-              <option value="all">All Categories</option>
+              <option value="all">{t('community.allCategories')}</option>
               {Object.entries(CATEGORY_CFG).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
             </select>
             <select value={statusFilter} onChange={e => setStatusFilter(e.target.value)} className={ADMIN_LIST_SELECT}>
-              <option value="all">All Status</option>
+              <option value="all">{t('community.allStatus')}</option>
               {Object.entries(STATUS_CFG).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
             </select>
           </AdminListFilterBar>
@@ -224,8 +229,8 @@ export default function AdminCommunity() {
           ) : filtered.length === 0 ? (
             <div className="flex flex-col items-center justify-center h-48 text-slate-400">
               <MessageSquare className="w-10 h-10 mb-3 opacity-40" />
-              <p className="font-medium">No posts found</p>
-              <p className="text-sm mt-1">Start the conversation by creating the first post</p>
+              <p className="font-medium">{t('community.noPostsFound')}</p>
+              <p className="text-sm mt-1">{t('community.startConversation')}</p>
             </div>
           ) : (
             <div className={ADMIN_LIST_CARD_GRID}>
@@ -256,7 +261,7 @@ export default function AdminCommunity() {
                             <button onClick={() => openEdit(post)} className="p-1.5 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-all">
                               <Pencil className="w-4 h-4" />
                             </button>
-                            <button onClick={() => handleDelete(post.id)} disabled={deleting === post.id}
+                            <button onClick={() => setConfirmDeleteId(post.id)} disabled={deleting === post.id}
                               className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-all disabled:opacity-40">
                               <Trash2 className="w-4 h-4" />
                             </button>
@@ -283,12 +288,12 @@ export default function AdminCommunity() {
 
       {/* Modal */}
       {showModal && (
-        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4" onClick={() => setShowModal(false)}>
+        <div className="fixed inset-0 lg:left-60 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4" onClick={() => setShowModal(false)}>
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
             <div className="flex items-center justify-between p-5 border-b border-slate-100">
               <div>
-                <h2 className="text-lg font-bold text-slate-900">{editing ? 'Edit Post' : 'New Community Post'}</h2>
-                <p className="text-slate-400 text-sm">{editing ? 'Update post content and settings' : 'Start a new discussion or share a resource'}</p>
+                <h2 className="text-lg font-bold text-slate-900">{editing ? t('community.editPost') : t('community.newCommunityPost')}</h2>
+                <p className="text-slate-400 text-sm">{editing ? t('community.updatePostContent') : t('community.startDiscussion')}</p>
               </div>
               <button onClick={() => setShowModal(false)} className="p-2 hover:bg-slate-100 rounded-xl transition-all">
                 <X className="w-5 h-5 text-slate-500" />
@@ -296,27 +301,27 @@ export default function AdminCommunity() {
             </div>
             <div className="p-5 space-y-4">
               <div>
-                <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">Title <span className="text-red-400">*</span></label>
+                <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">{t('community.titleLabel')} <span className="text-red-400">*</span></label>
                 <input value={form.title} onChange={e => set('title', e.target.value)}
                   className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
                   placeholder="What's on your mind?" />
               </div>
               <div>
-                <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">Content</label>
+                <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">{t('community.contentLabel')}</label>
                 <textarea rows={5} value={form.content} onChange={e => set('content', e.target.value)}
                   className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 resize-none leading-relaxed"
                   placeholder="Share more details, questions, or resources..." />
               </div>
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">Category</label>
+                  <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">{t('community.categoryLabel')}</label>
                   <select value={form.category} onChange={e => set('category', e.target.value as PostCategory)}
                     className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500">
                     {Object.entries(CATEGORY_CFG).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
                   </select>
                 </div>
                 <div>
-                  <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">Status</label>
+                  <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">{t('community.statusLabel')}</label>
                   <select value={form.status} onChange={e => set('status', e.target.value as PostStatus)}
                     className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500">
                     {Object.entries(STATUS_CFG).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
@@ -324,10 +329,10 @@ export default function AdminCommunity() {
                 </div>
               </div>
               <div>
-                <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">Author</label>
+                <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">{t('community.authorLabel')}</label>
                 <select value={form.author_id} onChange={e => set('author_id', e.target.value)}
                   className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500">
-                  <option value="">— Admin (default) —</option>
+                  <option value="">{t('community.adminDefault')}</option>
                   {members.map(m => <option key={m.id} value={m.id}>{m.displayName} ({m.email})</option>)}
                 </select>
               </div>
@@ -335,16 +340,61 @@ export default function AdminCommunity() {
             <div className="flex gap-3 p-5 border-t border-slate-100">
               <button onClick={() => setShowModal(false)}
                 className="flex-1 py-3 bg-slate-100 text-slate-600 rounded-xl font-semibold text-sm hover:bg-slate-200 transition-all">
-                Cancel
+                {t('community.cancel')}
               </button>
               <button onClick={handleSave} disabled={saving}
                 className="flex-1 py-3 bg-indigo-600 text-white rounded-xl font-semibold text-sm hover:bg-indigo-700 transition-all disabled:opacity-50 shadow-lg shadow-indigo-200">
-                {saving ? 'Saving...' : editing ? 'Update Post' : 'Publish Post'}
+                {saving ? t('common.saving') : editing ? t('community.editPost') : t('community.newPost')}
               </button>
             </div>
           </div>
         </div>
       )}
+      <AnimatePresence>
+        {confirmDeleteId && (
+          <motion.div
+            initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+            className="fixed inset-0 lg:left-60 z-50 flex items-center justify-center p-4"
+            style={{ background: 'rgba(15,10,40,0.55)', backdropFilter: 'blur(6px)' }}
+          >
+            <motion.div
+              initial={{ scale: 0.9, opacity: 0, y: 16 }}
+              animate={{ scale: 1, opacity: 1, y: 0 }}
+              exit={{ scale: 0.9, opacity: 0, y: 16 }}
+              transition={{ type: 'spring', stiffness: 340, damping: 28 }}
+              className="bg-white rounded-2xl shadow-2xl p-6 w-full max-w-sm"
+            >
+              <div className="flex flex-col items-center text-center gap-3 mb-5">
+                <div className="w-14 h-14 rounded-2xl flex items-center justify-center shadow-lg shadow-red-500/30"
+                  style={{ background: 'linear-gradient(135deg,#fca5a5,#ef4444)' }}>
+                  <Trash2 className="w-7 h-7 text-white" />
+                </div>
+                <div>
+                  <p className="font-bold text-slate-800 text-lg">Delete post?</p>
+                  <p className="text-slate-500 text-sm mt-1">This action cannot be undone.</p>
+                </div>
+                {postToDelete && (
+                  <span className="px-3 py-1 rounded-full text-sm font-semibold bg-red-50 text-red-700 border border-red-200">
+                    {postToDelete.title}
+                  </span>
+                )}
+              </div>
+              <div className="flex gap-3">
+                <button type="button" onClick={() => setConfirmDeleteId(null)}
+                  className="flex-1 py-2.5 rounded-xl text-sm font-semibold text-slate-600 bg-slate-100 hover:bg-slate-200 transition-all">
+                  Cancel
+                </button>
+                <button type="button" onClick={() => confirmDeleteId && handleDelete(confirmDeleteId)}
+                  disabled={!!deleting}
+                  className="flex-1 py-2.5 rounded-xl text-sm font-bold text-white shadow-lg shadow-red-500/30 transition-all disabled:opacity-60 active:scale-95"
+                  style={{ background: 'linear-gradient(135deg,#ef4444,#dc2626)' }}>
+                  {deleting ? <Loader2 className="w-4 h-4 animate-spin mx-auto" /> : 'Yes, delete'}
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </AdminLayout>
   );
 }

@@ -17,15 +17,64 @@ export default defineConfig(({mode}) => {
   const hmrHost = env.VITE_HMR_HOST || undefined;
   const hmrPort = Number(env.VITE_HMR_PORT) || undefined;
   const hmrClientPort = Number(env.VITE_HMR_CLIENT_PORT) || undefined;
+  const isReplit = !!(process.env.REPL_ID || process.env.REPLIT_DEV_DOMAIN);
   return {
+    base: '/',
     plugins: [react(), tailwindcss()],
-    define: {
-      'process.env.GEMINI_API_KEY': JSON.stringify(env.GEMINI_API_KEY),
+    build: {
+      outDir: 'dist',
+      emptyOutDir: true,
+      chunkSizeWarningLimit: 1000,
+      rollupOptions: {
+        output: {
+          manualChunks: {
+            'vendor-react': ['react', 'react-dom', 'react-router-dom'],
+            'vendor-ui': ['lucide-react', 'sonner', 'motion/react'],
+            'vendor-charts': ['recharts'],
+            'vendor-supabase': ['@supabase/supabase-js'],
+            'vendor-i18n': ['i18next', 'react-i18next', 'i18next-browser-languagedetector'],
+            'vendor-dnd': ['@dnd-kit/core', '@dnd-kit/sortable', '@dnd-kit/utilities'],
+            'vendor-forms': ['react-hook-form', '@hookform/resolvers', 'zod'],
+            'vendor-ai': ['@google/genai'],
+          },
+        },
+      },
     },
     resolve: {
       alias: {
         '@': path.resolve(__dirname, '.'),
       },
+      dedupe: ['react', 'react-dom', 'react-dom/client', 'react/jsx-runtime'],
+    },
+    optimizeDeps: {
+      include: [
+        'react',
+        'react-dom',
+        'react-dom/client',
+        'react/jsx-runtime',
+        'react/jsx-dev-runtime',
+        'react-router-dom',
+        'react-hook-form',
+        'react-i18next',
+        '@hookform/resolvers/zod',
+        'zod',
+        'lucide-react',
+        'clsx',
+        'tailwind-merge',
+        'sonner',
+        'motion/react',
+        'date-fns',
+        'recharts',
+        'i18next',
+        'i18next-browser-languagedetector',
+        '@supabase/supabase-js',
+        '@dnd-kit/core',
+        '@dnd-kit/sortable',
+        '@dnd-kit/utilities',
+        'canvas-confetti',
+        'dompurify',
+      ],
+      force: true,
     },
     server: {
       host: '0.0.0.0',
@@ -33,6 +82,11 @@ export default defineConfig(({mode}) => {
       allowedHosts: true,
       hmr: disableHmr
         ? false
+        : isReplit
+        ? {
+            clientPort: 443,
+            protocol: 'wss',
+          }
         : hmrHost
         ? {
             host: hmrHost,

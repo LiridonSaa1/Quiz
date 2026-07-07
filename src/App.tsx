@@ -1,107 +1,159 @@
-import React, { useEffect, useState } from 'react';
+import React, { Suspense, lazy, useEffect, useRef, useState } from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import { Toaster, toast } from 'sonner';
 import { supabase } from './supabase';
 import { UserProfile } from './types';
 import { AppBootSkeleton } from './components/ui/Skeleton';
 
-// Pages
-import Login from './pages/Login';
-import AdminDashboard from './pages/AdminDashboard';
-import AdminStudents from './pages/admin/Students';
-import AdminTeachers from './pages/admin/Teachers';
-import AdminCourses from './pages/admin/Courses';
-import AdminCourseForm from './pages/admin/CourseForm';
-import TeacherDashboard from './pages/teacher/Dashboard';
-import TeacherClasses from './pages/teacher/Classes';
-import TeacherCourses from './pages/teacher/Courses';
-import TeacherCourseForm from './pages/teacher/CourseForm';
-import StudentManagement from './pages/teacher/StudentManagement';
-import QuizManagement from './pages/teacher/QuizManagement';
-import QuizBuilder from './pages/teacher/QuizBuilder';
-import RealtimeQuizHost from './pages/teacher/RealtimeQuizHost';
-import RealtimeQuizReports from './pages/teacher/RealtimeQuizReports';
-import RealtimeQuizPlay from './pages/student/RealtimeQuizPlay';
-import QuizTaking from './pages/student/QuizTaking';
-import QuizResults from './pages/student/QuizResults';
-import StudentProfile from './pages/student/Profile';
-import TeacherResults from './pages/teacher/Results';
-import TeacherModules from './pages/teacher/Modules';
-import TeacherLessons from './pages/teacher/Lessons';
-import TeacherLessonContentManager from './pages/teacher/LessonContentManager';
-import TeacherAssignments from './pages/teacher/Assignments';
-import TeacherAttendance from './pages/teacher/Attendance';
-import TeacherCertificates from './pages/teacher/Certificates';
-import TeacherLiveSessions from './pages/teacher/LiveSessions';
-import TeacherLiveSessionRoom from './pages/teacher/LiveSessionRoom';
-import TeacherCommunity from './pages/teacher/Community';
-import TeacherAnnouncements from './pages/teacher/Announcements';
-import TeacherProgress from './pages/teacher/Progress';
-import TeacherExams from './pages/teacher/Exams';
-import TeacherProfilePage from './pages/teacher/Profile';
-import AdminModules from './pages/admin/Modules';
-import AdminLessons from './pages/admin/Lessons';
-import AdminQuizzes from './pages/admin/Quizzes';
-import AdminClasses from './pages/admin/Classes';
-import AdminAssignments from './pages/admin/Assignments';
-import AdminAttendance from './pages/admin/Attendance';
-import AdminCertificates from './pages/admin/Certificates';
-import AdminLiveSessions from './pages/admin/LiveSessions';
-import AdminLiveSessionRoom from './pages/admin/LiveSessionRoom';
-import AdminCommunity from './pages/admin/Community';
-import AdminAnnouncements from './pages/admin/Announcements';
-import AdminAnalytics from './pages/admin/Analytics';
-import AdminReports from './pages/admin/Reports';
-import AdminPayments from './pages/admin/Payments';
-import AdminInvoices from './pages/admin/Invoices';
-import AdminSettings from './pages/admin/Settings';
-import AdminBranding from './pages/admin/Branding';
-import AdminDomain from './pages/admin/Domain';
-import AdminRoles from './pages/admin/Roles';
-import AdminProfile from './pages/admin/Profile';
-import AdminSecurityPage from './pages/admin/Security';
-import JoinClass from './pages/student/JoinClass';
-import Badges from './pages/student/Badges';
-import StudentDashboard from './pages/student/Dashboard';
-import StudentCourses from './pages/student/Courses';
-import StudentCourseDetail from './pages/student/CourseDetail';
-import ContinueLearning from './pages/student/ContinueLearning';
-import StudentLessons from './pages/student/Lessons';
-import StudentLessonDetail from './pages/student/LessonDetail';
-import StudentQuizzes from './pages/student/Quizzes';
-import StudentAssignments from './pages/student/Assignments';
-import StudentAssignmentDetail from './pages/student/AssignmentDetail';
-import StudentProgress from './pages/student/Progress';
-import StudentResults from './pages/student/Results';
-import StudentCertificates from './pages/student/Certificates';
-import StudentCommunity from './pages/student/Community';
-import StudentLiveClasses from './pages/student/LiveClasses';
-import StudentLiveSessionJoin from './pages/student/LiveSessionJoin';
-import StudentExams from './pages/student/Exams';
-import StudentAnnouncements from './pages/student/Announcements';
-import NotFound from './pages/NotFound';
-import { apiUrl, authFetch } from './lib/apiUrl';
+// Pages — loaded lazily to enable code splitting (reduces initial bundle from 3.5MB to ~200KB)
+const Login = lazy(() => import('./pages/Login'));
+const AdminDashboard = lazy(() => import('./pages/AdminDashboard'));
+const AdminStudents = lazy(() => import('./pages/admin/Students'));
+const AdminTeachers = lazy(() => import('./pages/admin/Teachers'));
+const AdminCourses = lazy(() => import('./pages/admin/Courses'));
+const AdminCourseForm = lazy(() => import('./pages/admin/CourseForm'));
+const TeacherDashboard = lazy(() => import('./pages/teacher/Dashboard'));
+const TeacherClasses = lazy(() => import('./pages/teacher/Classes'));
+const TeacherCourses = lazy(() => import('./pages/teacher/Courses'));
+const TeacherCourseForm = lazy(() => import('./pages/teacher/CourseForm'));
+const StudentManagement = lazy(() => import('./pages/teacher/StudentManagement'));
+const QuizManagement = lazy(() => import('./pages/teacher/QuizManagement'));
+const QuizBuilder = lazy(() => import('./pages/teacher/QuizBuilder'));
+const SmartTestBuilder = lazy(() => import('./pages/teacher/SmartTestBuilder'));
+const RealtimeQuizHost = lazy(() => import('./pages/teacher/RealtimeQuizHost'));
+const RealtimeQuizReports = lazy(() => import('./pages/teacher/RealtimeQuizReports'));
+const RealtimeQuizPlay = lazy(() => import('./pages/student/RealtimeQuizPlay'));
+const QuizTaking = lazy(() => import('./pages/student/QuizTaking'));
+const QuizExperience = lazy(() => import('./pages/student/QuizExperience'));
+const QuizResults = lazy(() => import('./pages/student/QuizResults'));
+const StudentProfile = lazy(() => import('./pages/student/Profile'));
+const TeacherResults = lazy(() => import('./pages/teacher/Results'));
+const TeacherModules = lazy(() => import('./pages/teacher/Modules'));
+const TeacherModuleDetail = lazy(() => import('./pages/teacher/ModuleDetail'));
+const TeacherLessons = lazy(() => import('./pages/teacher/Lessons'));
+const TeacherCoursesList = lazy(() => import('./pages/teacher/TeacherCoursesList'));
+const HeadwayTestImport = lazy(() => import('./pages/teacher/HeadwayTestImport'));
+const TeacherModuleTests = lazy(() => import('./pages/teacher/TeacherModuleTests'));
+const TeacherLessonContentManager = lazy(() => import('./pages/teacher/LessonContentManager'));
+const TeacherAssignments = lazy(() => import('./pages/teacher/Assignments'));
+const TeacherAttendance = lazy(() => import('./pages/teacher/Attendance'));
+const TeacherCertificates = lazy(() => import('./pages/teacher/Certificates'));
+const TeacherLiveSessions = lazy(() => import('./pages/teacher/LiveSessions'));
+const TeacherLiveSessionRoom = lazy(() => import('./pages/teacher/LiveSessionRoom'));
+const TeacherCommunity = lazy(() => import('./pages/teacher/Community'));
+const TeacherAnnouncements = lazy(() => import('./pages/teacher/Announcements'));
+const TeacherProgress = lazy(() => import('./pages/teacher/Progress'));
+const StudentProgressDetail = lazy(() => import('./pages/teacher/StudentProgressDetail'));
+const TeacherExams = lazy(() => import('./pages/teacher/Exams'));
+const TeacherProfilePage = lazy(() => import('./pages/teacher/Profile'));
+const TeacherSettingsPage = lazy(() => import('./pages/teacher/Settings'));
+const TeacherExamBuilder = lazy(() => import('./pages/teacher/ExamBuilder'));
+const AdminModules = lazy(() => import('./pages/admin/Modules'));
+const AdminLessons = lazy(() => import('./pages/admin/Lessons'));
+const AdminQuizzes = lazy(() => import('./pages/admin/Quizzes'));
+const AdminClasses = lazy(() => import('./pages/admin/Classes'));
+const AdminAssignments = lazy(() => import('./pages/admin/Assignments'));
+const AdminAttendance = lazy(() => import('./pages/admin/Attendance'));
+const AdminCertificates = lazy(() => import('./pages/admin/Certificates'));
+const AdminLiveSessions = lazy(() => import('./pages/admin/LiveSessions'));
+const AdminLiveSessionRoom = lazy(() => import('./pages/admin/LiveSessionRoom'));
+const AdminCommunity = lazy(() => import('./pages/admin/Community'));
+const AdminAnnouncements = lazy(() => import('./pages/admin/Announcements'));
+const AdminAnalytics = lazy(() => import('./pages/admin/Analytics'));
+const AdminReports = lazy(() => import('./pages/admin/Reports'));
+const AdminPayments = lazy(() => import('./pages/admin/Payments'));
+const AdminInvoices = lazy(() => import('./pages/admin/Invoices'));
+const AdminStudentPayments = lazy(() => import('./pages/admin/StudentPayments'));
+const AdminTeacherHours = lazy(() => import('./pages/admin/TeacherHours'));
+const AdminSettings = lazy(() => import('./pages/admin/Settings'));
+const AdminBranding = lazy(() => import('./pages/admin/Branding'));
+const AdminDomain = lazy(() => import('./pages/admin/Domain'));
+const AdminRoles = lazy(() => import('./pages/admin/Roles'));
+const AdminProfile = lazy(() => import('./pages/admin/Profile'));
+const AdminSecurityPage = lazy(() => import('./pages/admin/Security'));
+const AdminPresentations = lazy(() => import('./pages/admin/Presentations'));
+const StudentPresentations = lazy(() => import('./pages/student/Presentations'));
+const JoinClass = lazy(() => import('./pages/student/JoinClass'));
+const Badges = lazy(() => import('./pages/student/Badges'));
+const StudentDashboard = lazy(() => import('./pages/student/Dashboard'));
+const StudentCourses = lazy(() => import('./pages/student/Courses'));
+const StudentCourseDetail = lazy(() => import('./pages/student/CourseDetail'));
+const ContinueLearning = lazy(() => import('./pages/student/ContinueLearning'));
+const StudentLessons = lazy(() => import('./pages/student/Lessons'));
+const StudentLessonDetail = lazy(() => import('./pages/student/LessonDetail'));
+const StudentQuizzes = lazy(() => import('./pages/student/Quizzes'));
+const StudentAssignments = lazy(() => import('./pages/student/Assignments'));
+const StudentAssignmentDetail = lazy(() => import('./pages/student/AssignmentDetail'));
+const StudentProgress = lazy(() => import('./pages/student/Progress'));
+const StudentResults = lazy(() => import('./pages/student/Results'));
+const StudentCertificates = lazy(() => import('./pages/student/Certificates'));
+const StudentCommunity = lazy(() => import('./pages/student/Community'));
+const StudentLiveClasses = lazy(() => import('./pages/student/LiveClasses'));
+const StudentLiveSessionJoin = lazy(() => import('./pages/student/LiveSessionJoin'));
+const StudentExams = lazy(() => import('./pages/student/Exams'));
+const StudentAnnouncements = lazy(() => import('./pages/student/Announcements'));
+const HeadwayAudio = lazy(() => import('./pages/student/HeadwayAudio'));
+const TestBuilder = lazy(() => import('./pages/student/TestBuilder'));
+const ModuleTestBuilder = lazy(() => import('./pages/student/ModuleTestBuilder'));
+const HeadwayGrammar = lazy(() => import('./pages/student/HeadwayGrammar'));
+const StudentModules = lazy(() => import('./pages/student/Modules'));
+const NotFound = lazy(() => import('./pages/NotFound'));
+const GuidePage = lazy(() => import('./pages/GuidePage'));
+import { apiUrl } from './lib/apiUrl';
 import { isProfileAccessAllowed } from './lib/profileAccess';
 import { normalizeUserRole } from './lib/userRole';
 import { defaultFeatureFlags, extractFeatureFlags, FeatureFlags } from './lib/platformFeatures';
-import ChatBot from './components/ChatBot';
+
+const PLATFORM_CONFIG_CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
+const SESSION_STORAGE_KEY = 'qm_platform_init';
+
+// In-memory cache for within-session reuse
+let platformConfigCache: { data: any; expiresAt: number } = { data: null, expiresAt: 0 };
+
+// Read/write sessionStorage so data survives React re-mounts but not tab close
+function readPlatformInitCache(): any | null {
+  try {
+    const raw = sessionStorage.getItem(SESSION_STORAGE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (Date.now() < parsed.expiresAt) return parsed.data;
+    sessionStorage.removeItem(SESSION_STORAGE_KEY);
+  } catch { /* ignore */ }
+  return null;
+}
+function writePlatformInitCache(data: any) {
+  try {
+    sessionStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify({ data, expiresAt: Date.now() + PLATFORM_CONFIG_CACHE_TTL_MS }));
+  } catch { /* quota exceeded — ignore */ }
+}
 
 export default function App() {
   const [user, setUser] = useState<UserProfile | null>(null);
   const [loading, setLoading] = useState(true);
   const [features, setFeatures] = useState<FeatureFlags>(defaultFeatureFlags);
   const [maintenanceMode, setMaintenanceMode] = useState(false);
-
+  // Tracks the userId that initSession already loaded so onAuthStateChange
+  // doesn't trigger a redundant second fetchProfile on startup.
+  const initializedUserIdRef = useRef<string | null>(null);
 
   useEffect(() => {
     const checkBackend = async () => {
-      try {
-        const res = await fetch(apiUrl('/api/health'));
-        if (!res.ok) throw new Error('Backend not responding');
-        console.log('Backend health check: OK');
-      } catch (error) {
-        console.error('Backend health check failed:', error);
-        toast.error('Backend server is not reachable.');
+      const maxAttempts = 3;
+      const delayMs = 1500;
+      for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+        try {
+          const res = await fetch(apiUrl('/api/health'));
+          if (!res.ok) throw new Error('Backend not responding');
+          console.log('Backend health check: OK');
+          return;
+        } catch (error) {
+          if (attempt < maxAttempts) {
+            await new Promise(r => setTimeout(r, delayMs));
+          } else {
+            console.error('Backend health check failed:', error);
+            toast.error('Backend server is not reachable.');
+          }
+        }
       }
     };
 
@@ -109,6 +161,7 @@ export default function App() {
       try {
         const { data: { session } } = await supabase.auth.getSession();
         if (session) {
+          initializedUserIdRef.current = session.user.id;
           await fetchProfile(session.user.id);
         } else {
           setLoading(false);
@@ -119,6 +172,7 @@ export default function App() {
       }
     };
 
+    // Fire health check and platform config in parallel with session init
     checkBackend();
     void loadPlatformRuntimeConfig();
     initSession();
@@ -129,6 +183,12 @@ export default function App() {
     try {
       const { data } = supabase.auth.onAuthStateChange((_event, session) => {
         if (session) {
+          // Skip if initSession already loaded this exact user to avoid
+          // the double-fetchProfile that happens on every cold startup.
+          if (initializedUserIdRef.current === session.user.id) {
+            initializedUserIdRef.current = null;
+            return;
+          }
           fetchProfile(session.user.id);
         } else {
           setUser(null);
@@ -148,50 +208,56 @@ export default function App() {
 
   const loadPlatformRuntimeConfig = async () => {
     try {
-      const [runtimeRes, brandingRes] = await Promise.all([
-        fetch(`${apiUrl('/api/platform/runtime')}?t=${Date.now()}`, { cache: 'no-store' }),
-        fetch(`${apiUrl('/api/platform/branding')}?t=${Date.now()}`, { cache: 'no-store' }),
-      ]);
-      const runtimeJson = await runtimeRes.json().catch(() => ({}));
-      if (runtimeRes.ok && runtimeJson?.success) {
-        const nextFeatures = extractFeatureFlags({ features: runtimeJson.features });
-        setFeatures(nextFeatures);
-        setMaintenanceMode(Boolean(runtimeJson.maintenanceMode));
-        const schoolName = String(runtimeJson.schoolName || 'QuizMaster').trim();
-        if (schoolName) document.title = schoolName;
+      // 1. In-memory cache (fastest — survives React re-renders)
+      if (platformConfigCache.data && Date.now() < platformConfigCache.expiresAt) {
+        applyPlatformInit(platformConfigCache.data);
+        return;
       }
-      const brandingJson = await brandingRes.json().catch(() => ({}));
-      if (brandingRes.ok && brandingJson?.success) {
-        const faviconUrl = brandingJson?.faviconUrl;
-        if (typeof faviconUrl === 'string' && faviconUrl.trim()) {
-          let link = document.querySelector("link[rel~='icon']") as HTMLLinkElement | null;
-          if (!link) {
-            link = document.createElement('link');
-            link.rel = 'icon';
-            document.head.appendChild(link);
-          }
-          link.href = faviconUrl;
-        }
+      // 2. sessionStorage cache (survives page navigations within the tab)
+      const cached = readPlatformInitCache();
+      if (cached) {
+        platformConfigCache = { data: cached, expiresAt: Date.now() + PLATFORM_CONFIG_CACHE_TTL_MS };
+        applyPlatformInit(cached);
+        return;
+      }
+      // 3. Network — ONE request instead of two
+      const res = await fetch(apiUrl('/api/platform/init'));
+      const json = await res.json().catch(() => ({}));
+      if (res.ok && json?.success) {
+        platformConfigCache = { data: json, expiresAt: Date.now() + PLATFORM_CONFIG_CACHE_TTL_MS };
+        writePlatformInitCache(json);
+        applyPlatformInit(json);
       }
     } catch {
       // keep defaults when config table is unavailable
     }
   };
 
+  const applyPlatformInit = (json: any) => {
+    if (!json?.success) return;
+    const nextFeatures = extractFeatureFlags({ features: json.features });
+    setFeatures(nextFeatures);
+    setMaintenanceMode(Boolean(json.maintenanceMode));
+    const schoolName = String(json.schoolName || 'QuizMaster').trim();
+    if (schoolName) document.title = schoolName;
+    // Apply favicon
+    const faviconUrl = json?.faviconUrl;
+    if (typeof faviconUrl === 'string' && faviconUrl.trim()) {
+      let link = document.querySelector("link[rel~='icon']") as HTMLLinkElement | null;
+      if (!link) {
+        link = document.createElement('link');
+        link.rel = 'icon';
+        document.head.appendChild(link);
+      }
+      link.href = faviconUrl;
+    }
+  };
+
   const fetchProfile = async (userId: string) => {
     try {
-      let runtimeMaintenanceMode = maintenanceMode;
-      try {
-        const runtimeRes = await fetch(`${apiUrl('/api/platform/runtime')}?t=${Date.now()}`, { cache: 'no-store' });
-        const runtimeJson = await runtimeRes.json().catch(() => ({}));
-        if (runtimeRes.ok && runtimeJson?.success) {
-          runtimeMaintenanceMode = Boolean(runtimeJson.maintenanceMode);
-          setMaintenanceMode(runtimeMaintenanceMode);
-        }
-      } catch {
-        // keep current in-memory maintenance value
-      }
-
+      // NOTE: Do NOT call /api/platform/runtime here.
+      // loadPlatformRuntimeConfig() already fetches it in parallel on startup.
+      // Calling it again causes a duplicate DB round-trip on every login/refresh.
       let profile: any = null;
       const profileRes = await supabase.from('profiles').select('*').eq('id', userId).maybeSingle();
       if (profileRes.error) {
@@ -203,29 +269,10 @@ export default function App() {
       }
 
       if (!profile) {
-        const { data: { session } } = await supabase.auth.getSession();
-        const authUser = session?.user && session.user.id === userId ? session.user : null;
-        const metadata = authUser?.user_metadata && typeof authUser.user_metadata === 'object'
-          ? authUser.user_metadata as Record<string, unknown>
-          : {};
-        const fallbackRole = normalizeUserRole(typeof metadata.role === 'string' ? metadata.role : null);
-
-        if (runtimeMaintenanceMode && fallbackRole !== 'admin') {
-          await supabase.auth.signOut();
-          setUser(null);
-          toast.error('Platform is currently offline for all students and teachers.', { id: 'maintenance-mode' });
-          return;
-        }
-
-        setUser({
-          uid: userId,
-          email: String(authUser?.email || ''),
-          displayName: String(metadata.display_name || metadata.full_name || authUser?.email || 'Student'),
-          role: fallbackRole,
-          teacherId: typeof metadata.teacher_id === 'string' ? metadata.teacher_id : undefined,
-          status: 'active',
-          createdAt: String(authUser?.created_at || new Date().toISOString()),
-        });
+        await supabase.auth.signOut();
+        setUser(null);
+        setLoading(false);
+        toast.error('Account not found in database. Please contact your administrator.', { id: 'no-profile' });
         return;
       }
 
@@ -235,7 +282,7 @@ export default function App() {
         toast.error('Your account has been disabled. Contact an administrator.', { id: 'account-disabled' });
         return;
       }
-      if (profile && runtimeMaintenanceMode && normalizeUserRole(profile.role) !== 'admin') {
+      if (profile && maintenanceMode && normalizeUserRole(profile.role) !== 'admin') {
         await supabase.auth.signOut();
         setUser(null);
         toast.error('Platform is currently offline for all students and teachers.', { id: 'maintenance-mode' });
@@ -345,6 +392,7 @@ export default function App() {
   return (
     <Router>
       <Toaster position="top-right" richColors />
+      <Suspense fallback={<AppBootSkeleton />}>
       <Routes>
         <Route path="/login" element={!user ? <Login /> : <Navigate to="/" />} />
         <Route path="/not-found" element={<NotFound />} />
@@ -360,7 +408,7 @@ export default function App() {
         <Route path="/student/*" element={user?.role === 'student' ? <StudentRoutes features={features} /> : <Navigate to="/login" />} />
         <Route path="*" element={<Navigate to="/not-found" replace />} />
       </Routes>
-      {user && <ChatBot userRole={user.role} />}
+      </Suspense>
     </Router>
   );
 }
@@ -379,6 +427,7 @@ function AdminRoutes({ features }: { features: FeatureFlags }) {
       <Route path="/quizzes" element={<AdminQuizzes />} />
       <Route path="/classes" element={<AdminClasses />} />
       <Route path="/assignments" element={<AdminAssignments />} />
+      <Route path="/presentations" element={<AdminPresentations />} />
       <Route path="/attendance" element={<AdminAttendance />} />
       <Route path="/certificates" element={<AdminCertificates />} />
       <Route path="/live-sessions" element={features.liveSessionsEnabled ? <AdminLiveSessions /> : <Navigate to="/not-found" replace />} />
@@ -389,12 +438,15 @@ function AdminRoutes({ features }: { features: FeatureFlags }) {
       <Route path="/reports" element={<AdminReports />} />
       <Route path="/payments" element={features.paymentsEnabled ? <AdminPayments /> : <Navigate to="/not-found" replace />} />
       <Route path="/invoices" element={features.paymentsEnabled ? <AdminInvoices /> : <Navigate to="/not-found" replace />} />
+      <Route path="/student-payments" element={<AdminStudentPayments />} />
+      <Route path="/teacher-hours" element={<AdminTeacherHours />} />
       <Route path="/settings" element={<AdminSettings />} />
       <Route path="/branding" element={<AdminBranding />} />
       <Route path="/domain" element={<AdminDomain />} />
       <Route path="/roles" element={<AdminRoles />} />
       <Route path="/profile" element={<AdminProfile />} />
       <Route path="/security" element={<AdminSecurityPage />} />
+      <Route path="/guide" element={<GuidePage />} />
       <Route path="*" element={<Navigate to="/not-found" replace />} />
     </Routes>
   );
@@ -412,11 +464,16 @@ function TeacherRoutes({ features }: { features: FeatureFlags }) {
       <Route path="/quizzes" element={<QuizManagement />} />
       <Route path="/quizzes/new" element={<QuizBuilder />} />
       <Route path="/quizzes/edit/:quizId" element={<QuizBuilder />} />
+      <Route path="/quizzes/test-builder" element={<SmartTestBuilder />} />
       <Route path="/live-quiz" element={<RealtimeQuizHost />} />
       <Route path="/live-quiz/reports" element={<RealtimeQuizReports />} />
       <Route path="/exams" element={<TeacherExams />} />
       <Route path="/results" element={<TeacherResults />} />
       <Route path="/modules" element={<TeacherModules />} />
+      <Route path="/modules/:moduleId" element={<TeacherModuleDetail />} />
+      <Route path="/courses/:courseId/modules" element={<TeacherModules />} />
+      <Route path="/headway-tests" element={<HeadwayTestImport />} />
+      <Route path="/module-tests" element={<TeacherModuleTests />} />
       <Route path="/lessons" element={<TeacherLessons />} />
       <Route path="/lessons/:lessonId/content" element={<TeacherLessonContentManager />} />
       <Route path="/assignments" element={<TeacherAssignments />} />
@@ -427,7 +484,11 @@ function TeacherRoutes({ features }: { features: FeatureFlags }) {
       <Route path="/community" element={features.communityEnabled ? <TeacherCommunity /> : <Navigate to="/not-found" replace />} />
       <Route path="/announcements" element={features.announcementsEnabled ? <TeacherAnnouncements /> : <Navigate to="/not-found" replace />} />
       <Route path="/progress" element={<TeacherProgress />} />
+      <Route path="/progress/:studentId" element={<StudentProgressDetail />} />
       <Route path="/profile" element={<TeacherProfilePage />} />
+      <Route path="/settings" element={<TeacherSettingsPage />} />
+      <Route path="/exams/builder/:examId" element={<TeacherExamBuilder />} />
+      <Route path="/guide" element={<GuidePage />} />
       <Route path="*" element={<Navigate to="/not-found" replace />} />
     </Routes>
   );
@@ -440,11 +501,13 @@ function StudentRoutes({ features }: { features: FeatureFlags }) {
       <Route path="/courses" element={<StudentCourses />} />
       <Route path="/courses/:courseId" element={<StudentCourseDetail />} />
       <Route path="/continue" element={<ContinueLearning />} />
+      <Route path="/modules" element={<StudentModules />} />
       <Route path="/lessons" element={<StudentLessons />} />
       <Route path="/lessons/:lessonId" element={<StudentLessonDetail />} />
       <Route path="/quizzes" element={<StudentQuizzes />} />
       <Route path="/assignments" element={<StudentAssignments />} />
       <Route path="/assignments/:assignmentId" element={<StudentAssignmentDetail />} />
+      <Route path="/presentations" element={<StudentPresentations />} />
       <Route path="/progress" element={<StudentProgress />} />
       <Route path="/results" element={<StudentResults />} />
       <Route path="/certificates" element={<StudentCertificates />} />
@@ -457,9 +520,14 @@ function StudentRoutes({ features }: { features: FeatureFlags }) {
       <Route path="/badges" element={<Badges />} />
       <Route path="/exams" element={<StudentExams />} />
       <Route path="/announcements" element={features.announcementsEnabled ? <StudentAnnouncements /> : <Navigate to="/not-found" replace />} />
-      <Route path="/quiz/:quizId" element={<QuizTaking />} />
+      <Route path="/quiz/:quizId" element={<QuizExperience />} />
       <Route path="/results/:attemptId" element={<QuizResults />} />
       <Route path="/profile" element={<StudentProfile />} />
+      <Route path="/headway-audio" element={<HeadwayAudio />} />
+      <Route path="/test-builder" element={<TestBuilder />} />
+      <Route path="/module-test-builder" element={<ModuleTestBuilder />} />
+      <Route path="/headway-grammar" element={<HeadwayGrammar />} />
+      <Route path="/guide" element={<GuidePage />} />
       <Route path="*" element={<Navigate to="/not-found" replace />} />
     </Routes>
   );

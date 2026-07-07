@@ -1,4 +1,5 @@
 import React, { useEffect, useState, useMemo } from 'react';
+import { useTranslation } from 'react-i18next';
 import { supabase } from '../../supabase';
 import StudentLayout from '../../components/layout/StudentLayout';
 import { motion, AnimatePresence } from 'motion/react';
@@ -14,6 +15,7 @@ import { fetchAttemptRowsByStudentId } from '../../lib/quizAttempts';
 type TabFilter = 'all' | 'passed' | 'failed';
 
 export default function StudentResults() {
+  const { t } = useTranslation();
   const [attempts, setAttempts] = useState<any[]>([]);
   const [quizMap, setQuizMap] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
@@ -63,9 +65,9 @@ export default function StudentResults() {
   };
 
   const TABS: { key: TabFilter; label: string; count: number }[] = [
-    { key: 'all', label: 'Të gjitha', count: attempts.length },
-    { key: 'passed', label: 'Kaluara', count: stats.passed },
-    { key: 'failed', label: 'Dështuara', count: stats.failed },
+    { key: 'all', label: t('student.quizzes.all'), count: attempts.length },
+    { key: 'passed', label: t('student.quizzes.passed'), count: stats.passed },
+    { key: 'failed', label: t('student.quizResults.failedTab'), count: stats.failed },
   ];
 
   return (
@@ -83,16 +85,16 @@ export default function StudentResults() {
             <div className="flex-1">
               <div className="inline-flex items-center gap-2 bg-white/10 border border-white/20 rounded-full px-3 py-1 mb-3">
                 <BarChart3 className="w-3.5 h-3.5 text-emerald-300" />
-                <span className="text-white/80 text-xs font-semibold">Rezultatet e Kuizeve</span>
+                <span className="text-white/80 text-xs font-semibold">{t('student.results.quizResults')}</span>
               </div>
-              <h1 className="text-2xl font-black text-white">Rezultatet e Mia</h1>
-              <p className="text-slate-400 text-sm mt-0.5">Histori e plotë e tentativave të kuizeve tuaj.</p>
+              <h1 className="text-2xl font-black text-white">{t('student.results.myResults')}</h1>
+              <p className="text-slate-400 text-sm mt-0.5">{t('student.results.fullHistory')}</p>
             </div>
             <div className="flex gap-2 shrink-0">
               {[
-                { label: 'Tentativa', value: stats.total, icon: Target, color: 'from-blue-500 to-indigo-500' },
-                { label: 'Kaluara', value: stats.passed, icon: CheckCircle2, color: 'from-emerald-500 to-teal-500' },
-                { label: 'Mesatarja', value: `${stats.avg}%`, icon: TrendingUp, color: 'from-violet-500 to-purple-500' },
+                { label: t('student.results.attempts'), value: stats.total, icon: Target, color: 'from-blue-500 to-indigo-500' },
+                { label: t('student.quizzes.passed'), value: stats.passed, icon: CheckCircle2, color: 'from-emerald-500 to-teal-500' },
+                { label: t('student.results.average'), value: `${stats.avg}%`, icon: TrendingUp, color: 'from-violet-500 to-purple-500' },
               ].map((s, i) => (
                 <motion.div
                   key={s.label}
@@ -116,7 +118,7 @@ export default function StudentResults() {
             <input
               value={search}
               onChange={e => setSearch(e.target.value)}
-              placeholder="Kërko sipas emrit të kuizit…"
+              placeholder={t('student.results.searchPlaceholder')}
               className="w-full pl-9 pr-4 py-2.5 bg-white border border-slate-200 rounded-xl text-sm text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-400/40 focus:border-emerald-400 shadow-sm"
             />
           </div>
@@ -171,11 +173,11 @@ export default function StudentResults() {
             >
               <Trophy className="w-8 h-8 text-emerald-400" />
             </motion.div>
-            <p className="text-slate-600 font-bold text-lg">Nuk ka rezultate</p>
+            <p className="text-slate-600 font-bold text-lg">{t('student.results.noResults')}</p>
             <p className="text-slate-400 text-sm mt-1">
               {search || tab !== 'all'
-                ? 'Provo të pastrojsh filtrat'
-                : 'Plotëso disa kuize për të parë rezultatet këtu.'}
+                ? t('student.results.tryClearingFilters')
+                : t('student.results.noQuizzesMessage')}
             </p>
           </motion.div>
         ) : (
@@ -186,7 +188,7 @@ export default function StudentResults() {
                   ? Math.round((attempt.score / attempt.total_points) * 100)
                   : 0;
                 const passed = pct >= 50;
-                const quizTitle = quizMap[attempt.quiz_id] || 'Kuiz';
+                const quizTitle = quizMap[attempt.quiz_id] || t('quizzes.title');
                 const duration = attempt.started_at && attempt.completed_at
                   ? Math.round((new Date(attempt.completed_at).getTime() - new Date(attempt.started_at).getTime()) / 60000)
                   : null;
@@ -223,7 +225,7 @@ export default function StudentResults() {
                           'text-[10px] font-bold uppercase tracking-wider',
                           passed ? 'text-emerald-500' : 'text-red-400',
                         )}>
-                          {passed ? 'Kaluar' : 'Dështuar'}
+                          {passed ? t('student.quizzes.passed') : t('student.quizResults.failedStatus')}
                         </div>
                       </div>
                     </div>
@@ -247,12 +249,12 @@ export default function StudentResults() {
                       <div className="flex flex-wrap gap-1.5 mb-3">
                         <span className="inline-flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded-full bg-slate-100 text-slate-600">
                           <Target className="w-2.5 h-2.5" />
-                          {attempt.score ?? 0}/{attempt.total_points ?? 0} pts
+                          {t('student.quizResults.pointsDisplayShort', { score: attempt.score ?? 0, total: attempt.total_points ?? 0 })}
                         </span>
                         {duration != null && (
                           <span className="inline-flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded-full bg-slate-100 text-slate-600">
                             <Clock className="w-2.5 h-2.5" />
-                            {duration}m
+                            {t('student.results.durationMinutes', { count: duration })}
                           </span>
                         )}
                       </div>
@@ -273,7 +275,7 @@ export default function StudentResults() {
                               : 'bg-red-50 text-red-600 hover:bg-red-500 hover:text-white',
                           )}
                         >
-                          Shiko detajet
+                          {t('student.results.viewDetails')}
                           <ChevronRight className="w-3.5 h-3.5" />
                         </Link>
                       </div>

@@ -5,6 +5,7 @@ import {
   Check, UserPlus
 } from 'lucide-react';
 import { toast } from 'sonner';
+import { useTranslation } from 'react-i18next';
 import { supabase } from '../supabase';
 import { cn } from '../lib/utils';
 import { authFetch } from '../lib/apiUrl';
@@ -37,6 +38,7 @@ const generatePassword = () => {
 const STEPS = ['Account', 'Professional', 'Review'];
 
 export default function AddTeacherModal({ onClose, onSuccess }: Props) {
+  const { t } = useTranslation();
   const [step, setStep] = useState(0);
   const [submitting, setSubmitting] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
@@ -49,7 +51,7 @@ export default function AddTeacherModal({ onClose, onSuccess }: Props) {
   });
 
   const set = (key: keyof FormData, val: string) => setForm(f => ({ ...f, [key]: val }));
-  const copyPassword = () => { navigator.clipboard.writeText(form.password); toast.success('Password copied'); };
+  const copyPassword = () => { navigator.clipboard.writeText(form.password); toast.success(t('modals.addTeacher.passwordCopied')); };
 
   const canGoNext = () => {
     if (step === 0) return form.name.trim() !== '' && form.email.trim() !== '' && form.password.trim() !== '';
@@ -58,7 +60,7 @@ export default function AddTeacherModal({ onClose, onSuccess }: Props) {
 
   const handleSubmit = async () => {
     if (!form.name || !form.email || !form.password) {
-      toast.error('Name, email, and password are required');
+      toast.error(t('modals.addTeacher.nameEmailPasswordRequired'));
       return;
     }
     setSubmitting(true);
@@ -74,12 +76,12 @@ export default function AddTeacherModal({ onClose, onSuccess }: Props) {
         }),
       });
       const json = await res.json();
-      if (!res.ok || !json.success) throw new Error(json.error || 'Failed to create teacher');
-      toast.success('Teacher created successfully');
+      if (!res.ok || !json.success) throw new Error(json.error || t('modals.addTeacher.failedToCreateTeacher'));
+      toast.success(t('modals.addTeacher.teacherCreatedSuccess'));
       onSuccess();
       onClose();
     } catch (err: any) {
-      toast.error(err.message || 'Failed to create teacher');
+      toast.error(err.message || t('modals.addTeacher.failedToCreateTeacher'));
     } finally {
       setSubmitting(false);
     }
@@ -98,9 +100,9 @@ export default function AddTeacherModal({ onClose, onSuccess }: Props) {
             <div>
               <h2 className="text-lg font-bold text-slate-900 flex items-center gap-2">
                 <UserPlus className="w-5 h-5" />
-                Add New Teacher
+                {t('modals.addTeacher.title')}
               </h2>
-              <p className="text-xs text-slate-500 mt-0.5">Fill in the details to create a teacher account.</p>
+              <p className="text-xs text-slate-500 mt-0.5">{t('modals.addTeacher.subtitle')}</p>
             </div>
             <button onClick={onClose} className="p-2 hover:bg-white/60 rounded-xl transition-all -mt-1 -mr-2">
               <X className="w-5 h-5 text-slate-400" />
@@ -137,33 +139,33 @@ export default function AddTeacherModal({ onClose, onSuccess }: Props) {
           {step === 0 && (
             <div className="space-y-4">
               <div>
-                <label className={labelCls}>Full Name <span className="text-red-400 normal-case font-normal">*</span></label>
+                <label className={labelCls}>{t('modals.addTeacher.fullName')} <span className="text-red-400 normal-case font-normal">*</span></label>
                 <div className="relative">
                   <User className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
                   <input
                     type="text" required
                     value={form.name}
                     onChange={e => set('name', e.target.value)}
-                    placeholder="e.g. Jane Smith"
+                    placeholder={t('modals.addTeacher.placeholder')}
                     className={`${inputCls} pl-9`}
                   />
                 </div>
               </div>
               <div>
-                <label className={labelCls}>Email Address <span className="text-red-400 normal-case font-normal">*</span></label>
+                <label className={labelCls}>{t('modals.addTeacher.emailAddress')} <span className="text-red-400 normal-case font-normal">*</span></label>
                 <div className="relative">
                   <Mail className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
                   <input
                     type="email" required
                     value={form.email}
                     onChange={e => set('email', e.target.value)}
-                    placeholder="jane@school.com"
+                    placeholder={t('modals.addTeacher.emailPlaceholder')}
                     className={`${inputCls} pl-9`}
                   />
                 </div>
               </div>
               <div>
-                <label className={labelCls}>Temporary Password <span className="text-red-400 normal-case font-normal">*</span></label>
+                <label className={labelCls}>{t('modals.addTeacher.temporaryPassword')} <span className="text-red-400 normal-case font-normal">*</span></label>
                 <div className="flex gap-2">
                   <div className="relative flex-1">
                     <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
@@ -178,16 +180,16 @@ export default function AddTeacherModal({ onClose, onSuccess }: Props) {
                       {showPassword ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
                     </button>
                   </div>
-                  <button type="button" onClick={copyPassword} title="Copy password"
+                  <button type="button" onClick={copyPassword} title={t('modals.addTeacher.passwordCopied')}
                     className="p-2.5 bg-slate-100 hover:bg-slate-200 border border-slate-200 rounded-xl transition-all">
                     <Copy className="w-4 h-4 text-slate-500" />
                   </button>
-                  <button type="button" onClick={() => set('password', generatePassword())} title="Regenerate"
+                  <button type="button" onClick={() => set('password', generatePassword())} title={t('modals.addTeacher.regenerate')}
                     className="p-2.5 bg-slate-100 hover:bg-slate-200 border border-slate-200 rounded-xl transition-all">
                     <RotateCcw className="w-4 h-4 text-slate-500" />
                   </button>
                 </div>
-                <p className="text-[11px] text-slate-400 mt-1.5">Share this with the teacher — they can change it after first login.</p>
+                <p className="text-[11px] text-slate-400 mt-1.5">{t('modals.addTeacher.sharePassword')}</p>
               </div>
             </div>
           )}
@@ -196,20 +198,20 @@ export default function AddTeacherModal({ onClose, onSuccess }: Props) {
           {step === 1 && (
             <div className="space-y-4">
               <div>
-                <label className={labelCls}>Phone Number <span className="text-slate-300 normal-case font-normal">(optional)</span></label>
+                <label className={labelCls}>{t('modals.addTeacher.phoneNumber')} <span className="text-slate-300 normal-case font-normal">{t('modals.addTeacher.optional')}</span></label>
                 <div className="relative">
                   <Phone className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
                   <input
                     type="tel"
                     value={form.phone}
                     onChange={e => set('phone', e.target.value)}
-                    placeholder="+1 555 000 0000"
+                    placeholder={t('modals.addTeacher.phonePlaceholder')}
                     className={`${inputCls} pl-9`}
                   />
                 </div>
               </div>
               <div>
-                <label className={labelCls}>Specialization <span className="text-slate-300 normal-case font-normal">(optional)</span></label>
+                <label className={labelCls}>{t('modals.addTeacher.specialization')} <span className="text-slate-300 normal-case font-normal">{t('modals.addTeacher.optional')}</span></label>
                 <div className="relative">
                   <BookOpen className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
                   <select
@@ -217,7 +219,7 @@ export default function AddTeacherModal({ onClose, onSuccess }: Props) {
                     onChange={e => set('specialization', e.target.value)}
                     className={`${inputCls} pl-9`}
                   >
-                    <option value="">Select specialization</option>
+                    <option value="">{t('modals.addTeacher.selectSpecialization')}</option>
                     {SPECIALIZATIONS.map(s => <option key={s} value={s}>{s}</option>)}
                   </select>
                 </div>
@@ -229,36 +231,36 @@ export default function AddTeacherModal({ onClose, onSuccess }: Props) {
           {step === 2 && (
             <div className="space-y-4">
               <div className="bg-slate-50 rounded-xl p-4 border border-slate-100">
-                <p className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-3">Summary</p>
+                <p className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-3">{t('modals.addTeacher.summary')}</p>
                 <div className="space-y-2.5 text-sm">
                   <div className="flex gap-2">
-                    <span className="text-slate-400 w-32 shrink-0">Name</span>
+                    <span className="text-slate-400 w-32 shrink-0">{t('modals.addTeacher.nameLabel')}</span>
                     <span className="font-semibold text-slate-800">{form.name || '—'}</span>
                   </div>
                   <div className="flex gap-2">
-                    <span className="text-slate-400 w-32 shrink-0">Email</span>
+                    <span className="text-slate-400 w-32 shrink-0">{t('modals.addTeacher.emailLabel')}</span>
                     <span className="font-semibold text-slate-800">{form.email || '—'}</span>
                   </div>
                   <div className="flex gap-2">
-                    <span className="text-slate-400 w-32 shrink-0">Password</span>
+                    <span className="text-slate-400 w-32 shrink-0">{t('modals.addTeacher.passwordLabel')}</span>
                     <span className="font-mono font-semibold text-slate-800 text-xs bg-slate-100 px-2 py-0.5 rounded-lg">••••••••••••</span>
                   </div>
                   {form.phone && (
                     <div className="flex gap-2">
-                      <span className="text-slate-400 w-32 shrink-0">Phone</span>
+                      <span className="text-slate-400 w-32 shrink-0">{t('modals.addTeacher.phoneLabel')}</span>
                       <span className="font-semibold text-slate-800">{form.phone}</span>
                     </div>
                   )}
                   {form.specialization && (
                     <div className="flex gap-2">
-                      <span className="text-slate-400 w-32 shrink-0">Specialization</span>
+                      <span className="text-slate-400 w-32 shrink-0">{t('modals.addTeacher.specializationLabel')}</span>
                       <span className="font-semibold text-slate-800">{form.specialization}</span>
                     </div>
                   )}
                 </div>
               </div>
               <p className="text-xs text-slate-400 text-center">
-                Review the details above. Click <span className="font-semibold text-violet-600">Create Teacher</span> to confirm.
+                {t('modals.addTeacher.reviewText', { button: t('modals.addTeacher.createTeacher') })}
               </p>
             </div>
           )}
@@ -273,7 +275,7 @@ export default function AddTeacherModal({ onClose, onSuccess }: Props) {
               className="flex items-center gap-2 px-4 py-2.5 bg-slate-100 text-slate-600 rounded-xl font-semibold text-sm hover:bg-slate-200 transition-all"
             >
               <ChevronLeft className="w-4 h-4" />
-              Back
+              {t('common.back')}
             </button>
           )}
           <button
@@ -281,7 +283,7 @@ export default function AddTeacherModal({ onClose, onSuccess }: Props) {
             onClick={onClose}
             className="px-4 py-2.5 bg-slate-100 text-slate-600 rounded-xl font-semibold text-sm hover:bg-slate-200 transition-all"
           >
-            Cancel
+            {t('common.cancel')}
           </button>
           <div className="flex-1" />
           {step < STEPS.length - 1 ? (
@@ -290,7 +292,7 @@ export default function AddTeacherModal({ onClose, onSuccess }: Props) {
               onClick={() => { if (canGoNext()) setStep(s => s + 1); else toast.error('Please fill in the required fields.'); }}
               className="flex items-center gap-2 px-5 py-2.5 bg-violet-600 hover:bg-violet-700 shadow-violet-200 text-white rounded-xl font-semibold text-sm transition-all shadow-lg"
             >
-              Next
+              {t('common.next')}
               <ChevronRight className="w-4 h-4" />
             </button>
           ) : (
@@ -301,7 +303,7 @@ export default function AddTeacherModal({ onClose, onSuccess }: Props) {
               variant="primary"
               size="sm"
             >
-              Create Teacher
+              {t('modals.addTeacher.createTeacher')}
             </LoadingButton>
           )}
         </div>

@@ -3,6 +3,7 @@ import AdminLayout from '../../components/layout/AdminLayout';
 import { cn } from '../../lib/utils';
 import { toast } from 'sonner';
 import { supabase } from '../../supabase';
+import { useTranslation } from 'react-i18next';
 import {
   Lock, Eye, EyeOff,
   CheckCircle2, AlertTriangle, LogOut, Monitor,
@@ -39,11 +40,10 @@ const passwordStrength = (pw: string) => {
   return score;
 };
 
-const STRENGTH_LABELS = ['', 'Weak', 'Fair', 'Good', 'Strong', 'Very Strong'];
 const STRENGTH_COLORS = ['', 'bg-rose-500', 'bg-amber-500', 'bg-yellow-400', 'bg-emerald-400', 'bg-emerald-600'];
-const STRENGTH_TEXT   = ['', 'text-rose-600', 'text-amber-600', 'text-yellow-600', 'text-emerald-600', 'text-emerald-700'];
 
 export default function AdminSecurity() {
+  const { t } = useTranslation();
   const [sessions, setSessions] = useState<Session[]>([]);
   const [loginHistory, setLoginHistory] = useState<LoginEvent[]>([]);
   const [loading, setLoading] = useState(true);
@@ -55,8 +55,10 @@ export default function AdminSecurity() {
   const [confirmPw, setConfirmPw] = useState('');
   const [pwSaving, setPwSaving]   = useState(false);
 
-
   const strength = passwordStrength(newPw);
+
+  const STRENGTH_LABELS = ['', t('security.strength.weak'), t('security.strength.fair'), t('security.strength.good'), t('security.strength.strong'), t('security.strength.veryStrong')];
+  const STRENGTH_TEXT   = ['', 'text-rose-600', 'text-amber-600', 'text-yellow-600', 'text-emerald-600', 'text-emerald-700'];
 
   const deviceLabel = useMemo(() => {
     const ua = navigator.userAgent || '';
@@ -118,9 +120,9 @@ export default function AdminSecurity() {
 
 
   const handlePasswordSave = async () => {
-    if (!currentPw) return toast.error('Enter your current password.');
-    if (newPw.length < 8) return toast.error('New password must be at least 8 characters.');
-    if (newPw !== confirmPw) return toast.error('Passwords do not match.');
+    if (!currentPw) return toast.error(t('security.toasts.enterCurrent'));
+    if (newPw.length < 8) return toast.error(t('security.toasts.minChars'));
+    if (newPw !== confirmPw) return toast.error(t('security.toasts.mismatch'));
     try {
       setPwSaving(true);
       const { error } = await supabase.auth.updateUser({ password: newPw });
@@ -128,9 +130,9 @@ export default function AdminSecurity() {
       setCurrentPw('');
       setNewPw('');
       setConfirmPw('');
-      toast.success('Password updated successfully.');
+      toast.success(t('security.toasts.updated'));
     } catch (e: any) {
-      toast.error(e?.message || 'Failed to update password.');
+      toast.error(e?.message || t('errors.saveFailed'));
     } finally {
       setPwSaving(false);
     }
@@ -138,12 +140,12 @@ export default function AdminSecurity() {
 
   const revokeSession = (id: string) => {
     setSessions(prev => prev.filter(s => s.id !== id));
-    toast.success('Session revoked.');
+    toast.success(t('security.toasts.revoked'));
   };
 
   const revokeAll = () => {
     setSessions(prev => prev.filter(s => s.current));
-    toast.success('All other sessions have been revoked.');
+    toast.success(t('security.toasts.allRevoked'));
   };
 
   return (
@@ -151,8 +153,8 @@ export default function AdminSecurity() {
       <div className="p-6 space-y-6">
         {/* Header */}
         <div>
-          <h1 className="text-2xl font-bold text-slate-900">Security</h1>
-          <p className="text-sm text-slate-500 mt-0.5">Manage your account security and active sessions</p>
+          <h1 className="text-2xl font-bold text-slate-900">{t('security.title')}</h1>
+          <p className="text-sm text-slate-500 mt-0.5">{t('security.subtitle')}</p>
         </div>
 
         {/* Security score */}
@@ -161,8 +163,8 @@ export default function AdminSecurity() {
             <ShieldCheck className="w-5 h-5" />
           </div>
           <div className="flex-1">
-            <p className="font-bold text-sm text-emerald-800">Your account is protected</p>
-            <p className="text-xs mt-0.5 text-emerald-600">Use a strong, unique password and keep your credentials private.</p>
+            <p className="font-bold text-sm text-emerald-800">{t('security.protected')}</p>
+            <p className="text-xs mt-0.5 text-emerald-600">{t('security.protectedDesc')}</p>
             <div className="mt-2.5 flex items-center gap-3">
               <div className="flex-1 h-1.5 bg-white/60 rounded-full overflow-hidden max-w-48">
                 <div className="h-full rounded-full bg-emerald-500" style={{ width: '75%' }} />
@@ -174,10 +176,10 @@ export default function AdminSecurity() {
 
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
           {/* Change Password */}
-          <Card title="Change Password" icon={Lock} subtitle="Use a strong, unique password">
+          <Card title={t('security.changePassword')} icon={Lock} subtitle={t('security.changePasswordDesc')}>
             <div className="space-y-4">
-              <PasswordField label="Current Password" value={currentPw} onChange={setCurrentPw} show={showCurrent} onToggle={() => setShowCurrent(p => !p)} />
-              <PasswordField label="New Password" value={newPw} onChange={setNewPw} show={showNew} onToggle={() => setShowNew(p => !p)} />
+              <PasswordField label={t('security.currentPassword')} value={currentPw} onChange={setCurrentPw} show={showCurrent} onToggle={() => setShowCurrent(p => !p)} />
+              <PasswordField label={t('security.newPassword')} value={newPw} onChange={setNewPw} show={showNew} onToggle={() => setShowNew(p => !p)} />
 
               {/* Strength bar */}
               {newPw && (
@@ -191,10 +193,10 @@ export default function AdminSecurity() {
                     <p className={cn('text-xs font-semibold', STRENGTH_TEXT[strength])}>{STRENGTH_LABELS[strength]}</p>
                     <ul className="flex gap-3">
                       {[
-                        { ok: newPw.length >= 8,        label: '8+ chars' },
-                        { ok: /[A-Z]/.test(newPw),      label: 'Uppercase' },
-                        { ok: /[0-9]/.test(newPw),      label: 'Number' },
-                        { ok: /[^A-Za-z0-9]/.test(newPw), label: 'Symbol' },
+                        { ok: newPw.length >= 8,        label: t('security.strength.chars8') },
+                        { ok: /[A-Z]/.test(newPw),      label: t('security.strength.uppercase') },
+                        { ok: /[0-9]/.test(newPw),      label: t('security.strength.number') },
+                        { ok: /[^A-Za-z0-9]/.test(newPw), label: t('security.strength.symbol') },
                       ].map(({ ok, label }) => (
                         <li key={label} className={cn('text-xs flex items-center gap-0.5', ok ? 'text-emerald-600' : 'text-slate-400')}>
                           <CheckCircle2 className="w-3 h-3" /> {label}
@@ -205,12 +207,12 @@ export default function AdminSecurity() {
                 </div>
               )}
 
-              <PasswordField label="Confirm New Password" value={confirmPw} onChange={setConfirmPw} show={showConfirm} onToggle={() => setShowConfirm(p => !p)} />
+              <PasswordField label={t('security.confirmPassword')} value={confirmPw} onChange={setConfirmPw} show={showConfirm} onToggle={() => setShowConfirm(p => !p)} />
               {confirmPw && newPw !== confirmPw && (
-                <p className="text-xs text-rose-500 flex items-center gap-1"><AlertTriangle className="w-3 h-3" /> Passwords do not match</p>
+                <p className="text-xs text-rose-500 flex items-center gap-1"><AlertTriangle className="w-3 h-3" /> {t('security.passwordMismatch')}</p>
               )}
               {confirmPw && newPw === confirmPw && newPw && (
-                <p className="text-xs text-emerald-600 flex items-center gap-1"><CheckCircle2 className="w-3 h-3" /> Passwords match</p>
+                <p className="text-xs text-emerald-600 flex items-center gap-1"><CheckCircle2 className="w-3 h-3" /> {t('security.passwordMatch')}</p>
               )}
 
               <button
@@ -218,7 +220,7 @@ export default function AdminSecurity() {
                 disabled={pwSaving}
                 className="w-full bg-indigo-600 hover:bg-indigo-700 disabled:opacity-60 text-white text-sm font-semibold py-2.5 rounded-xl transition-colors"
               >
-                {pwSaving ? 'Updating…' : 'Update Password'}
+                {pwSaving ? t('security.updating') : t('security.updatePassword')}
               </button>
             </div>
           </Card>
@@ -226,9 +228,9 @@ export default function AdminSecurity() {
         </div>
 
         {/* Active Sessions */}
-        <Card title="Active Sessions" icon={Monitor} subtitle="Devices currently signed in to your account"
+        <Card title={t('security.activeSessions')} icon={Monitor} subtitle={t('security.activeSessionsDesc')}
           action={sessions.filter(s => !s.current).length > 0
-            ? <button onClick={revokeAll} className="text-xs text-rose-600 font-semibold hover:underline flex items-center gap-1"><LogOut className="w-3 h-3" /> Revoke all others</button>
+            ? <button onClick={revokeAll} className="text-xs text-rose-600 font-semibold hover:underline flex items-center gap-1"><LogOut className="w-3 h-3" /> {t('security.revokeAllOthers')}</button>
             : undefined
           }
         >
@@ -246,7 +248,7 @@ export default function AdminSecurity() {
                   <div>
                     <div className="flex items-center gap-2">
                       <p className="text-sm font-bold text-slate-800">{s.device}</p>
-                      {s.current && <span className="text-xs bg-indigo-600 text-white px-2 py-0.5 rounded-full font-semibold">This device</span>}
+                      {s.current && <span className="text-xs bg-indigo-600 text-white px-2 py-0.5 rounded-full font-semibold">{t('security.thisDevice')}</span>}
                     </div>
                     <p className="text-xs text-slate-400 mt-0.5">{s.browser}</p>
                     <div className="flex items-center gap-3 mt-1.5">
@@ -254,35 +256,35 @@ export default function AdminSecurity() {
                       <span className="flex items-center gap-1 text-xs text-slate-400"><Key className="w-3 h-3" />{s.ip}</span>
                       <span className="flex items-center gap-1 text-xs text-slate-400">
                         <Clock className="w-3 h-3" />
-                        {s.current ? 'Now' : format(s.last_active, 'MMM d, h:mm a')}
+                        {s.current ? t('security.now') : format(s.last_active, 'MMM d, h:mm a')}
                       </span>
                     </div>
                   </div>
                 </div>
                 {!s.current && (
-                  <button onClick={() => revokeSession(s.id)} className="shrink-0 p-1.5 rounded-lg hover:bg-rose-50 text-slate-400 hover:text-rose-500 transition-colors" title="Revoke session">
+                  <button onClick={() => revokeSession(s.id)} className="shrink-0 p-1.5 rounded-lg hover:bg-rose-50 text-slate-400 hover:text-rose-500 transition-colors" title={t('security.toasts.revoked')}>
                     <X className="w-4 h-4" />
                   </button>
                 )}
               </div>
             ))}
             {sessions.length === 1 && sessions[0].current && (
-              <p className="text-xs text-slate-400 text-center py-2">No other active sessions.</p>
+              <p className="text-xs text-slate-400 text-center py-2">{t('security.noOtherSessions')}</p>
             )}
           </div>
         </Card>
 
         {/* Login History */}
-        <Card title="Login History" icon={Clock} subtitle="Recent sign-in activity on your account">
+        <Card title={t('security.loginHistory')} icon={Clock} subtitle={t('security.loginHistoryDesc')}>
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-slate-100">
-                  <th className="text-left pb-3 text-xs font-semibold text-slate-500 uppercase tracking-wide">Status</th>
-                  <th className="text-left pb-3 text-xs font-semibold text-slate-500 uppercase tracking-wide">Device</th>
-                  <th className="text-left pb-3 text-xs font-semibold text-slate-500 uppercase tracking-wide hidden md:table-cell">Location</th>
-                  <th className="text-left pb-3 text-xs font-semibold text-slate-500 uppercase tracking-wide hidden lg:table-cell">IP Address</th>
-                  <th className="text-left pb-3 text-xs font-semibold text-slate-500 uppercase tracking-wide">Time</th>
+                  <th className="text-left pb-3 text-xs font-semibold text-slate-500 uppercase tracking-wide">{t('security.table.status')}</th>
+                  <th className="text-left pb-3 text-xs font-semibold text-slate-500 uppercase tracking-wide">{t('security.table.device')}</th>
+                  <th className="text-left pb-3 text-xs font-semibold text-slate-500 uppercase tracking-wide hidden md:table-cell">{t('security.table.location')}</th>
+                  <th className="text-left pb-3 text-xs font-semibold text-slate-500 uppercase tracking-wide hidden lg:table-cell">{t('security.table.ip')}</th>
+                  <th className="text-left pb-3 text-xs font-semibold text-slate-500 uppercase tracking-wide">{t('security.table.time')}</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-50">
@@ -293,7 +295,7 @@ export default function AdminSecurity() {
                         ev.status === 'success' ? 'bg-emerald-50 text-emerald-700' : 'bg-rose-50 text-rose-700'
                       )}>
                         <span className={cn('w-1.5 h-1.5 rounded-full', ev.status === 'success' ? 'bg-emerald-500' : 'bg-rose-500')} />
-                        {ev.status === 'success' ? 'Success' : 'Failed'}
+                        {ev.status === 'success' ? t('security.table.success') : t('security.table.failed')}
                       </span>
                     </td>
                     <td className="py-3 pr-4 text-sm text-slate-700 font-medium">{ev.device}</td>
@@ -314,7 +316,7 @@ export default function AdminSecurity() {
           {loginHistory.some(e => e.status === 'failed') && (
             <div className="mt-4 flex items-start gap-2.5 bg-rose-50 border border-rose-200 rounded-xl px-4 py-3 text-sm text-rose-700">
               <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" />
-              <p>Suspicious failed login attempts detected from Lagos, Nigeria. If this wasn't you, change your password immediately.</p>
+              <p>{t('security.suspiciousActivity')}</p>
             </div>
           )}
         </Card>

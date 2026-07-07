@@ -1,6 +1,8 @@
 import React, { useEffect, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import TeacherLayout from '../../components/layout/TeacherLayout';
 import { toast } from 'sonner';
+import GenderAvatar from '../../components/ui/GenderAvatar';
 import { motion } from 'motion/react';
 import {
   AdminListFilterBar,
@@ -88,6 +90,7 @@ const emptyForm = {
 };
 
 export default function TeacherCertificates() {
+  const { t } = useTranslation();
   const [certs, setCerts] = useState<Certificate[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
@@ -304,7 +307,7 @@ export default function TeacherCertificates() {
       setCourses(courseOptions.map((course) => ({ id: course.id, title: course.title })));
       setStudents(s || []);
     } catch {
-      toast.error('Failed to load certificates');
+      toast.error(t('errors.loadFailed'));
     } finally {
       setLoading(false);
     }
@@ -355,9 +358,9 @@ export default function TeacherCertificates() {
   };
 
   const handleSave = async () => {
-    if (!form.student_id) { toast.error('Student is required'); return; }
-    if (!form.title.trim()) { toast.error('Title is required'); return; }
-    if (!form.certificate_number.trim()) { toast.error('Certificate number is required'); return; }
+    if (!form.student_id) { toast.error(t('modules.titleRequired')); return; }
+    if (!form.title.trim()) { toast.error(t('modules.titleRequired')); return; }
+    if (!form.certificate_number.trim()) { toast.error(t('modules.titleRequired')); return; }
     setSaving(true);
     try {
       const payload: any = {
@@ -373,7 +376,7 @@ export default function TeacherCertificates() {
       if (editId) {
         const { error } = await supabase.from('certificates').update(payload).eq('id', editId);
         if (error) throw error;
-        toast.success('Certificate updated');
+        toast.success(t('success.updated'));
       } else {
         payload.created_at = new Date().toISOString();
         const { data: inserted, error } = await supabase
@@ -382,7 +385,7 @@ export default function TeacherCertificates() {
           .select('id')
           .single();
         if (error) throw error;
-        toast.success('Certificate issued');
+        toast.success(t('success.created'));
 
         // Fan out an in-app notification to the student, this teacher (issuer),
         // and all admins — gated by the admin Settings → "Certificate Issued" toggle.
@@ -409,7 +412,7 @@ export default function TeacherCertificates() {
       setShowModal(false);
       fetchData();
     } catch (e: any) {
-      toast.error(e.message || 'Failed to save');
+      toast.error(e.message || t('errors.saveFailed'));
     } finally {
       setSaving(false);
     }
@@ -419,10 +422,10 @@ export default function TeacherCertificates() {
     try {
       const { error } = await supabase.from('certificates').delete().eq('id', id);
       if (error) throw error;
-      toast.success('Certificate deleted');
+      toast.success(t('success.deleted'));
       setDeleteId(null);
       fetchData();
-    } catch { toast.error('Failed to delete'); }
+    } catch { toast.error(t('errors.deleteFailed')); }
   };
 
   const toggleStatus = async (cert: Certificate) => {
@@ -438,10 +441,10 @@ export default function TeacherCertificates() {
   return (
     <TeacherLayout>
       <AdminListPageShell
-        breadcrumbPortalLabel="Teacher Portal"
-        breadcrumbLabel="Certificates"
-        title="Certificates"
-        description="Issue and manage student achievement certificates."
+        breadcrumbPortalLabel={t('nav.teacherPortal')}
+        breadcrumbLabel={t('nav.certificates')}
+        title={t('certificates.title')}
+        description={t('certificates.manage')}
         action={
           <motion.button
             type="button"
@@ -455,7 +458,7 @@ export default function TeacherCertificates() {
             }}
           >
             <Plus className="w-4 h-4" />
-            Issue Certificate
+            {t('certificates.issueCertificate')}
           </motion.button>
         }
         stats={stats}
@@ -466,17 +469,17 @@ export default function TeacherCertificates() {
               <input
                 value={search}
                 onChange={e => setSearch(e.target.value)}
-                placeholder="Search student, course, certificate #..."
+                placeholder={t('certificates.searchPlaceholder')}
                 className={ADMIN_LIST_SEARCH_INPUT}
               />
             </div>
             <select value={statusFilter} onChange={e => setStatusFilter(e.target.value)} className={ADMIN_LIST_SELECT}>
-              <option value="all">All Status</option>
-              <option value="issued">Issued</option>
-              <option value="revoked">Revoked</option>
+              <option value="all">{t('certificates.allStatus')}</option>
+              <option value="issued">{t('certificates.issued')}</option>
+              <option value="revoked">{t('certificates.revoked')}</option>
             </select>
             <select value={courseFilter} onChange={e => setCourseFilter(e.target.value)} className={ADMIN_LIST_SELECT}>
-              <option value="all">All Courses</option>
+              <option value="all">{t('certificates.allCourses')}</option>
               {courses.map(c => <option key={c.id} value={c.id}>{c.title}</option>)}
             </select>
           </AdminListFilterBar>
@@ -493,8 +496,8 @@ export default function TeacherCertificates() {
         ) : filtered.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-20 gap-3 text-slate-400 bg-white rounded-2xl border border-slate-100 shadow-sm">
             <Award className="w-10 h-10 opacity-30" />
-            <p className="text-sm">No certificates found</p>
-            <button type="button" onClick={openAdd} className="text-xs text-indigo-600 font-semibold hover:underline">Issue the first one</button>
+            <p className="text-sm">{t('certificates.noFound')}</p>
+            <button type="button" onClick={openAdd} className="text-xs text-indigo-600 font-semibold hover:underline">{t('certificates.issueFirstOne')}</button>
           </div>
         ) : (
           <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
@@ -502,14 +505,11 @@ export default function TeacherCertificates() {
               {filtered.map(cert => {
                 const sc = STATUS_CFG[cert.status];
                 const name = cert.student?.display_name || 'Unknown';
-                const initials = name.split(' ').map(n => n[0]).join('').substring(0, 2).toUpperCase();
                 const gradeColor = cert.grade ? (GRADE_COLORS[cert.grade] || 'text-slate-600 bg-slate-100') : null;
                 return (
-                  <div key={cert.id} className={ADMIN_LIST_ITEM_CARD}>
+                  <div key={cert.id} className={ADMIN_LIST_ITEM_CARD} style={{ borderLeftWidth: '4px', borderLeftColor: cert.status === 'issued' ? '#10b981' : '#f43f5e' }}>
                     <div className="flex items-start gap-3">
-                      <div className={cn('w-12 h-12 rounded-xl bg-gradient-to-br flex items-center justify-center text-white text-sm font-bold shrink-0', getAvatarColor(name))}>
-                        {initials}
-                      </div>
+                      <GenderAvatar name={name} />
                       <div className="min-w-0 flex-1">
                         <p className="font-semibold text-slate-900 text-sm">{name}</p>
                         <p className="text-xs text-slate-400 truncate">{cert.student?.email}</p>
@@ -586,24 +586,24 @@ export default function TeacherCertificates() {
                 <div className="w-8 h-8 bg-amber-100 rounded-lg flex items-center justify-center">
                   <Award className="w-4 h-4 text-amber-600" />
                 </div>
-                <h2 className="text-lg font-bold text-slate-800">{editId ? 'Edit Certificate' : 'Issue Certificate'}</h2>
+                <h2 className="text-lg font-bold text-slate-800">{editId ? t('certificates.editCert') : t('certificates.issueCert')}</h2>
               </div>
               <button onClick={() => setShowModal(false)} className="p-2 hover:bg-slate-100 rounded-lg"><X className="w-4 h-4" /></button>
             </div>
             <div className="p-5 space-y-4">
               <div>
-                <label className="text-xs font-semibold text-slate-600 uppercase tracking-wide">Student *</label>
+                <label className="text-xs font-semibold text-slate-600 uppercase tracking-wide">{t('certificates.selectStudent')} *</label>
                 <select value={form.student_id} onChange={e => setForm(f => ({ ...f, student_id: e.target.value }))}
                   className="mt-1 w-full px-3 py-2.5 text-sm border border-slate-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-amber-500/30">
-                  <option value="">Select student</option>
+                  <option value="">{t('common.select')}</option>
                   {students.map(s => <option key={s.id} value={s.id}>{s.display_name} ({s.email})</option>)}
                 </select>
               </div>
               <div>
-                <label className="text-xs font-semibold text-slate-600 uppercase tracking-wide">Certificate Title *</label>
+                <label className="text-xs font-semibold text-slate-600 uppercase tracking-wide">{t('certificates.certTitle')} *</label>
                 <input value={form.title} onChange={e => setForm(f => ({ ...f, title: e.target.value }))}
                   className="mt-1 w-full px-3 py-2.5 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-500/30"
-                  placeholder="e.g. Certificate of Completion" />
+                  placeholder={t('certificates.titlePlaceholder')} />
               </div>
               <div>
                 <label className="text-xs font-semibold text-slate-600 uppercase tracking-wide">Course</label>

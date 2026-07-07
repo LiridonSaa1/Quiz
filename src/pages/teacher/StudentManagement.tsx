@@ -1,7 +1,9 @@
 import React, { useEffect, useState, useMemo } from 'react';
+import { useTranslation } from 'react-i18next';
 import { supabase } from '../../supabase';
 import TeacherLayout from '../../components/layout/TeacherLayout';
-import { Users, UserPlus, Search, UserCheck, UserX, BookOpen, X, Pencil, Trash2 } from 'lucide-react';
+import { Users, UserPlus, Search, UserCheck, UserX, BookOpen, X, Pencil, Trash2, AlertTriangle, RotateCcw } from 'lucide-react';
+import GenderAvatar from '../../components/ui/GenderAvatar';
 import { toast } from 'sonner';
 import { UserProfile, UserRole } from '../../types';
 import { cn } from '../../lib/utils';
@@ -9,7 +11,7 @@ import AddStudentModal from '../../components/AddStudentModal';
 import { resolveTeacherIdCandidates } from '../../lib/teacherScope';
 import { apiUrl, authFetch } from '../../lib/apiUrl';
 import { isMissingCoursesStudentIdsError } from '../../lib/schemaErrors';
-import { motion } from 'motion/react';
+import { motion, AnimatePresence } from 'motion/react';
 import {
   AdminListPageShell,
   AdminListFilterBar,
@@ -18,6 +20,63 @@ import {
   ADMIN_LIST_CARD_GRID,
   ADMIN_LIST_ITEM_CARD,
 } from '../../components/admin/AdminListPageShell';
+
+function DeleteConfirmModal({
+  name,
+  onConfirm,
+  onCancel,
+  loading,
+}: {
+  name: string;
+  onConfirm: () => void;
+  onCancel: () => void;
+  loading: boolean;
+}) {
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
+      <motion.div
+        initial={{ opacity: 0, scale: 0.95 }}
+        animate={{ opacity: 1, scale: 1 }}
+        exit={{ opacity: 0, scale: 0.95 }}
+        transition={{ duration: 0.15 }}
+        className="bg-white rounded-2xl shadow-2xl w-full max-w-sm p-6"
+      >
+        <div className="flex flex-col items-center text-center gap-3">
+          <div className="w-14 h-14 rounded-full bg-rose-100 flex items-center justify-center mb-1">
+            <AlertTriangle className="w-7 h-7 text-rose-500" />
+          </div>
+          <h3 className="text-lg font-bold text-slate-900">Delete Student</h3>
+          <p className="text-sm text-slate-500 leading-relaxed">
+            Are you sure you want to delete <span className="font-semibold text-slate-700">{name}</span>? This action cannot be undone.
+          </p>
+        </div>
+        <div className="flex gap-3 mt-6">
+          <button
+            type="button"
+            onClick={onCancel}
+            disabled={loading}
+            className="flex-1 py-2.5 rounded-xl border border-slate-200 text-slate-600 font-semibold text-sm hover:bg-slate-50 transition-colors disabled:opacity-50"
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            onClick={onConfirm}
+            disabled={loading}
+            className="flex-1 py-2.5 rounded-xl bg-rose-600 hover:bg-rose-700 text-white font-semibold text-sm transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
+          >
+            {loading ? (
+              <span className="w-4 h-4 border-2 border-white/40 border-t-white rounded-full animate-spin" />
+            ) : (
+              <Trash2 className="w-4 h-4" />
+            )}
+            Delete
+          </button>
+        </div>
+      </motion.div>
+    </div>
+  );
+}
 
 function EmptyIllustration() {
   return (
@@ -60,6 +119,7 @@ const STAT_CONFIG = [
 ];
 
 export default function StudentManagement() {
+  const { t } = useTranslation();
   const [students, setStudents] = useState<StudentWithCourses[]>([]);
   const [courses, setCourses] = useState<{ id: string; name: string; studentIds: string[] }[]>([]);
   const [classes, setClasses] = useState<Array<{ id: string; name: string; studentIds: string[] }>>([]);
@@ -69,6 +129,9 @@ export default function StudentManagement() {
   const [courseFilter, setCourseFilter] = useState('all');
   const [classFilter, setClassFilter] = useState('all');
   const [showAddModal, setShowAddModal] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState<StudentWithCourses | null>(null);
+  const [deleteLoading, setDeleteLoading] = useState(false);
+  const [resettingProgressId, setResettingProgressId] = useState<string | null>(null);
 
   const fetchData = async () => {
     setLoading(true);
@@ -76,10 +139,10 @@ export default function StudentManagement() {
       const { data: { session } } = await supabase.auth.getSession();
       if (!session?.user?.id) return;
 
-      const studentsRes = await authFetch(
-        `/api/teacher/students?userId=${encodeURIComponent(session.user.id)}`
-      );
-      const classesRes = await authFetch('/api/teacher/classes');
+      const [studentsRes, classesRes] = await Promise.all([
+        authFetch(`/api/teacher/students?userId=${encodeURIComponent(session.user.id)}`),
+        authFetch('/api/teacher/classes'),
+      ]);
       if (classesRes.ok) {
         const classesJson = await classesRes.json();
         if (classesJson?.success && Array.isArray(classesJson.classes)) {
@@ -259,15 +322,15 @@ export default function StudentManagement() {
     try {
       const { error } = await supabase.from('profiles').update({ status: newStatus }).eq('id', student.uid);
       if (error) throw error;
-      toast.success(`Student ${newStatus === 'active' ? 'activated' : 'deactivated'}`);
+      toast.success(newStatus === 'active' ? t('teacher.studentManagement.studentActivated') : t('teacher.studentManagement.studentDeactivated'));
       fetchData();
-    } catch { toast.error('Failed to update status'); }
+    } catch { toast.error(t('teacher.studentManagement.failedUpdateStatus')); }
   };
 
   const editStudent = async (student: StudentWithCourses) => {
-    const displayName = window.prompt('Student name', student.displayName || '');
+    const displayName = window.prompt(t('teacher.studentManagement.addStudent'), student.displayName || '');
     if (displayName === null) return;
-    const email = window.prompt('Student email', student.email || '');
+    const email = window.prompt('Email', student.email || '');
     if (email === null) return;
     try {
       const res = await authFetch(`/api/teacher/students/${encodeURIComponent(student.uid)}`, {
@@ -275,24 +338,52 @@ export default function StudentManagement() {
         body: JSON.stringify({ display_name: displayName, email }),
       });
       const json = await res.json().catch(() => ({}));
-      if (!res.ok || !json?.success) throw new Error(json?.error || 'Failed to update student');
-      toast.success('Student updated');
+      if (!res.ok || !json?.success) throw new Error(json?.error || t('teacher.studentManagement.failedUpdateStudent'));
+      toast.success(t('teacher.studentManagement.studentUpdated'));
       fetchData();
     } catch (e: any) {
-      toast.error(e?.message || 'Failed to update student');
+      toast.error(e?.message || t('teacher.studentManagement.failedUpdateStudent'));
     }
   };
 
-  const deleteStudent = async (student: StudentWithCourses) => {
-    if (!window.confirm(`Delete student "${student.displayName || student.email}"?`)) return;
+  const handleResetProgress = async (student: StudentWithCourses) => {
+    if (!window.confirm(`Reset all quiz attempts and lesson progress for ${student.displayName || student.email}? This cannot be undone.`)) return;
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session) { toast.error('Not signed in'); return; }
+    setResettingProgressId(student.uid);
     try {
-      const res = await authFetch(`/api/teacher/students/${encodeURIComponent(student.uid)}`, { method: 'DELETE' });
+      const res = await authFetch(`/api/teacher/students/${encodeURIComponent(student.uid)}/reset-progress`, {
+        method: 'POST',
+        body: JSON.stringify({ userId: session.user.id }),
+      });
       const json = await res.json().catch(() => ({}));
-      if (!res.ok || !json?.success) throw new Error(json?.error || 'Failed to delete student');
-      toast.success('Student deleted');
+      if (!res.ok) throw new Error(json?.error || 'Reset failed');
+      toast.success(`Progress reset — ${json.deletedAttempts ?? 0} quiz attempt(s) and ${json.deletedProgress ?? 0} lesson progress record(s) cleared`);
+    } catch (e: any) {
+      toast.error(e?.message || 'Failed to reset progress');
+    } finally {
+      setResettingProgressId(null);
+    }
+  };
+
+  const deleteStudent = (student: StudentWithCourses) => {
+    setDeleteTarget(student);
+  };
+
+  const confirmDelete = async () => {
+    if (!deleteTarget) return;
+    setDeleteLoading(true);
+    try {
+      const res = await authFetch(`/api/teacher/students/${encodeURIComponent(deleteTarget.uid)}`, { method: 'DELETE' });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok || !json?.success) throw new Error(json?.error || t('teacher.studentManagement.failedDeleteStudent'));
+      toast.success(t('teacher.studentManagement.studentDeleted'));
+      setDeleteTarget(null);
       fetchData();
     } catch (e: any) {
-      toast.error(e?.message || 'Failed to delete student');
+      toast.error(e?.message || t('teacher.studentManagement.failedDeleteStudent'));
+    } finally {
+      setDeleteLoading(false);
     }
   };
 
@@ -323,11 +414,21 @@ export default function StudentManagement() {
 
   return (
     <TeacherLayout>
+      <AnimatePresence>
+        {deleteTarget && (
+          <DeleteConfirmModal
+            name={deleteTarget.displayName || deleteTarget.email || 'this student'}
+            onConfirm={confirmDelete}
+            onCancel={() => setDeleteTarget(null)}
+            loading={deleteLoading}
+          />
+        )}
+      </AnimatePresence>
       <AdminListPageShell
-        breadcrumbPortalLabel="Teacher Portal"
-        breadcrumbLabel="Students"
-        title="Students"
-        description="Students linked to your account and their course enrollments."
+        breadcrumbPortalLabel={t('nav.teacherPortal')}
+        breadcrumbLabel={t('teacher.studentManagement.title')}
+        title={t('teacher.studentManagement.title')}
+        description={t('teacher.studentManagement.description')}
         action={
           <motion.button
             type="button"
@@ -341,7 +442,7 @@ export default function StudentManagement() {
             }}
           >
             <UserPlus className="w-4 h-4" />
-            Add Student
+            {t('teacher.studentManagement.addStudent')}
           </motion.button>
         }
         stats={stats}
@@ -351,26 +452,26 @@ export default function StudentManagement() {
               <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-indigo-400" />
               <input
                 type="text"
-                placeholder="Search by name, email or course..."
+                placeholder={t('teacher.studentManagement.searchPlaceholder')}
                 value={search}
                 onChange={e => setSearch(e.target.value)}
                 className={ADMIN_LIST_SEARCH_INPUT}
               />
             </div>
             <select value={statusFilter} onChange={e => setStatusFilter(e.target.value)} className={ADMIN_LIST_SELECT}>
-              <option value="all">All statuses</option>
-              <option value="active">Active</option>
-              <option value="inactive">Inactive</option>
+              <option value="all">{t('teacher.studentManagement.allStatuses')}</option>
+              <option value="active">{t('teacher.studentManagement.active')}</option>
+              <option value="inactive">{t('teacher.studentManagement.inactive')}</option>
             </select>
             {courses.length > 0 && (
               <select value={courseFilter} onChange={e => setCourseFilter(e.target.value)} className={ADMIN_LIST_SELECT}>
-                <option value="all">All courses</option>
+                <option value="all">{t('teacher.studentManagement.allCourses')}</option>
                 {courses.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
               </select>
             )}
             {classes.length > 0 && (
               <select value={classFilter} onChange={e => setClassFilter(e.target.value)} className={ADMIN_LIST_SELECT}>
-                <option value="all">All classes</option>
+                <option value="all">{t('teacher.studentManagement.allClasses')}</option>
                 {classes.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
               </select>
             )}
@@ -380,7 +481,7 @@ export default function StudentManagement() {
                 onClick={() => { setSearch(''); setStatusFilter('all'); setCourseFilter('all'); setClassFilter('all'); }}
                 className="flex items-center gap-1.5 px-3 py-2 rounded-full text-xs font-semibold text-slate-500 hover:text-slate-800 hover:bg-slate-100 transition-all"
               >
-                <X className="w-3.5 h-3.5" /> Clear
+                <X className="w-3.5 h-3.5" /> {t('teacher.studentManagement.clear')}
               </button>
             )}
           </AdminListFilterBar>
@@ -397,12 +498,12 @@ export default function StudentManagement() {
             <div className="py-20 flex flex-col items-center justify-center px-4">
               <EmptyIllustration />
               <h3 className="text-xl font-extrabold text-slate-800 mt-6 mb-2">
-                {hasActiveFilters ? 'No results found' : 'No students yet'}
+                {hasActiveFilters ? t('teacher.studentManagement.noResults') : t('teacher.studentManagement.noStudentsYet')}
               </h3>
               <p className="text-slate-400 text-sm mb-6 max-w-xs text-center">
                 {hasActiveFilters
-                  ? 'Try adjusting your search or filters.'
-                  : 'No students have been added yet.'}
+                  ? t('teacher.studentManagement.adjustSearch')
+                  : t('teacher.studentManagement.noStudentsAdded')}
               </p>
             </div>
           ) : (
@@ -410,11 +511,9 @@ export default function StudentManagement() {
               {filtered.map(student => {
                 const enrolledCount = student.enrolledCourses.length;
                 return (
-                  <div key={student.uid} className={ADMIN_LIST_ITEM_CARD}>
+                  <div key={student.uid} className={ADMIN_LIST_ITEM_CARD} style={{ borderLeftWidth: '4px', borderLeftColor: student.status === 'active' ? '#10b981' : '#94a3b8' }}>
                     <div className="flex items-center gap-3 min-w-0">
-                      <div className={`w-11 h-11 rounded-xl bg-gradient-to-br ${getAvatarColor(student.displayName || student.email || '')} flex items-center justify-center text-white font-bold text-sm shrink-0`}>
-                        {(student.displayName || student.email || '?').charAt(0).toUpperCase()}
-                      </div>
+                      <GenderAvatar name={student.displayName || student.email} />
                       <div className="min-w-0 flex-1">
                         <div className="text-sm font-semibold text-slate-900 truncate">{student.displayName || '—'}</div>
                         <div className="text-xs text-slate-400 truncate">{student.email}</div>
@@ -443,6 +542,17 @@ export default function StudentManagement() {
                         </button>
                         <button
                           type="button"
+                          onClick={() => void handleResetProgress(student)}
+                          disabled={resettingProgressId === student.uid}
+                          title="Reset progress"
+                          className="p-2 rounded-lg text-slate-400 hover:text-amber-600 hover:bg-amber-50 transition-all disabled:opacity-50"
+                        >
+                          {resettingProgressId === student.uid
+                            ? <span className="w-4 h-4 block rounded-full border-2 border-amber-400 border-t-transparent animate-spin" />
+                            : <RotateCcw className="w-4 h-4" />}
+                        </button>
+                        <button
+                          type="button"
                           onClick={() => deleteStudent(student)}
                           title="Delete"
                           className="p-2 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 transition-all"
@@ -453,22 +563,22 @@ export default function StudentManagement() {
                     </div>
                     <div className="mt-4 space-y-2 text-xs">
                       <div className="flex items-center justify-between gap-2 text-slate-500">
-                        <span className="font-semibold text-slate-400 uppercase tracking-wider">Status</span>
-                        <span className="text-slate-700 font-medium">{student.status === 'active' ? 'Active' : 'Inactive'}</span>
+                        <span className="font-semibold text-slate-400 uppercase tracking-wider">{t('teacher.studentManagement.status')}</span>
+                        <span className="text-slate-700 font-medium">{student.status === 'active' ? t('teacher.studentManagement.active') : t('teacher.studentManagement.inactive')}</span>
                       </div>
                       <div className="flex items-center justify-between gap-2">
-                        <span className="font-semibold text-slate-400 uppercase tracking-wider">Courses</span>
+                        <span className="font-semibold text-slate-400 uppercase tracking-wider">{t('teacher.studentManagement.courses')}</span>
                         {enrolledCount > 0 ? (
                           <span className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-indigo-50 text-indigo-600 text-xs font-semibold rounded-lg">
                             <BookOpen className="w-3 h-3" />
                             {enrolledCount}
                           </span>
                         ) : (
-                          <span className="text-slate-300 italic">None</span>
+                          <span className="text-slate-300 italic">{t('teacher.studentManagement.none')}</span>
                         )}
                       </div>
                       <div className="flex items-center justify-between gap-2 text-slate-500">
-                        <span className="font-semibold text-slate-400 uppercase tracking-wider">Joined</span>
+                        <span className="font-semibold text-slate-400 uppercase tracking-wider">{t('teacher.studentManagement.joined')}</span>
                         <span>{new Date(student.createdAt).toLocaleDateString()}</span>
                       </div>
                     </div>
