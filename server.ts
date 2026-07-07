@@ -10094,24 +10094,21 @@ Assistant:`;
     } catch (e: any) { res.status(500).json({ error: e.message }); }
   });
 
-  // Student: get own submission for an assignment
+  // Student: get own submission for an assignment (poolQuery – bypasses PostgREST schema cache)
   app.get('/api/student/assignments/:assignmentId/submission', async (req: Request, res: Response) => {
     try {
       const caller = await assertAuthenticated(req, res);
       if (!caller) return;
       const { assignmentId } = req.params;
-      const { data, error } = await supabaseAdmin
-        .from('assignment_submissions')
-        .select('*')
-        .eq('assignment_id', assignmentId)
-        .eq('student_id', caller.userId)
-        .maybeSingle();
-      if (error && !/does not exist|schema cache/i.test(error.message)) throw error;
-      res.json({ success: true, submission: data || null });
+      const result = await poolQuery(
+        `SELECT * FROM assignment_submissions WHERE assignment_id=$1 AND student_id=$2 LIMIT 1`,
+        [assignmentId, caller.userId]
+      );
+      res.json({ success: true, submission: result.rows[0] || null });
     } catch (e: any) { res.status(500).json({ error: e.message }); }
   });
 
-  // Student: submit (or resubmit) an assignment
+  // Student: submit (or resubmit) an assignment (poolQuery – bypasses PostgREST schema cache)
   app.post('/api/student/assignments/:assignmentId/submit', async (req: Request, res: Response) => {
     try {
       const caller = await assertAuthenticated(req, res);
@@ -10119,12 +10116,11 @@ Assistant:`;
       const { assignmentId } = req.params;
       const { content } = req.body;
 
-      const { data: assignment } = await supabaseAdmin
-        .from('assignments')
-        .select('id, due_date, allow_late_submission, status')
-        .eq('id', assignmentId)
-        .maybeSingle();
-
+      const asgRes = await poolQuery(
+        `SELECT id, due_date, allow_late_submission, status FROM assignments WHERE id=$1 LIMIT 1`,
+        [assignmentId]
+      );
+      const assignment = asgRes.rows[0];
       if (!assignment || assignment.status !== 'published') {
         return res.status(400).json({ error: 'Assignment not available' });
       }
@@ -10134,31 +10130,29 @@ Assistant:`;
         return res.status(400).json({ error: 'Deadline has passed and late submissions are not allowed' });
       }
 
-      const { data: existing } = await supabaseAdmin
-        .from('assignment_submissions')
-        .select('id')
-        .eq('assignment_id', assignmentId)
-        .eq('student_id', caller.userId)
-        .maybeSingle();
+      const existingRes = await poolQuery(
+        `SELECT id FROM assignment_submissions WHERE assignment_id=$1 AND student_id=$2 LIMIT 1`,
+        [assignmentId, caller.userId]
+      );
+      const existing = existingRes.rows[0];
+      const now = new Date().toISOString();
 
-      const payload: any = {
-        assignment_id: assignmentId,
-        student_id: caller.userId,
-        content: content || '',
-        status: 'submitted',
-        is_late: isLate,
-        submitted_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
-      };
-
-      let result;
+      let row;
       if (existing?.id) {
-        result = await supabaseAdmin.from('assignment_submissions').update(payload).eq('id', existing.id).select().single();
+        const upd = await poolQuery(
+          `UPDATE assignment_submissions SET content=$1, status='submitted', is_late=$2, submitted_at=$3, updated_at=$3 WHERE id=$4 RETURNING *`,
+          [content || null, isLate, now, existing.id]
+        );
+        row = upd.rows[0];
       } else {
-        result = await supabaseAdmin.from('assignment_submissions').insert({ ...payload, created_at: new Date().toISOString() }).select().single();
+        const ins = await poolQuery(
+          `INSERT INTO assignment_submissions (assignment_id, student_id, content, status, is_late, submitted_at, created_at, updated_at)
+           VALUES ($1,$2,$3,'submitted',$4,$5,$5,$5) RETURNING *`,
+          [assignmentId, caller.userId, content || null, isLate, now]
+        );
+        row = ins.rows[0];
       }
-      if (result.error) throw result.error;
-      res.json({ success: true, submission: result.data });
+      res.json({ success: true, submission: row });
     } catch (e: any) { res.status(500).json({ error: e.message }); }
   });
 
@@ -10321,22 +10315,20 @@ Assistant:`;
     } catch (e: any) { res.status(500).json({ error: e.message }); }
   });
 
-  // Teacher: get all submissions for an assignment
+  // Teacher: get all submissions for an assignment (poolQuery – bypasses PostgREST schema cache)
   app.get('/api/teacher/assignments/:assignmentId/submissions', async (req: Request, res: Response) => {
     try {
       const caller = await assertAuthenticated(req, res);
       if (!caller) return;
       const { assignmentId } = req.params;
 
-      const { data: submissions, error } = await supabaseAdmin
-        .from('assignment_submissions')
-        .select('*')
-        .eq('assignment_id', assignmentId)
-        .order('submitted_at', { ascending: false });
+      const subRes = await poolQuery(
+        `SELECT * FROM assignment_submissions WHERE assignment_id=$1 ORDER BY submitted_at DESC`,
+        [assignmentId]
+      );
+      const submissions = subRes.rows;
 
-      if (error && !/does not exist|schema cache/i.test(error.message)) throw error;
-
-      const studentIds = [...new Set((submissions || []).map((s: any) => s.student_id))];
+      const studentIds = [...new Set(submissions.map((s: any) => s.student_id))];
       let profileMap: Record<string, any> = {};
       if (studentIds.length > 0) {
         const { data: profiles } = await supabaseAdmin
@@ -10346,7 +10338,7 @@ Assistant:`;
         (profiles || []).forEach((p: any) => { profileMap[p.id] = p; });
       }
 
-      const enriched = (submissions || []).map((s: any) => ({
+      const enriched = submissions.map((s: any) => ({
         ...s,
         student: profileMap[s.student_id] || { display_name: 'Unknown', email: '' },
       }));
@@ -10354,29 +10346,21 @@ Assistant:`;
     } catch (e: any) { res.status(500).json({ error: e.message }); }
   });
 
-  // Teacher: grade a submission
+  // Teacher: grade a submission (poolQuery – bypasses PostgREST schema cache)
   app.patch('/api/teacher/assignments/submissions/:subId/grade', async (req: Request, res: Response) => {
     try {
       const caller = await assertAuthenticated(req, res);
       if (!caller) return;
       const { subId } = req.params;
       const { grade, feedback } = req.body;
+      const now = new Date().toISOString();
 
-      const { data, error } = await supabaseAdmin
-        .from('assignment_submissions')
-        .update({
-          grade: grade !== undefined && grade !== '' ? Number(grade) : null,
-          feedback: feedback || null,
-          status: 'graded',
-          graded_at: new Date().toISOString(),
-          updated_at: new Date().toISOString(),
-        })
-        .eq('id', subId)
-        .select()
-        .single();
-
-      if (error) throw error;
-      res.json({ success: true, submission: data });
+      const result = await poolQuery(
+        `UPDATE assignment_submissions SET grade=$1, feedback=$2, status='graded', graded_at=$3, updated_at=$3 WHERE id=$4 RETURNING *`,
+        [grade !== undefined && grade !== '' ? Number(grade) : null, feedback || null, now, subId]
+      );
+      if (!result.rows[0]) return res.status(404).json({ error: 'Submission not found' });
+      res.json({ success: true, submission: result.rows[0] });
     } catch (e: any) { res.status(500).json({ error: e.message }); }
   });
 
@@ -10474,24 +10458,21 @@ Assistant:`;
     }
   }
 
-  // Student: get own submission for an assignment
+  // Student: get own submission (duplicate registration – poolQuery)
   app.get('/api/student/assignments/:assignmentId/submission', async (req: Request, res: Response) => {
     try {
       const caller = await assertAuthenticated(req, res);
       if (!caller) return;
       const { assignmentId } = req.params;
-      const { data, error } = await supabaseAdmin
-        .from('assignment_submissions')
-        .select('*')
-        .eq('assignment_id', assignmentId)
-        .eq('student_id', caller.userId)
-        .maybeSingle();
-      if (error && !/does not exist|schema cache/i.test(error.message)) throw error;
-      res.json({ success: true, submission: data || null });
+      const result = await poolQuery(
+        `SELECT * FROM assignment_submissions WHERE assignment_id=$1 AND student_id=$2 LIMIT 1`,
+        [assignmentId, caller.userId]
+      );
+      res.json({ success: true, submission: result.rows[0] || null });
     } catch (e: any) { res.status(500).json({ error: e.message }); }
   });
 
-  // Student: submit (or resubmit) an assignment
+  // Student: submit/resubmit (duplicate registration – poolQuery)
   app.post('/api/student/assignments/:assignmentId/submit', async (req: Request, res: Response) => {
     try {
       const caller = await assertAuthenticated(req, res);
@@ -10499,63 +10480,48 @@ Assistant:`;
       const { assignmentId } = req.params;
       const { content, file_urls, link_urls } = req.body;
 
-      const { data: assignment } = await supabaseAdmin
-        .from('assignments')
-        .select('id, due_date, allow_late_submission, status')
-        .eq('id', assignmentId)
-        .maybeSingle();
-
+      const asgRes = await poolQuery(
+        `SELECT id, due_date, allow_late_submission, status FROM assignments WHERE id=$1 LIMIT 1`,
+        [assignmentId]
+      );
+      const assignment = asgRes.rows[0];
       if (!assignment || assignment.status !== 'published') {
         return res.status(400).json({ error: 'Assignment not available' });
       }
-
       const isLate = assignment.due_date ? new Date() > new Date(assignment.due_date) : false;
       if (isLate && !assignment.allow_late_submission) {
         return res.status(400).json({ error: 'Deadline has passed and late submissions are not allowed' });
       }
 
-      const existing = await supabaseAdmin
-        .from('assignment_submissions')
-        .select('id')
-        .eq('assignment_id', assignmentId)
-        .eq('student_id', caller.userId)
-        .maybeSingle();
+      const existingRes = await poolQuery(
+        `SELECT id FROM assignment_submissions WHERE assignment_id=$1 AND student_id=$2 LIMIT 1`,
+        [assignmentId, caller.userId]
+      );
+      const existing = existingRes.rows[0];
+      const now = new Date().toISOString();
+      const safeFileUrls = JSON.stringify(Array.isArray(file_urls) ? file_urls : []);
+      const safeLinkUrls = JSON.stringify(Array.isArray(link_urls) ? link_urls : []);
 
-      const safeFileUrls = Array.isArray(file_urls) ? file_urls : [];
-      const safeLinkUrls = Array.isArray(link_urls) ? link_urls : [];
-
-      const basePayload: any = {
-        content: content || null,
-        status: 'submitted',
-        submitted_at: new Date().toISOString(),
-        is_late: isLate,
-        updated_at: new Date().toISOString(),
-      };
-
-      const tryWithRichFields = async (id?: string) => {
-        const richPayload = { ...basePayload, file_urls: JSON.stringify(safeFileUrls), link_urls: JSON.stringify(safeLinkUrls) };
-        if (id) {
-          return supabaseAdmin.from('assignment_submissions').update(richPayload).eq('id', id).select().single();
-        }
-        return supabaseAdmin.from('assignment_submissions').insert({ assignment_id: assignmentId, student_id: caller.userId, ...richPayload }).select().single();
-      };
-
-      const tryWithBaseFields = async (id?: string) => {
-        if (id) {
-          return supabaseAdmin.from('assignment_submissions').update(basePayload).eq('id', id).select().single();
-        }
-        return supabaseAdmin.from('assignment_submissions').insert({ assignment_id: assignmentId, student_id: caller.userId, ...basePayload }).select().single();
-      };
-
-      let result = await tryWithRichFields(existing.data?.id);
-      if (result.error && /column|schema cache/i.test(result.error.message)) {
-        result = await tryWithBaseFields(existing.data?.id);
+      let row;
+      if (existing?.id) {
+        const upd = await poolQuery(
+          `UPDATE assignment_submissions SET content=$1, file_urls=$2::jsonb, link_urls=$3::jsonb, status='submitted', is_late=$4, submitted_at=$5, updated_at=$5 WHERE id=$6 RETURNING *`,
+          [content || null, safeFileUrls, safeLinkUrls, isLate, now, existing.id]
+        );
+        row = upd.rows[0];
+      } else {
+        const ins = await poolQuery(
+          `INSERT INTO assignment_submissions (assignment_id, student_id, content, file_urls, link_urls, status, is_late, submitted_at, created_at, updated_at)
+           VALUES ($1,$2,$3,$4::jsonb,$5::jsonb,'submitted',$6,$7,$7,$7) RETURNING *`,
+          [assignmentId, caller.userId, content || null, safeFileUrls, safeLinkUrls, isLate, now]
+        );
+        row = ins.rows[0];
       }
-      if (result.error) throw result.error;
-      res.json({ success: true, submission: result.data });
+      res.json({ success: true, submission: row });
     } catch (e: any) { res.status(500).json({ error: e.message }); }
   });
 
+  // Student: save draft (duplicate registration – poolQuery)
   app.post('/api/student/assignments/:assignmentId/save-draft', async (req: Request, res: Response) => {
     try {
       const caller = await assertAuthenticated(req, res);
@@ -10563,97 +10529,71 @@ Assistant:`;
       const { assignmentId } = req.params;
       const { draft_content, draft_file_urls, draft_link_urls } = req.body;
 
-      const existing = await supabaseAdmin
-        .from('assignment_submissions')
-        .select('id')
-        .eq('assignment_id', assignmentId)
-        .eq('student_id', caller.userId)
-        .maybeSingle();
+      const existingRes = await poolQuery(
+        `SELECT id FROM assignment_submissions WHERE assignment_id=$1 AND student_id=$2 LIMIT 1`,
+        [assignmentId, caller.userId]
+      );
+      const existing = existingRes.rows[0];
+      const now = new Date().toISOString();
+      const safeDraftFiles = JSON.stringify(Array.isArray(draft_file_urls) ? draft_file_urls : []);
+      const safeDraftLinks = JSON.stringify(Array.isArray(draft_link_urls) ? draft_link_urls : []);
 
-      const draftPayload: any = {
-        draft_content: draft_content || null,
-        draft_file_urls: JSON.stringify(Array.isArray(draft_file_urls) ? draft_file_urls : []),
-        draft_link_urls: JSON.stringify(Array.isArray(draft_link_urls) ? draft_link_urls : []),
-        draft_saved_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
-      };
-
-      let result: any;
-      if (existing.data?.id) {
-        result = await supabaseAdmin.from('assignment_submissions').update(draftPayload).eq('id', existing.data.id).select().single();
+      let row;
+      if (existing?.id) {
+        const upd = await poolQuery(
+          `UPDATE assignment_submissions SET draft_content=$1, draft_file_urls=$2::jsonb, draft_link_urls=$3::jsonb, draft_saved_at=$4, updated_at=$4 WHERE id=$5 RETURNING *`,
+          [draft_content || null, safeDraftFiles, safeDraftLinks, now, existing.id]
+        );
+        row = upd.rows[0];
       } else {
-        result = await supabaseAdmin.from('assignment_submissions').insert({
-          assignment_id: assignmentId,
-          student_id: caller.userId,
-          status: 'submitted',
-          is_late: false,
-          ...draftPayload,
-        }).select().single();
+        const ins = await poolQuery(
+          `INSERT INTO assignment_submissions (assignment_id, student_id, status, is_late, draft_content, draft_file_urls, draft_link_urls, draft_saved_at, created_at, updated_at)
+           VALUES ($1,$2,'submitted',false,$3,$4::jsonb,$5::jsonb,$6,$6,$6) RETURNING *`,
+          [assignmentId, caller.userId, draft_content || null, safeDraftFiles, safeDraftLinks, now]
+        );
+        row = ins.rows[0];
       }
-      if (result.error && /column|schema cache/i.test(result.error.message)) {
-        return res.json({ success: true, saved: false, reason: 'draft columns not yet migrated' });
-      }
-      if (result.error) throw result.error;
-      res.json({ success: true, saved: true, submission: result.data });
+      res.json({ success: true, saved: true, submission: row });
     } catch (e: any) { res.status(500).json({ error: e.message }); }
   });
 
-  // Teacher: list submissions for an assignment
+  // Teacher: list submissions (duplicate registration – poolQuery)
   app.get('/api/teacher/assignments/:assignmentId/submissions', async (req: Request, res: Response) => {
     try {
       const caller = await assertAuthenticated(req, res);
       if (!caller) return;
       const { assignmentId } = req.params;
 
-      const { data: submissions, error } = await supabaseAdmin
-        .from('assignment_submissions')
-        .select('*')
-        .eq('assignment_id', assignmentId)
-        .order('submitted_at', { ascending: false });
-
-      if (error && !/does not exist|schema cache/i.test(error.message)) throw error;
-
-      const studentIds = [...new Set((submissions || []).map((s: any) => s.student_id))];
+      const subRes = await poolQuery(
+        `SELECT * FROM assignment_submissions WHERE assignment_id=$1 ORDER BY submitted_at DESC`,
+        [assignmentId]
+      );
+      const submissions = subRes.rows;
+      const studentIds = [...new Set(submissions.map((s: any) => s.student_id))];
       let profileMap: Record<string, any> = {};
       if (studentIds.length > 0) {
-        const { data: profiles } = await supabaseAdmin
-          .from('profiles')
-          .select('id, display_name, email, avatar_url')
-          .in('id', studentIds);
+        const { data: profiles } = await supabaseAdmin.from('profiles').select('id, display_name, email, avatar_url').in('id', studentIds);
         (profiles || []).forEach((p: any) => { profileMap[p.id] = p; });
       }
-
-      const enriched = (submissions || []).map((s: any) => ({
-        ...s,
-        student: profileMap[s.student_id] || { display_name: 'Unknown', email: '' },
-      }));
+      const enriched = submissions.map((s: any) => ({ ...s, student: profileMap[s.student_id] || { display_name: 'Unknown', email: '' } }));
       res.json({ success: true, submissions: enriched });
     } catch (e: any) { res.status(500).json({ error: e.message }); }
   });
 
-  // Teacher: grade a submission
+  // Teacher: grade submission (duplicate registration – poolQuery)
   app.patch('/api/teacher/assignments/submissions/:subId/grade', async (req: Request, res: Response) => {
     try {
       const caller = await assertAuthenticated(req, res);
       if (!caller) return;
       const { subId } = req.params;
       const { grade, feedback } = req.body;
-
-      const { data, error } = await supabaseAdmin
-        .from('assignment_submissions')
-        .update({
-          grade: grade !== undefined && grade !== '' ? Number(grade) : null,
-          feedback: feedback || null,
-          status: 'graded',
-          graded_at: new Date().toISOString(),
-          updated_at: new Date().toISOString(),
-        })
-        .eq('id', subId)
-        .select()
-        .single();
-
-      if (error) throw error;
-      res.json({ success: true, submission: data });
+      const now = new Date().toISOString();
+      const result = await poolQuery(
+        `UPDATE assignment_submissions SET grade=$1, feedback=$2, status='graded', graded_at=$3, updated_at=$3 WHERE id=$4 RETURNING *`,
+        [grade !== undefined && grade !== '' ? Number(grade) : null, feedback || null, now, subId]
+      );
+      if (!result.rows[0]) return res.status(404).json({ error: 'Submission not found' });
+      res.json({ success: true, submission: result.rows[0] });
     } catch (e: any) { res.status(500).json({ error: e.message }); }
   });
 
@@ -10924,6 +10864,11 @@ async function runAssignmentSubmissionsMigration() {
   } catch (err: any) {
     console.warn('[migration] assignment_submissions table:', err?.message?.split('\n')[0]);
   }
+  // Notify PostgREST to reload schema cache so new tables are visible immediately
+  try {
+    await poolQuery(`SELECT pg_notify('pgrst', 'reload schema')`);
+    console.log('[migration] PostgREST schema cache reloaded ✓');
+  } catch { /* ignore if pg_notify not available */ }
   try {
     await poolQuery(`ALTER TABLE assignments ADD COLUMN IF NOT EXISTS instructions text`);
     await poolQuery(`ALTER TABLE assignments ADD COLUMN IF NOT EXISTS allow_late_submission boolean DEFAULT false`);
