@@ -6073,29 +6073,36 @@ Assistant:`
       let teacherAssignmentsCount = 0;
       const assignmentsByStudent = {};
       if (teacherCourseIds.length > 0) {
-        const assignmentsRes = await supabaseAdmin.from("assignments").select("id,title,course_id").in("course_id", teacherCourseIds);
-        if (!assignmentsRes.error) {
-          const assignmentIds = (assignmentsRes.data || []).map((a) => String(a.id)).filter(Boolean);
+        try {
+          const asgR = await poolQuery(
+            `SELECT id FROM assignments WHERE course_id = ANY($1::uuid[])`,
+            [teacherCourseIds]
+          );
+          const assignmentIds = asgR.rows.map((a) => String(a.id));
           teacherAssignmentsCount = assignmentIds.length;
           if (assignmentIds.length > 0 && allowedStudentIds.size > 0) {
-            const subsRes = await supabaseAdmin.from("assignment_submissions").select("id,assignment_id,student_id,grade,status,submitted_at").in("assignment_id", assignmentIds).in("student_id", [...allowedStudentIds]);
-            if (!subsRes.error) {
-              (subsRes.data || []).forEach((sub) => {
-                const sid = String(sub.student_id || "");
-                if (!sid || !allowedStudentIds.has(sid)) return;
-                if (!assignmentsByStudent[sid]) assignmentsByStudent[sid] = { submitted: 0, graded: 0, gradeSum: 0, lastDate: null };
-                assignmentsByStudent[sid].submitted += 1;
-                if (sub.grade != null && sub.grade !== "") {
-                  assignmentsByStudent[sid].graded += 1;
-                  assignmentsByStudent[sid].gradeSum += Number(sub.grade) || 0;
-                }
-                const d = sub.submitted_at || null;
-                if (d && (!assignmentsByStudent[sid].lastDate || d > assignmentsByStudent[sid].lastDate)) {
-                  assignmentsByStudent[sid].lastDate = d;
-                }
-              });
-            }
+            const subR = await poolQuery(
+              `SELECT id,assignment_id,student_id,grade,status,submitted_at
+               FROM assignment_submissions
+               WHERE assignment_id = ANY($1::uuid[]) AND student_id = ANY($2::uuid[])`,
+              [assignmentIds, [...allowedStudentIds]]
+            );
+            subR.rows.forEach((sub) => {
+              const sid = String(sub.student_id || "");
+              if (!sid || !allowedStudentIds.has(sid)) return;
+              if (!assignmentsByStudent[sid]) assignmentsByStudent[sid] = { submitted: 0, graded: 0, gradeSum: 0, lastDate: null };
+              assignmentsByStudent[sid].submitted += 1;
+              if (sub.grade != null && sub.grade !== "") {
+                assignmentsByStudent[sid].graded += 1;
+                assignmentsByStudent[sid].gradeSum += Number(sub.grade) || 0;
+              }
+              const d = sub.submitted_at || null;
+              if (d && (!assignmentsByStudent[sid].lastDate || d > assignmentsByStudent[sid].lastDate)) {
+                assignmentsByStudent[sid].lastDate = d;
+              }
+            });
           }
+        } catch {
         }
       }
       const rows = [...studentById.values()].map((s) => {
@@ -6242,25 +6249,32 @@ Assistant:`
       let assignmentSubmissions = [];
       let assignments = {};
       if (teacherCourseIds.length > 0) {
-        const asgRes = await supabaseAdmin.from("assignments").select("id,title,course_id").in("course_id", teacherCourseIds);
-        if (!asgRes.error) {
-          (asgRes.data || []).forEach((a) => {
+        try {
+          const asgRes = await poolQuery(
+            `SELECT id, title FROM assignments WHERE course_id = ANY($1::uuid[])`,
+            [teacherCourseIds]
+          );
+          asgRes.rows.forEach((a) => {
             assignments[String(a.id)] = String(a.title || "Assignment");
           });
           const asgIds = Object.keys(assignments);
           if (asgIds.length > 0 && allowedStudentIds.size > 0) {
-            const subRes = await supabaseAdmin.from("assignment_submissions").select("id,assignment_id,student_id,grade,status,submitted_at,content").in("assignment_id", asgIds).in("student_id", [...allowedStudentIds]);
-            if (!subRes.error) {
-              assignmentSubmissions = (subRes.data || []).map((s) => ({
-                id: String(s.id || ""),
-                assignmentId: String(s.assignment_id || ""),
-                studentId: String(s.student_id || ""),
-                grade: s.grade != null ? Number(s.grade) : null,
-                status: String(s.status || "submitted"),
-                submittedAt: s.submitted_at || null
-              }));
-            }
+            const subRes = await poolQuery(
+              `SELECT id,assignment_id,student_id,grade,status,submitted_at
+               FROM assignment_submissions
+               WHERE assignment_id = ANY($1::uuid[]) AND student_id = ANY($2::uuid[])`,
+              [asgIds, [...allowedStudentIds]]
+            );
+            assignmentSubmissions = subRes.rows.map((s) => ({
+              id: String(s.id || ""),
+              assignmentId: String(s.assignment_id || ""),
+              studentId: String(s.student_id || ""),
+              grade: s.grade != null ? Number(s.grade) : null,
+              status: String(s.status || "submitted"),
+              submittedAt: s.submitted_at || null
+            }));
           }
+        } catch {
         }
       }
       res.json({ success: true, attempts, quizzes, students, assignmentSubmissions, assignments });
@@ -15376,8 +15390,7 @@ ${shortContent}`;
         );
         existingId = r.rows[0]?.id || null;
       } catch {
-        const { data: ex } = await supabaseAdmin.from("assignment_submissions").select("id").eq("assignment_id", assignmentId).eq("student_id", caller.userId).maybeSingle();
-        existingId = ex?.id || null;
+        existingId = null;
       }
       let rowData;
       try {
@@ -15403,25 +15416,20 @@ ${shortContent}`;
           rowData = r.rows[0];
         }
       } catch (sqlErr) {
-        const payload = {
-          assignment_id: assignmentId,
-          student_id: caller.userId,
-          content: content || "",
-          file_urls: Array.isArray(file_urls) ? file_urls : [],
-          link_urls: Array.isArray(link_urls) ? link_urls : [],
-          status: "submitted",
-          is_late: isLate,
-          submitted_at: now,
-          updated_at: now
-        };
-        let result;
         if (existingId) {
-          result = await supabaseAdmin.from("assignment_submissions").update(payload).eq("id", existingId).select().single();
+          const r = await poolQuery(
+            `UPDATE assignment_submissions SET content=$1, status='submitted', is_late=$2, submitted_at=$3, updated_at=$3 WHERE id=$4 RETURNING *`,
+            [content || "", isLate, now, existingId]
+          );
+          rowData = r.rows[0];
         } else {
-          result = await supabaseAdmin.from("assignment_submissions").insert({ ...payload, created_at: now }).select().single();
+          const r = await poolQuery(
+            `INSERT INTO assignment_submissions (assignment_id, student_id, content, status, is_late, submitted_at, created_at, updated_at)
+             VALUES ($1,$2,$3,'submitted',$4,$5,$5,$5) RETURNING *`,
+            [assignmentId, caller.userId, content || "", isLate, now]
+          );
+          rowData = r.rows[0];
         }
-        if (result.error) throw result.error;
-        rowData = result.data;
       }
       return res.json({ success: true, submission: rowData });
     } catch (e) {
@@ -15438,42 +15446,23 @@ ${shortContent}`;
       const now = (/* @__PURE__ */ new Date()).toISOString();
       const dfJson = JSON.stringify(Array.isArray(draft_file_urls) ? draft_file_urls : []);
       const dlJson = JSON.stringify(Array.isArray(draft_link_urls) ? draft_link_urls : []);
-      try {
+      const exRes = await poolQuery(
+        `SELECT id, status FROM assignment_submissions WHERE assignment_id=$1 AND student_id=$2 LIMIT 1`,
+        [assignmentId, caller.userId]
+      );
+      const ex = exRes.rows[0];
+      if (!ex) {
         await poolQuery(
           `INSERT INTO assignment_submissions
              (assignment_id, student_id, content, status, draft_content, draft_file_urls, draft_link_urls, draft_saved_at, submitted_at, created_at, updated_at)
-           VALUES ($1,$2,'','draft',$3,$4::jsonb,$5::jsonb,$6,$6,$6,$6)
-           ON CONFLICT (assignment_id, student_id)
-           DO UPDATE SET draft_content=$3, draft_file_urls=$4::jsonb, draft_link_urls=$5::jsonb,
-                         draft_saved_at=$6, updated_at=$6
-           WHERE assignment_submissions.status != 'submitted'`,
+           VALUES ($1,$2,'','draft',$3,$4::jsonb,$5::jsonb,$6,$6,$6,$6)`,
           [assignmentId, caller.userId, draft_content || "", dfJson, dlJson, now]
         );
-      } catch {
-        const { data: ex } = await supabaseAdmin.from("assignment_submissions").select("id, status").eq("assignment_id", assignmentId).eq("student_id", caller.userId).maybeSingle();
-        if (!ex) {
-          await supabaseAdmin.from("assignment_submissions").insert({
-            assignment_id: assignmentId,
-            student_id: caller.userId,
-            content: "",
-            status: "draft",
-            draft_content: draft_content || "",
-            draft_file_urls: Array.isArray(draft_file_urls) ? draft_file_urls : [],
-            draft_link_urls: Array.isArray(draft_link_urls) ? draft_link_urls : [],
-            draft_saved_at: now,
-            submitted_at: now,
-            created_at: now,
-            updated_at: now
-          });
-        } else if (ex.status !== "submitted") {
-          await supabaseAdmin.from("assignment_submissions").update({
-            draft_content: draft_content || "",
-            draft_file_urls: Array.isArray(draft_file_urls) ? draft_file_urls : [],
-            draft_link_urls: Array.isArray(draft_link_urls) ? draft_link_urls : [],
-            draft_saved_at: now,
-            updated_at: now
-          }).eq("id", ex.id);
-        }
+      } else if (ex.status !== "submitted") {
+        await poolQuery(
+          `UPDATE assignment_submissions SET draft_content=$1, draft_file_urls=$2::jsonb, draft_link_urls=$3::jsonb, draft_saved_at=$4, updated_at=$4 WHERE id=$5`,
+          [draft_content || "", dfJson, dlJson, now, ex.id]
+        );
       }
       return res.json({ success: true });
     } catch (e) {
