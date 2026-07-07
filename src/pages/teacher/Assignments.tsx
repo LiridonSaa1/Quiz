@@ -137,9 +137,20 @@ function SubmissionsPanel({ assignment, onClose }: { assignment: Assignment; onC
 
   useEffect(() => {
     authFetch(`/api/teacher/assignments/${assignment.id}/submissions`)
-      .then(r => r.json())
-      .then(json => { if (json.success) setSubmissions(json.submissions || []); })
-      .catch(() => toast.error(t('teacher.assignments.failedLoadSubmissions')))
+      .then(async r => {
+        const json = await r.json();
+        if (json.success) {
+          setSubmissions(json.submissions || []);
+          if (json.error) console.warn('[submissions panel] partial error:', json.error);
+        } else {
+          console.error('[submissions panel] server error:', json.error);
+          toast.error(json.error || t('teacher.assignments.failedLoadSubmissions'));
+        }
+      })
+      .catch(e => {
+        console.error('[submissions panel] fetch error:', e);
+        toast.error(t('teacher.assignments.failedLoadSubmissions'));
+      })
       .finally(() => setLoading(false));
   }, [assignment.id]);
 

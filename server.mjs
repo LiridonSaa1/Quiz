@@ -15492,27 +15492,31 @@ ${shortContent}`;
       } catch {
       }
       try {
-        const baseQuery = caller.role === "teacher" ? `SELECT a.*, COALESCE(s.cnt, 0)::int AS submissions_count
-             FROM assignments a
-             LEFT JOIN (
-               SELECT assignment_id, COUNT(*) AS cnt
+        const assignmentResult = caller.role === "teacher" ? await poolQuery(
+          `SELECT * FROM assignments WHERE teacher_id = ANY($1::uuid[]) ORDER BY created_at DESC`,
+          [scopedIds]
+        ) : await poolQuery(`SELECT * FROM assignments ORDER BY created_at DESC`);
+        const rows = assignmentResult.rows;
+        let countMap = {};
+        if (rows.length > 0) {
+          try {
+            const ids = rows.map((r) => r.id);
+            const countRes = await poolQuery(
+              `SELECT assignment_id, COUNT(*)::int AS cnt
                FROM assignment_submissions
-               WHERE status IN ('submitted','graded')
-               GROUP BY assignment_id
-             ) s ON s.assignment_id = a.id
-             WHERE a.teacher_id = ANY($1::uuid[])
-             ORDER BY a.created_at DESC` : `SELECT a.*, COALESCE(s.cnt, 0)::int AS submissions_count
-             FROM assignments a
-             LEFT JOIN (
-               SELECT assignment_id, COUNT(*) AS cnt
-               FROM assignment_submissions
-               WHERE status IN ('submitted','graded')
-               GROUP BY assignment_id
-             ) s ON s.assignment_id = a.id
-             ORDER BY a.created_at DESC`;
-        const result = caller.role === "teacher" ? await poolQuery(baseQuery, [scopedIds]) : await poolQuery(baseQuery);
-        console.log(`[assignments] GET via poolQuery: ${result.rows.length} rows (role=${caller.role})`);
-        return res.json({ success: true, assignments: result.rows });
+               WHERE assignment_id = ANY($1::uuid[]) AND status IN ('submitted','graded')
+               GROUP BY assignment_id`,
+              [ids]
+            );
+            countRes.rows.forEach((r) => {
+              countMap[r.assignment_id] = r.cnt;
+            });
+          } catch {
+          }
+        }
+        const enriched = rows.map((r) => ({ ...r, submissions_count: countMap[r.id] ?? 0 }));
+        console.log(`[assignments] GET via poolQuery: ${enriched.length} rows (role=${caller.role})`);
+        return res.json({ success: true, assignments: enriched });
       } catch (sqlErr) {
         console.warn("[assignments] poolQuery failed, falling back to supabaseAdmin:", sqlErr?.message);
       }
@@ -15684,11 +15688,30 @@ ${shortContent}`;
       const caller = await assertAuthenticated(req, res);
       if (!caller) return;
       const { assignmentId } = req.params;
-      const subRes = await poolQuery(
-        `SELECT * FROM assignment_submissions WHERE assignment_id=$1 ORDER BY submitted_at DESC`,
-        [assignmentId]
-      );
-      const rawRows = subRes.rows;
+      console.log(`[submissions] GET ${assignmentId} (caller=${caller.userId})`);
+      let rawRows = [];
+      try {
+        const subRes = await poolQuery(
+          `SELECT * FROM assignment_submissions WHERE assignment_id=$1 ORDER BY submitted_at DESC`,
+          [assignmentId]
+        );
+        rawRows = subRes.rows;
+        console.log(`[submissions] poolQuery returned ${rawRows.length} rows for assignment ${assignmentId}`);
+      } catch (sqlErr) {
+        console.warn(`[submissions] poolQuery failed: ${sqlErr?.message}`);
+        try {
+          const subRes2 = await poolQuery(
+            `SELECT id, assignment_id, student_id, content, status, grade, feedback, submitted_at, graded_at, is_late, created_at, updated_at
+             FROM assignment_submissions WHERE assignment_id=$1 ORDER BY submitted_at DESC`,
+            [assignmentId]
+          );
+          rawRows = subRes2.rows;
+          console.log(`[submissions] fallback poolQuery returned ${rawRows.length} rows`);
+        } catch (fallbackErr) {
+          console.error(`[submissions] both queries failed: ${fallbackErr?.message}`);
+          return res.json({ success: true, submissions: [], error: fallbackErr.message });
+        }
+      }
       const studentIds = [...new Set(rawRows.map((s) => s.student_id))];
       let profileMap = {};
       if (studentIds.length > 0) {
@@ -15699,10 +15722,13 @@ ${shortContent}`;
       }
       const enriched = rawRows.map((s) => ({
         ...s,
+        file_urls: typeof s.file_urls === "string" ? JSON.parse(s.file_urls || "[]") : s.file_urls ?? [],
+        link_urls: typeof s.link_urls === "string" ? JSON.parse(s.link_urls || "[]") : s.link_urls ?? [],
         student: profileMap[s.student_id] || { display_name: "Unknown", email: "" }
       }));
       res.json({ success: true, submissions: enriched });
     } catch (e) {
+      console.error(`[submissions] unhandled error: ${e.message}`);
       res.status(500).json({ error: e.message });
     }
   });

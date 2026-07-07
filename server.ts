@@ -16518,31 +16518,35 @@ Content:\n"""${clipped}"""`;
 
       // Try direct SQL first (bypasses PostgREST schema cache)
       try {
-        const baseQuery = caller.role === 'teacher'
-          ? `SELECT a.*, COALESCE(s.cnt, 0)::int AS submissions_count
-             FROM assignments a
-             LEFT JOIN (
-               SELECT assignment_id, COUNT(*) AS cnt
+        // Step 1: fetch assignments
+        const assignmentResult = caller.role === 'teacher'
+          ? await poolQuery(
+              `SELECT * FROM assignments WHERE teacher_id = ANY($1::uuid[]) ORDER BY created_at DESC`,
+              [scopedIds]
+            )
+          : await poolQuery(`SELECT * FROM assignments ORDER BY created_at DESC`);
+
+        const rows = assignmentResult.rows;
+
+        // Step 2: try to enrich with submission counts (optional — ignore if table missing)
+        let countMap: Record<string, number> = {};
+        if (rows.length > 0) {
+          try {
+            const ids = rows.map((r: any) => r.id);
+            const countRes = await poolQuery(
+              `SELECT assignment_id, COUNT(*)::int AS cnt
                FROM assignment_submissions
-               WHERE status IN ('submitted','graded')
-               GROUP BY assignment_id
-             ) s ON s.assignment_id = a.id
-             WHERE a.teacher_id = ANY($1::uuid[])
-             ORDER BY a.created_at DESC`
-          : `SELECT a.*, COALESCE(s.cnt, 0)::int AS submissions_count
-             FROM assignments a
-             LEFT JOIN (
-               SELECT assignment_id, COUNT(*) AS cnt
-               FROM assignment_submissions
-               WHERE status IN ('submitted','graded')
-               GROUP BY assignment_id
-             ) s ON s.assignment_id = a.id
-             ORDER BY a.created_at DESC`;
-        const result = caller.role === 'teacher'
-          ? await poolQuery(baseQuery, [scopedIds])
-          : await poolQuery(baseQuery);
-        console.log(`[assignments] GET via poolQuery: ${result.rows.length} rows (role=${caller.role})`);
-        return res.json({ success: true, assignments: result.rows });
+               WHERE assignment_id = ANY($1::uuid[]) AND status IN ('submitted','graded')
+               GROUP BY assignment_id`,
+              [ids]
+            );
+            countRes.rows.forEach((r: any) => { countMap[r.assignment_id] = r.cnt; });
+          } catch { /* assignment_submissions may not exist yet */ }
+        }
+
+        const enriched = rows.map((r: any) => ({ ...r, submissions_count: countMap[r.id] ?? 0 }));
+        console.log(`[assignments] GET via poolQuery: ${enriched.length} rows (role=${caller.role})`);
+        return res.json({ success: true, assignments: enriched });
       } catch (sqlErr: any) {
         console.warn('[assignments] poolQuery failed, falling back to supabaseAdmin:', sqlErr?.message);
       }
@@ -16701,13 +16705,34 @@ Content:\n"""${clipped}"""`;
       const caller = await assertAuthenticated(req, res);
       if (!caller) return;
       const { assignmentId } = req.params;
+      console.log(`[submissions] GET ${assignmentId} (caller=${caller.userId})`);
 
       // poolQuery — bypasses PostgREST schema cache; enrich with profiles via supabaseAdmin
-      const subRes = await poolQuery(
-        `SELECT * FROM assignment_submissions WHERE assignment_id=$1 ORDER BY submitted_at DESC`,
-        [assignmentId]
-      );
-      const rawRows = subRes.rows;
+      let rawRows: any[] = [];
+      try {
+        const subRes = await poolQuery(
+          `SELECT * FROM assignment_submissions WHERE assignment_id=$1 ORDER BY submitted_at DESC`,
+          [assignmentId]
+        );
+        rawRows = subRes.rows;
+        console.log(`[submissions] poolQuery returned ${rawRows.length} rows for assignment ${assignmentId}`);
+      } catch (sqlErr: any) {
+        console.warn(`[submissions] poolQuery failed: ${sqlErr?.message}`);
+        // Try without schema — table may not have all columns
+        try {
+          const subRes2 = await poolQuery(
+            `SELECT id, assignment_id, student_id, content, status, grade, feedback, submitted_at, graded_at, is_late, created_at, updated_at
+             FROM assignment_submissions WHERE assignment_id=$1 ORDER BY submitted_at DESC`,
+            [assignmentId]
+          );
+          rawRows = subRes2.rows;
+          console.log(`[submissions] fallback poolQuery returned ${rawRows.length} rows`);
+        } catch (fallbackErr: any) {
+          console.error(`[submissions] both queries failed: ${fallbackErr?.message}`);
+          return res.json({ success: true, submissions: [], error: fallbackErr.message });
+        }
+      }
+
       const studentIds = [...new Set(rawRows.map((s: any) => s.student_id))];
       let profileMap: Record<string, any> = {};
       if (studentIds.length > 0) {
@@ -16719,10 +16744,15 @@ Content:\n"""${clipped}"""`;
       }
       const enriched = rawRows.map((s: any) => ({
         ...s,
+        file_urls: typeof s.file_urls === 'string' ? JSON.parse(s.file_urls || '[]') : (s.file_urls ?? []),
+        link_urls: typeof s.link_urls === 'string' ? JSON.parse(s.link_urls || '[]') : (s.link_urls ?? []),
         student: profileMap[s.student_id] || { display_name: 'Unknown', email: '' },
       }));
       res.json({ success: true, submissions: enriched });
-    } catch (e: any) { res.status(500).json({ error: e.message }); }
+    } catch (e: any) {
+      console.error(`[submissions] unhandled error: ${e.message}`);
+      res.status(500).json({ error: e.message });
+    }
   });
 
   // Teacher: grade a submission (poolQuery – bypasses PostgREST schema cache)
