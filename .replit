@@ -28,7 +28,7 @@ outputType = "webview"
 
 [[workflows.workflow.tasks]]
 task = "shell.exec"
-args = "npm run dev"
+args = "npm install && (cd artifacts/mockup-sandbox && npm install) && npm run dev"
 waitForPort = 5000
 
 [[ports]]
