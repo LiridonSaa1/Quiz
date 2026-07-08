@@ -2225,6 +2225,24 @@ When giving instructions, number each step clearly. Be precise and technical whe
       });
       await Promise.allSettled(emailPromises);
       console.log(`[assignments] Sent new-assignment email to ${students.length} student(s) in class ${opts.classId}`);
+
+      // Also insert in-app notifications for each student in the class
+      const inAppRows = students.map((s: any) => ({
+        user_id: String(s.id),
+        title: 'Detyrë e re',
+        message: `"${opts.title}" u caktua për ju${opts.dueDate ? ` — afati: ${new Date(opts.dueDate).toLocaleDateString('sq-AL', { day: '2-digit', month: 'short', year: 'numeric' })}` : ''}.`,
+        type: 'info',
+        action_url: '/student/assignments',
+        read: false,
+        created_at: new Date().toISOString(),
+      }));
+      if (inAppRows.length > 0) {
+        await supabaseAdmin.from('notifications').insert(inAppRows).then(() => {
+          console.log(`[assignments] Sent ${inAppRows.length} in-app notification(s) for new assignment`);
+        }).catch((err2: any) => {
+          console.warn('[assignments] in-app notification insert failed:', err2?.message || err2);
+        });
+      }
     } catch (err: any) {
       console.error('[assignments] notifyClassOfNewAssignment failed:', err?.message || err);
     }
@@ -9511,6 +9529,12 @@ Rules:
       const dayOfMonth = new Date().getDate();
       const tpl = renderPaymentReminderEmail({ studentName: student.display_name || student.email, monthLabel, dayOfMonth });
       await sendEmail({ to: student.email, toName: student.display_name || student.email, subject: tpl.subject, htmlContent: tpl.htmlContent, textContent: tpl.textContent });
+      // Also fire in-app notification (fire-and-forget)
+      void dispatchNotifyEvent('paymentReminder', {
+        studentId: String(student_id),
+        studentName: student.display_name || student.email,
+        monthLabel,
+      }).catch(() => {});
       res.json({ success: true });
     } catch (e: any) {
       res.status(500).json({ error: e.message || 'Failed to send reminder' });
@@ -17111,6 +17135,30 @@ Content:\n"""${clipped}"""`;
       }
       if (!updatedRow) return res.status(404).json({ error: 'Submission not found' });
       res.json({ success: true, submission: updatedRow });
+      // Fire in-app notification to the student (fire-and-forget)
+      if (updatedRow?.student_id) {
+        (async () => {
+          try {
+            let assignTitle = '';
+            let maxScore: number | undefined;
+            if (updatedRow.assignment_id) {
+              const { data: aData } = await supabaseAdmin
+                .from('assignments').select('title, max_score').eq('id', updatedRow.assignment_id).single();
+              assignTitle = aData?.title || '';
+              maxScore = aData?.max_score != null ? Number(aData.max_score) : undefined;
+            }
+            await dispatchNotifyEvent('assignmentGraded', {
+              studentId: String(updatedRow.student_id),
+              assignmentId: updatedRow.assignment_id ? String(updatedRow.assignment_id) : undefined,
+              assignmentTitle: assignTitle,
+              gradeValue: updatedRow.grade != null ? Number(updatedRow.grade) : undefined,
+              maxScore,
+            });
+          } catch (notifyErr: any) {
+            console.warn('[grade] notification failed:', notifyErr?.message);
+          }
+        })();
+      }
     } catch (e: any) { res.status(500).json({ error: e.message }); }
   });
 

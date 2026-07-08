@@ -607,8 +607,11 @@ var RECIPIENTS = {
   newEnrollment: { student: true, teacher: true, admin: true },
   quizSubmitted: { student: true, teacher: true, admin: true },
   assignmentSubmitted: { student: true, teacher: true, admin: true },
+  assignmentGraded: { student: true, teacher: false, admin: false },
+  newAssignment: { student: true, teacher: false, admin: false },
   certificateIssued: { student: true, teacher: true, admin: true },
   paymentReceived: { student: true, teacher: true, admin: true },
+  paymentReminder: { student: true, teacher: false, admin: false },
   maintenanceAlert: { student: false, teacher: false, admin: true },
   weeklyReport: { student: false, teacher: false, admin: true }
 };
@@ -616,8 +619,11 @@ var TYPE_MAP = {
   newEnrollment: "course",
   quizSubmitted: "quiz",
   assignmentSubmitted: "info",
+  assignmentGraded: "success",
+  newAssignment: "info",
   certificateIssued: "success",
   paymentReceived: "success",
+  paymentReminder: "warning",
   maintenanceAlert: "warning",
   weeklyReport: "info"
 };
@@ -625,8 +631,11 @@ var SETTINGS_KEY = {
   newEnrollment: "email_new_enrollment",
   quizSubmitted: "email_quiz_submitted",
   assignmentSubmitted: "email_assignment_submitted",
+  assignmentGraded: "email_assignment_graded",
+  newAssignment: "email_new_assignment",
   certificateIssued: "email_certificate_issued",
   paymentReceived: "email_payment_received",
+  paymentReminder: "email_payment_reminder",
   maintenanceAlert: "system_maintenance_alerts",
   weeklyReport: "weekly_report"
 };
@@ -646,12 +655,27 @@ var ACTION_URLS = {
     teacher: "/teacher/assignments",
     admin: "/admin/assignments"
   },
+  assignmentGraded: {
+    student: "/student/assignments",
+    teacher: "/teacher/assignments",
+    admin: "/admin/assignments"
+  },
+  newAssignment: {
+    student: "/student/assignments",
+    teacher: "/teacher/assignments",
+    admin: "/admin/assignments"
+  },
   certificateIssued: {
     student: "/student/certificates",
     teacher: "/teacher/certificates",
     admin: "/admin/certificates"
   },
   paymentReceived: {
+    student: "/student/payments",
+    teacher: "/teacher/payments",
+    admin: "/admin/payments"
+  },
+  paymentReminder: {
     student: "/student/payments",
     teacher: "/teacher/payments",
     admin: "/admin/payments"
@@ -776,6 +800,47 @@ function renderContent(role, event, ctx) {
       return {
         title: "Payment received",
         message: `Payment${amountText} from ${studentName} was processed successfully.`
+      };
+    }
+    case "assignmentGraded": {
+      const assignmentTitle = ctx.assignmentTitle || "an assignment";
+      const gradeText = ctx.gradeValue != null && ctx.maxScore != null ? ` \u2014 ${ctx.gradeValue}/${ctx.maxScore}` : ctx.gradeValue != null ? ` \u2014 grade: ${ctx.gradeValue}` : "";
+      if (role === "student") {
+        return {
+          title: "Detyr\xEB vler\xEBsuar",
+          message: `Detyra jote "${assignmentTitle}" u vler\xEBsua${gradeText}.`
+        };
+      }
+      return {
+        title: "Detyr\xEB vler\xEBsuar",
+        message: `Detyra e ${studentName} "${assignmentTitle}" u vler\xEBsua${gradeText}.`
+      };
+    }
+    case "newAssignment": {
+      const assignmentTitle = ctx.assignmentTitle || "Detyr\xEB e re";
+      const dueText = ctx.dueDate ? ` \u2014 afati: ${new Date(ctx.dueDate).toLocaleDateString("sq-AL", { day: "2-digit", month: "short", year: "numeric" })}` : "";
+      if (role === "student") {
+        return {
+          title: "Detyr\xEB e re",
+          message: `"${assignmentTitle}" u caktua p\xEBr ju${dueText}.`
+        };
+      }
+      return {
+        title: "Detyr\xEB e re u krijua",
+        message: `"${assignmentTitle}" u krijua${ctx.courseTitle ? ` p\xEBr "${ctx.courseTitle}"` : ""}.`
+      };
+    }
+    case "paymentReminder": {
+      const label = ctx.monthLabel ? ` p\xEBr ${ctx.monthLabel}` : "";
+      if (role === "student") {
+        return {
+          title: "Kujtes\xEB pagese",
+          message: `Keni nj\xEB pages\xEB t\xEB papaguar${label}. Ju lutemi kryeni pages\xEBn p\xEBr t\xEB vazhduar aksesin.`
+        };
+      }
+      return {
+        title: "Kujtes\xEB u d\xEBrgua",
+        message: `Kujtes\xEB pagese${label} u d\xEBrgua tek ${studentName}.`
       };
     }
     case "maintenanceAlert": {
@@ -4303,6 +4368,22 @@ Assistant:`
       });
       await Promise.allSettled(emailPromises);
       console.log(`[assignments] Sent new-assignment email to ${students.length} student(s) in class ${opts.classId}`);
+      const inAppRows = students.map((s) => ({
+        user_id: String(s.id),
+        title: "Detyr\xEB e re",
+        message: `"${opts.title}" u caktua p\xEBr ju${opts.dueDate ? ` \u2014 afati: ${new Date(opts.dueDate).toLocaleDateString("sq-AL", { day: "2-digit", month: "short", year: "numeric" })}` : ""}.`,
+        type: "info",
+        action_url: "/student/assignments",
+        read: false,
+        created_at: (/* @__PURE__ */ new Date()).toISOString()
+      }));
+      if (inAppRows.length > 0) {
+        await supabaseAdmin.from("notifications").insert(inAppRows).then(() => {
+          console.log(`[assignments] Sent ${inAppRows.length} in-app notification(s) for new assignment`);
+        }).catch((err2) => {
+          console.warn("[assignments] in-app notification insert failed:", err2?.message || err2);
+        });
+      }
     } catch (err) {
       console.error("[assignments] notifyClassOfNewAssignment failed:", err?.message || err);
     }
@@ -9950,6 +10031,12 @@ ${e?.stack || ""}`),
       const dayOfMonth = (/* @__PURE__ */ new Date()).getDate();
       const tpl = renderPaymentReminderEmail({ studentName: student.display_name || student.email, monthLabel, dayOfMonth });
       await sendEmail({ to: student.email, toName: student.display_name || student.email, subject: tpl.subject, htmlContent: tpl.htmlContent, textContent: tpl.textContent });
+      void dispatchNotifyEvent("paymentReminder", {
+        studentId: String(student_id),
+        studentName: student.display_name || student.email,
+        monthLabel
+      }).catch(() => {
+      });
       res.json({ success: true });
     } catch (e) {
       res.status(500).json({ error: e.message || "Failed to send reminder" });
@@ -16075,6 +16162,28 @@ ${shortContent}`;
       }
       if (!updatedRow) return res.status(404).json({ error: "Submission not found" });
       res.json({ success: true, submission: updatedRow });
+      if (updatedRow?.student_id) {
+        (async () => {
+          try {
+            let assignTitle = "";
+            let maxScore;
+            if (updatedRow.assignment_id) {
+              const { data: aData } = await supabaseAdmin.from("assignments").select("title, max_score").eq("id", updatedRow.assignment_id).single();
+              assignTitle = aData?.title || "";
+              maxScore = aData?.max_score != null ? Number(aData.max_score) : void 0;
+            }
+            await dispatchNotifyEvent("assignmentGraded", {
+              studentId: String(updatedRow.student_id),
+              assignmentId: updatedRow.assignment_id ? String(updatedRow.assignment_id) : void 0,
+              assignmentTitle: assignTitle,
+              gradeValue: updatedRow.grade != null ? Number(updatedRow.grade) : void 0,
+              maxScore
+            });
+          } catch (notifyErr) {
+            console.warn("[grade] notification failed:", notifyErr?.message);
+          }
+        })();
+      }
     } catch (e) {
       res.status(500).json({ error: e.message });
     }

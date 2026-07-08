@@ -20,8 +20,11 @@ export type NotifyEventKey =
   | "newEnrollment"
   | "quizSubmitted"
   | "assignmentSubmitted"
+  | "assignmentGraded"
+  | "newAssignment"
   | "certificateIssued"
   | "paymentReceived"
+  | "paymentReminder"
   | "maintenanceAlert"
   | "weeklyReport";
 
@@ -41,6 +44,10 @@ export interface NotifyContext {
   assignmentTitle?: string;
   submissionId?: string;
   isLateSubmission?: boolean;
+  gradeValue?: number;
+  maxScore?: number;
+  dueDate?: string;
+  monthLabel?: string;
   certificateId?: string;
   certificateNumber?: string;
   paymentId?: string;
@@ -64,35 +71,44 @@ export interface NotifyContext {
 type Role = "student" | "teacher" | "admin";
 
 const RECIPIENTS: Record<NotifyEventKey, Record<Role, boolean>> = {
-  newEnrollment:     { student: true,  teacher: true,  admin: true },
-  quizSubmitted:     { student: true,  teacher: true,  admin: true },
-  assignmentSubmitted: { student: true, teacher: true, admin: true },
-  certificateIssued: { student: true,  teacher: true,  admin: true },
-  paymentReceived:   { student: true,  teacher: true,  admin: true },
-  maintenanceAlert:  { student: false, teacher: false, admin: true },
-  weeklyReport:      { student: false, teacher: false, admin: true },
+  newEnrollment:       { student: true,  teacher: true,  admin: true  },
+  quizSubmitted:       { student: true,  teacher: true,  admin: true  },
+  assignmentSubmitted: { student: true,  teacher: true,  admin: true  },
+  assignmentGraded:    { student: true,  teacher: false, admin: false },
+  newAssignment:       { student: true,  teacher: false, admin: false },
+  certificateIssued:   { student: true,  teacher: true,  admin: true  },
+  paymentReceived:     { student: true,  teacher: true,  admin: true  },
+  paymentReminder:     { student: true,  teacher: false, admin: false },
+  maintenanceAlert:    { student: false, teacher: false, admin: true  },
+  weeklyReport:        { student: false, teacher: false, admin: true  },
 };
 
 /** Maps an event to the existing notifications.type enum. */
 const TYPE_MAP: Record<NotifyEventKey, string> = {
-  newEnrollment: "course",
-  quizSubmitted: "quiz",
+  newEnrollment:       "course",
+  quizSubmitted:       "quiz",
   assignmentSubmitted: "info",
-  certificateIssued: "success",
-  paymentReceived: "success",
-  maintenanceAlert: "warning",
-  weeklyReport: "info",
+  assignmentGraded:    "success",
+  newAssignment:       "info",
+  certificateIssued:   "success",
+  paymentReceived:     "success",
+  paymentReminder:     "warning",
+  maintenanceAlert:    "warning",
+  weeklyReport:        "info",
 };
 
 /** Maps the admin "Email Notifications" toggle key to our event key. */
 export const SETTINGS_KEY: Record<NotifyEventKey, string> = {
-  newEnrollment: "email_new_enrollment",
-  quizSubmitted: "email_quiz_submitted",
+  newEnrollment:       "email_new_enrollment",
+  quizSubmitted:       "email_quiz_submitted",
   assignmentSubmitted: "email_assignment_submitted",
-  certificateIssued: "email_certificate_issued",
-  paymentReceived: "email_payment_received",
-  maintenanceAlert: "system_maintenance_alerts",
-  weeklyReport: "weekly_report",
+  assignmentGraded:    "email_assignment_graded",
+  newAssignment:       "email_new_assignment",
+  certificateIssued:   "email_certificate_issued",
+  paymentReceived:     "email_payment_received",
+  paymentReminder:     "email_payment_reminder",
+  maintenanceAlert:    "system_maintenance_alerts",
+  weeklyReport:        "weekly_report",
 };
 
 const ACTION_URLS: Record<NotifyEventKey, Record<Role, string>> = {
@@ -111,12 +127,27 @@ const ACTION_URLS: Record<NotifyEventKey, Record<Role, string>> = {
     teacher: "/teacher/assignments",
     admin:   "/admin/assignments",
   },
+  assignmentGraded: {
+    student: "/student/assignments",
+    teacher: "/teacher/assignments",
+    admin:   "/admin/assignments",
+  },
+  newAssignment: {
+    student: "/student/assignments",
+    teacher: "/teacher/assignments",
+    admin:   "/admin/assignments",
+  },
   certificateIssued: {
     student: "/student/certificates",
     teacher: "/teacher/certificates",
     admin:   "/admin/certificates",
   },
   paymentReceived: {
+    student: "/student/payments",
+    teacher: "/teacher/payments",
+    admin:   "/admin/payments",
+  },
+  paymentReminder: {
     student: "/student/payments",
     teacher: "/teacher/payments",
     admin:   "/admin/payments",
@@ -250,6 +281,57 @@ function renderContent(role: Role, event: NotifyEventKey, ctx: NotifyContext): {
       return {
         title: "Payment received",
         message: `Payment${amountText} from ${studentName} was processed successfully.`,
+      };
+    }
+
+    case "assignmentGraded": {
+      const assignmentTitle = ctx.assignmentTitle || "an assignment";
+      const gradeText =
+        ctx.gradeValue != null && ctx.maxScore != null
+          ? ` — ${ctx.gradeValue}/${ctx.maxScore}`
+          : ctx.gradeValue != null
+          ? ` — grade: ${ctx.gradeValue}`
+          : "";
+      if (role === "student") {
+        return {
+          title: "Detyrë vlerësuar",
+          message: `Detyra jote "${assignmentTitle}" u vlerësua${gradeText}.`,
+        };
+      }
+      return {
+        title: "Detyrë vlerësuar",
+        message: `Detyra e ${studentName} "${assignmentTitle}" u vlerësua${gradeText}.`,
+      };
+    }
+
+    case "newAssignment": {
+      const assignmentTitle = ctx.assignmentTitle || "Detyrë e re";
+      const dueText = ctx.dueDate
+        ? ` — afati: ${new Date(ctx.dueDate).toLocaleDateString("sq-AL", { day: "2-digit", month: "short", year: "numeric" })}`
+        : "";
+      if (role === "student") {
+        return {
+          title: "Detyrë e re",
+          message: `"${assignmentTitle}" u caktua për ju${dueText}.`,
+        };
+      }
+      return {
+        title: "Detyrë e re u krijua",
+        message: `"${assignmentTitle}" u krijua${ctx.courseTitle ? ` për "${ctx.courseTitle}"` : ""}.`,
+      };
+    }
+
+    case "paymentReminder": {
+      const label = ctx.monthLabel ? ` për ${ctx.monthLabel}` : "";
+      if (role === "student") {
+        return {
+          title: "Kujtesë pagese",
+          message: `Keni një pagesë të papaguar${label}. Ju lutemi kryeni pagesën për të vazhduar aksesin.`,
+        };
+      }
+      return {
+        title: "Kujtesë u dërgua",
+        message: `Kujtesë pagese${label} u dërgua tek ${studentName}.`,
       };
     }
 
