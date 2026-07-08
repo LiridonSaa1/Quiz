@@ -584,7 +584,9 @@ export default function StudentAssignmentDetail() {
   const isExpired = assignment?.due_date
     ? isPast(new Date(assignment.due_date))
     : false;
-  const canSubmit = !isExpired || assignment?.allow_late_submission;
+  const canSubmit =
+    (!isExpired || assignment?.allow_late_submission) &&
+    submission?.status !== "graded";
   const wordCount = answer.trim() ? answer.trim().split(/\s+/).length : 0;
   const charCount = answer.length;
   const typeMeta =
