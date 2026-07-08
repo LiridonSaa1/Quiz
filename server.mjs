@@ -601,6 +601,79 @@ function renderPaymentReminderEmail(opts) {
 </html>`;
   return { subject, htmlContent, textContent };
 }
+function renderTrialWelcomeEmail(opts) {
+  const brand = (opts.brandName || "QuizMaster").trim();
+  let expiryDate = opts.trialEndsAt;
+  try {
+    expiryDate = new Date(opts.trialEndsAt).toLocaleDateString("sq-AL", {
+      day: "numeric",
+      month: "long",
+      year: "numeric"
+    });
+  } catch {
+  }
+  const subject = `Mir\xEB se vini n\xEB ${brand} \u2014 ${opts.trialDays} dit\xEB falas nga sot`;
+  const loginBtn = opts.loginUrl ? `<div style="text-align:center;margin-bottom:24px;"><a href="${opts.loginUrl}" style="display:inline-block;background:#6366f1;color:#ffffff;font-size:14px;font-weight:700;text-decoration:none;padding:13px 32px;border-radius:12px;">\u{1F393} Ky\xE7uni tani</a></div>` : "";
+  const textContent = [
+    `Mir\xEB se vini n\xEB ${brand}, ${opts.name}!`,
+    ``,
+    `Llogaria juaj \xEBsht\xEB krijuar me sukses.`,
+    `Keni ${opts.trialDays} dit\xEB falas, duke filluar nga sot.`,
+    ``,
+    `Periudha falas mbaron m\xEB: ${expiryDate}`,
+    ``,
+    `Pas k\xEBsaj date duhet t\xEB b\xEBni pages\xEBn mujore p\xEBr t\xEB vazhduar aksesimin e platform\xEBs.`,
+    `N\xEBse pagesa nuk b\xEBhet, aksesi do t\xEB ndalet automatikisht.`,
+    ``,
+    opts.loginUrl ? `Ky\xE7uni: ${opts.loginUrl}` : ``,
+    ``,
+    `Ju faleminderit \u2014 Ekipi i ${brand}`
+  ].join("\n");
+  const htmlContent = `<!doctype html>
+<html>
+<body style="margin:0;padding:0;background:#f1f5f9;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f1f5f9;padding:40px 16px;">
+    <tr><td align="center">
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:520px;background:#ffffff;border-radius:20px;overflow:hidden;box-shadow:0 4px 24px rgba(0,0,0,0.06);">
+        <tr><td style="background:linear-gradient(135deg,#6366f1 0%,#8b5cf6 100%);padding:28px 36px;">
+          <div style="font-size:22px;font-weight:800;color:#ffffff;letter-spacing:-0.02em;">${brand}</div>
+          <div style="font-size:13px;color:rgba(255,255,255,0.82);margin-top:4px;">Mir\xEB se vini \u2014 periudha juaj falas \u{1F389}</div>
+        </td></tr>
+        <tr><td style="padding:36px;">
+          <p style="margin:0 0 6px;font-size:15px;font-weight:700;color:#0f172a;">P\xEBrsh\xEBndetje, ${opts.name}!</p>
+          <p style="margin:0 0 24px;font-size:14px;line-height:1.6;color:#475569;">
+            Llogaria juaj u krijua me sukses. Keni <strong>${opts.trialDays} dit\xEB falas</strong> p\xEBr t\xEB eksploruar platform\xEBn pa asnj\xEB pages\xEB.
+          </p>
+          <div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:14px;padding:18px 22px;margin-bottom:16px;">
+            <p style="margin:0;font-size:13px;color:#1e40af;line-height:1.9;">
+              \u{1F4C5} <strong>Fillon:</strong> sot (nga data e krijimit t\xEB llogaris\xEB)<br>
+              \u23F0 <strong>Mbaron m\xEB:</strong> ${expiryDate}<br>
+              \u{1F522} <strong>Dit\xEB falas:</strong> ${opts.trialDays} dit\xEB
+            </p>
+          </div>
+          <div style="background:#fffbeb;border:1px solid #fde68a;border-radius:14px;padding:14px 18px;margin-bottom:24px;">
+            <p style="margin:0;font-size:12px;color:#92400e;line-height:1.6;">
+              \u26A0\uFE0F Pas dat\xEBs <strong>${expiryDate}</strong>, duhet t\xEB b\xEBhet pagesa mujore.
+              N\xEBse pagesa nuk kryhet, aksesi n\xEB platform\xEB do t\xEB <strong>ndalet automatikisht</strong>.
+              Kontaktoni m\xEBsuesin tuaj p\xEBr ta rregulluar.
+            </p>
+          </div>
+          ${loginBtn}
+          <p style="margin:0;font-size:12px;line-height:1.6;color:#94a3b8;">
+            Llogaria: <strong>${opts.email}</strong><br>
+            Ky email \xEBsht\xEB d\xEBrguar automatikisht nga sistemi.
+          </p>
+        </td></tr>
+        <tr><td style="background:#f8fafc;padding:16px 36px;border-top:1px solid #e2e8f0;">
+          <p style="margin:0;font-size:11px;color:#94a3b8;text-align:center;">D\xEBrguar nga platforma <strong>${brand}</strong> \xB7 Ju faleminderit!</p>
+        </td></tr>
+      </table>
+    </td></tr>
+  </table>
+</body>
+</html>`;
+  return { subject, htmlContent, textContent };
+}
 
 // src/lib/notifyEvents.ts
 var RECIPIENTS = {
@@ -5894,6 +5967,22 @@ Assistant:`
       res.json({ success: true, uid: userId });
       void sendUserCredentials({ name, email, password, role: "student", phone: phone || void 0 });
       void dispatchNotifyEvent("newStudentCreated", { studentId: userId, studentName: name });
+      if (hasTrial && trialEndsAt) {
+        void (async () => {
+          try {
+            if (!isEmailConfigured()) return;
+            const settings = await getConfigSection("settings");
+            const brandName = settings?.general?.school_name || "QuizMaster";
+            const baseUrl = process.env.REPLIT_DEV_DOMAIN ? `https://${process.env.REPLIT_DEV_DOMAIN}` : settings?.general?.website || "http://localhost:5000";
+            const loginUrl = `${baseUrl}/login?email=${encodeURIComponent(email)}&pw=${encodeURIComponent(password)}`;
+            const tpl = renderTrialWelcomeEmail({ name, email, trialDays: trialDaysNum, trialEndsAt, loginUrl, brandName });
+            await sendEmail({ to: email, toName: name, subject: tpl.subject, htmlContent: tpl.htmlContent, textContent: tpl.textContent });
+            console.log(`[trial] Sent trial welcome email to ${email} (${trialDaysNum} days, ends ${trialEndsAt})`);
+          } catch (e) {
+            console.warn("[trial] Failed to send trial welcome email:", e.message);
+          }
+        })();
+      }
     } catch (error) {
       console.error("Error creating student:", error);
       res.status(500).json({ error: error.message });

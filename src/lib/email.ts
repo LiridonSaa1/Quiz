@@ -472,3 +472,92 @@ export function renderPaymentReminderEmail(opts: {
 
   return { subject, htmlContent, textContent };
 }
+
+/** Email informues për studentin kur krijohet llogaria me periudhë prove falas (shqip). */
+export function renderTrialWelcomeEmail(opts: {
+  name: string;
+  email: string;
+  trialDays: number;
+  trialEndsAt: string;
+  loginUrl?: string;
+  brandName?: string;
+}) {
+  const brand = (opts.brandName || "QuizMaster").trim();
+
+  let expiryDate = opts.trialEndsAt;
+  try {
+    expiryDate = new Date(opts.trialEndsAt).toLocaleDateString("sq-AL", {
+      day: "numeric",
+      month: "long",
+      year: "numeric",
+    });
+  } catch { /* fallback to raw ISO */ }
+
+  const subject = `Mirë se vini në ${brand} — ${opts.trialDays} ditë falas nga sot`;
+
+  const loginBtn = opts.loginUrl
+    ? `<div style="text-align:center;margin-bottom:24px;"><a href="${opts.loginUrl}" style="display:inline-block;background:#6366f1;color:#ffffff;font-size:14px;font-weight:700;text-decoration:none;padding:13px 32px;border-radius:12px;">🎓 Kyçuni tani</a></div>`
+    : "";
+
+  const textContent = [
+    `Mirë se vini në ${brand}, ${opts.name}!`,
+    ``,
+    `Llogaria juaj është krijuar me sukses.`,
+    `Keni ${opts.trialDays} ditë falas, duke filluar nga sot.`,
+    ``,
+    `Periudha falas mbaron më: ${expiryDate}`,
+    ``,
+    `Pas kësaj date duhet të bëni pagesën mujore për të vazhduar aksesimin e platformës.`,
+    `Nëse pagesa nuk bëhet, aksesi do të ndalet automatikisht.`,
+    ``,
+    opts.loginUrl ? `Kyçuni: ${opts.loginUrl}` : ``,
+    ``,
+    `Ju faleminderit — Ekipi i ${brand}`,
+  ].join("\n");
+
+  const htmlContent = `<!doctype html>
+<html>
+<body style="margin:0;padding:0;background:#f1f5f9;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f1f5f9;padding:40px 16px;">
+    <tr><td align="center">
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:520px;background:#ffffff;border-radius:20px;overflow:hidden;box-shadow:0 4px 24px rgba(0,0,0,0.06);">
+        <tr><td style="background:linear-gradient(135deg,#6366f1 0%,#8b5cf6 100%);padding:28px 36px;">
+          <div style="font-size:22px;font-weight:800;color:#ffffff;letter-spacing:-0.02em;">${brand}</div>
+          <div style="font-size:13px;color:rgba(255,255,255,0.82);margin-top:4px;">Mirë se vini — periudha juaj falas 🎉</div>
+        </td></tr>
+        <tr><td style="padding:36px;">
+          <p style="margin:0 0 6px;font-size:15px;font-weight:700;color:#0f172a;">Përshëndetje, ${opts.name}!</p>
+          <p style="margin:0 0 24px;font-size:14px;line-height:1.6;color:#475569;">
+            Llogaria juaj u krijua me sukses. Keni <strong>${opts.trialDays} ditë falas</strong> për të eksploruar platformën pa asnjë pagesë.
+          </p>
+          <div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:14px;padding:18px 22px;margin-bottom:16px;">
+            <p style="margin:0;font-size:13px;color:#1e40af;line-height:1.9;">
+              📅 <strong>Fillon:</strong> sot (nga data e krijimit të llogarisë)<br>
+              ⏰ <strong>Mbaron më:</strong> ${expiryDate}<br>
+              🔢 <strong>Ditë falas:</strong> ${opts.trialDays} ditë
+            </p>
+          </div>
+          <div style="background:#fffbeb;border:1px solid #fde68a;border-radius:14px;padding:14px 18px;margin-bottom:24px;">
+            <p style="margin:0;font-size:12px;color:#92400e;line-height:1.6;">
+              ⚠️ Pas datës <strong>${expiryDate}</strong>, duhet të bëhet pagesa mujore.
+              Nëse pagesa nuk kryhet, aksesi në platformë do të <strong>ndalet automatikisht</strong>.
+              Kontaktoni mësuesin tuaj për ta rregulluar.
+            </p>
+          </div>
+          ${loginBtn}
+          <p style="margin:0;font-size:12px;line-height:1.6;color:#94a3b8;">
+            Llogaria: <strong>${opts.email}</strong><br>
+            Ky email është dërguar automatikisht nga sistemi.
+          </p>
+        </td></tr>
+        <tr><td style="background:#f8fafc;padding:16px 36px;border-top:1px solid #e2e8f0;">
+          <p style="margin:0;font-size:11px;color:#94a3b8;text-align:center;">Dërguar nga platforma <strong>${brand}</strong> · Ju faleminderit!</p>
+        </td></tr>
+      </table>
+    </td></tr>
+  </table>
+</body>
+</html>`;
+
+  return { subject, htmlContent, textContent };
+}

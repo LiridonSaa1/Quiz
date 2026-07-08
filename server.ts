@@ -6,7 +6,7 @@ import jwt from "jsonwebtoken";
 import { isMissingCoursesStudentIdsError } from "./src/lib/schemaErrors.js";
 import { canAccessTeacherCourses, isAdmin, isAdminSeedAllowed } from "./src/lib/routeAuth.js";
 import { generateFixSuggestion } from "./src/lib/ai/generateFixSuggestion.js";
-import { isEmailConfigured, sendEmail, renderVerificationEmail, renderCredentialEmail, renderInvoiceEmail, renderPaymentReminderEmail, renderAssignmentEmail } from "./src/lib/email.js";
+import { isEmailConfigured, sendEmail, renderVerificationEmail, renderCredentialEmail, renderInvoiceEmail, renderPaymentReminderEmail, renderAssignmentEmail, renderTrialWelcomeEmail } from "./src/lib/email.js";
 import { notifyEvent, type NotifyContext, type NotifyEventKey } from "./src/lib/notifyEvents.js";
 import { HEADWAY_FULL_DATA, buildUnitQuestions as buildHwUnitQuestions, type HUnit } from "./src/lib/headwayData.js";
 import { getQuestionsForSection, getTopicsForLevel, HEADWAY_QUESTIONS } from "./src/lib/headwayQuestions.js";
@@ -4186,6 +4186,25 @@ When giving instructions, number each step clearly. Be precise and technical whe
       // Fire-and-forget: send credentials via configured notification channels
       void sendUserCredentials({ name, email, password, role: 'student', phone: phone || undefined });
       void dispatchNotifyEvent('newStudentCreated', { studentId: userId, studentName: name });
+      // Send trial welcome email if a free trial was granted
+      if (hasTrial && trialEndsAt) {
+        void (async () => {
+          try {
+            if (!isEmailConfigured()) return;
+            const settings: any = await getConfigSection('settings');
+            const brandName: string = settings?.general?.school_name || 'QuizMaster';
+            const baseUrl = process.env.REPLIT_DEV_DOMAIN
+              ? `https://${process.env.REPLIT_DEV_DOMAIN}`
+              : (settings?.general?.website || 'http://localhost:5000');
+            const loginUrl = `${baseUrl}/login?email=${encodeURIComponent(email)}&pw=${encodeURIComponent(password)}`;
+            const tpl = renderTrialWelcomeEmail({ name, email, trialDays: trialDaysNum, trialEndsAt, loginUrl, brandName });
+            await sendEmail({ to: email, toName: name, subject: tpl.subject, htmlContent: tpl.htmlContent, textContent: tpl.textContent });
+            console.log(`[trial] Sent trial welcome email to ${email} (${trialDaysNum} days, ends ${trialEndsAt})`);
+          } catch (e: any) {
+            console.warn('[trial] Failed to send trial welcome email:', e.message);
+          }
+        })();
+      }
     } catch (error: any) {
       console.error('Error creating student:', error);
       res.status(500).json({ error: error.message });
