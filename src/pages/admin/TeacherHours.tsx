@@ -94,7 +94,9 @@ export default function TeacherHours() {
   const changeMonth = (dir: 1 | -1) => {
     const [yr, mo] = currentMonth.split("-").map(Number);
     const d = new Date(yr, mo - 1 + dir, 1);
-    setCurrentMonth(d.toISOString().slice(0, 7));
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, "0");
+    setCurrentMonth(`${y}-${m}`);
   };
 
   const handleAdd = async () => {
@@ -473,9 +475,11 @@ export default function TeacherHours() {
                     <div className="w-9 h-9 rounded-xl bg-violet-600 flex items-center justify-center">
                       <FileText className="w-5 h-5 text-white" />
                     </div>
-                    <span className="text-lg font-bold text-slate-900">QuizMaster</span>
+                    <span className="text-lg font-bold text-slate-900">{invoiceData.business?.name || "QuizMaster"}</span>
                   </div>
-                  <p className="text-xs text-slate-400 ml-11">Platform Edukative</p>
+                  {invoiceData.business?.website && (
+                    <p className="text-xs text-slate-400 ml-11">{invoiceData.business.website}</p>
+                  )}
                 </div>
                 <div className="text-right">
                   <span className="inline-block px-3 py-1 bg-violet-100 text-violet-700 text-xs font-bold rounded-full uppercase tracking-wider mb-2">
@@ -494,9 +498,16 @@ export default function TeacherHours() {
               <div className="grid grid-cols-2 gap-6 mb-8">
                 <div className="bg-slate-50 rounded-2xl p-4">
                   <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">Nga</p>
-                  <p className="font-bold text-slate-800">QuizMaster Academy</p>
-                  <p className="text-sm text-slate-500 mt-0.5">platform@quizmaster.edu</p>
-                  <p className="text-sm text-slate-500">Tiranë, Shqipëri</p>
+                  <p className="font-bold text-slate-800">{invoiceData.business?.name || "QuizMaster Academy"}</p>
+                  {invoiceData.business?.email && (
+                    <p className="text-sm text-slate-500 mt-0.5">{invoiceData.business.email}</p>
+                  )}
+                  {invoiceData.business?.phone && (
+                    <p className="text-sm text-slate-500">{invoiceData.business.phone}</p>
+                  )}
+                  {invoiceData.business?.address && (
+                    <p className="text-sm text-slate-500">{invoiceData.business.address}</p>
+                  )}
                 </div>
                 <div className="bg-violet-50 border border-violet-100 rounded-2xl p-4">
                   <p className="text-xs font-semibold text-violet-400 uppercase tracking-wider mb-2">Për</p>
@@ -575,7 +586,7 @@ export default function TeacherHours() {
               {/* Footer */}
               <div className="mt-10 pt-6 border-t border-dashed border-slate-200 text-center">
                 <p className="text-xs text-slate-400">Faleminderit për punën tuaj të dedikuar.</p>
-                <p className="text-xs text-slate-300 mt-1">QuizMaster Platform Edukative · {format(new Date(), "yyyy")}</p>
+                <p className="text-xs text-slate-300 mt-1">{invoiceData.business?.name || "QuizMaster"} · {format(new Date(), "yyyy")}</p>
               </div>
 
             </div>

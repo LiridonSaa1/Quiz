@@ -57,7 +57,9 @@ export default function AdminStudentPayments() {
   const changeMonth = (dir: 1 | -1) => {
     const [yr, mo] = currentMonth.split("-").map(Number);
     const d = new Date(yr, mo - 1 + dir, 1);
-    setCurrentMonth(d.toISOString().slice(0, 7));
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, "0");
+    setCurrentMonth(`${y}-${m}`);
   };
 
   const openMarkPaid = (s: StudentRow) => {

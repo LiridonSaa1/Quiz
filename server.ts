@@ -9331,6 +9331,16 @@ Rules:
           throw invInsert.error;
         }
 
+        // Also mirror into student_monthly_payments so /admin/student-payments reflects this payment
+        const monthYear = String(payment_date).slice(0, 7);
+        await supabaseAdmin
+          .from('student_monthly_payments')
+          .upsert(
+            { student_id, month_year: monthYear, amount: numericAmount, notes: String(description || '').trim(), paid_at: new Date().toISOString() },
+            { onConflict: 'student_id,month_year' }
+          )
+          .then(() => {});
+
         await dispatchNotifyEvent('paymentReceived', {
           studentId: String(student_id),
           teacherId: String(teacher_id),
@@ -9346,6 +9356,16 @@ Rules:
           invoice_number: invInsert.data?.invoice_number,
         });
       }
+
+      // No invoice path — also mirror into student_monthly_payments
+      const monthYearNoInv = String(payment_date).slice(0, 7);
+      await supabaseAdmin
+        .from('student_monthly_payments')
+        .upsert(
+          { student_id, month_year: monthYearNoInv, amount: numericAmount, notes: String(description || '').trim(), paid_at: new Date().toISOString() },
+          { onConflict: 'student_id,month_year' }
+        )
+        .then(() => {});
 
       await dispatchNotifyEvent('paymentReceived', {
         studentId: String(student_id),
@@ -9717,9 +9737,10 @@ Rules:
       const startDate = `${yr}-${mo}-01`;
       const endDate = new Date(Number(yr), Number(mo), 0).toISOString().slice(0, 10);
 
-      const [teacherRes, hoursRes] = await Promise.all([
+      const [teacherRes, hoursRes, settingsRaw] = await Promise.all([
         supabaseAdmin.from('profiles').select('id, display_name, email').eq('id', teacher_id).single(),
         supabaseAdmin.from('teacher_hours').select('*').eq('teacher_id', teacher_id).gte('work_date', startDate).lte('work_date', endDate).order('work_date'),
+        getConfigSection('settings').catch(() => null),
       ]);
 
       if (teacherRes.error) throw teacherRes.error;
@@ -9728,6 +9749,15 @@ Rules:
       const total_hours = rows.reduce((s: number, r: any) => s + Number(r.hours), 0);
       const total_amount = rows.reduce((s: number, r: any) => s + Number(r.hours) * Number(r.rate_per_hour), 0);
 
+      const s: any = settingsRaw || {};
+      const business = {
+        name: s.school_name || s.general?.school_name || 'QuizMaster Academy',
+        email: s.contact_email || s.general?.contact_email || '',
+        phone: s.support_phone || s.general?.support_phone || '',
+        address: s.address || s.general?.address || '',
+        website: s.website || s.general?.website || '',
+      };
+
       res.json({
         success: true,
         teacher: teacherRes.data,
@@ -9735,6 +9765,7 @@ Rules:
         rows: rows.map((r: any) => ({ ...r, hours: Number(r.hours), rate_per_hour: Number(r.rate_per_hour), total: Number(r.hours) * Number(r.rate_per_hour) })),
         total_hours,
         total_amount,
+        business,
       });
     } catch (e: any) {
       res.status(500).json({ error: e.message || 'Failed to generate invoice' });
