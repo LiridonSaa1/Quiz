@@ -15688,20 +15688,39 @@ ${shortContent}`;
           );
           rowData = r.rows[0];
         }
-      } catch (sqlErr) {
+      } catch {
+        const fileUrlsParsed = Array.isArray(file_urls) ? file_urls : [];
+        const linkUrlsParsed = Array.isArray(link_urls) ? link_urls : [];
         if (existingId) {
-          const r = await poolQuery(
-            `UPDATE assignment_submissions SET content=$1, status='submitted', is_late=$2, submitted_at=$3, updated_at=$3 WHERE id=$4 RETURNING *`,
-            [content || "", isLate, now, existingId]
-          );
-          rowData = r.rows[0];
+          const { data: updated, error: upErr } = await supabaseAdmin.from("assignment_submissions").update({
+            content: content || "",
+            file_urls: fileUrlsParsed,
+            link_urls: linkUrlsParsed,
+            status: "submitted",
+            is_late: isLate,
+            submitted_at: now,
+            updated_at: now,
+            draft_content: null,
+            draft_file_urls: [],
+            draft_link_urls: []
+          }).eq("id", existingId).select().single();
+          if (upErr) throw upErr;
+          rowData = updated;
         } else {
-          const r = await poolQuery(
-            `INSERT INTO assignment_submissions (assignment_id, student_id, content, status, is_late, submitted_at, created_at, updated_at)
-             VALUES ($1,$2,$3,'submitted',$4,$5,$5,$5) RETURNING *`,
-            [assignmentId, caller.userId, content || "", isLate, now]
-          );
-          rowData = r.rows[0];
+          const { data: inserted, error: insErr } = await supabaseAdmin.from("assignment_submissions").insert({
+            assignment_id: assignmentId,
+            student_id: caller.userId,
+            content: content || "",
+            file_urls: fileUrlsParsed,
+            link_urls: linkUrlsParsed,
+            status: "submitted",
+            is_late: isLate,
+            submitted_at: now,
+            created_at: now,
+            updated_at: now
+          }).select().single();
+          if (insErr) throw insErr;
+          rowData = inserted;
         }
       }
       void dispatchNotifyEvent("assignmentSubmitted", {

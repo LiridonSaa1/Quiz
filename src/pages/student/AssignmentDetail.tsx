@@ -1175,6 +1175,7 @@ export default function StudentAssignmentDetail() {
                   {/* Existing submission view */}
                   {submission && !showForm ? (
                     <div className="space-y-3">
+
                       {submission.is_late && (
                         <div className="inline-flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-xl bg-orange-50 border border-orange-200 text-orange-600 font-semibold">
                           <AlertCircle className="w-3.5 h-3.5" /> Submitted late
@@ -1266,7 +1267,7 @@ export default function StudentAssignmentDetail() {
                           ` · ${t("student.assignments.markedAsLate")}`}
                       </p>
                     </div>
-                  ) : (
+                  ) : showForm ? (
                     /* Submission form */
                     <div className="space-y-4">
                       {submission && (
@@ -1575,7 +1576,7 @@ export default function StudentAssignmentDetail() {
                         </button>
                       </div>
                     </div>
-                  )}
+                  ) : null}
                 </div>
               </motion.div>
             )}
