@@ -16011,6 +16011,7 @@ ${shortContent}`;
       const { assignmentId } = req.params;
       console.log(`[submissions] GET ${assignmentId} (caller=${caller.userId})`);
       let rawRows = [];
+      let usedFallback = false;
       try {
         const subRes = await poolQuery(
           `SELECT * FROM assignment_submissions WHERE assignment_id=$1 ORDER BY submitted_at DESC`,
@@ -16019,19 +16020,17 @@ ${shortContent}`;
         rawRows = subRes.rows;
         console.log(`[submissions] poolQuery returned ${rawRows.length} rows for assignment ${assignmentId}`);
       } catch (sqlErr) {
-        console.warn(`[submissions] poolQuery failed: ${sqlErr?.message}`);
-        try {
-          const subRes2 = await poolQuery(
-            `SELECT id, assignment_id, student_id, content, status, grade, feedback, submitted_at, graded_at, is_late, created_at, updated_at
-             FROM assignment_submissions WHERE assignment_id=$1 ORDER BY submitted_at DESC`,
-            [assignmentId]
-          );
-          rawRows = subRes2.rows;
-          console.log(`[submissions] fallback poolQuery returned ${rawRows.length} rows`);
-        } catch (fallbackErr) {
-          console.error(`[submissions] both queries failed: ${fallbackErr?.message}`);
-          return res.json({ success: true, submissions: [], error: fallbackErr.message });
+        console.warn(`[submissions] poolQuery failed (${sqlErr?.message}), falling back to supabaseAdmin`);
+        usedFallback = true;
+      }
+      if (usedFallback) {
+        const { data: sbRows, error: sbErr } = await supabaseAdmin.from("assignment_submissions").select("*").eq("assignment_id", assignmentId).order("submitted_at", { ascending: false });
+        if (sbErr) {
+          console.error(`[submissions] supabaseAdmin fallback failed: ${sbErr.message}`);
+          return res.json({ success: true, submissions: [], error: sbErr.message });
         }
+        rawRows = sbRows || [];
+        console.log(`[submissions] supabaseAdmin fallback returned ${rawRows.length} rows`);
       }
       const studentIds = [...new Set(rawRows.map((s) => s.student_id))];
       let profileMap = {};
@@ -16060,12 +16059,22 @@ ${shortContent}`;
       const { subId } = req.params;
       const { grade, feedback } = req.body;
       const now = (/* @__PURE__ */ new Date()).toISOString();
-      const result = await poolQuery(
-        `UPDATE assignment_submissions SET grade=$1, feedback=$2, status='graded', graded_at=$3, updated_at=$3 WHERE id=$4 RETURNING *`,
-        [grade !== void 0 && grade !== "" ? Number(grade) : null, feedback || null, now, subId]
-      );
-      if (!result.rows[0]) return res.status(404).json({ error: "Submission not found" });
-      res.json({ success: true, submission: result.rows[0] });
+      let updatedRow = null;
+      try {
+        const result = await poolQuery(
+          `UPDATE assignment_submissions SET grade=$1, feedback=$2, status='graded', graded_at=$3, updated_at=$3 WHERE id=$4 RETURNING *`,
+          [grade !== void 0 && grade !== "" ? Number(grade) : null, feedback || null, now, subId]
+        );
+        updatedRow = result.rows[0];
+      } catch (pgErr) {
+        console.warn(`[grade] poolQuery failed (${pgErr?.message}), falling back to supabaseAdmin`);
+        const gradeVal = grade !== void 0 && grade !== "" ? Number(grade) : null;
+        const { data, error: sbErr } = await supabaseAdmin.from("assignment_submissions").update({ grade: gradeVal, feedback: feedback || null, status: "graded", graded_at: now, updated_at: now }).eq("id", subId).select().single();
+        if (sbErr) return res.status(500).json({ error: sbErr.message });
+        updatedRow = data;
+      }
+      if (!updatedRow) return res.status(404).json({ error: "Submission not found" });
+      res.json({ success: true, submission: updatedRow });
     } catch (e) {
       res.status(500).json({ error: e.message });
     }
