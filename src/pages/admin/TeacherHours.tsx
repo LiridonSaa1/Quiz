@@ -233,8 +233,8 @@ export default function TeacherHours() {
             className="px-3 py-2.5 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-violet-400 bg-white"
           >
             <option value="">Të gjithë mësuesit</option>
-            {teachers.map((t) => (
-              <option key={t.id} value={t.id}>{t.display_name || t.email}</option>
+            {summary.map((s) => (
+              <option key={s.teacher_id} value={s.teacher_id}>{s.teacher_name}</option>
             ))}
           </select>
 
@@ -246,8 +246,8 @@ export default function TeacherHours() {
               className="px-3 py-2.5 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-violet-400 bg-white"
             >
               <option value="">Zgjidh mësuesin për faturë</option>
-              {teachers.map((t) => (
-                <option key={t.id} value={t.id}>{t.display_name || t.email}</option>
+              {summary.map((s) => (
+                <option key={s.teacher_id} value={s.teacher_id}>{s.teacher_name}</option>
               ))}
             </select>
             <button

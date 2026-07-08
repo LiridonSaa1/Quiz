@@ -20,12 +20,23 @@ import {
   ReceiptText,
   Pencil,
   Trash2,
+  Bell,
+  Mail,
+  Users,
+  AlertTriangle,
 } from "lucide-react";
 import { toast } from "sonner";
 import { apiUrl, authFetch, readApiError } from "../../lib/apiUrl";
 
 type PaymentStatus = "completed" | "pending" | "failed" | "refunded";
 type PaymentMethod = "card" | "bank" | "paypal" | "cash";
+
+interface UnpaidStudent {
+  id: string;
+  display_name: string;
+  email: string;
+  teacher_name: string;
+}
 
 interface Payment {
   id: string;
@@ -144,6 +155,12 @@ export default function AdminPayments() {
   const [showDelete, setShowDelete] = useState<Payment | null>(null);
   const [deleting, setDeleting] = useState(false);
   const [showRegister, setShowRegister] = useState(false);
+  const [sendInvoice, setSendInvoice] = useState(true);
+  const [unpaidStudents, setUnpaidStudents] = useState<UnpaidStudent[]>([]);
+  const [unpaidLoading, setUnpaidLoading] = useState(false);
+  const [unpaidShown, setUnpaidShown] = useState(false);
+  const [reminderLoading, setReminderLoading] = useState<Set<string>>(new Set());
+  const [reminderSent, setReminderSent] = useState<Set<string>>(new Set());
   const [form, setForm] = useState({
     teacher_id: "",
     student_id: "",
@@ -237,8 +254,55 @@ export default function AdminPayments() {
       reference: "",
     });
 
+  const loadUnpaidStudents = async () => {
+    setUnpaidLoading(true);
+    try {
+      const monthYear = format(new Date(), "yyyy-MM");
+      const res = await authFetch(`/api/admin/student-payments?month=${monthYear}`);
+      if (!res.ok) throw new Error(await readApiError(res));
+      const json = await res.json();
+      const all: any[] = json.students || [];
+      const unpaid = all
+        .filter((s: any) => !s.paid)
+        .map((s: any) => ({
+          id: s.id,
+          display_name: s.display_name || s.email || "Student",
+          email: s.email || "",
+          teacher_name: s.teacher_name || "",
+        }));
+      setUnpaidStudents(unpaid);
+      setUnpaidShown(true);
+    } catch (e: any) {
+      toast.error(e.message || "Failed to load unpaid students");
+    } finally {
+      setUnpaidLoading(false);
+    }
+  };
+
+  const sendReminder = async (studentId: string) => {
+    const monthYear = format(new Date(), "yyyy-MM");
+    setReminderLoading((prev) => new Set(prev).add(studentId));
+    try {
+      const res = await authFetch("/api/admin/payments/send-reminder", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ student_id: studentId, month_year: monthYear }),
+      });
+      if (!res.ok) throw new Error(await readApiError(res));
+      const json = await res.json();
+      if (!json.success) throw new Error(json.error || "Failed to send reminder");
+      setReminderSent((prev) => new Set(prev).add(studentId));
+      toast.success("Kujtues u dërgua me sukses");
+    } catch (e: any) {
+      toast.error(e.message || "Dërgimi i kujtuesit dështoi");
+    } finally {
+      setReminderLoading((prev) => { const s = new Set(prev); s.delete(studentId); return s; });
+    }
+  };
+
   const openRegisterModal = () => {
     resetForm();
+    setSendInvoice(true);
     setShowRegister(true);
   };
 
@@ -332,13 +396,15 @@ export default function AdminPayments() {
           amount: Number(form.amount),
           reference: form.reference.trim(),
           description: form.description.trim(),
+          send_invoice: sendInvoice,
         }),
       });
       if (!res.ok) throw new Error(await readApiError(res));
       const json = await res.json();
       if (!json.success) throw new Error(json.error || "Failed to create payment");
       if (json.invoice_number) {
-        toast.success(`Payment registered · Invoice ${json.invoice_number}`);
+        const emailNote = json.email_sent ? " · Email i dërguar" : "";
+        toast.success(`Payment registered · Invoice ${json.invoice_number}${emailNote}`);
       } else {
         toast.success("Payment registered");
       }
@@ -879,6 +945,77 @@ export default function AdminPayments() {
         </div>
       )}
 
+      {/* Unpaid Students Section */}
+      <div className="bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden">
+        <div className="flex items-center justify-between px-5 py-4 border-b border-slate-100">
+          <div className="flex items-center gap-2">
+            <div className="p-1.5 bg-amber-100 rounded-lg">
+              <AlertTriangle className="w-4 h-4 text-amber-600" />
+            </div>
+            <div>
+              <h3 className="text-sm font-bold text-slate-900">Studente pa pagesë — {format(new Date(), "MMMM yyyy")}</h3>
+              <p className="text-[11px] text-slate-400">Dërgo kujtues pagese me email</p>
+            </div>
+          </div>
+          <button
+            onClick={loadUnpaidStudents}
+            disabled={unpaidLoading}
+            className="flex items-center gap-2 px-3 py-2 text-xs font-semibold text-amber-700 bg-amber-50 hover:bg-amber-100 border border-amber-200 rounded-xl transition-colors disabled:opacity-60"
+          >
+            <Users className="w-3.5 h-3.5" />
+            {unpaidLoading ? "Duke ngarkuar..." : unpaidShown ? "Rifresko" : "Shfaq studentët"}
+          </button>
+        </div>
+
+        {unpaidShown && (
+          <div>
+            {unpaidStudents.length === 0 ? (
+              <div className="flex flex-col items-center justify-center py-10 text-slate-400">
+                <CheckCircle2 className="w-8 h-8 text-emerald-400 mb-2" />
+                <p className="text-sm font-medium text-emerald-600">Të gjithë studentët kanë paguar këtë muaj!</p>
+              </div>
+            ) : (
+              <div className="divide-y divide-slate-50">
+                {unpaidStudents.map((s) => (
+                  <div key={s.id} className="flex items-center justify-between px-5 py-3 hover:bg-slate-50 transition-colors">
+                    <div className="flex items-center gap-3 min-w-0">
+                      <div className="w-8 h-8 rounded-full bg-amber-100 flex items-center justify-center flex-shrink-0">
+                        <span className="text-xs font-bold text-amber-700">
+                          {(s.display_name || "?")[0].toUpperCase()}
+                        </span>
+                      </div>
+                      <div className="min-w-0">
+                        <p className="text-sm font-semibold text-slate-800 truncate">{s.display_name}</p>
+                        <p className="text-xs text-slate-400 truncate">{s.email}{s.teacher_name ? ` · ${s.teacher_name}` : ""}</p>
+                      </div>
+                    </div>
+                    <button
+                      onClick={() => sendReminder(s.id)}
+                      disabled={reminderLoading.has(s.id) || reminderSent.has(s.id)}
+                      className={cn(
+                        "flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-xl transition-colors flex-shrink-0 ml-3",
+                        reminderSent.has(s.id)
+                          ? "bg-emerald-50 text-emerald-600 border border-emerald-200 cursor-default"
+                          : "bg-amber-50 hover:bg-amber-100 text-amber-700 border border-amber-200 disabled:opacity-60"
+                      )}
+                    >
+                      {reminderLoading.has(s.id) ? (
+                        <RefreshCw className="w-3 h-3 animate-spin" />
+                      ) : reminderSent.has(s.id) ? (
+                        <CheckCircle2 className="w-3 h-3" />
+                      ) : (
+                        <Bell className="w-3 h-3" />
+                      )}
+                      {reminderSent.has(s.id) ? "Dërguar" : reminderLoading.has(s.id) ? "Duke dërguar..." : "Kujtues"}
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+
       {/* Register Payment Modal */}
       {showRegister && (
         <div
@@ -1074,6 +1211,32 @@ export default function AdminPayments() {
                     placeholder="What is this payment for?"
                   />
                 </div>
+              </div>
+
+              <div className="flex items-center gap-3 px-1 py-1 bg-indigo-50 border border-indigo-100 rounded-xl">
+                <label className="flex items-center gap-2 cursor-pointer select-none flex-1">
+                  <div
+                    onClick={() => setSendInvoice((v) => !v)}
+                    className={cn(
+                      "relative w-9 h-5 rounded-full transition-colors flex-shrink-0",
+                      sendInvoice ? "bg-indigo-600" : "bg-slate-300"
+                    )}
+                  >
+                    <span
+                      className={cn(
+                        "absolute top-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform",
+                        sendInvoice ? "translate-x-4" : "translate-x-0.5"
+                      )}
+                    />
+                  </div>
+                  <div>
+                    <p className="text-xs font-semibold text-slate-700 flex items-center gap-1">
+                      <Mail className="w-3 h-3 text-indigo-500" />
+                      Dërgo faturë me email
+                    </p>
+                    <p className="text-[10px] text-slate-400">Studentit i dërgohet fatura automatikisht</p>
+                  </div>
+                </label>
               </div>
 
               <div className="pt-2 flex items-center justify-end gap-2">

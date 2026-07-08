@@ -9748,7 +9748,8 @@ ${e?.stack || ""}`),
         method = "bank",
         payment_date,
         description = "",
-        reference = ""
+        reference = "",
+        send_invoice: sendInvoice = true
       } = req.body || {};
       if (!teacher_id) return res.status(400).json({ error: "Teacher is required" });
       if (!student_id) return res.status(400).json({ error: "Student is required" });
@@ -9835,11 +9836,26 @@ ${e?.stack || ""}`),
           amount: numericAmount,
           currency
         });
+        if (sendInvoice !== false && isEmailConfigured()) {
+          supabaseAdmin.from("profiles").select("display_name, email").eq("id", String(student_id)).single().then(({ data: sProf }) => {
+            if (sProf?.email) {
+              try {
+                const [yr, mo] = String(payment_date).slice(0, 7).split("-");
+                const monthLabel = new Date(Number(yr), Number(mo) - 1, 1).toLocaleString("default", { month: "long", year: "numeric" });
+                const tpl = renderInvoiceEmail({ studentName: sProf.display_name || sProf.email, amount: numericAmount, monthLabel, notes: String(description || "").trim() || void 0, paidAt: String(payment_date) });
+                sendEmail({ to: sProf.email, toName: sProf.display_name || sProf.email, subject: tpl.subject, htmlContent: tpl.htmlContent, textContent: tpl.textContent }).catch((e) => console.error("[invoice-email] failed:", e.message));
+              } catch (e) {
+                console.error("[invoice-email] render failed:", e.message);
+              }
+            }
+          });
+        }
         return res.json({
           success: true,
           id: paymentId,
           invoice_id: invInsert.data?.id,
-          invoice_number: invInsert.data?.invoice_number
+          invoice_number: invInsert.data?.invoice_number,
+          email_sent: sendInvoice !== false && isEmailConfigured()
         });
       }
       const monthYearNoInv = String(payment_date).slice(0, 7);
@@ -9903,11 +9919,40 @@ ${e?.stack || ""}`),
     try {
       const { id } = req.params;
       if (!id) return res.status(400).json({ error: "Payment ID is required" });
+      const { data: pmtRow } = await supabaseAdmin.from("payments").select("student_id, payment_date").eq("id", id).single();
+      await supabaseAdmin.from("invoices").delete().eq("payment_id", id);
+      if (pmtRow?.student_id && pmtRow?.payment_date) {
+        const monthYear = String(pmtRow.payment_date).slice(0, 7);
+        await supabaseAdmin.from("student_monthly_payments").delete().eq("student_id", pmtRow.student_id).eq("month_year", monthYear);
+      }
       const { error } = await supabaseAdmin.from("payments").delete().eq("id", id);
       if (error) throw error;
       res.json({ success: true });
     } catch (e) {
       res.status(500).json({ error: e.message || "Failed to delete payment" });
+    }
+  });
+  app.post("/api/admin/payments/send-reminder", async (req, res) => {
+    try {
+      const { student_id, month_year } = req.body || {};
+      if (!student_id || !month_year) {
+        return res.status(400).json({ error: "student_id and month_year are required" });
+      }
+      if (!isEmailConfigured()) {
+        return res.status(400).json({ error: "Email is not configured (Brevo). Check BREVO_API_KEY and BREVO_SENDER_EMAIL." });
+      }
+      const { data: student } = await supabaseAdmin.from("profiles").select("display_name, email").eq("id", String(student_id)).single();
+      if (!student?.email) {
+        return res.status(400).json({ error: "Student not found or has no email address" });
+      }
+      const [yr, mo] = String(month_year).split("-");
+      const monthLabel = new Date(Number(yr), Number(mo) - 1, 1).toLocaleString("default", { month: "long", year: "numeric" });
+      const dayOfMonth = (/* @__PURE__ */ new Date()).getDate();
+      const tpl = renderPaymentReminderEmail({ studentName: student.display_name || student.email, monthLabel, dayOfMonth });
+      await sendEmail({ to: student.email, toName: student.display_name || student.email, subject: tpl.subject, htmlContent: tpl.htmlContent, textContent: tpl.textContent });
+      res.json({ success: true });
+    } catch (e) {
+      res.status(500).json({ error: e.message || "Failed to send reminder" });
     }
   });
   app.get("/api/admin/student-payments", async (req, res) => {
