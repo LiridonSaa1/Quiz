@@ -26,7 +26,10 @@ export type NotifyEventKey =
   | "paymentReceived"
   | "paymentReminder"
   | "maintenanceAlert"
-  | "weeklyReport";
+  | "weeklyReport"
+  | "newTeacherCreated"
+  | "newStudentCreated"
+  | "studentTransferred";
 
 export interface NotifyContext {
   studentId?: string;
@@ -66,6 +69,11 @@ export interface NotifyContext {
     revenue?: number;
     currency?: string;
   };
+  // New user / transfer payloads
+  teacherName?: string;
+  teacherEmail?: string;
+  fromTeacherName?: string;
+  sessionTitle?: string;
 }
 
 type Role = "student" | "teacher" | "admin";
@@ -81,6 +89,9 @@ const RECIPIENTS: Record<NotifyEventKey, Record<Role, boolean>> = {
   paymentReminder:     { student: true,  teacher: false, admin: false },
   maintenanceAlert:    { student: false, teacher: false, admin: true  },
   weeklyReport:        { student: false, teacher: false, admin: true  },
+  newTeacherCreated:   { student: false, teacher: false, admin: true  },
+  newStudentCreated:   { student: false, teacher: false, admin: true  },
+  studentTransferred:  { student: false, teacher: true,  admin: true  },
 };
 
 /** Maps an event to the existing notifications.type enum. */
@@ -95,6 +106,9 @@ const TYPE_MAP: Record<NotifyEventKey, string> = {
   paymentReminder:     "warning",
   maintenanceAlert:    "warning",
   weeklyReport:        "info",
+  newTeacherCreated:   "info",
+  newStudentCreated:   "info",
+  studentTransferred:  "info",
 };
 
 /** Maps the admin "Email Notifications" toggle key to our event key. */
@@ -109,6 +123,9 @@ export const SETTINGS_KEY: Record<NotifyEventKey, string> = {
   paymentReminder:     "email_payment_reminder",
   maintenanceAlert:    "system_maintenance_alerts",
   weeklyReport:        "weekly_report",
+  newTeacherCreated:   "notify_new_teacher",
+  newStudentCreated:   "notify_new_student",
+  studentTransferred:  "notify_student_transfer",
 };
 
 const ACTION_URLS: Record<NotifyEventKey, Record<Role, string>> = {
@@ -161,6 +178,21 @@ const ACTION_URLS: Record<NotifyEventKey, Record<Role, string>> = {
     student: "/admin",
     teacher: "/admin",
     admin:   "/admin",
+  },
+  newTeacherCreated: {
+    student: "/admin/teachers",
+    teacher: "/admin/teachers",
+    admin:   "/admin/teachers",
+  },
+  newStudentCreated: {
+    student: "/admin/students",
+    teacher: "/admin/students",
+    admin:   "/admin/students",
+  },
+  studentTransferred: {
+    student: "/teacher/students",
+    teacher: "/teacher/students",
+    admin:   "/admin/students",
   },
 };
 
@@ -374,6 +406,37 @@ function renderContent(role: Role, event: NotifyEventKey, ctx: NotifyContext): {
       return {
         title: "Weekly summary report",
         message: `Last 7 days: ${summary}.`,
+      };
+    }
+
+    case "newTeacherCreated": {
+      const tName = ctx.teacherName || ctx.teacherEmail || "A new teacher";
+      return {
+        title: "New teacher registered",
+        message: `${tName} has been added as a teacher on the platform.`,
+      };
+    }
+
+    case "newStudentCreated": {
+      const sName = ctx.studentName || "A new student";
+      return {
+        title: "New student registered",
+        message: `${sName} has been added as a student on the platform.`,
+      };
+    }
+
+    case "studentTransferred": {
+      const sName = ctx.studentName || "A student";
+      const fromName = ctx.fromTeacherName ? ` from ${ctx.fromTeacherName}` : "";
+      if (role === "teacher") {
+        return {
+          title: "Student transferred to you",
+          message: `${sName} has been transferred${fromName} and is now in your student list.`,
+        };
+      }
+      return {
+        title: "Student transferred",
+        message: `${sName} was transferred${fromName} to a new teacher.`,
       };
     }
   }

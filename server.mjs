@@ -613,7 +613,10 @@ var RECIPIENTS = {
   paymentReceived: { student: true, teacher: true, admin: true },
   paymentReminder: { student: true, teacher: false, admin: false },
   maintenanceAlert: { student: false, teacher: false, admin: true },
-  weeklyReport: { student: false, teacher: false, admin: true }
+  weeklyReport: { student: false, teacher: false, admin: true },
+  newTeacherCreated: { student: false, teacher: false, admin: true },
+  newStudentCreated: { student: false, teacher: false, admin: true },
+  studentTransferred: { student: false, teacher: true, admin: true }
 };
 var TYPE_MAP = {
   newEnrollment: "course",
@@ -625,7 +628,10 @@ var TYPE_MAP = {
   paymentReceived: "success",
   paymentReminder: "warning",
   maintenanceAlert: "warning",
-  weeklyReport: "info"
+  weeklyReport: "info",
+  newTeacherCreated: "info",
+  newStudentCreated: "info",
+  studentTransferred: "info"
 };
 var SETTINGS_KEY = {
   newEnrollment: "email_new_enrollment",
@@ -637,7 +643,10 @@ var SETTINGS_KEY = {
   paymentReceived: "email_payment_received",
   paymentReminder: "email_payment_reminder",
   maintenanceAlert: "system_maintenance_alerts",
-  weeklyReport: "weekly_report"
+  weeklyReport: "weekly_report",
+  newTeacherCreated: "notify_new_teacher",
+  newStudentCreated: "notify_new_student",
+  studentTransferred: "notify_student_transfer"
 };
 var ACTION_URLS = {
   newEnrollment: {
@@ -689,6 +698,21 @@ var ACTION_URLS = {
     student: "/admin",
     teacher: "/admin",
     admin: "/admin"
+  },
+  newTeacherCreated: {
+    student: "/admin/teachers",
+    teacher: "/admin/teachers",
+    admin: "/admin/teachers"
+  },
+  newStudentCreated: {
+    student: "/admin/students",
+    teacher: "/admin/students",
+    admin: "/admin/students"
+  },
+  studentTransferred: {
+    student: "/teacher/students",
+    teacher: "/teacher/students",
+    admin: "/admin/students"
   }
 };
 function formatMoney(amount, currency) {
@@ -877,6 +901,34 @@ function renderContent(role, event, ctx) {
       return {
         title: "Weekly summary report",
         message: `Last 7 days: ${summary}.`
+      };
+    }
+    case "newTeacherCreated": {
+      const tName = ctx.teacherName || ctx.teacherEmail || "A new teacher";
+      return {
+        title: "New teacher registered",
+        message: `${tName} has been added as a teacher on the platform.`
+      };
+    }
+    case "newStudentCreated": {
+      const sName = ctx.studentName || "A new student";
+      return {
+        title: "New student registered",
+        message: `${sName} has been added as a student on the platform.`
+      };
+    }
+    case "studentTransferred": {
+      const sName = ctx.studentName || "A student";
+      const fromName = ctx.fromTeacherName ? ` from ${ctx.fromTeacherName}` : "";
+      if (role === "teacher") {
+        return {
+          title: "Student transferred to you",
+          message: `${sName} has been transferred${fromName} and is now in your student list.`
+        };
+      }
+      return {
+        title: "Student transferred",
+        message: `${sName} was transferred${fromName} to a new teacher.`
       };
     }
   }
@@ -5669,6 +5721,7 @@ Assistant:`
       if (teacherError) throw teacherError;
       res.json({ success: true, uid: userId });
       void sendUserCredentials({ name, email, password, role: "teacher", phone: phone || void 0 });
+      void dispatchNotifyEvent("newTeacherCreated", { teacherId: userId, teacherName: name, teacherEmail: email });
     } catch (error) {
       console.error("Error creating teacher:", error);
       res.status(500).json({ error: error.message });
@@ -5840,6 +5893,7 @@ Assistant:`
       }
       res.json({ success: true, uid: userId });
       void sendUserCredentials({ name, email, password, role: "student", phone: phone || void 0 });
+      void dispatchNotifyEvent("newStudentCreated", { studentId: userId, studentName: name });
     } catch (error) {
       console.error("Error creating student:", error);
       res.status(500).json({ error: error.message });
@@ -6187,6 +6241,12 @@ Assistant:`
         if (logErr) console.warn("[transfer] Failed to log transfer:", logErr.message);
       });
       console.log(`[transfer] Student ${studentId} transferred from teacher ${caller.userId} \u2192 ${targetTeacherId}`);
+      void dispatchNotifyEvent("studentTransferred", {
+        studentId,
+        studentName: student.display_name || student.email || "",
+        teacherId: targetTeacherId,
+        fromTeacherName: fromTeacherProfile?.display_name || fromTeacherProfile?.email || ""
+      });
       return res.json({
         success: true,
         message: `${student.display_name || student.email} transferred to ${targetTeacher.display_name}`
@@ -11576,8 +11636,30 @@ ${smartUserPrompt}` });
     try {
       const hostId = await assertSessionHost(req, res, req.params.id);
       if (!hostId) return;
+      const [sessionSnap, partsSnap] = await Promise.all([
+        supabaseAdmin.from("live_sessions").select("title").eq("id", req.params.id).single(),
+        supabaseAdmin.from("session_participants").select("user_id").eq("session_id", req.params.id)
+      ]);
+      const sessionTitle = sessionSnap.data?.title || "Live Session";
+      if (partsSnap.error && !isSessionParticipantsTableMissing(partsSnap.error)) {
+        console.warn("[live-sessions] delete: participant fetch error:", partsSnap.error.message);
+      }
+      const participantIds = [...new Set(
+        (partsSnap.data || []).map((p) => String(p.user_id)).filter(Boolean)
+      )];
       const { error } = await supabaseAdmin.from("live_sessions").delete().eq("id", req.params.id);
       if (error) throw error;
+      if (participantIds.length > 0) {
+        const notifRows = participantIds.map((uid) => ({
+          user_id: uid,
+          title: "Live Session Cancelled",
+          message: `"${sessionTitle}" has been cancelled by the host.`,
+          type: "warning",
+          action_url: "/student/live-sessions",
+          created_at: (/* @__PURE__ */ new Date()).toISOString()
+        }));
+        void notifInsert(notifRows);
+      }
       res.json({ success: true });
     } catch (e) {
       res.status(500).json({ error: e.message });

@@ -3961,6 +3961,7 @@ When giving instructions, number each step clearly. Be precise and technical whe
       res.json({ success: true, uid: userId });
       // Fire-and-forget: send credentials via configured notification channels
       void sendUserCredentials({ name, email, password, role: 'teacher', phone: phone || undefined });
+      void dispatchNotifyEvent('newTeacherCreated', { teacherId: userId, teacherName: name, teacherEmail: email });
     } catch (error: any) {
       console.error('Error creating teacher:', error);
       res.status(500).json({ error: error.message });
@@ -4184,6 +4185,7 @@ When giving instructions, number each step clearly. Be precise and technical whe
       res.json({ success: true, uid: userId });
       // Fire-and-forget: send credentials via configured notification channels
       void sendUserCredentials({ name, email, password, role: 'student', phone: phone || undefined });
+      void dispatchNotifyEvent('newStudentCreated', { studentId: userId, studentName: name });
     } catch (error: any) {
       console.error('Error creating student:', error);
       res.status(500).json({ error: error.message });
@@ -4679,6 +4681,12 @@ When giving instructions, number each step clearly. Be precise and technical whe
       });
 
       console.log(`[transfer] Student ${studentId} transferred from teacher ${caller.userId} → ${targetTeacherId}`);
+      void dispatchNotifyEvent('studentTransferred', {
+        studentId,
+        studentName: student.display_name || student.email || '',
+        teacherId: targetTeacherId,
+        fromTeacherName: fromTeacherProfile?.display_name || fromTeacherProfile?.email || '',
+      });
       return res.json({
         success: true,
         message: `${student.display_name || student.email} transferred to ${targetTeacher.display_name}`,
@@ -11430,8 +11438,37 @@ Content:\n"""${clipped}"""`;
     try {
       const hostId = await assertSessionHost(req, res, req.params.id);
       if (!hostId) return;
+
+      // Fetch session title and invited participants before deleting
+      const [sessionSnap, partsSnap] = await Promise.all([
+        supabaseAdmin.from('live_sessions').select('title').eq('id', req.params.id).single(),
+        supabaseAdmin.from('session_participants').select('user_id').eq('session_id', req.params.id),
+      ]);
+      const sessionTitle = sessionSnap.data?.title || 'Live Session';
+      // Tolerate missing session_participants table; log unexpected errors
+      if (partsSnap.error && !isSessionParticipantsTableMissing(partsSnap.error)) {
+        console.warn('[live-sessions] delete: participant fetch error:', partsSnap.error.message);
+      }
+      const participantIds: string[] = [...new Set(
+        (partsSnap.data || []).map((p: any) => String(p.user_id)).filter(Boolean)
+      )];
+
       const { error } = await supabaseAdmin.from('live_sessions').delete().eq('id', req.params.id);
       if (error) throw error;
+
+      // Notify all invited participants that the session was cancelled
+      if (participantIds.length > 0) {
+        const notifRows = participantIds.map((uid) => ({
+          user_id: uid,
+          title: 'Live Session Cancelled',
+          message: `"${sessionTitle}" has been cancelled by the host.`,
+          type: 'warning',
+          action_url: '/student/live-sessions',
+          created_at: new Date().toISOString(),
+        }));
+        void notifInsert(notifRows);
+      }
+
       res.json({ success: true });
     } catch (e: unknown) { res.status(500).json({ error: (e as Error).message }); }
   });
