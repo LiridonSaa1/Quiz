@@ -311,6 +311,94 @@ export function renderInvoiceEmail(opts: {
   return { subject, htmlContent, textContent };
 }
 
+/** Renders a "new assignment" notification email for a student (Albanian). */
+export function renderAssignmentEmail(opts: {
+  studentName: string;
+  title: string;
+  description?: string | null;
+  courseName?: string | null;
+  className?: string | null;
+  dueDate?: string | null;
+  maxScore?: number | null;
+  brandName?: string;
+  loginUrl?: string;
+}) {
+  const brand = (opts.brandName || 'QuizMaster').trim();
+  const subject = `📝 Detyrë e re: ${opts.title} | ${brand}`;
+
+  let dueDateStr = '';
+  if (opts.dueDate) {
+    try { dueDateStr = new Date(opts.dueDate).toLocaleDateString('sq-AL', { day: '2-digit', month: 'long', year: 'numeric' }); }
+    catch { dueDateStr = String(opts.dueDate).slice(0, 10); }
+  }
+
+  const textContent = [
+    `Detyrë e re — ${brand}`,
+    ``,
+    `Përshëndetje ${opts.studentName},`,
+    `Mësuesi juaj ka publikuar një detyrë të re${opts.className ? ` për klasën "${opts.className}"` : ''}.`,
+    ``,
+    `Titulli: ${opts.title}`,
+    opts.courseName ? `Kursi: ${opts.courseName}` : '',
+    dueDateStr ? `Afati: ${dueDateStr}` : '',
+    opts.maxScore != null ? `Pikët maksimale: ${opts.maxScore}` : '',
+    opts.description ? `\nPërshkrimi:\n${opts.description}` : '',
+    ``,
+    `Ju faleminderit! — Ekipi i ${brand}`,
+  ].filter(Boolean).join('\n');
+
+  const loginBtn = opts.loginUrl ? `
+          <div style="text-align:center;margin-bottom:20px;">
+            <a href="${opts.loginUrl}" style="display:inline-block;background:#6366f1;color:#ffffff;font-size:14px;font-weight:700;text-decoration:none;padding:13px 28px;border-radius:12px;">
+              🔗 Shiko detyrën
+            </a>
+          </div>` : '';
+
+  const htmlContent = `<!doctype html>
+<html>
+<body style="margin:0;padding:0;background:#f1f5f9;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f1f5f9;padding:40px 16px;">
+    <tr><td align="center">
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:520px;background:#ffffff;border-radius:20px;overflow:hidden;box-shadow:0 4px 24px rgba(0,0,0,0.06);">
+        <tr><td style="background:#6366f1;padding:28px 36px;">
+          <div style="font-size:22px;font-weight:800;color:#ffffff;letter-spacing:-0.02em;">${brand}</div>
+          <div style="font-size:13px;color:rgba(255,255,255,0.85);margin-top:4px;">Detyrë e Re 📝</div>
+        </td></tr>
+        <tr><td style="padding:36px;">
+          <p style="margin:0 0 8px;font-size:15px;font-weight:700;color:#0f172a;">Përshëndetje, ${opts.studentName}!</p>
+          <p style="margin:0 0 24px;font-size:14px;line-height:1.6;color:#475569;">
+            Mësuesi juaj ka publikuar një detyrë të re${opts.className ? ` për klasën <strong>${opts.className}</strong>` : ''}.
+          </p>
+          <div style="background:#eef2ff;border:1px solid #c7d2fe;border-radius:14px;padding:20px 24px;margin-bottom:24px;">
+            <p style="margin:0 0 14px;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:1px;color:#6b7280;">Detajet e Detyrës</p>
+            <table role="presentation" cellpadding="0" cellspacing="0" width="100%">
+              <tr>
+                <td style="padding:6px 0;font-size:13px;color:#64748b;width:110px;vertical-align:top;">📌 Titulli</td>
+                <td style="padding:6px 0;font-size:13px;font-weight:600;color:#0f172a;">${opts.title}</td>
+              </tr>
+              ${opts.courseName ? `<tr><td style="padding:6px 0;font-size:13px;color:#64748b;vertical-align:top;">📚 Kursi</td><td style="padding:6px 0;font-size:13px;font-weight:600;color:#0f172a;">${opts.courseName}</td></tr>` : ''}
+              ${dueDateStr ? `<tr><td style="padding:6px 0;font-size:13px;color:#64748b;vertical-align:top;">📅 Afati</td><td style="padding:6px 0;font-size:13px;font-weight:600;color:#0f172a;">${dueDateStr}</td></tr>` : ''}
+              ${opts.maxScore != null ? `<tr><td style="padding:6px 0;font-size:13px;color:#64748b;vertical-align:top;">🎯 Pikët</td><td style="padding:6px 0;font-size:13px;font-weight:600;color:#0f172a;">${opts.maxScore}</td></tr>` : ''}
+            </table>
+          </div>
+          ${opts.description ? `<p style="margin:0 0 24px;font-size:13px;line-height:1.6;color:#374151;white-space:pre-wrap;">${opts.description}</p>` : ''}
+          ${loginBtn}
+          <p style="margin:0;font-size:12px;line-height:1.6;color:#94a3b8;">
+            Ky email dërgohet automatikisht kur mësuesi publikon një detyrë të re.
+          </p>
+        </td></tr>
+        <tr><td style="background:#f8fafc;padding:16px 36px;border-top:1px solid #e2e8f0;">
+          <p style="margin:0;font-size:11px;color:#94a3b8;text-align:center;">Dërguar nga platforma <strong>${brand}</strong> · Ju faleminderit!</p>
+        </td></tr>
+      </table>
+    </td></tr>
+  </table>
+</body>
+</html>`;
+
+  return { subject, htmlContent, textContent };
+}
+
 /** Renders a payment deadline reminder email for a student (Albanian). */
 export function renderPaymentReminderEmail(opts: {
   studentName: string;

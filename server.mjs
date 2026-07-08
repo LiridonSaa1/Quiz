@@ -464,6 +464,82 @@ function renderInvoiceEmail(opts) {
 </html>`;
   return { subject, htmlContent, textContent };
 }
+function renderAssignmentEmail(opts) {
+  const brand = (opts.brandName || "QuizMaster").trim();
+  const subject = `\u{1F4DD} Detyr\xEB e re: ${opts.title} | ${brand}`;
+  let dueDateStr = "";
+  if (opts.dueDate) {
+    try {
+      dueDateStr = new Date(opts.dueDate).toLocaleDateString("sq-AL", { day: "2-digit", month: "long", year: "numeric" });
+    } catch {
+      dueDateStr = String(opts.dueDate).slice(0, 10);
+    }
+  }
+  const textContent = [
+    `Detyr\xEB e re \u2014 ${brand}`,
+    ``,
+    `P\xEBrsh\xEBndetje ${opts.studentName},`,
+    `M\xEBsuesi juaj ka publikuar nj\xEB detyr\xEB t\xEB re${opts.className ? ` p\xEBr klas\xEBn "${opts.className}"` : ""}.`,
+    ``,
+    `Titulli: ${opts.title}`,
+    opts.courseName ? `Kursi: ${opts.courseName}` : "",
+    dueDateStr ? `Afati: ${dueDateStr}` : "",
+    opts.maxScore != null ? `Pik\xEBt maksimale: ${opts.maxScore}` : "",
+    opts.description ? `
+P\xEBrshkrimi:
+${opts.description}` : "",
+    ``,
+    `Ju faleminderit! \u2014 Ekipi i ${brand}`
+  ].filter(Boolean).join("\n");
+  const loginBtn = opts.loginUrl ? `
+          <div style="text-align:center;margin-bottom:20px;">
+            <a href="${opts.loginUrl}" style="display:inline-block;background:#6366f1;color:#ffffff;font-size:14px;font-weight:700;text-decoration:none;padding:13px 28px;border-radius:12px;">
+              \u{1F517} Shiko detyr\xEBn
+            </a>
+          </div>` : "";
+  const htmlContent = `<!doctype html>
+<html>
+<body style="margin:0;padding:0;background:#f1f5f9;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f1f5f9;padding:40px 16px;">
+    <tr><td align="center">
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:520px;background:#ffffff;border-radius:20px;overflow:hidden;box-shadow:0 4px 24px rgba(0,0,0,0.06);">
+        <tr><td style="background:#6366f1;padding:28px 36px;">
+          <div style="font-size:22px;font-weight:800;color:#ffffff;letter-spacing:-0.02em;">${brand}</div>
+          <div style="font-size:13px;color:rgba(255,255,255,0.85);margin-top:4px;">Detyr\xEB e Re \u{1F4DD}</div>
+        </td></tr>
+        <tr><td style="padding:36px;">
+          <p style="margin:0 0 8px;font-size:15px;font-weight:700;color:#0f172a;">P\xEBrsh\xEBndetje, ${opts.studentName}!</p>
+          <p style="margin:0 0 24px;font-size:14px;line-height:1.6;color:#475569;">
+            M\xEBsuesi juaj ka publikuar nj\xEB detyr\xEB t\xEB re${opts.className ? ` p\xEBr klas\xEBn <strong>${opts.className}</strong>` : ""}.
+          </p>
+          <div style="background:#eef2ff;border:1px solid #c7d2fe;border-radius:14px;padding:20px 24px;margin-bottom:24px;">
+            <p style="margin:0 0 14px;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:1px;color:#6b7280;">Detajet e Detyr\xEBs</p>
+            <table role="presentation" cellpadding="0" cellspacing="0" width="100%">
+              <tr>
+                <td style="padding:6px 0;font-size:13px;color:#64748b;width:110px;vertical-align:top;">\u{1F4CC} Titulli</td>
+                <td style="padding:6px 0;font-size:13px;font-weight:600;color:#0f172a;">${opts.title}</td>
+              </tr>
+              ${opts.courseName ? `<tr><td style="padding:6px 0;font-size:13px;color:#64748b;vertical-align:top;">\u{1F4DA} Kursi</td><td style="padding:6px 0;font-size:13px;font-weight:600;color:#0f172a;">${opts.courseName}</td></tr>` : ""}
+              ${dueDateStr ? `<tr><td style="padding:6px 0;font-size:13px;color:#64748b;vertical-align:top;">\u{1F4C5} Afati</td><td style="padding:6px 0;font-size:13px;font-weight:600;color:#0f172a;">${dueDateStr}</td></tr>` : ""}
+              ${opts.maxScore != null ? `<tr><td style="padding:6px 0;font-size:13px;color:#64748b;vertical-align:top;">\u{1F3AF} Pik\xEBt</td><td style="padding:6px 0;font-size:13px;font-weight:600;color:#0f172a;">${opts.maxScore}</td></tr>` : ""}
+            </table>
+          </div>
+          ${opts.description ? `<p style="margin:0 0 24px;font-size:13px;line-height:1.6;color:#374151;white-space:pre-wrap;">${opts.description}</p>` : ""}
+          ${loginBtn}
+          <p style="margin:0;font-size:12px;line-height:1.6;color:#94a3b8;">
+            Ky email d\xEBrgohet automatikisht kur m\xEBsuesi publikon nj\xEB detyr\xEB t\xEB re.
+          </p>
+        </td></tr>
+        <tr><td style="background:#f8fafc;padding:16px 36px;border-top:1px solid #e2e8f0;">
+          <p style="margin:0;font-size:11px;color:#94a3b8;text-align:center;">D\xEBrguar nga platforma <strong>${brand}</strong> \xB7 Ju faleminderit!</p>
+        </td></tr>
+      </table>
+    </td></tr>
+  </table>
+</body>
+</html>`;
+  return { subject, htmlContent, textContent };
+}
 function renderPaymentReminderEmail(opts) {
   const brand = (opts.brandName || "QuizMaster").trim();
   const subject = `\u23F0 Kujtues pagese \u2014 ${opts.monthLabel} | ${brand}`;
@@ -4134,6 +4210,74 @@ Assistant:`
       if (row?.user_id) candidates.add(String(row.user_id));
     });
     return [...candidates];
+  };
+  const resolveClassStudentProfiles = async (classId, teacherId) => {
+    if (!classId) return [];
+    const { data: classRow, error: classErr } = await supabaseAdmin.from("classes").select("id, student_ids, course_id, teacher_id").eq("id", classId).maybeSingle();
+    if (classErr || !classRow) return [];
+    let ids = Array.isArray(classRow.student_ids) ? classRow.student_ids.map(String).filter(Boolean) : [];
+    if (ids.length === 0 && classRow.course_id) {
+      const { data: courseRow } = await supabaseAdmin.from("courses").select("id, student_ids").eq("id", classRow.course_id).maybeSingle();
+      if (courseRow && Array.isArray(courseRow.student_ids)) {
+        ids = courseRow.student_ids.map(String).filter(Boolean);
+      }
+    }
+    if (ids.length === 0) {
+      const fallbackTeacherId = teacherId || classRow.teacher_id;
+      if (fallbackTeacherId) {
+        const teacherIdCandidates = await getTeacherIdCandidates(fallbackTeacherId).catch(() => [fallbackTeacherId]);
+        const { data: linkedProfiles } = await supabaseAdmin.from("profiles").select("id").in("teacher_id", teacherIdCandidates).eq("role", "student");
+        ids = (linkedProfiles || []).map((p) => String(p.id));
+      }
+    }
+    if (ids.length === 0) return [];
+    const { data: students, error: studentsErr } = await supabaseAdmin.from("profiles").select("id, email, display_name, status").in("id", ids).eq("role", "student");
+    if (studentsErr || !students) return [];
+    return students.filter((s) => s.email && s.status !== "inactive").map((s) => ({ id: String(s.id), email: String(s.email), display_name: s.display_name || null }));
+  };
+  const notifyClassOfNewAssignment = async (opts) => {
+    try {
+      if (!opts.classId) return;
+      if (!isEmailConfigured()) return;
+      const students = await resolveClassStudentProfiles(opts.classId, opts.teacherId || void 0);
+      if (students.length === 0) return;
+      let brandName = "QuizMaster";
+      let baseUrl = process.env.REPLIT_DEV_DOMAIN ? `https://${process.env.REPLIT_DEV_DOMAIN}` : "http://localhost:5000";
+      try {
+        const cfgRes = await supabaseAdmin.from("platform_config").select("value").eq("section", "settings").maybeSingle();
+        const settings = cfgRes.data?.value ?? {};
+        if (settings?.general?.school_name) brandName = settings.general.school_name;
+        if (!process.env.REPLIT_DEV_DOMAIN && settings?.general?.website) baseUrl = settings.general.website;
+      } catch {
+      }
+      const loginUrl = `${baseUrl}/login`;
+      let className = null;
+      let courseName = null;
+      const [classRes, courseRes] = await Promise.all([
+        supabaseAdmin.from("classes").select("name").eq("id", opts.classId).maybeSingle(),
+        opts.courseId ? supabaseAdmin.from("courses").select("title").eq("id", opts.courseId).maybeSingle() : Promise.resolve({ data: null })
+      ]);
+      className = classRes?.data?.name || null;
+      courseName = courseRes?.data?.title || null;
+      const emailPromises = students.map((student) => {
+        const tpl = renderAssignmentEmail({
+          studentName: student.display_name || student.email,
+          title: opts.title,
+          description: opts.description,
+          courseName,
+          className,
+          dueDate: opts.dueDate,
+          maxScore: opts.maxScore,
+          brandName,
+          loginUrl
+        });
+        return sendEmail({ to: student.email, toName: student.display_name || student.email, subject: tpl.subject, htmlContent: tpl.htmlContent, textContent: tpl.textContent }).catch((err) => console.error(`[assignments] Failed to email ${student.email}:`, err?.message || err));
+      });
+      await Promise.allSettled(emailPromises);
+      console.log(`[assignments] Sent new-assignment email to ${students.length} student(s) in class ${opts.classId}`);
+    } catch (err) {
+      console.error("[assignments] notifyClassOfNewAssignment failed:", err?.message || err);
+    }
   };
   const fetchTeacherCourseRows = async (scopedIds, includeStudentIds = false) => {
     const buildQ = (filterByTeacher, withStudentIds) => {
@@ -15599,7 +15743,17 @@ ${shortContent}`;
             publishAt
           ]
         );
-        return res.json({ success: true, assignment: { id: result.rows[0].id } });
+        const newId = result.rows[0].id;
+        notifyClassOfNewAssignment({
+          classId: b.class_id ? String(b.class_id) : null,
+          courseId: b.course_id ? String(b.course_id) : null,
+          teacherId: b.teacher_id ? String(b.teacher_id) : caller.userId,
+          title: String(b.title),
+          description: b.description != null ? String(b.description) : null,
+          dueDate: b.due_date ? String(b.due_date) : null,
+          maxScore: Number(b.max_score) || 100
+        });
+        return res.json({ success: true, assignment: { id: newId } });
       } catch {
         const now = (/* @__PURE__ */ new Date()).toISOString();
         let payload = {
@@ -15622,7 +15776,18 @@ ${shortContent}`;
         const STRIP_COLS = ["publish_at", "allow_late_submission", "instructions", "submission_config"];
         for (let i = 0; i < STRIP_COLS.length + 2; i++) {
           const { data, error } = await supabaseAdmin.from("assignments").insert(payload).select("id").single();
-          if (!error && data?.id) return res.json({ success: true, assignment: { id: data.id } });
+          if (!error && data?.id) {
+            notifyClassOfNewAssignment({
+              classId: b.class_id ? String(b.class_id) : null,
+              courseId: b.course_id ? String(b.course_id) : null,
+              teacherId: b.teacher_id ? String(b.teacher_id) : caller.userId,
+              title: String(b.title),
+              description: b.description != null ? String(b.description) : null,
+              dueDate: b.due_date ? String(b.due_date) : null,
+              maxScore: Number(b.max_score) || 100
+            });
+            return res.json({ success: true, assignment: { id: data.id } });
+          }
           if (!error) return res.status(500).json({ error: "Insert returned no id" });
           const em = (error.message || "").toLowerCase();
           const hit = STRIP_COLS.find((c) => em.includes(c) && c in payload);

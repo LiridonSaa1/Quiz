@@ -102,6 +102,14 @@ Set these in Replit Secrets:
 - **`migrations/010_chat_sender_denorm.sql`** — adds `sender_display_name`, `sender_avatar_url` to `session_chat_messages`
 - **`migrations/011_extra_indexes.sql`** — adds indexes on `quiz_attempts(student_id,status)`, `notifications(user_id,read)`, `profiles(status)`, `profiles(role,status)`, `profiles(created_at)`, `courses(status)`, `classes(status)`
 
+## Assignment Email Notifications
+When a teacher (or admin, via the same `/api/teacher/assignments` endpoint) creates an assignment linked to a class, every active student in that class is automatically emailed (Albanian template) about the new assignment — title, course, due date, max score, description, and a login link.
+
+- **Trigger**: `POST /api/teacher/assignments` — fire-and-forget call to `notifyClassOfNewAssignment()` in `server.ts` right after the assignment row is inserted (both the `poolQuery` and `supabaseAdmin` fallback paths). Never blocks or fails the API response — errors are only logged.
+- **Recipient resolution**: `resolveClassStudentProfiles()` reuses the same fallback chain as `GET /api/teacher/classes/students`: `classes.student_ids` → `courses.student_ids` (via `class.course_id`) → students linked to the teacher via `profiles.teacher_id`. Only active students with an email are emailed.
+- **Requires** `BREVO_API_KEY` / `BREVO_SENDER_EMAIL` configured (`isEmailConfigured()`); silently skipped if email isn't set up, or if the assignment has no `class_id`.
+- **Template**: `renderAssignmentEmail()` in `src/lib/email.ts`.
+
 ## Notes
 - Port 5000 is used for both frontend and backend (Express serves Vite middleware)
 - Vite is configured with `allowedHosts: true` for Replit proxy compatibility

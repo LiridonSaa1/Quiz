@@ -6,7 +6,7 @@ import jwt from "jsonwebtoken";
 import { isMissingCoursesStudentIdsError } from "./src/lib/schemaErrors.js";
 import { canAccessTeacherCourses, isAdmin, isAdminSeedAllowed } from "./src/lib/routeAuth.js";
 import { generateFixSuggestion } from "./src/lib/ai/generateFixSuggestion.js";
-import { isEmailConfigured, sendEmail, renderVerificationEmail, renderCredentialEmail, renderInvoiceEmail, renderPaymentReminderEmail } from "./src/lib/email.js";
+import { isEmailConfigured, sendEmail, renderVerificationEmail, renderCredentialEmail, renderInvoiceEmail, renderPaymentReminderEmail, renderAssignmentEmail } from "./src/lib/email.js";
 import { notifyEvent, type NotifyContext, type NotifyEventKey } from "./src/lib/notifyEvents.js";
 import { HEADWAY_FULL_DATA, buildUnitQuestions as buildHwUnitQuestions, type HUnit } from "./src/lib/headwayData.js";
 import { getQuestionsForSection, getTopicsForLevel, HEADWAY_QUESTIONS } from "./src/lib/headwayQuestions.js";
@@ -2104,6 +2104,130 @@ When giving instructions, number each step clearly. Be precise and technical whe
     });
 
     return [...candidates];
+  };
+
+  /**
+   * Resolve the active student profiles (id, email, display_name) enrolled in a class.
+   * Mirrors the resolution order used by GET /api/teacher/classes/students:
+   * classes.student_ids -> courses.student_ids (via class.course_id) -> profiles.teacher_id fallback.
+   */
+  const resolveClassStudentProfiles = async (
+    classId: string,
+    teacherId?: string,
+  ): Promise<Array<{ id: string; email: string; display_name: string | null }>> => {
+    if (!classId) return [];
+    const { data: classRow, error: classErr } = await supabaseAdmin
+      .from('classes')
+      .select('id, student_ids, course_id, teacher_id')
+      .eq('id', classId)
+      .maybeSingle();
+    if (classErr || !classRow) return [];
+
+    let ids: string[] = Array.isArray((classRow as any).student_ids)
+      ? ((classRow as any).student_ids as unknown[]).map(String).filter(Boolean)
+      : [];
+
+    if (ids.length === 0 && (classRow as any).course_id) {
+      const { data: courseRow } = await supabaseAdmin
+        .from('courses')
+        .select('id, student_ids')
+        .eq('id', (classRow as any).course_id)
+        .maybeSingle();
+      if (courseRow && Array.isArray((courseRow as any).student_ids)) {
+        ids = ((courseRow as any).student_ids as unknown[]).map(String).filter(Boolean);
+      }
+    }
+
+    if (ids.length === 0) {
+      const fallbackTeacherId = teacherId || (classRow as any).teacher_id;
+      if (fallbackTeacherId) {
+        const teacherIdCandidates = await getTeacherIdCandidates(fallbackTeacherId).catch(() => [fallbackTeacherId]);
+        const { data: linkedProfiles } = await supabaseAdmin
+          .from('profiles')
+          .select('id')
+          .in('teacher_id', teacherIdCandidates)
+          .eq('role', 'student');
+        ids = (linkedProfiles || []).map((p: any) => String(p.id));
+      }
+    }
+
+    if (ids.length === 0) return [];
+
+    const { data: students, error: studentsErr } = await supabaseAdmin
+      .from('profiles')
+      .select('id, email, display_name, status')
+      .in('id', ids)
+      .eq('role', 'student');
+    if (studentsErr || !students) return [];
+
+    return students
+      .filter((s: any) => s.email && s.status !== 'inactive')
+      .map((s: any) => ({ id: String(s.id), email: String(s.email), display_name: s.display_name || null }));
+  };
+
+  /**
+   * Fire-and-forget: email every active student in a class when a teacher creates
+   * a new assignment for that class. Never throws — failures are logged only.
+   */
+  const notifyClassOfNewAssignment = async (opts: {
+    classId?: string | null;
+    courseId?: string | null;
+    teacherId?: string | null;
+    title: string;
+    description?: string | null;
+    dueDate?: string | null;
+    maxScore?: number | null;
+  }) => {
+    try {
+      if (!opts.classId) return;
+      if (!isEmailConfigured()) return;
+
+      const students = await resolveClassStudentProfiles(opts.classId, opts.teacherId || undefined);
+      if (students.length === 0) return;
+
+      let brandName = 'QuizMaster';
+      let baseUrl = process.env.REPLIT_DEV_DOMAIN
+        ? `https://${process.env.REPLIT_DEV_DOMAIN}`
+        : 'http://localhost:5000';
+      try {
+        const cfgRes = await supabaseAdmin.from('platform_config').select('value').eq('section', 'settings').maybeSingle();
+        const settings: any = cfgRes.data?.value ?? {};
+        if (settings?.general?.school_name) brandName = settings.general.school_name;
+        if (!process.env.REPLIT_DEV_DOMAIN && settings?.general?.website) baseUrl = settings.general.website;
+      } catch { /* use defaults */ }
+      const loginUrl = `${baseUrl}/login`;
+
+      let className: string | null = null;
+      let courseName: string | null = null;
+      const [classRes, courseRes] = await Promise.all([
+        supabaseAdmin.from('classes').select('name').eq('id', opts.classId).maybeSingle(),
+        opts.courseId
+          ? supabaseAdmin.from('courses').select('title').eq('id', opts.courseId).maybeSingle()
+          : Promise.resolve({ data: null } as any),
+      ]);
+      className = (classRes as any)?.data?.name || null;
+      courseName = (courseRes as any)?.data?.title || null;
+
+      const emailPromises = students.map(student => {
+        const tpl = renderAssignmentEmail({
+          studentName: student.display_name || student.email,
+          title: opts.title,
+          description: opts.description,
+          courseName,
+          className,
+          dueDate: opts.dueDate,
+          maxScore: opts.maxScore,
+          brandName,
+          loginUrl,
+        });
+        return sendEmail({ to: student.email, toName: student.display_name || student.email, subject: tpl.subject, htmlContent: tpl.htmlContent, textContent: tpl.textContent })
+          .catch(err => console.error(`[assignments] Failed to email ${student.email}:`, err?.message || err));
+      });
+      await Promise.allSettled(emailPromises);
+      console.log(`[assignments] Sent new-assignment email to ${students.length} student(s) in class ${opts.classId}`);
+    } catch (err: any) {
+      console.error('[assignments] notifyClassOfNewAssignment failed:', err?.message || err);
+    }
   };
 
   /**
@@ -16642,7 +16766,17 @@ Content:\n"""${clipped}"""`;
             publishAt,
           ]
         );
-        return res.json({ success: true, assignment: { id: result.rows[0].id } });
+        const newId = result.rows[0].id;
+        notifyClassOfNewAssignment({
+          classId: b.class_id ? String(b.class_id) : null,
+          courseId: b.course_id ? String(b.course_id) : null,
+          teacherId: b.teacher_id ? String(b.teacher_id) : caller.userId,
+          title: String(b.title),
+          description: b.description != null ? String(b.description) : null,
+          dueDate: b.due_date ? String(b.due_date) : null,
+          maxScore: Number(b.max_score) || 100,
+        });
+        return res.json({ success: true, assignment: { id: newId } });
       } catch {
         // poolQuery unavailable — fall back to supabaseAdmin with column-strip retry loop
         const now = new Date().toISOString();
@@ -16662,7 +16796,18 @@ Content:\n"""${clipped}"""`;
         const STRIP_COLS = ['publish_at', 'allow_late_submission', 'instructions', 'submission_config'];
         for (let i = 0; i < STRIP_COLS.length + 2; i++) {
           const { data, error } = await supabaseAdmin.from('assignments').insert(payload).select('id').single();
-          if (!error && data?.id) return res.json({ success: true, assignment: { id: data.id } });
+          if (!error && data?.id) {
+            notifyClassOfNewAssignment({
+              classId: b.class_id ? String(b.class_id) : null,
+              courseId: b.course_id ? String(b.course_id) : null,
+              teacherId: b.teacher_id ? String(b.teacher_id) : caller.userId,
+              title: String(b.title),
+              description: b.description != null ? String(b.description) : null,
+              dueDate: b.due_date ? String(b.due_date) : null,
+              maxScore: Number(b.max_score) || 100,
+            });
+            return res.json({ success: true, assignment: { id: data.id } });
+          }
           if (!error) return res.status(500).json({ error: 'Insert returned no id' });
           const em = (error.message || '').toLowerCase();
           const hit = STRIP_COLS.find(c => em.includes(c) && c in payload);
