@@ -336,7 +336,10 @@ export default function TeacherLayout({ children }: { children: React.ReactNode 
   const headerL = collapsed ? 'lg:left-16' : 'lg:left-60';
 
   return (
-    <div className="min-h-screen bg-slate-50 flex overflow-x-hidden">
+    <div
+      className="min-h-screen bg-slate-50 flex overflow-x-hidden"
+      style={{ '--sidebar-offset': collapsed ? '4rem' : '15rem' } as React.CSSProperties}
+    >
 
       {/* ── Desktop Sidebar ── */}
       <aside className={cn(

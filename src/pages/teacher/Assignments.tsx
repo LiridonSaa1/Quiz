@@ -189,7 +189,11 @@ function SubmissionsPanel({ assignment, onClose }: { assignment: Assignment; onC
   const late = submissions.filter(s => s.is_late).length;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm" onClick={onClose}>
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm"
+      style={{ left: 'var(--sidebar-offset, 0)' } as React.CSSProperties}
+      onClick={onClose}
+    >
       <motion.div
         initial={{ opacity: 0, scale: 0.96, y: 12 }}
         animate={{ opacity: 1, scale: 1, y: 0 }}
