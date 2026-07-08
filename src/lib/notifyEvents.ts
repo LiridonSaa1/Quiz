@@ -19,6 +19,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 export type NotifyEventKey =
   | "newEnrollment"
   | "quizSubmitted"
+  | "assignmentSubmitted"
   | "certificateIssued"
   | "paymentReceived"
   | "maintenanceAlert"
@@ -36,6 +37,10 @@ export interface NotifyContext {
   score?: number;
   totalPoints?: number;
   passed?: boolean;
+  assignmentId?: string;
+  assignmentTitle?: string;
+  submissionId?: string;
+  isLateSubmission?: boolean;
   certificateId?: string;
   certificateNumber?: string;
   paymentId?: string;
@@ -61,6 +66,7 @@ type Role = "student" | "teacher" | "admin";
 const RECIPIENTS: Record<NotifyEventKey, Record<Role, boolean>> = {
   newEnrollment:     { student: true,  teacher: true,  admin: true },
   quizSubmitted:     { student: true,  teacher: true,  admin: true },
+  assignmentSubmitted: { student: true, teacher: true, admin: true },
   certificateIssued: { student: true,  teacher: true,  admin: true },
   paymentReceived:   { student: true,  teacher: true,  admin: true },
   maintenanceAlert:  { student: false, teacher: false, admin: true },
@@ -71,6 +77,7 @@ const RECIPIENTS: Record<NotifyEventKey, Record<Role, boolean>> = {
 const TYPE_MAP: Record<NotifyEventKey, string> = {
   newEnrollment: "course",
   quizSubmitted: "quiz",
+  assignmentSubmitted: "info",
   certificateIssued: "success",
   paymentReceived: "success",
   maintenanceAlert: "warning",
@@ -81,6 +88,7 @@ const TYPE_MAP: Record<NotifyEventKey, string> = {
 export const SETTINGS_KEY: Record<NotifyEventKey, string> = {
   newEnrollment: "email_new_enrollment",
   quizSubmitted: "email_quiz_submitted",
+  assignmentSubmitted: "email_assignment_submitted",
   certificateIssued: "email_certificate_issued",
   paymentReceived: "email_payment_received",
   maintenanceAlert: "system_maintenance_alerts",
@@ -97,6 +105,11 @@ const ACTION_URLS: Record<NotifyEventKey, Record<Role, string>> = {
     student: "/student/results",
     teacher: "/teacher/quizzes",
     admin:   "/admin/quizzes",
+  },
+  assignmentSubmitted: {
+    student: "/student/assignments",
+    teacher: "/teacher/assignments",
+    admin:   "/admin/assignments",
   },
   certificateIssued: {
     student: "/student/certificates",
@@ -175,6 +188,27 @@ function renderContent(role: Role, event: NotifyEventKey, ctx: NotifyContext): {
       return {
         title: "Quiz submitted",
         message: `${studentName} submitted "${quizTitle}"${scoreText}.`,
+      };
+    }
+
+    case "assignmentSubmitted": {
+      const assignmentTitle = ctx.assignmentTitle || "an assignment";
+      const lateText = ctx.isLateSubmission ? " (submitted late)" : "";
+      if (role === "student") {
+        return {
+          title: "Assignment submitted",
+          message: `Your submission for "${assignmentTitle}"${lateText} was received.`,
+        };
+      }
+      if (role === "teacher") {
+        return {
+          title: "New assignment submission",
+          message: `${studentName} submitted "${assignmentTitle}"${lateText}.`,
+        };
+      }
+      return {
+        title: "Assignment submitted",
+        message: `${studentName} submitted "${assignmentTitle}"${lateText}.`,
       };
     }
 

@@ -16530,20 +16530,20 @@ Content:\n"""${clipped}"""`;
       let assignment: any = null;
       try {
         const r = await poolQuery(
-          `SELECT id, due_date, allow_late_submission, status FROM assignments WHERE id=$1`,
+          `SELECT id, due_date, allow_late_submission, status, teacher_id, title FROM assignments WHERE id=$1`,
           [assignmentId]
         );
         if (r.rows[0]) assignment = r.rows[0];
       } catch {
         const { data: aFull } = await supabaseAdmin
           .from('assignments')
-          .select('id, due_date, allow_late_submission, status')
+          .select('id, due_date, allow_late_submission, status, teacher_id, title')
           .eq('id', assignmentId)
           .maybeSingle();
         if (aFull) assignment = aFull;
         else {
           const { data: aBasic } = await supabaseAdmin
-            .from('assignments').select('id, due_date, status').eq('id', assignmentId).maybeSingle();
+            .from('assignments').select('id, due_date, status, teacher_id, title').eq('id', assignmentId).maybeSingle();
           if (aBasic) assignment = { ...aBasic, allow_late_submission: false };
         }
       }
@@ -16614,6 +16614,15 @@ Content:\n"""${clipped}"""`;
           rowData = r.rows[0];
         }
       }
+
+      void dispatchNotifyEvent('assignmentSubmitted', {
+        studentId: caller.userId,
+        teacherId: assignment.teacher_id ? String(assignment.teacher_id) : undefined,
+        assignmentId: String(assignmentId),
+        assignmentTitle: assignment.title || undefined,
+        submissionId: rowData?.id ? String(rowData.id) : undefined,
+        isLateSubmission: isLate,
+      });
 
       return res.json({ success: true, submission: rowData });
     } catch (e: any) {

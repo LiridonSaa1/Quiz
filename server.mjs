@@ -606,6 +606,7 @@ function renderPaymentReminderEmail(opts) {
 var RECIPIENTS = {
   newEnrollment: { student: true, teacher: true, admin: true },
   quizSubmitted: { student: true, teacher: true, admin: true },
+  assignmentSubmitted: { student: true, teacher: true, admin: true },
   certificateIssued: { student: true, teacher: true, admin: true },
   paymentReceived: { student: true, teacher: true, admin: true },
   maintenanceAlert: { student: false, teacher: false, admin: true },
@@ -614,6 +615,7 @@ var RECIPIENTS = {
 var TYPE_MAP = {
   newEnrollment: "course",
   quizSubmitted: "quiz",
+  assignmentSubmitted: "info",
   certificateIssued: "success",
   paymentReceived: "success",
   maintenanceAlert: "warning",
@@ -622,6 +624,7 @@ var TYPE_MAP = {
 var SETTINGS_KEY = {
   newEnrollment: "email_new_enrollment",
   quizSubmitted: "email_quiz_submitted",
+  assignmentSubmitted: "email_assignment_submitted",
   certificateIssued: "email_certificate_issued",
   paymentReceived: "email_payment_received",
   maintenanceAlert: "system_maintenance_alerts",
@@ -637,6 +640,11 @@ var ACTION_URLS = {
     student: "/student/results",
     teacher: "/teacher/quizzes",
     admin: "/admin/quizzes"
+  },
+  assignmentSubmitted: {
+    student: "/student/assignments",
+    teacher: "/teacher/assignments",
+    admin: "/admin/assignments"
   },
   certificateIssued: {
     student: "/student/certificates",
@@ -709,6 +717,26 @@ function renderContent(role, event, ctx) {
       return {
         title: "Quiz submitted",
         message: `${studentName} submitted "${quizTitle}"${scoreText}.`
+      };
+    }
+    case "assignmentSubmitted": {
+      const assignmentTitle = ctx.assignmentTitle || "an assignment";
+      const lateText = ctx.isLateSubmission ? " (submitted late)" : "";
+      if (role === "student") {
+        return {
+          title: "Assignment submitted",
+          message: `Your submission for "${assignmentTitle}"${lateText} was received.`
+        };
+      }
+      if (role === "teacher") {
+        return {
+          title: "New assignment submission",
+          message: `${studentName} submitted "${assignmentTitle}"${lateText}.`
+        };
+      }
+      return {
+        title: "Assignment submitted",
+        message: `${studentName} submitted "${assignmentTitle}"${lateText}.`
       };
     }
     case "certificateIssued": {
@@ -15538,15 +15566,15 @@ ${shortContent}`;
       let assignment = null;
       try {
         const r = await poolQuery(
-          `SELECT id, due_date, allow_late_submission, status FROM assignments WHERE id=$1`,
+          `SELECT id, due_date, allow_late_submission, status, teacher_id, title FROM assignments WHERE id=$1`,
           [assignmentId]
         );
         if (r.rows[0]) assignment = r.rows[0];
       } catch {
-        const { data: aFull } = await supabaseAdmin.from("assignments").select("id, due_date, allow_late_submission, status").eq("id", assignmentId).maybeSingle();
+        const { data: aFull } = await supabaseAdmin.from("assignments").select("id, due_date, allow_late_submission, status, teacher_id, title").eq("id", assignmentId).maybeSingle();
         if (aFull) assignment = aFull;
         else {
-          const { data: aBasic } = await supabaseAdmin.from("assignments").select("id, due_date, status").eq("id", assignmentId).maybeSingle();
+          const { data: aBasic } = await supabaseAdmin.from("assignments").select("id, due_date, status, teacher_id, title").eq("id", assignmentId).maybeSingle();
           if (aBasic) assignment = { ...aBasic, allow_late_submission: false };
         }
       }
@@ -15609,6 +15637,14 @@ ${shortContent}`;
           rowData = r.rows[0];
         }
       }
+      void dispatchNotifyEvent("assignmentSubmitted", {
+        studentId: caller.userId,
+        teacherId: assignment.teacher_id ? String(assignment.teacher_id) : void 0,
+        assignmentId: String(assignmentId),
+        assignmentTitle: assignment.title || void 0,
+        submissionId: rowData?.id ? String(rowData.id) : void 0,
+        isLateSubmission: isLate
+      });
       return res.json({ success: true, submission: rowData });
     } catch (e) {
       console.error("POST /api/student/assignments/:id/submit", e.message);
