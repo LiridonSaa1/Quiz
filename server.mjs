@@ -5474,7 +5474,8 @@ Assistant:`
       preferredLanguage,
       currentLevel,
       notes,
-      classId
+      classId,
+      trialDays
     } = req.body;
     try {
       const caller = await assertAuthenticated(req, res);
@@ -5507,17 +5508,21 @@ Assistant:`
         if (authError) throw authError;
         throw new Error("Could not find or create user in Supabase Auth.");
       }
+      const trialDaysNum = Number(trialDays);
+      const hasTrial = profilesHasTrialColumns && Number.isFinite(trialDaysNum) && trialDaysNum > 0;
+      const trialEndsAt = hasTrial ? new Date(Date.now() + trialDaysNum * 24 * 60 * 60 * 1e3).toISOString() : null;
       const profilePayload = {
         id: userId,
         email,
         display_name: name,
         role: "student",
         teacher_id: resolvedTeacherId,
-        status: "active"
+        status: "active",
+        ...profilesHasTrialColumns ? { trial_days: hasTrial ? trialDaysNum : null, trial_ends_at: trialEndsAt } : {}
       };
       const { error: upsertError } = await supabaseAdmin.from("profiles").upsert(profilePayload, { onConflict: "id" });
       if (!upsertError) {
-        await supabaseAdmin.from("profiles").update({ teacher_id: resolvedTeacherId, role: "student", display_name: name, status: "active", email }).eq("id", userId);
+        await supabaseAdmin.from("profiles").update({ teacher_id: resolvedTeacherId, role: "student", display_name: name, status: "active", email, ...profilesHasTrialColumns ? { trial_days: hasTrial ? trialDaysNum : null, trial_ends_at: trialEndsAt } : {} }).eq("id", userId);
       } else {
         throw upsertError;
       }
@@ -5831,8 +5836,18 @@ Assistant:`
       if (typeof body.display_name === "string") update.display_name = body.display_name.trim();
       if (typeof body.email === "string") update.email = body.email.trim();
       if (body.status === "active" || body.status === "inactive") update.status = body.status;
+      if (profilesHasTrialColumns && body.trialDays !== void 0) {
+        const trialDaysNum = Number(body.trialDays);
+        if (Number.isFinite(trialDaysNum) && trialDaysNum > 0) {
+          update.trial_days = trialDaysNum;
+          update.trial_ends_at = new Date(Date.now() + trialDaysNum * 24 * 60 * 60 * 1e3).toISOString();
+        } else {
+          update.trial_days = null;
+          update.trial_ends_at = null;
+        }
+      }
       if (Object.keys(update).length === 0) return res.status(400).json({ error: "No valid fields to update" });
-      const { data, error } = await supabaseAdmin.from("profiles").update(update).eq("id", studentId).select("id, email, display_name, role, teacher_id, status, created_at").single();
+      const { data, error } = await supabaseAdmin.from("profiles").update(update).eq("id", studentId).select(profilesHasTrialColumns ? "id, email, display_name, role, teacher_id, status, created_at, trial_days, trial_ends_at" : "id, email, display_name, role, teacher_id, status, created_at").single();
       if (error) throw error;
       res.json({ success: true, student: data });
     } catch (e) {
@@ -9822,11 +9837,20 @@ ${e?.stack || ""}`),
       if (!token) return res.status(401).json({ error: "Unauthorized" });
       const { data: { user }, error: authErr } = await supabaseAdmin.auth.getUser(token);
       if (authErr || !user) return res.status(401).json({ error: "Unauthorized" });
-      const { data: profile } = await supabaseAdmin.from("profiles").select("role").eq("id", user.id).single();
+      const { data: profile } = await supabaseAdmin.from("profiles").select(profilesHasTrialColumns ? "role, trial_ends_at" : "role").eq("id", user.id).single();
       if (profile?.role !== "student") return res.json({ required: false, paid: true });
+      if (profilesHasTrialColumns && profile.trial_ends_at) {
+        const trialEndsAtRaw = profile.trial_ends_at;
+        const trialEnds = new Date(trialEndsAtRaw);
+        if (!Number.isNaN(trialEnds.getTime()) && trialEnds.getTime() > Date.now()) {
+          return res.json({ required: false, paid: true, trialActive: true, trialEndsAt: trialEndsAtRaw });
+        }
+      }
       const monthYear = (/* @__PURE__ */ new Date()).toISOString().slice(0, 7);
       const { data: payRow } = await supabaseAdmin.from("student_monthly_payments").select("id").eq("student_id", user.id).eq("month_year", monthYear).maybeSingle();
-      res.json({ required: true, paid: !!payRow });
+      const trialEndsAtVal = profilesHasTrialColumns ? profile.trial_ends_at : null;
+      const trialExpired = !!trialEndsAtVal && new Date(trialEndsAtVal).getTime() <= Date.now();
+      res.json({ required: true, paid: !!payRow, trialExpired, trialEndsAt: trialEndsAtVal || null });
     } catch (e) {
       res.json({ required: false, paid: true });
     }
@@ -10947,8 +10971,18 @@ ${smartUserPrompt}` });
       if (typeof body.email === "string") update.email = body.email.trim();
       if (body.status === "active" || body.status === "inactive") update.status = body.status;
       if (typeof body.teacher_id === "string" || body.teacher_id === null) update.teacher_id = body.teacher_id;
+      if (profilesHasTrialColumns && body.trialDays !== void 0) {
+        const trialDaysNum = Number(body.trialDays);
+        if (Number.isFinite(trialDaysNum) && trialDaysNum > 0) {
+          update.trial_days = trialDaysNum;
+          update.trial_ends_at = new Date(Date.now() + trialDaysNum * 24 * 60 * 60 * 1e3).toISOString();
+        } else {
+          update.trial_days = null;
+          update.trial_ends_at = null;
+        }
+      }
       if (Object.keys(update).length === 0) return res.status(400).json({ error: "No valid fields to update" });
-      const { data, error } = await supabaseAdmin.from("profiles").update(update).eq("id", studentId).select("id, email, display_name, role, teacher_id, status, created_at").single();
+      const { data, error } = await supabaseAdmin.from("profiles").update(update).eq("id", studentId).select(profilesHasTrialColumns ? "id, email, display_name, role, teacher_id, status, created_at, trial_days, trial_ends_at" : "id, email, display_name, role, teacher_id, status, created_at").single();
       if (error) throw error;
       res.json({ success: true, student: data });
     } catch (e) {
@@ -16363,6 +16397,42 @@ async function runAnnouncementColumnsMigration() {
   }
   console.log("[migration] announcements columns: will use graceful fallback in API handlers");
 }
+var profilesHasTrialColumns = false;
+async function runStudentTrialMigration() {
+  const cols = [
+    { name: "trial_days", ddl: `ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS trial_days INTEGER NULL` },
+    { name: "trial_ends_at", ddl: `ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS trial_ends_at TIMESTAMPTZ NULL` }
+  ];
+  let allOk = true;
+  for (const col of cols) {
+    try {
+      await poolQuery(col.ddl);
+      await poolQuery(`NOTIFY pgrst, 'reload schema'`).catch(() => {
+      });
+      console.log(`[migration] profiles.${col.name} column ensured \u2713`);
+      continue;
+    } catch {
+    }
+    try {
+      const probe = await supabaseAdmin.from("profiles").select(col.name).limit(1);
+      if (!probe.error) {
+        console.log(`[migration] profiles.${col.name} column already exists \u2713`);
+        continue;
+      }
+      const rpc = await supabaseAdmin.rpc("exec_sql", { sql: col.ddl });
+      if (rpc.error) throw rpc.error;
+      console.log(`[migration] profiles.${col.name} added via RPC \u2713`);
+    } catch (err) {
+      allOk = false;
+      console.warn(`[migration] profiles.${col.name} could not be auto-created:`, err?.message?.split("\n")[0]);
+      console.warn(`[migration] Run manually (see migrations/015_student_trial.sql):`, col.ddl);
+    }
+  }
+  profilesHasTrialColumns = allOk;
+  if (!allOk) {
+    console.warn("[migration] Student trial feature will be disabled until migrations/015_student_trial.sql is run manually.");
+  }
+}
 async function runStudentMonthlyPaymentsMigration() {
   const dbUrl = process.env.DATABASE_URL?.trim();
   if (!dbUrl) return;
@@ -16935,6 +17005,7 @@ async function startServer() {
   void runQuizSectionsMigration();
   void runStudentTransfersMigration();
   void runStudentMonthlyPaymentsMigration();
+  void runStudentTrialMigration();
   void runTeacherHoursMigration();
   void ensureAssignmentFilesBucket();
   void ensureHeadwayMediaBucket();

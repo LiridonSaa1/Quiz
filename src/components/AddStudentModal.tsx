@@ -21,6 +21,7 @@ interface FormData {
   preferredLanguage: string;
   currentLevel: string;
   classId: string;
+  trialDays: string;
 }
 
 interface Props {
@@ -55,6 +56,7 @@ export default function AddStudentModal({ onClose, onSuccess, accentColor = 'vio
     preferredLanguage: '',
     currentLevel: '',
     classId: '',
+    trialDays: '',
   });
   const [classes, setClasses] = useState<Array<{ id: string; name: string; capacity: number; enrolled: number }>>([]);
 
@@ -127,6 +129,7 @@ export default function AddStudentModal({ onClose, onSuccess, accentColor = 'vio
           preferredLanguage: form.preferredLanguage || undefined,
           currentLevel: form.currentLevel || undefined,
           classId: form.classId || undefined,
+          trialDays: form.trialDays ? Number(form.trialDays) : undefined,
         }),
       });
       const json = await res.json();
@@ -323,6 +326,20 @@ export default function AddStudentModal({ onClose, onSuccess, accentColor = 'vio
                 </div>
               </div>
               <div className="col-span-2">
+                <label className={labelCls}>Free trial days <span className="text-slate-300 normal-case font-normal">{t('modals.addStudent.optional')}</span></label>
+                <input
+                  type="number"
+                  min={0}
+                  value={form.trialDays}
+                  onChange={e => set('trialDays', e.target.value)}
+                  placeholder="e.g. 7"
+                  className={inputCls}
+                />
+                <p className="mt-1.5 text-[11px] text-slate-400">
+                  If set, the student can log in without payment for this many days after account creation.
+                </p>
+              </div>
+              <div className="col-span-2">
                 <label className={labelCls}>
                   {t('modals.addStudent.class')} {classes.length > 0 ? <span className="text-red-400 normal-case font-normal">*</span> : <span className="text-slate-300 normal-case font-normal">{t('modals.addStudent.optional')}</span>}
                 </label>
@@ -370,6 +387,7 @@ export default function AddStudentModal({ onClose, onSuccess, accentColor = 'vio
                   {form.preferredLanguage && <div className="flex gap-2"><span className="text-slate-400 w-28 shrink-0">{t('modals.addStudent.languageLabel')}</span><span className="font-semibold text-slate-800">{form.preferredLanguage}</span></div>}
                   {form.currentLevel && <div className="flex gap-2"><span className="text-slate-400 w-28 shrink-0">{t('modals.addStudent.levelLabel')}</span><span className="font-semibold text-slate-800">{form.currentLevel}</span></div>}
                   {form.classId && <div className="flex gap-2"><span className="text-slate-400 w-28 shrink-0">{t('modals.addStudent.classLabel')}</span><span className="font-semibold text-slate-800">{classes.find(c => c.id === form.classId)?.name || form.classId}</span></div>}
+                  {form.trialDays && <div className="flex gap-2"><span className="text-slate-400 w-28 shrink-0">Free trial</span><span className="font-semibold text-slate-800">{form.trialDays} day{Number(form.trialDays) !== 1 ? 's' : ''}</span></div>}
                 </div>
               </div>
             </div>

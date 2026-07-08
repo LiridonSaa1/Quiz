@@ -3877,7 +3877,7 @@ When giving instructions, number each step clearly. Be precise and technical whe
   app.post("/api/admin/create-student", async (req, res) => {
     const {
       name, email, password, teacherId,
-      phone, dateOfBirth, gender, preferredLanguage, currentLevel, notes, classId
+      phone, dateOfBirth, gender, preferredLanguage, currentLevel, notes, classId, trialDays
     } = req.body;
     
     try {
@@ -3924,13 +3924,20 @@ When giving instructions, number each step clearly. Be precise and technical whe
       // 2. Upsert profile — insert if new, update all key fields if the row already exists
       // (Supabase Auth may auto-create a bare profile row via trigger; the update ensures
       //  teacher_id and role are always written correctly.)
-      const profilePayload = {
+      const trialDaysNum = Number(trialDays);
+      const hasTrial = profilesHasTrialColumns && Number.isFinite(trialDaysNum) && trialDaysNum > 0;
+      const trialEndsAt = hasTrial
+        ? new Date(Date.now() + trialDaysNum * 24 * 60 * 60 * 1000).toISOString()
+        : null;
+
+      const profilePayload: Record<string, unknown> = {
         id: userId,
         email,
         display_name: name,
         role: 'student',
         teacher_id: resolvedTeacherId,
         status: 'active',
+        ...(profilesHasTrialColumns ? { trial_days: hasTrial ? trialDaysNum : null, trial_ends_at: trialEndsAt } : {}),
       };
 
       const { error: upsertError } = await supabaseAdmin
@@ -3941,7 +3948,7 @@ When giving instructions, number each step clearly. Be precise and technical whe
       if (!upsertError) {
         await supabaseAdmin
           .from('profiles')
-          .update({ teacher_id: resolvedTeacherId, role: 'student', display_name: name, status: 'active', email })
+          .update({ teacher_id: resolvedTeacherId, role: 'student', display_name: name, status: 'active', email, ...(profilesHasTrialColumns ? { trial_days: hasTrial ? trialDaysNum : null, trial_ends_at: trialEndsAt } : {}) })
           .eq('id', userId);
       } else {
         throw upsertError;
@@ -4377,13 +4384,25 @@ When giving instructions, number each step clearly. Be precise and technical whe
       if (typeof body.display_name === 'string') update.display_name = body.display_name.trim();
       if (typeof body.email === 'string') update.email = body.email.trim();
       if (body.status === 'active' || body.status === 'inactive') update.status = body.status;
+      if (profilesHasTrialColumns && body.trialDays !== undefined) {
+        const trialDaysNum = Number(body.trialDays);
+        if (Number.isFinite(trialDaysNum) && trialDaysNum > 0) {
+          update.trial_days = trialDaysNum;
+          update.trial_ends_at = new Date(Date.now() + trialDaysNum * 24 * 60 * 60 * 1000).toISOString();
+        } else {
+          update.trial_days = null;
+          update.trial_ends_at = null;
+        }
+      }
       if (Object.keys(update).length === 0) return res.status(400).json({ error: 'No valid fields to update' });
 
       const { data, error } = await supabaseAdmin
         .from('profiles')
         .update(update)
         .eq('id', studentId)
-        .select('id, email, display_name, role, teacher_id, status, created_at')
+        .select(profilesHasTrialColumns
+          ? 'id, email, display_name, role, teacher_id, status, created_at, trial_days, trial_ends_at'
+          : 'id, email, display_name, role, teacher_id, status, created_at')
         .single();
       if (error) throw error;
       res.json({ success: true, student: data });
@@ -9422,8 +9441,21 @@ Rules:
       const { data: { user }, error: authErr } = await supabaseAdmin.auth.getUser(token);
       if (authErr || !user) return res.status(401).json({ error: 'Unauthorized' });
 
-      const { data: profile } = await supabaseAdmin.from('profiles').select('role').eq('id', user.id).single();
+      const { data: profile } = await supabaseAdmin
+        .from('profiles')
+        .select(profilesHasTrialColumns ? 'role, trial_ends_at' : 'role')
+        .eq('id', user.id)
+        .single();
       if (profile?.role !== 'student') return res.json({ required: false, paid: true });
+
+      // Free trial period: while trial is active, skip the payment requirement entirely.
+      if (profilesHasTrialColumns && (profile as any).trial_ends_at) {
+        const trialEndsAtRaw = (profile as any).trial_ends_at;
+        const trialEnds = new Date(trialEndsAtRaw);
+        if (!Number.isNaN(trialEnds.getTime()) && trialEnds.getTime() > Date.now()) {
+          return res.json({ required: false, paid: true, trialActive: true, trialEndsAt: trialEndsAtRaw });
+        }
+      }
 
       const monthYear = new Date().toISOString().slice(0, 7);
       const { data: payRow } = await supabaseAdmin
@@ -9433,7 +9465,9 @@ Rules:
         .eq('month_year', monthYear)
         .maybeSingle();
 
-      res.json({ required: true, paid: !!payRow });
+      const trialEndsAtVal = profilesHasTrialColumns ? (profile as any).trial_ends_at : null;
+      const trialExpired = !!trialEndsAtVal && new Date(trialEndsAtVal).getTime() <= Date.now();
+      res.json({ required: true, paid: !!payRow, trialExpired, trialEndsAt: trialEndsAtVal || null });
     } catch (e: any) {
       res.json({ required: false, paid: true });
     }
@@ -10762,13 +10796,25 @@ Content:\n"""${clipped}"""`;
       if (typeof body.email === 'string') update.email = body.email.trim();
       if (body.status === 'active' || body.status === 'inactive') update.status = body.status;
       if (typeof body.teacher_id === 'string' || body.teacher_id === null) update.teacher_id = body.teacher_id;
+      if (profilesHasTrialColumns && body.trialDays !== undefined) {
+        const trialDaysNum = Number(body.trialDays);
+        if (Number.isFinite(trialDaysNum) && trialDaysNum > 0) {
+          update.trial_days = trialDaysNum;
+          update.trial_ends_at = new Date(Date.now() + trialDaysNum * 24 * 60 * 60 * 1000).toISOString();
+        } else {
+          update.trial_days = null;
+          update.trial_ends_at = null;
+        }
+      }
       if (Object.keys(update).length === 0) return res.status(400).json({ error: 'No valid fields to update' });
 
       const { data, error } = await supabaseAdmin
         .from('profiles')
         .update(update)
         .eq('id', studentId)
-        .select('id, email, display_name, role, teacher_id, status, created_at')
+        .select(profilesHasTrialColumns
+          ? 'id, email, display_name, role, teacher_id, status, created_at, trial_days, trial_ends_at'
+          : 'id, email, display_name, role, teacher_id, status, created_at')
         .single();
       if (error) throw error;
       res.json({ success: true, student: data });
@@ -17414,6 +17460,43 @@ async function runAnnouncementColumnsMigration(): Promise<void> {
   console.log('[migration] announcements columns: will use graceful fallback in API handlers');
 }
 
+// ─── Student Trial Period Migration ──────────────────────────────────────────
+let profilesHasTrialColumns = false;
+
+async function runStudentTrialMigration(): Promise<void> {
+  const cols: Array<{ name: string; ddl: string }> = [
+    { name: 'trial_days', ddl: `ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS trial_days INTEGER NULL` },
+    { name: 'trial_ends_at', ddl: `ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS trial_ends_at TIMESTAMPTZ NULL` },
+  ];
+  let allOk = true;
+  for (const col of cols) {
+    try {
+      await poolQuery(col.ddl);
+      await poolQuery(`NOTIFY pgrst, 'reload schema'`).catch(() => {});
+      console.log(`[migration] profiles.${col.name} column ensured ✓`);
+      continue;
+    } catch { /* fall through to supabase probe/RPC */ }
+    try {
+      const probe = await supabaseAdmin.from('profiles').select(col.name).limit(1);
+      if (!probe.error) {
+        console.log(`[migration] profiles.${col.name} column already exists ✓`);
+        continue;
+      }
+      const rpc = await (supabaseAdmin as any).rpc('exec_sql', { sql: col.ddl });
+      if (rpc.error) throw rpc.error;
+      console.log(`[migration] profiles.${col.name} added via RPC ✓`);
+    } catch (err: any) {
+      allOk = false;
+      console.warn(`[migration] profiles.${col.name} could not be auto-created:`, err?.message?.split('\n')[0]);
+      console.warn(`[migration] Run manually (see migrations/015_student_trial.sql):`, col.ddl);
+    }
+  }
+  profilesHasTrialColumns = allOk;
+  if (!allOk) {
+    console.warn('[migration] Student trial feature will be disabled until migrations/015_student_trial.sql is run manually.');
+  }
+}
+
 // ─── Student Monthly Payments Migration ──────────────────────────────────────
 async function runStudentMonthlyPaymentsMigration() {
   const dbUrl = process.env.DATABASE_URL?.trim();
@@ -18048,6 +18131,7 @@ async function startServer() {
   void runQuizSectionsMigration();
   void runStudentTransfersMigration();
   void runStudentMonthlyPaymentsMigration();
+  void runStudentTrialMigration();
   void runTeacherHoursMigration();
   void ensureAssignmentFilesBucket();
   void ensureHeadwayMediaBucket();

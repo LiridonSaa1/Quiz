@@ -120,6 +120,14 @@ This is a full-stack app (Express backend + React frontend). Do NOT deploy as a 
 
 **Why the Express server works:** `scripts/start-dev.mjs` uses esbuild to bundle `server.ts` (very fast, low memory), then runs the Express server which handles all `/api/*` routes AND serves the React frontend via Vite middleware — no separate build step needed.
 
+## Student Free Trial Period
+Teachers/admins can grant a new student N free trial days when creating their account. While the trial is active, the student can log in without needing a monthly payment on record; once it expires, login is blocked exactly like the existing unpaid-month gate (until a payment or a new trial is set).
+
+- **Create**: `AddStudentModal.tsx` has an optional "Free trial days" field → sent as `trialDays` to `POST /api/admin/create-student`, which computes `trial_ends_at = now + trialDays` on the `profiles` row.
+- **Edit**: `PATCH /api/admin/students/:id` and `PATCH /api/teacher/students/:id` accept `trialDays` to set/replace/clear (`0` or omitted-with-falsy clears) the trial.
+- **Login gate**: `GET /api/auth/check-student-payment` returns `trialActive: true` (skips payment check) while `trial_ends_at` is in the future; once past, `trialExpired: true` is returned and `Login.tsx` shows an Albanian "trial ended" message instead of the generic unpaid message.
+- **Required manual DB step**: this Supabase project has no `exec_sql` RPC function, so the server cannot auto-add columns to `profiles` (same limitation as the existing `quiz_sections` migration). Run `migrations/015_student_trial.sql` once in the Supabase SQL editor to add `trial_days` / `trial_ends_at` to `profiles`. Until that's done, the server logs `[migration] Student trial feature will be disabled until migrations/015_student_trial.sql is run manually` at startup and the trial UI/logic is a no-op (create-student ignores `trialDays`, check-student-payment falls back to the normal monthly-payment gate).
+
 ## Two-Factor Authentication (2FA)
 Per-role 2FA toggle in `/admin/settings` → Security tab. Admin can enable separately for Student / Teacher / Admin.
 

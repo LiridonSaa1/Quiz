@@ -185,7 +185,9 @@ export default function Login() {
             if (paymentJson.required && !paymentJson.paid) {
               await supabase.auth.signOut();
               toast.error(
-                'Nuk mund të identifikoheni. Nuk keni bërë pagesën e muajit. Ju lutemi kontaktoni mësuesin tuaj.',
+                paymentJson.trialExpired
+                  ? 'Periudha juaj e provës falas ka përfunduar. Ju lutemi kontaktoni mësuesin tuaj për të vazhduar.'
+                  : 'Nuk mund të identifikoheni. Nuk keni bërë pagesën e muajit. Ju lutemi kontaktoni mësuesin tuaj.',
                 { id: 'payment-required', duration: 8000 }
               );
               return;
