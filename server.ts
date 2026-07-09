@@ -4047,19 +4047,11 @@ When giving instructions, number each step clearly. Be precise and technical whe
       let userId = authData.user?.id;
 
       if (!userId) {
-        const { data: usersData, error: listError } = await supabaseAdmin.auth.admin.listUsers();
+        // createUser failed (e.g. email already registered) — find the existing user
+        const { data: usersData, error: listError } = await supabaseAdmin.auth.admin.listUsers({ perPage: 1000 });
         if (!listError) {
-          const existingUser = usersData.users.find((u: any) => u.email === email);
-          if (existingUser) {
-            userId = existingUser.id;
-            // Update BOTH password and metadata so the credentials in the email are valid
-            const { error: pwUpdateError } = await supabaseAdmin.auth.admin.updateUserById(userId, {
-              password,
-              email_confirm: true,
-              user_metadata: { displayName: name, role: 'student' }
-            });
-            if (pwUpdateError) throw new Error(`Could not update password for existing user: ${pwUpdateError.message}`);
-          }
+          const existingUser = usersData.users.find((u: any) => u.email?.toLowerCase() === email.toLowerCase());
+          if (existingUser) userId = existingUser.id;
         }
       }
 
@@ -4067,6 +4059,17 @@ When giving instructions, number each step clearly. Be precise and technical whe
         if (authError) throw authError;
         throw new Error("Could not find or create user in Supabase Auth.");
       }
+
+      // Always force-set password + confirm email regardless of whether user is new or existed.
+      // Supabase createUser sets the password for truly new users, but when it returns an
+      // existing user's id (email already registered), the password is NOT updated.
+      // Calling updateUserById here covers both cases safely.
+      const { error: pwSetError } = await supabaseAdmin.auth.admin.updateUserById(userId, {
+        password,
+        email_confirm: true,
+        user_metadata: { displayName: name, role: 'student' }
+      });
+      if (pwSetError) throw new Error(`Could not set password: ${pwSetError.message}`);
 
       // 2. Upsert profile — insert if new, update all key fields if the row already exists
       // (Supabase Auth may auto-create a bare profile row via trigger; the update ensures

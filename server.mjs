@@ -5875,24 +5875,22 @@ Assistant:`
       });
       let userId = authData.user?.id;
       if (!userId) {
-        const { data: usersData, error: listError } = await supabaseAdmin.auth.admin.listUsers();
+        const { data: usersData, error: listError } = await supabaseAdmin.auth.admin.listUsers({ perPage: 1e3 });
         if (!listError) {
-          const existingUser = usersData.users.find((u) => u.email === email);
-          if (existingUser) {
-            userId = existingUser.id;
-            const { error: pwUpdateError } = await supabaseAdmin.auth.admin.updateUserById(userId, {
-              password,
-              email_confirm: true,
-              user_metadata: { displayName: name, role: "student" }
-            });
-            if (pwUpdateError) throw new Error(`Could not update password for existing user: ${pwUpdateError.message}`);
-          }
+          const existingUser = usersData.users.find((u) => u.email?.toLowerCase() === email.toLowerCase());
+          if (existingUser) userId = existingUser.id;
         }
       }
       if (!userId) {
         if (authError) throw authError;
         throw new Error("Could not find or create user in Supabase Auth.");
       }
+      const { error: pwSetError } = await supabaseAdmin.auth.admin.updateUserById(userId, {
+        password,
+        email_confirm: true,
+        user_metadata: { displayName: name, role: "student" }
+      });
+      if (pwSetError) throw new Error(`Could not set password: ${pwSetError.message}`);
       const trialDaysNum = Number(trialDays);
       const hasTrial = profilesHasTrialColumns && Number.isFinite(trialDaysNum) && trialDaysNum > 0;
       const trialEndsAt = hasTrial ? new Date(Date.now() + trialDaysNum * 24 * 60 * 60 * 1e3).toISOString() : null;
