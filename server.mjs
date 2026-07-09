@@ -5874,11 +5874,17 @@ Assistant:`
         user_metadata: { displayName: name, role: "student" }
       });
       let userId = authData.user?.id;
+      console.log(`[create-student] createUser \u2192 userId=${userId ?? "null"} error=${authError?.message ?? "none"}`);
       if (!userId) {
         const { data: usersData, error: listError } = await supabaseAdmin.auth.admin.listUsers({ perPage: 1e3 });
         if (!listError) {
           const existingUser = usersData.users.find((u) => u.email?.toLowerCase() === email.toLowerCase());
-          if (existingUser) userId = existingUser.id;
+          if (existingUser) {
+            userId = existingUser.id;
+            console.log(`[create-student] found existing user \u2192 userId=${userId}`);
+          }
+        } else {
+          console.warn(`[create-student] listUsers error: ${listError.message}`);
         }
       }
       if (!userId) {
@@ -5890,6 +5896,7 @@ Assistant:`
         email_confirm: true,
         user_metadata: { displayName: name, role: "student" }
       });
+      console.log(`[create-student] updateUserById (password) \u2192 error=${pwSetError?.message ?? "none"}`);
       if (pwSetError) throw new Error(`Could not set password: ${pwSetError.message}`);
       const trialDaysNum = Number(trialDays);
       const hasTrial = profilesHasTrialColumns && Number.isFinite(trialDaysNum) && trialDaysNum > 0;

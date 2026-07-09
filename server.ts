@@ -4045,13 +4045,19 @@ When giving instructions, number each step clearly. Be precise and technical whe
       });
 
       let userId = authData.user?.id;
+      console.log(`[create-student] createUser → userId=${userId ?? 'null'} error=${authError?.message ?? 'none'}`);
 
       if (!userId) {
         // createUser failed (e.g. email already registered) — find the existing user
         const { data: usersData, error: listError } = await supabaseAdmin.auth.admin.listUsers({ perPage: 1000 });
         if (!listError) {
           const existingUser = usersData.users.find((u: any) => u.email?.toLowerCase() === email.toLowerCase());
-          if (existingUser) userId = existingUser.id;
+          if (existingUser) {
+            userId = existingUser.id;
+            console.log(`[create-student] found existing user → userId=${userId}`);
+          }
+        } else {
+          console.warn(`[create-student] listUsers error: ${listError.message}`);
         }
       }
 
@@ -4069,6 +4075,7 @@ When giving instructions, number each step clearly. Be precise and technical whe
         email_confirm: true,
         user_metadata: { displayName: name, role: 'student' }
       });
+      console.log(`[create-student] updateUserById (password) → error=${pwSetError?.message ?? 'none'}`);
       if (pwSetError) throw new Error(`Could not set password: ${pwSetError.message}`);
 
       // 2. Upsert profile — insert if new, update all key fields if the row already exists
