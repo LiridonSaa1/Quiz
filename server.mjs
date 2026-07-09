@@ -4637,9 +4637,29 @@ Assistant:`
   };
   const notifyClassOfNewAssignment = async (opts) => {
     try {
-      if (!opts.classId) return;
-      if (!isEmailConfigured()) return;
-      const students = await resolveClassStudentProfiles(opts.classId, opts.teacherId || void 0);
+      let students = [];
+      if (opts.classId) {
+        students = await resolveClassStudentProfiles(opts.classId, opts.teacherId || void 0);
+      } else if (opts.courseId) {
+        let ids = [];
+        const { data: courseRow } = await supabaseAdmin.from("courses").select("id, student_ids").eq("id", opts.courseId).maybeSingle();
+        if (courseRow && Array.isArray(courseRow.student_ids)) {
+          ids = courseRow.student_ids.map(String).filter(Boolean);
+        }
+        if (ids.length === 0 && opts.teacherId) {
+          const teacherIdCandidates = await getTeacherIdCandidates(opts.teacherId).catch(() => [opts.teacherId]);
+          const { data: linkedProfiles } = await supabaseAdmin.from("profiles").select("id").in("teacher_id", teacherIdCandidates).eq("role", "student");
+          ids = (linkedProfiles || []).map((p) => String(p.id));
+        }
+        if (ids.length > 0) {
+          const { data: sRows } = await supabaseAdmin.from("profiles").select("id, email, display_name, status").in("id", ids).eq("role", "student");
+          students = (sRows || []).filter((s) => s.email && s.status !== "inactive").map((s) => ({ id: String(s.id), email: String(s.email), display_name: s.display_name || null }));
+        }
+      } else if (opts.teacherId) {
+        const teacherIdCandidates = await getTeacherIdCandidates(opts.teacherId).catch(() => [opts.teacherId]);
+        const { data: sRows } = await supabaseAdmin.from("profiles").select("id, email, display_name, status").in("teacher_id", teacherIdCandidates).eq("role", "student");
+        students = (sRows || []).filter((s) => s.email && s.status !== "inactive").map((s) => ({ id: String(s.id), email: String(s.email), display_name: s.display_name || null }));
+      }
       if (students.length === 0) return;
       let brandName = "QuizMaster";
       let baseUrl = process.env.REPLIT_DEV_DOMAIN ? `https://${process.env.REPLIT_DEV_DOMAIN}` : "http://localhost:5000";
