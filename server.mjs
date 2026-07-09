@@ -324,7 +324,7 @@ async function sendEmail(msg, override) {
 function renderCredentialEmail(opts) {
   const brand = (opts.brandName || "QuizMaster").trim();
   const isTeacher2 = opts.role === "teacher";
-  const subject = isTeacher2 ? `Ftes\xEB p\xEBr akses n\xEB ${brand}` : `Llogaria juaj n\xEB ${brand} \xEBsht\xEB krijuar`;
+  const subject2 = isTeacher2 ? `Ftes\xEB p\xEBr akses n\xEB ${brand}` : `Llogaria juaj n\xEB ${brand} \xEBsht\xEB krijuar`;
   const roleLabel = isTeacher2 ? "m\xEBsues" : "student";
   const accentColor = isTeacher2 ? "#6366f1" : "#10b981";
   const greeting = isTeacher2 ? `Ju jeni ftuar si <strong>${roleLabel}</strong> n\xEB platform\xEBn <strong>${brand}</strong>.` : `Llogaria juaj si <strong>${roleLabel}</strong> n\xEB platform\xEBn <strong>${brand}</strong> \xEBsht\xEB krijuar me sukses.`;
@@ -393,11 +393,11 @@ function renderCredentialEmail(opts) {
   </table>
 </body>
 </html>`;
-  return { subject, htmlContent, textContent };
+  return { subject: subject2, htmlContent, textContent };
 }
 function renderInvoiceEmail(opts) {
   const brand = (opts.brandName || "QuizMaster").trim();
-  const subject = `Fatur\xEB pagese \u2014 ${opts.monthLabel} | ${brand}`;
+  const subject2 = `Fatur\xEB pagese \u2014 ${opts.monthLabel} | ${brand}`;
   const amountStr = opts.amount > 0 ? `\u20AC${opts.amount.toFixed(2)}` : "\u2014";
   let dateStr = opts.paidAt.slice(0, 10);
   try {
@@ -462,13 +462,13 @@ function renderInvoiceEmail(opts) {
   </table>
 </body>
 </html>`;
-  return { subject, htmlContent, textContent };
+  return { subject: subject2, htmlContent, textContent };
 }
 function renderAssignmentEmail(opts) {
   const brand = (opts.brandName || "QuizMaster").trim();
   const lang = opts.language === "en" ? "en" : "sq";
   const isEn = lang === "en";
-  const subject = isEn ? `\u{1F4DD} New assignment: ${opts.title} | ${brand}` : `\u{1F4DD} Detyr\xEB e re: ${opts.title} | ${brand}`;
+  const subject2 = isEn ? `\u{1F4DD} New assignment: ${opts.title} | ${brand}` : `\u{1F4DD} Detyr\xEB e re: ${opts.title} | ${brand}`;
   let dueDateStr = "";
   if (opts.dueDate) {
     try {
@@ -578,11 +578,11 @@ ${opts.description}` : "",
   </table>
 </body>
 </html>`;
-  return { subject, htmlContent, textContent };
+  return { subject: subject2, htmlContent, textContent };
 }
 function renderPaymentReminderEmail(opts) {
   const brand = (opts.brandName || "QuizMaster").trim();
-  const subject = `\u23F0 Kujtues pagese \u2014 ${opts.monthLabel} | ${brand}`;
+  const subject2 = `\u23F0 Kujtues pagese \u2014 ${opts.monthLabel} | ${brand}`;
   const daysLate = Math.max(0, opts.dayOfMonth - 5);
   const urgency = daysLate >= 10 ? "Urgjente" : daysLate >= 5 ? "Afati po afrohet" : "Kujtues mujor";
   const textContent = [
@@ -639,7 +639,7 @@ function renderPaymentReminderEmail(opts) {
   </table>
 </body>
 </html>`;
-  return { subject, htmlContent, textContent };
+  return { subject: subject2, htmlContent, textContent };
 }
 function renderTrialWelcomeEmail(opts) {
   const brand = (opts.brandName || "QuizMaster").trim();
@@ -655,7 +655,7 @@ function renderTrialWelcomeEmail(opts) {
     }
   } catch {
   }
-  const subject = `Mir\xEB se vini n\xEB ${brand} \u2014 ${opts.trialDays} dit\xEB falas nga sot`;
+  const subject2 = `Mir\xEB se vini n\xEB ${brand} \u2014 ${opts.trialDays} dit\xEB falas nga sot`;
   const loginBtn = opts.loginUrl ? `<div style="text-align:center;margin-bottom:24px;"><a href="${opts.loginUrl}" style="display:inline-block;background:#6366f1;color:#ffffff;font-size:14px;font-weight:700;text-decoration:none;padding:13px 32px;border-radius:12px;">\u{1F393} Ky\xE7uni tani</a></div>` : "";
   const textContent = [
     `Mir\xEB se vini n\xEB ${brand}, ${opts.name}!`,
@@ -709,6 +709,98 @@ function renderTrialWelcomeEmail(opts) {
         </td></tr>
         <tr><td style="background:#f8fafc;padding:16px 36px;border-top:1px solid #e2e8f0;">
           <p style="margin:0;font-size:11px;color:#94a3b8;text-align:center;">D\xEBrguar nga platforma <strong>${brand}</strong> \xB7 Ju faleminderit!</p>
+        </td></tr>
+      </table>
+    </td></tr>
+  </table>
+</body>
+</html>`;
+  return { subject: subject2, htmlContent, textContent };
+}
+function renderLiveSessionInviteEmail(opts) {
+  const brand = (opts.brandName || "QuizMaster").trim();
+  const lang = opts.language === "en" ? "en" : "sq";
+  let whenLabel = "";
+  if (opts.scheduledAt) {
+    try {
+      const d = new Date(opts.scheduledAt);
+      if (!isNaN(d.getTime())) {
+        whenLabel = d.toLocaleString(lang === "en" ? "en-US" : "sq-AL", {
+          day: "numeric",
+          month: "long",
+          year: "numeric",
+          hour: "2-digit",
+          minute: "2-digit"
+        });
+      }
+    } catch {
+    }
+  }
+  const t = lang === "en" ? {
+    subject: `\u{1F4F9} Live session invitation: "${opts.sessionTitle}" \u2014 ${brand}`,
+    heading: "You've been invited to a live session",
+    greeting: `Hello, ${opts.recipientName}!`,
+    intro: `${opts.hostName ? opts.hostName : "Your teacher"} has invited you to join a live session on ${brand}.`,
+    sessionLabel: "Session",
+    whenLabel: "When",
+    whenTbd: "To be scheduled",
+    hostLabel: "Host",
+    btn: "\u{1F517} Join the session",
+    footerNote: "This email was sent automatically by the system.",
+    footer: `Sent by ${brand} \xB7 Thank you!`
+  } : {
+    subject: `\u{1F4F9} Ftes\xEB p\xEBr seanc\xEB live: "${opts.sessionTitle}" \u2014 ${brand}`,
+    heading: "Jeni ftuar n\xEB nj\xEB seanc\xEB live",
+    greeting: `P\xEBrsh\xEBndetje, ${opts.recipientName}!`,
+    intro: `${opts.hostName ? opts.hostName : "M\xEBsuesi/ja juaj"} ju ka ftuar n\xEB nj\xEB seanc\xEB live n\xEB ${brand}.`,
+    sessionLabel: "Seanca",
+    whenLabel: "Kur",
+    whenTbd: "Do t\xEB caktohet",
+    hostLabel: "M\xEBsuesi/ja",
+    btn: "\u{1F517} Bashkohu n\xEB seanc\xEB",
+    footerNote: "Ky email \xEBsht\xEB d\xEBrguar automatikisht nga sistemi.",
+    footer: `D\xEBrguar nga platforma ${brand} \xB7 Ju faleminderit!`
+  };
+  const textContent = [
+    `${t.heading} \u2014 ${brand}`,
+    ``,
+    t.greeting,
+    t.intro,
+    ``,
+    `${t.sessionLabel}: ${opts.sessionTitle}`,
+    `${t.whenLabel}: ${whenLabel || t.whenTbd}`,
+    opts.hostName ? `${t.hostLabel}: ${opts.hostName}` : ``,
+    ``,
+    opts.joinUrl ? `${t.btn}: ${opts.joinUrl}` : ``,
+    ``,
+    t.footer
+  ].filter(Boolean).join("\n");
+  const joinBtn = opts.joinUrl ? `<div style="text-align:center;margin-bottom:20px;"><a href="${opts.joinUrl}" style="display:inline-block;background:#6366f1;color:#ffffff;font-size:14px;font-weight:700;text-decoration:none;padding:13px 28px;border-radius:12px;">${t.btn}</a></div>` : "";
+  const htmlContent = `<!doctype html>
+<html>
+<body style="margin:0;padding:0;background:#f1f5f9;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f1f5f9;padding:40px 16px;">
+    <tr><td align="center">
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:520px;background:#ffffff;border-radius:20px;overflow:hidden;box-shadow:0 4px 24px rgba(0,0,0,0.06);">
+        <tr><td style="background:linear-gradient(135deg,#6366f1 0%,#8b5cf6 100%);padding:28px 36px;">
+          <div style="font-size:22px;font-weight:800;color:#ffffff;letter-spacing:-0.02em;">${brand}</div>
+          <div style="font-size:13px;color:rgba(255,255,255,0.85);margin-top:4px;">${t.heading} \u{1F4F9}</div>
+        </td></tr>
+        <tr><td style="padding:36px;">
+          <p style="margin:0 0 8px;font-size:15px;font-weight:700;color:#0f172a;">${t.greeting}</p>
+          <p style="margin:0 0 24px;font-size:14px;line-height:1.6;color:#475569;">${t.intro}</p>
+          <div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:14px;padding:18px 22px;margin-bottom:24px;">
+            <p style="margin:0;font-size:13px;color:#1e40af;line-height:1.9;">
+              \u{1F3AC} <strong>${t.sessionLabel}:</strong> ${opts.sessionTitle}<br>
+              \u{1F4C5} <strong>${t.whenLabel}:</strong> ${whenLabel || t.whenTbd}<br>
+              ${opts.hostName ? `\u{1F464} <strong>${t.hostLabel}:</strong> ${opts.hostName}<br>` : ""}
+            </p>
+          </div>
+          ${joinBtn}
+          <p style="margin:0;font-size:12px;line-height:1.6;color:#94a3b8;">${t.footerNote}</p>
+        </td></tr>
+        <tr><td style="background:#f8fafc;padding:16px 36px;border-top:1px solid #e2e8f0;">
+          <p style="margin:0;font-size:11px;color:#94a3b8;text-align:center;">${t.footer}</p>
         </td></tr>
       </table>
     </td></tr>
@@ -4602,6 +4694,46 @@ Assistant:`
       }
     } catch (err) {
       console.error("[assignments] notifyClassOfNewAssignment failed:", err?.message || err);
+    }
+  };
+  const notifyLiveSessionInvite = async (opts) => {
+    try {
+      if (!opts.userIds || opts.userIds.length === 0) return;
+      if (!isEmailConfigured()) return;
+      const { data: recipients } = await supabaseAdmin.from("profiles").select("id, display_name, email").in("id", opts.userIds);
+      const withEmail = (recipients || []).filter((r) => r?.email);
+      if (withEmail.length === 0) return;
+      let hostName = null;
+      if (opts.hostId) {
+        const { data: hostRow } = await supabaseAdmin.from("profiles").select("display_name").eq("id", opts.hostId).maybeSingle();
+        hostName = hostRow?.display_name || null;
+      }
+      let brandName = "QuizMaster";
+      let baseUrl = process.env.REPLIT_DEV_DOMAIN ? `https://${process.env.REPLIT_DEV_DOMAIN}` : "http://localhost:5000";
+      try {
+        const cfgRes = await supabaseAdmin.from("platform_config").select("value").eq("section", "settings").maybeSingle();
+        const settings = cfgRes.data?.value ?? {};
+        if (settings?.general?.school_name) brandName = settings.general.school_name;
+        if (!process.env.REPLIT_DEV_DOMAIN && settings?.general?.website) baseUrl = settings.general.website;
+      } catch {
+      }
+      const joinUrl = `${baseUrl}/student/live-sessions/${opts.sessionId}`;
+      const emailPromises = withEmail.map((r) => {
+        const tpl = renderLiveSessionInviteEmail({
+          recipientName: r.display_name || r.email,
+          sessionTitle: opts.sessionTitle,
+          scheduledAt: opts.scheduledAt,
+          hostName,
+          brandName,
+          joinUrl,
+          language: opts.language
+        });
+        return sendEmail({ to: r.email, toName: r.display_name || r.email, subject: tpl.subject, htmlContent: tpl.htmlContent, textContent: tpl.textContent }).catch((err) => console.error(`[live-sessions] Failed to email invite to ${r.email}:`, err?.message || err));
+      });
+      await Promise.allSettled(emailPromises);
+      console.log(`[live-sessions] Sent invite email to ${withEmail.length} participant(s) for session ${opts.sessionId}`);
+    } catch (err) {
+      console.error("[live-sessions] notifyLiveSessionInvite failed:", err?.message || err);
     }
   };
   const fetchTeacherCourseRows = async (scopedIds, includeStudentIds = false) => {
@@ -11814,6 +11946,14 @@ ${smartUserPrompt}` });
           created_at: (/* @__PURE__ */ new Date()).toISOString()
         }));
         await notifInsert(notifRows);
+        notifyLiveSessionInvite({
+          userIds: inviteIds,
+          sessionId: session.id,
+          sessionTitle: session.title,
+          scheduledAt: session.scheduled_at,
+          hostId: caller.userId,
+          language: req.body.email_language === "en" ? "en" : "sq"
+        }).catch((err) => console.error("[live-sessions] invite email failed:", err?.message || err));
       }
       res.json({ success: true, session });
     } catch (e) {
@@ -12062,7 +12202,7 @@ ${smartUserPrompt}` });
         });
       }
       if (inviteIds.length === 0) return res.status(400).json({ error: "No user IDs provided" });
-      const { data: session } = await supabaseAdmin.from("live_sessions").select("title").eq("id", req.params.id).single();
+      const { data: session } = await supabaseAdmin.from("live_sessions").select("title, scheduled_at").eq("id", req.params.id).single();
       const rows = inviteIds.map((uid) => ({
         session_id: req.params.id,
         user_id: uid,
@@ -12080,6 +12220,14 @@ ${smartUserPrompt}` });
         created_at: (/* @__PURE__ */ new Date()).toISOString()
       }));
       await notifInsert(notifRows);
+      notifyLiveSessionInvite({
+        userIds: inviteIds,
+        sessionId: req.params.id,
+        sessionTitle: session?.title || "Live Session",
+        scheduledAt: session?.scheduled_at,
+        hostId,
+        language: req.body.email_language === "en" ? "en" : "sq"
+      }).catch((err) => console.error("[live-sessions] invite email failed:", err?.message || err));
       res.json({ success: true, invited: inviteIds.length });
     } catch (e) {
       res.status(500).json({ error: e.message });

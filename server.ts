@@ -6,7 +6,7 @@ import jwt from "jsonwebtoken";
 import { isMissingCoursesStudentIdsError } from "./src/lib/schemaErrors.js";
 import { canAccessTeacherCourses, isAdmin, isAdminSeedAllowed } from "./src/lib/routeAuth.js";
 import { generateFixSuggestion } from "./src/lib/ai/generateFixSuggestion.js";
-import { isEmailConfigured, sendEmail, renderVerificationEmail, renderCredentialEmail, renderInvoiceEmail, renderPaymentReminderEmail, renderAssignmentEmail, renderTrialWelcomeEmail } from "./src/lib/email.js";
+import { isEmailConfigured, sendEmail, renderVerificationEmail, renderCredentialEmail, renderInvoiceEmail, renderPaymentReminderEmail, renderAssignmentEmail, renderTrialWelcomeEmail, renderLiveSessionInviteEmail } from "./src/lib/email.js";
 import { notifyEvent, type NotifyContext, type NotifyEventKey } from "./src/lib/notifyEvents.js";
 import { HEADWAY_FULL_DATA, buildUnitQuestions as buildHwUnitQuestions, type HUnit } from "./src/lib/headwayData.js";
 import { getQuestionsForSection, getTopicsForLevel, HEADWAY_QUESTIONS } from "./src/lib/headwayQuestions.js";
@@ -2263,6 +2263,67 @@ When giving instructions, number each step clearly. Be precise and technical whe
       }
     } catch (err: any) {
       console.error('[assignments] notifyClassOfNewAssignment failed:', err?.message || err);
+    }
+  };
+
+  /**
+   * Email-njofton studentët/pjesëmarrësit e ftuar në një seancë live.
+   * Fire-and-forget — kurrë nuk bllokon apo dështon përgjigjen e API-t.
+   */
+  const notifyLiveSessionInvite = async (opts: {
+    userIds: string[];
+    sessionId: string;
+    sessionTitle: string;
+    scheduledAt?: string | null;
+    hostId?: string | null;
+    language?: 'sq' | 'en';
+  }) => {
+    try {
+      if (!opts.userIds || opts.userIds.length === 0) return;
+      if (!isEmailConfigured()) return;
+
+      const { data: recipients } = await supabaseAdmin
+        .from('profiles')
+        .select('id, display_name, email')
+        .in('id', opts.userIds);
+      const withEmail = (recipients || []).filter((r: any) => r?.email);
+      if (withEmail.length === 0) return;
+
+      let hostName: string | null = null;
+      if (opts.hostId) {
+        const { data: hostRow } = await supabaseAdmin.from('profiles').select('display_name').eq('id', opts.hostId).maybeSingle();
+        hostName = hostRow?.display_name || null;
+      }
+
+      let brandName = 'QuizMaster';
+      let baseUrl = process.env.REPLIT_DEV_DOMAIN
+        ? `https://${process.env.REPLIT_DEV_DOMAIN}`
+        : 'http://localhost:5000';
+      try {
+        const cfgRes = await supabaseAdmin.from('platform_config').select('value').eq('section', 'settings').maybeSingle();
+        const settings: any = cfgRes.data?.value ?? {};
+        if (settings?.general?.school_name) brandName = settings.general.school_name;
+        if (!process.env.REPLIT_DEV_DOMAIN && settings?.general?.website) baseUrl = settings.general.website;
+      } catch { /* use defaults */ }
+      const joinUrl = `${baseUrl}/student/live-sessions/${opts.sessionId}`;
+
+      const emailPromises = withEmail.map((r: any) => {
+        const tpl = renderLiveSessionInviteEmail({
+          recipientName: r.display_name || r.email,
+          sessionTitle: opts.sessionTitle,
+          scheduledAt: opts.scheduledAt,
+          hostName,
+          brandName,
+          joinUrl,
+          language: opts.language,
+        });
+        return sendEmail({ to: r.email, toName: r.display_name || r.email, subject: tpl.subject, htmlContent: tpl.htmlContent, textContent: tpl.textContent })
+          .catch(err => console.error(`[live-sessions] Failed to email invite to ${r.email}:`, err?.message || err));
+      });
+      await Promise.allSettled(emailPromises);
+      console.log(`[live-sessions] Sent invite email to ${withEmail.length} participant(s) for session ${opts.sessionId}`);
+    } catch (err: any) {
+      console.error('[live-sessions] notifyLiveSessionInvite failed:', err?.message || err);
     }
   };
 
@@ -11489,6 +11550,15 @@ Content:\n"""${clipped}"""`;
           created_at: new Date().toISOString(),
         }));
         await notifInsert(notifRows);
+
+        notifyLiveSessionInvite({
+          userIds: inviteIds,
+          sessionId: session.id,
+          sessionTitle: session.title,
+          scheduledAt: session.scheduled_at,
+          hostId: caller.userId,
+          language: req.body.email_language === 'en' ? 'en' : 'sq',
+        }).catch(err => console.error('[live-sessions] invite email failed:', err?.message || err));
       }
 
       res.json({ success: true, session });
@@ -11778,7 +11848,7 @@ Content:\n"""${clipped}"""`;
 
       if (inviteIds.length === 0) return res.status(400).json({ error: 'No user IDs provided' });
 
-      const { data: session } = await supabaseAdmin.from('live_sessions').select('title').eq('id', req.params.id).single();
+      const { data: session } = await supabaseAdmin.from('live_sessions').select('title, scheduled_at').eq('id', req.params.id).single();
 
       const rows = inviteIds.map((uid: string) => ({
         session_id: req.params.id,
@@ -11798,6 +11868,15 @@ Content:\n"""${clipped}"""`;
         created_at: new Date().toISOString(),
       }));
       await notifInsert(notifRows);
+
+      notifyLiveSessionInvite({
+        userIds: inviteIds,
+        sessionId: req.params.id,
+        sessionTitle: session?.title || 'Live Session',
+        scheduledAt: session?.scheduled_at,
+        hostId: hostId,
+        language: req.body.email_language === 'en' ? 'en' : 'sq',
+      }).catch(err => console.error('[live-sessions] invite email failed:', err?.message || err));
 
       res.json({ success: true, invited: inviteIds.length });
     } catch (e: unknown) { res.status(500).json({ error: (e as Error).message }); }

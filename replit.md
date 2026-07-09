@@ -117,6 +117,14 @@ The sender can choose Albanian or English for the notification email sent to rec
 - **Announcements**: when "Send via Email" is toggled on, a language dropdown appears (`src/pages/admin/Announcements.tsx`, `src/pages/teacher/Announcements.tsx`). Sent as `email_language` in the announcement create/update body, threaded through `sendAnnouncementNotifications({ language })` in `server.ts`, which builds the subject/HTML/text inline in the chosen language (not via `email.ts` — this email body is built directly in `server.ts`).
 - Defaults to `'sq'` (Albanian) everywhere if not specified, preserving prior behavior.
 
+## Live Session Invite Emails
+When a teacher/admin creates a live session (with participants/classes) or invites more participants to an existing one, every invited user with an email is automatically sent an email invite (in addition to the existing in-app bell notification).
+
+- **Trigger**: `POST /api/teacher/live-sessions` (on create, for all resolved participant IDs) and `POST /api/teacher/live-sessions/:id/invite` (on ad-hoc invite) — both fire-and-forget call `notifyLiveSessionInvite()` in `server.ts` right after `session_participants` rows + in-app notifications are written. Never blocks or fails the API response — errors are only logged.
+- **Requires** `BREVO_API_KEY` / `BREVO_SENDER_EMAIL` configured (`isEmailConfigured()`); silently skipped if email isn't set up.
+- **Template**: `renderLiveSessionInviteEmail()` in `src/lib/email.ts` — accepts a `language: 'sq' | 'en'` option (same `email_language` request-body convention as announcements/assignments, defaults to `'sq'`). Includes session title, scheduled time, host name, and a join link to `/student/live-sessions/:id`.
+- No frontend dropdown was added for this yet — language defaults to Albanian unless the caller explicitly sends `email_language: 'en'` in the request body.
+
 ## Notes
 - Port 5000 is used for both frontend and backend (Express serves Vite middleware)
 - Vite is configured with `allowedHosts: true` for Replit proxy compatibility

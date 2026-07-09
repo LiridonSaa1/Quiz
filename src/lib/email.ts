@@ -600,3 +600,114 @@ export function renderTrialWelcomeEmail(opts: {
 
   return { subject, htmlContent, textContent };
 }
+
+/** Email ftese për një seancë live (video-mësim) — shqip/anglisht. */
+export function renderLiveSessionInviteEmail(opts: {
+  recipientName: string;
+  sessionTitle: string;
+  scheduledAt?: string | null;
+  hostName?: string | null;
+  brandName?: string;
+  joinUrl?: string;
+  language?: EmailLanguage;
+}) {
+  const brand = (opts.brandName || "QuizMaster").trim();
+  const lang: EmailLanguage = opts.language === "en" ? "en" : "sq";
+
+  let whenLabel = "";
+  if (opts.scheduledAt) {
+    try {
+      const d = new Date(opts.scheduledAt);
+      if (!isNaN(d.getTime())) {
+        whenLabel = d.toLocaleString(lang === "en" ? "en-US" : "sq-AL", {
+          day: "numeric",
+          month: "long",
+          year: "numeric",
+          hour: "2-digit",
+          minute: "2-digit",
+        });
+      }
+    } catch { /* fallback to raw value */ }
+  }
+
+  const t = lang === "en"
+    ? {
+        subject: `📹 Live session invitation: "${opts.sessionTitle}" — ${brand}`,
+        heading: "You've been invited to a live session",
+        greeting: `Hello, ${opts.recipientName}!`,
+        intro: `${opts.hostName ? opts.hostName : "Your teacher"} has invited you to join a live session on ${brand}.`,
+        sessionLabel: "Session",
+        whenLabel: "When",
+        whenTbd: "To be scheduled",
+        hostLabel: "Host",
+        btn: "🔗 Join the session",
+        footerNote: "This email was sent automatically by the system.",
+        footer: `Sent by ${brand} · Thank you!`,
+      }
+    : {
+        subject: `📹 Ftesë për seancë live: "${opts.sessionTitle}" — ${brand}`,
+        heading: "Jeni ftuar në një seancë live",
+        greeting: `Përshëndetje, ${opts.recipientName}!`,
+        intro: `${opts.hostName ? opts.hostName : "Mësuesi/ja juaj"} ju ka ftuar në një seancë live në ${brand}.`,
+        sessionLabel: "Seanca",
+        whenLabel: "Kur",
+        whenTbd: "Do të caktohet",
+        hostLabel: "Mësuesi/ja",
+        btn: "🔗 Bashkohu në seancë",
+        footerNote: "Ky email është dërguar automatikisht nga sistemi.",
+        footer: `Dërguar nga platforma ${brand} · Ju faleminderit!`,
+      };
+
+  const textContent = [
+    `${t.heading} — ${brand}`,
+    ``,
+    t.greeting,
+    t.intro,
+    ``,
+    `${t.sessionLabel}: ${opts.sessionTitle}`,
+    `${t.whenLabel}: ${whenLabel || t.whenTbd}`,
+    opts.hostName ? `${t.hostLabel}: ${opts.hostName}` : ``,
+    ``,
+    opts.joinUrl ? `${t.btn}: ${opts.joinUrl}` : ``,
+    ``,
+    t.footer,
+  ].filter(Boolean).join("\n");
+
+  const joinBtn = opts.joinUrl
+    ? `<div style="text-align:center;margin-bottom:20px;"><a href="${opts.joinUrl}" style="display:inline-block;background:#6366f1;color:#ffffff;font-size:14px;font-weight:700;text-decoration:none;padding:13px 28px;border-radius:12px;">${t.btn}</a></div>`
+    : "";
+
+  const htmlContent = `<!doctype html>
+<html>
+<body style="margin:0;padding:0;background:#f1f5f9;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f1f5f9;padding:40px 16px;">
+    <tr><td align="center">
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:520px;background:#ffffff;border-radius:20px;overflow:hidden;box-shadow:0 4px 24px rgba(0,0,0,0.06);">
+        <tr><td style="background:linear-gradient(135deg,#6366f1 0%,#8b5cf6 100%);padding:28px 36px;">
+          <div style="font-size:22px;font-weight:800;color:#ffffff;letter-spacing:-0.02em;">${brand}</div>
+          <div style="font-size:13px;color:rgba(255,255,255,0.85);margin-top:4px;">${t.heading} 📹</div>
+        </td></tr>
+        <tr><td style="padding:36px;">
+          <p style="margin:0 0 8px;font-size:15px;font-weight:700;color:#0f172a;">${t.greeting}</p>
+          <p style="margin:0 0 24px;font-size:14px;line-height:1.6;color:#475569;">${t.intro}</p>
+          <div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:14px;padding:18px 22px;margin-bottom:24px;">
+            <p style="margin:0;font-size:13px;color:#1e40af;line-height:1.9;">
+              🎬 <strong>${t.sessionLabel}:</strong> ${opts.sessionTitle}<br>
+              📅 <strong>${t.whenLabel}:</strong> ${whenLabel || t.whenTbd}<br>
+              ${opts.hostName ? `👤 <strong>${t.hostLabel}:</strong> ${opts.hostName}<br>` : ""}
+            </p>
+          </div>
+          ${joinBtn}
+          <p style="margin:0;font-size:12px;line-height:1.6;color:#94a3b8;">${t.footerNote}</p>
+        </td></tr>
+        <tr><td style="background:#f8fafc;padding:16px 36px;border-top:1px solid #e2e8f0;">
+          <p style="margin:0;font-size:11px;color:#94a3b8;text-align:center;">${t.footer}</p>
+        </td></tr>
+      </table>
+    </td></tr>
+  </table>
+</body>
+</html>`;
+
+  return { subject, htmlContent, textContent };
+}
