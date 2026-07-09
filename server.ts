@@ -2196,10 +2196,52 @@ When giving instructions, number each step clearly. Be precise and technical whe
     language?: 'sq' | 'en';
   }) => {
     try {
-      if (!opts.classId) return;
-      if (!isEmailConfigured()) return;
-
-      const students = await resolveClassStudentProfiles(opts.classId, opts.teacherId || undefined);
+      let students: Array<{ id: string; email: string; display_name: string | null }> = [];
+      if (opts.classId) {
+        students = await resolveClassStudentProfiles(opts.classId, opts.teacherId || undefined);
+      } else if (opts.courseId) {
+        // No class linked — fall back to resolving students directly via the course,
+        // then via the teacher's linked students, so in-app notifications still fire.
+        let ids: string[] = [];
+        const { data: courseRow } = await supabaseAdmin
+          .from('courses')
+          .select('id, student_ids')
+          .eq('id', opts.courseId)
+          .maybeSingle();
+        if (courseRow && Array.isArray((courseRow as any).student_ids)) {
+          ids = ((courseRow as any).student_ids as unknown[]).map(String).filter(Boolean);
+        }
+        if (ids.length === 0 && opts.teacherId) {
+          const teacherIdCandidates = await getTeacherIdCandidates(opts.teacherId).catch(() => [opts.teacherId as string]);
+          const { data: linkedProfiles } = await supabaseAdmin
+            .from('profiles')
+            .select('id')
+            .in('teacher_id', teacherIdCandidates)
+            .eq('role', 'student');
+          ids = (linkedProfiles || []).map((p: any) => String(p.id));
+        }
+        if (ids.length > 0) {
+          const { data: sRows } = await supabaseAdmin
+            .from('profiles')
+            .select('id, email, display_name, status')
+            .in('id', ids)
+            .eq('role', 'student');
+          students = (sRows || [])
+            .filter((s: any) => s.email && s.status !== 'inactive')
+            .map((s: any) => ({ id: String(s.id), email: String(s.email), display_name: s.display_name || null }));
+        }
+      } else if (opts.teacherId) {
+        // No class or course linked either — notify students directly assigned to this teacher.
+        const teacherIdCandidates = await getTeacherIdCandidates(opts.teacherId).catch(() => [opts.teacherId as string]);
+        const { data: sRows } = await supabaseAdmin
+          .from('profiles')
+          .select('id, email, display_name, status')
+          .in('teacher_id', teacherIdCandidates)
+          .eq('role', 'student');
+        students = (sRows || [])
+          .filter((s: any) => s.email && s.status !== 'inactive')
+          .map((s: any) => ({ id: String(s.id), email: String(s.email), display_name: s.display_name || null }));
+      }
       if (students.length === 0) return;
 
       let brandName = 'QuizMaster';
