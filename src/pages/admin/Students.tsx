@@ -629,6 +629,8 @@ export default function AdminStudents() {
           accentColor="emerald"
           onClose={() => setShowAddModal(false)}
           onSuccess={() => fetchData()}
+          teacherId={teacherFilter !== 'all' ? teacherFilter : undefined}
+          teachers={teacherOptions}
         />
       )}
     </AdminLayout>

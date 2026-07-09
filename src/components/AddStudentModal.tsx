@@ -28,6 +28,10 @@ interface Props {
   onClose: () => void;
   onSuccess: () => void;
   accentColor?: 'violet' | 'emerald';
+  /** Pre-selected teacher (admin passing a specific teacher, or teacher using their own modal) */
+  teacherId?: string;
+  /** List of teachers for admin to choose from (only shown when teacherId is not pre-set) */
+  teachers?: Array<{ id: string; name: string }>;
 }
 
 const LANGUAGES = ['English', 'Arabic', 'French', 'Spanish', 'German', 'Chinese', 'Turkish', 'Portuguese', 'Other'];
@@ -41,7 +45,7 @@ const generatePassword = () => {
 
 const STEPS = ['Account', 'Personal', 'Academic'];
 
-export default function AddStudentModal({ onClose, onSuccess, accentColor = 'violet' }: Props) {
+export default function AddStudentModal({ onClose, onSuccess, accentColor = 'violet', teacherId: propTeacherId, teachers }: Props) {
   const { t } = useTranslation();
   const [step, setStep] = useState(0);
   const [submitting, setSubmitting] = useState(false);
@@ -59,6 +63,7 @@ export default function AddStudentModal({ onClose, onSuccess, accentColor = 'vio
     trialDays: '',
   });
   const [classes, setClasses] = useState<Array<{ id: string; name: string; capacity: number; enrolled: number }>>([]);
+  const [selectedTeacherId, setSelectedTeacherId] = useState<string>(propTeacherId ?? '');
 
   const accent = {
     ring: accentColor === 'violet' ? 'focus:ring-violet-500' : 'focus:ring-emerald-500',
@@ -76,7 +81,11 @@ export default function AddStudentModal({ onClose, onSuccess, accentColor = 'vio
 
   const canGoNext = () => {
     if (step === 0) return form.name.trim() !== '' && form.email.trim() !== '' && form.password.trim() !== '';
-    if (step === 2 && classes.length > 0) return form.classId.trim() !== '';
+    if (step === 2) {
+      // Admin must pick a teacher before proceeding if list is shown
+      if (teachers && teachers.length > 0 && !propTeacherId && !selectedTeacherId) return false;
+      if (classes.length > 0) return form.classId.trim() !== '';
+    }
     return true;
   };
 
@@ -84,7 +93,10 @@ export default function AddStudentModal({ onClose, onSuccess, accentColor = 'vio
     const loadClasses = async () => {
       const { data: { session } } = await supabase.auth.getSession();
       if (!session) return;
-      const res = await authFetch('/api/teacher/classes');
+      // Need a teacher id to scope classes — skip if admin hasn't picked one yet
+      const tid = selectedTeacherId || propTeacherId;
+      const url = tid ? `/api/teacher/classes?teacher_id=${encodeURIComponent(tid)}` : '/api/teacher/classes';
+      const res = await authFetch(url);
       if (!res.ok) return;
       const json = await res.json().catch(() => ({}));
       if (!json?.success || !Array.isArray(json.classes)) return;
@@ -97,9 +109,11 @@ export default function AddStudentModal({ onClose, onSuccess, accentColor = 'vio
           return { id: String(c.id), name: String(c.name || 'Untitled class'), capacity: cap, enrolled };
         })
       );
+      // Reset class selection when teacher changes
+      set('classId', '');
     };
     void loadClasses();
-  }, []);
+  }, [selectedTeacherId, propTeacherId]);
 
   const selectedClass = classes.find(c => c.id === form.classId);
   const selectedClassFull = selectedClass ? selectedClass.enrolled >= selectedClass.capacity : false;
@@ -122,7 +136,7 @@ export default function AddStudentModal({ onClose, onSuccess, accentColor = 'vio
           name: form.name.trim(),
           email: form.email.trim(),
           password: form.password,
-          teacherId: session?.user.id,
+          teacherId: selectedTeacherId || propTeacherId || session?.user.id,
           phone: form.phone || undefined,
           dateOfBirth: form.dateOfBirth || undefined,
           gender: form.gender || undefined,
@@ -339,6 +353,21 @@ export default function AddStudentModal({ onClose, onSuccess, accentColor = 'vio
                   If set, the student can log in without payment for this many days after account creation.
                 </p>
               </div>
+              {/* Teacher selector — only shown for admin when no teacher was pre-selected */}
+              {teachers && teachers.length > 0 && !propTeacherId && (
+                <div className="col-span-2">
+                  <label className={labelCls}>Mësuesi <span className="text-red-400 normal-case font-normal">*</span></label>
+                  <select
+                    value={selectedTeacherId}
+                    onChange={e => setSelectedTeacherId(e.target.value)}
+                    className={inputCls}
+                  >
+                    <option value="">— Zgjidh mësuesin —</option>
+                    {teachers.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
+                  </select>
+                </div>
+              )}
+
               <div className="col-span-2">
                 <label className={labelCls}>
                   {t('modals.addStudent.class')} {classes.length > 0 ? <span className="text-red-400 normal-case font-normal">*</span> : <span className="text-slate-300 normal-case font-normal">{t('modals.addStudent.optional')}</span>}
