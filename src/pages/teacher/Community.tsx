@@ -3,7 +3,7 @@ import { useTranslation } from 'react-i18next';
 import TeacherLayout from "../../components/layout/TeacherLayout";
 import LessonDiscussionBoard from "../../components/discussion/LessonDiscussionBoard";
 import { authFetch } from "../../lib/apiUrl";
-import { MessageSquare, BookOpen, Loader2, Search } from "lucide-react";
+import { MessageSquare, BookOpen, Loader2, Search, AlertTriangle } from "lucide-react";
 
 export default function TeacherCommunity() {
   const { t } = useTranslation();
@@ -156,6 +156,20 @@ export default function TeacherCommunity() {
               selectedLesson
                 ? `Discussion: ${selectedLesson.title}`
                 : "Lesson Discussion"
+            }
+            dbUnavailableBanner={
+              <div className="rounded-2xl border border-amber-200 bg-amber-50 p-6 flex items-start gap-4">
+                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-amber-100">
+                  <AlertTriangle className="h-5 w-5 text-amber-500" />
+                </div>
+                <div>
+                  <p className="font-bold text-amber-800">Diskutimet nuk disponohen</p>
+                  <p className="text-sm text-amber-700 mt-1 leading-relaxed">
+                    Lidhja me bazën e të dhënave direkte (<code className="font-mono bg-amber-100 px-1 rounded">DATABASE_URL</code>) është e vjetëruar ose e gabuar.
+                    Shkoni te <strong>Supabase → Settings → Database → Connection string (URI)</strong>, kopjoni lidhjen e re dhe përditësoni sekret-in <code className="font-mono bg-amber-100 px-1 rounded">DATABASE_URL</code> në Replit.
+                  </p>
+                </div>
+              </div>
             }
           />
         )}

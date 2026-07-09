@@ -259,7 +259,12 @@ async function processZipEntries(
 }
 // ─────────────────────────────────────────────────────────────────────────────
 
+// Set to true permanently when a fatal connection error (ENOTFOUND, ECONNREFUSED) is detected
+// so we stop hammering a broken DATABASE_URL on every request.
+let _poolPermanentlyDown = false;
+
 const getPool = async () => {
+  if (_poolPermanentlyDown) return null;
   const connectionString = process.env.DATABASE_URL?.trim();
   if (!connectionString) return null;
 
@@ -273,6 +278,7 @@ const getPool = async () => {
       return new Pool({
         connectionString,
         ssl: { rejectUnauthorized: false },
+        connectionTimeoutMillis: 5000,
       });
     });
   }
@@ -286,16 +292,26 @@ const getPool = async () => {
 };
 
 const poolQuery = async (sql: string, params?: any[]) => {
+  if (_poolPermanentlyDown) throw new Error('DB_UNAVAILABLE');
   const pool = await getPool();
   if (!pool) throw new Error('Database pool not available');
-  const client = await pool.connect();
+  let client: any;
+  try {
+    client = await pool.connect();
+  } catch (connErr: any) {
+    const msg: string = connErr?.message ?? '';
+    if (msg.includes('ENOTFOUND') || msg.includes('ECONNREFUSED') || msg.includes('ETIMEDOUT')) {
+      _poolPermanentlyDown = true;
+      poolPromise = null;
+      console.error('[db-pool] Permanent connection failure — disabling pool:', msg);
+    }
+    throw connErr;
+  }
   try {
     await client.query('SET search_path TO public');
     try {
       return await client.query(sql, params);
     } catch (e: any) {
-      // If the profiles table doesn't exist in the direct DB connection,
-      // retry with dummy null-returning subqueries instead of the JOIN.
       if (
         typeof e?.message === 'string' &&
         e.message.includes('relation') &&
@@ -15582,6 +15598,8 @@ Content:\n"""${clipped}"""`;
       const nextCursor = hasMore ? String(rows.slice(0, limit)[rows.slice(0, limit).length - 1]?.[order.col] || '') : null;
       res.json({ success: true, questions: pageRows, hasMore, nextCursor });
     } catch (e: any) {
+      const isDbDown = e.message === 'DB_UNAVAILABLE' || _poolPermanentlyDown;
+      if (isDbDown) return res.status(503).json({ db_unavailable: true, error: 'Discussion database unavailable' });
       res.status(500).json({ error: e.message || 'Failed to load lesson discussions' });
     }
   });

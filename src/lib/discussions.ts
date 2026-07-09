@@ -10,6 +10,7 @@ export async function listLessonQuestions(lessonId: string, params: { q?: string
   if (params.limit) query.set('limit', String(params.limit));
   const qs = query.toString();
   const res = await authFetch(`/api/student/lessons/${encodeURIComponent(lessonId)}/discussions${qs ? `?${qs}` : ''}`);
+  if (res.status === 503) return { db_unavailable: true, questions: [], hasMore: false };
   if (!res.ok) throw new Error(await readApiError(res));
   return res.json();
 }

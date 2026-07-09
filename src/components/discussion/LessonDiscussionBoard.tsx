@@ -60,12 +60,14 @@ type Props = {
   lessonId: string;
   canModerate?: boolean;
   title?: string;
+  dbUnavailableBanner?: React.ReactNode;
 };
 
-export default function LessonDiscussionBoard({ lessonId, canModerate = false, title = 'Lesson Discussion' }: Props) {
+export default function LessonDiscussionBoard({ lessonId, canModerate = false, title = 'Lesson Discussion', dbUnavailableBanner }: Props) {
   const { t } = useTranslation();
   const [loading, setLoading] = useState(true);
   const [discussionDisabled, setDiscussionDisabled] = useState(false);
+  const [dbDown, setDbDown] = useState(false);
   const [questions, setQuestions] = useState<QuestionRow[]>([]);
   const [activeQuestionId, setActiveQuestionId] = useState<string>('');
   const [answers, setAnswers] = useState<any[]>([]);
@@ -140,6 +142,11 @@ export default function LessonDiscussionBoard({ lessonId, canModerate = false, t
     try {
       setLoading(!append);
       const json = await listLessonQuestions(lessonId, { q, sort, cursor: append ? cursor || undefined : undefined, limit: 20 });
+      if (json?.db_unavailable) {
+        setDbDown(true);
+        setDiscussionDisabled(true);
+        return;
+      }
       const disabled = Boolean(json?.disabled);
       if (disabled) {
         // Schema cache may still be warming up — auto-retry up to 5 times with backoff
@@ -257,7 +264,9 @@ export default function LessonDiscussionBoard({ lessonId, canModerate = false, t
         </div>
       ) : null}
 
-      {discussionDisabled ? (
+      {dbDown && dbUnavailableBanner ? (
+        <>{dbUnavailableBanner}</>
+      ) : discussionDisabled ? (
         <DiscussionSetupBanner onRetry={() => void loadQuestions(false)} />
       ) : (
       <div className="grid grid-cols-1 md:grid-cols-[320px_1fr] gap-5">
