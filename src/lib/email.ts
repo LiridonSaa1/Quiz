@@ -311,7 +311,9 @@ export function renderInvoiceEmail(opts: {
   return { subject, htmlContent, textContent };
 }
 
-/** Renders a "new assignment" notification email for a student (Albanian). */
+export type EmailLanguage = 'sq' | 'en';
+
+/** Renders a "new assignment" notification email for a student (Albanian or English). */
 export function renderAssignmentEmail(opts: {
   studentName: string;
   title: string;
@@ -322,17 +324,33 @@ export function renderAssignmentEmail(opts: {
   maxScore?: number | null;
   brandName?: string;
   loginUrl?: string;
+  language?: EmailLanguage;
 }) {
   const brand = (opts.brandName || 'QuizMaster').trim();
-  const subject = `📝 Detyrë e re: ${opts.title} | ${brand}`;
+  const lang: EmailLanguage = opts.language === 'en' ? 'en' : 'sq';
+  const isEn = lang === 'en';
+  const subject = isEn ? `📝 New assignment: ${opts.title} | ${brand}` : `📝 Detyrë e re: ${opts.title} | ${brand}`;
 
   let dueDateStr = '';
   if (opts.dueDate) {
-    try { dueDateStr = new Date(opts.dueDate).toLocaleDateString('sq-AL', { day: '2-digit', month: 'long', year: 'numeric' }); }
+    try { dueDateStr = new Date(opts.dueDate).toLocaleDateString(isEn ? 'en-US' : 'sq-AL', { day: '2-digit', month: 'long', year: 'numeric' }); }
     catch { dueDateStr = String(opts.dueDate).slice(0, 10); }
   }
 
-  const textContent = [
+  const textContent = isEn ? [
+    `New assignment — ${brand}`,
+    ``,
+    `Hi ${opts.studentName},`,
+    `Your teacher has published a new assignment${opts.className ? ` for class "${opts.className}"` : ''}.`,
+    ``,
+    `Title: ${opts.title}`,
+    opts.courseName ? `Course: ${opts.courseName}` : '',
+    dueDateStr ? `Due date: ${dueDateStr}` : '',
+    opts.maxScore != null ? `Max score: ${opts.maxScore}` : '',
+    opts.description ? `\nDescription:\n${opts.description}` : '',
+    ``,
+    `Thank you! — The ${brand} Team`,
+  ].filter(Boolean).join('\n') : [
     `Detyrë e re — ${brand}`,
     ``,
     `Përshëndetje ${opts.studentName},`,
@@ -350,9 +368,27 @@ export function renderAssignmentEmail(opts: {
   const loginBtn = opts.loginUrl ? `
           <div style="text-align:center;margin-bottom:20px;">
             <a href="${opts.loginUrl}" style="display:inline-block;background:#6366f1;color:#ffffff;font-size:14px;font-weight:700;text-decoration:none;padding:13px 28px;border-radius:12px;">
-              🔗 Shiko detyrën
+              🔗 ${isEn ? 'View assignment' : 'Shiko detyrën'}
             </a>
           </div>` : '';
+
+  const t = isEn ? {
+    headerTag: 'New Assignment 📝',
+    greeting: `Hi, ${opts.studentName}!`,
+    intro: `Your teacher has published a new assignment${opts.className ? ` for class <strong>${opts.className}</strong>` : ''}.`,
+    detailsLabel: 'Assignment Details',
+    titleLabel: '📌 Title', courseLabel: '📚 Course', dueLabel: '📅 Due date', scoreLabel: '🎯 Points',
+    footerNote: 'This email was sent automatically when the teacher published a new assignment.',
+    footer: `Sent by the <strong>${brand}</strong> platform · Thank you!`,
+  } : {
+    headerTag: 'Detyrë e Re 📝',
+    greeting: `Përshëndetje, ${opts.studentName}!`,
+    intro: `Mësuesi juaj ka publikuar një detyrë të re${opts.className ? ` për klasën <strong>${opts.className}</strong>` : ''}.`,
+    detailsLabel: 'Detajet e Detyrës',
+    titleLabel: '📌 Titulli', courseLabel: '📚 Kursi', dueLabel: '📅 Afati', scoreLabel: '🎯 Pikët',
+    footerNote: 'Ky email dërgohet automatikisht kur mësuesi publikon një detyrë të re.',
+    footer: `Dërguar nga platforma <strong>${brand}</strong> · Ju faleminderit!`,
+  };
 
   const htmlContent = `<!doctype html>
 <html>
@@ -362,33 +398,33 @@ export function renderAssignmentEmail(opts: {
       <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:520px;background:#ffffff;border-radius:20px;overflow:hidden;box-shadow:0 4px 24px rgba(0,0,0,0.06);">
         <tr><td style="background:#6366f1;padding:28px 36px;">
           <div style="font-size:22px;font-weight:800;color:#ffffff;letter-spacing:-0.02em;">${brand}</div>
-          <div style="font-size:13px;color:rgba(255,255,255,0.85);margin-top:4px;">Detyrë e Re 📝</div>
+          <div style="font-size:13px;color:rgba(255,255,255,0.85);margin-top:4px;">${t.headerTag}</div>
         </td></tr>
         <tr><td style="padding:36px;">
-          <p style="margin:0 0 8px;font-size:15px;font-weight:700;color:#0f172a;">Përshëndetje, ${opts.studentName}!</p>
+          <p style="margin:0 0 8px;font-size:15px;font-weight:700;color:#0f172a;">${t.greeting}</p>
           <p style="margin:0 0 24px;font-size:14px;line-height:1.6;color:#475569;">
-            Mësuesi juaj ka publikuar një detyrë të re${opts.className ? ` për klasën <strong>${opts.className}</strong>` : ''}.
+            ${t.intro}
           </p>
           <div style="background:#eef2ff;border:1px solid #c7d2fe;border-radius:14px;padding:20px 24px;margin-bottom:24px;">
-            <p style="margin:0 0 14px;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:1px;color:#6b7280;">Detajet e Detyrës</p>
+            <p style="margin:0 0 14px;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:1px;color:#6b7280;">${t.detailsLabel}</p>
             <table role="presentation" cellpadding="0" cellspacing="0" width="100%">
               <tr>
-                <td style="padding:6px 0;font-size:13px;color:#64748b;width:110px;vertical-align:top;">📌 Titulli</td>
+                <td style="padding:6px 0;font-size:13px;color:#64748b;width:110px;vertical-align:top;">${t.titleLabel}</td>
                 <td style="padding:6px 0;font-size:13px;font-weight:600;color:#0f172a;">${opts.title}</td>
               </tr>
-              ${opts.courseName ? `<tr><td style="padding:6px 0;font-size:13px;color:#64748b;vertical-align:top;">📚 Kursi</td><td style="padding:6px 0;font-size:13px;font-weight:600;color:#0f172a;">${opts.courseName}</td></tr>` : ''}
-              ${dueDateStr ? `<tr><td style="padding:6px 0;font-size:13px;color:#64748b;vertical-align:top;">📅 Afati</td><td style="padding:6px 0;font-size:13px;font-weight:600;color:#0f172a;">${dueDateStr}</td></tr>` : ''}
-              ${opts.maxScore != null ? `<tr><td style="padding:6px 0;font-size:13px;color:#64748b;vertical-align:top;">🎯 Pikët</td><td style="padding:6px 0;font-size:13px;font-weight:600;color:#0f172a;">${opts.maxScore}</td></tr>` : ''}
+              ${opts.courseName ? `<tr><td style="padding:6px 0;font-size:13px;color:#64748b;vertical-align:top;">${t.courseLabel}</td><td style="padding:6px 0;font-size:13px;font-weight:600;color:#0f172a;">${opts.courseName}</td></tr>` : ''}
+              ${dueDateStr ? `<tr><td style="padding:6px 0;font-size:13px;color:#64748b;vertical-align:top;">${t.dueLabel}</td><td style="padding:6px 0;font-size:13px;font-weight:600;color:#0f172a;">${dueDateStr}</td></tr>` : ''}
+              ${opts.maxScore != null ? `<tr><td style="padding:6px 0;font-size:13px;color:#64748b;vertical-align:top;">${t.scoreLabel}</td><td style="padding:6px 0;font-size:13px;font-weight:600;color:#0f172a;">${opts.maxScore}</td></tr>` : ''}
             </table>
           </div>
           ${opts.description ? `<p style="margin:0 0 24px;font-size:13px;line-height:1.6;color:#374151;white-space:pre-wrap;">${opts.description}</p>` : ''}
           ${loginBtn}
           <p style="margin:0;font-size:12px;line-height:1.6;color:#94a3b8;">
-            Ky email dërgohet automatikisht kur mësuesi publikon një detyrë të re.
+            ${t.footerNote}
           </p>
         </td></tr>
         <tr><td style="background:#f8fafc;padding:16px 36px;border-top:1px solid #e2e8f0;">
-          <p style="margin:0;font-size:11px;color:#94a3b8;text-align:center;">Dërguar nga platforma <strong>${brand}</strong> · Ju faleminderit!</p>
+          <p style="margin:0;font-size:11px;color:#94a3b8;text-align:center;">${t.footer}</p>
         </td></tr>
       </table>
     </td></tr>

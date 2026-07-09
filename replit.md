@@ -103,12 +103,19 @@ Set these in Replit Secrets:
 - **`migrations/011_extra_indexes.sql`** — adds indexes on `quiz_attempts(student_id,status)`, `notifications(user_id,read)`, `profiles(status)`, `profiles(role,status)`, `profiles(created_at)`, `courses(status)`, `classes(status)`
 
 ## Assignment Email Notifications
-When a teacher (or admin, via the same `/api/teacher/assignments` endpoint) creates an assignment linked to a class, every active student in that class is automatically emailed (Albanian template) about the new assignment — title, course, due date, max score, description, and a login link.
+When a teacher (or admin, via the same `/api/teacher/assignments` endpoint) creates an assignment linked to a class, every active student in that class is automatically emailed about the new assignment — title, course, due date, max score, description, and a login link.
 
 - **Trigger**: `POST /api/teacher/assignments` — fire-and-forget call to `notifyClassOfNewAssignment()` in `server.ts` right after the assignment row is inserted (both the `poolQuery` and `supabaseAdmin` fallback paths). Never blocks or fails the API response — errors are only logged.
 - **Recipient resolution**: `resolveClassStudentProfiles()` reuses the same fallback chain as `GET /api/teacher/classes/students`: `classes.student_ids` → `courses.student_ids` (via `class.course_id`) → students linked to the teacher via `profiles.teacher_id`. Only active students with an email are emailed.
 - **Requires** `BREVO_API_KEY` / `BREVO_SENDER_EMAIL` configured (`isEmailConfigured()`); silently skipped if email isn't set up, or if the assignment has no `class_id`.
-- **Template**: `renderAssignmentEmail()` in `src/lib/email.ts`.
+- **Template**: `renderAssignmentEmail()` in `src/lib/email.ts` — accepts a `language: 'sq' | 'en'` option with full Albanian/English copy for subject, text and HTML body.
+
+## Email Language Selection (Announcements + Assignments)
+The sender can choose Albanian or English for the notification email sent to recipients (the in-app bell notification and UI stay in their existing language — only the outbound email text changes).
+
+- **Assignments**: when a teacher/admin picks a Class in the assignment form, a "Notification Email Language" dropdown (Shqip/English) appears (`src/pages/teacher/Assignments.tsx`, `src/pages/admin/Assignments.tsx`). Sent as `email_language` in the `POST/PATCH /api/teacher/assignments` body, threaded through `notifyClassOfNewAssignment({ language })` → `renderAssignmentEmail({ language })`.
+- **Announcements**: when "Send via Email" is toggled on, a language dropdown appears (`src/pages/admin/Announcements.tsx`, `src/pages/teacher/Announcements.tsx`). Sent as `email_language` in the announcement create/update body, threaded through `sendAnnouncementNotifications({ language })` in `server.ts`, which builds the subject/HTML/text inline in the chosen language (not via `email.ts` — this email body is built directly in `server.ts`).
+- Defaults to `'sq'` (Albanian) everywhere if not specified, preserving prior behavior.
 
 ## Notes
 - Port 5000 is used for both frontend and backend (Express serves Vite middleware)

@@ -146,6 +146,7 @@ const emptyForm = {
   expires_at: '',
   scheduled_at: '',
   send_email: false,
+  email_language: 'sq' as 'sq' | 'en',
 };
 
 interface BrevoStatus { configured: boolean; connected: boolean; reason?: string; email?: string; plan?: string; senderEmail?: string; senderName?: string; }
@@ -256,6 +257,7 @@ export default function AdminAnnouncements() {
       expires_at: a.expires_at ? a.expires_at.slice(0, 10) : '',
       scheduled_at: a.scheduled_at ? a.scheduled_at.slice(0, 16) : '',
       send_email: false,
+      email_language: 'sq',
     });
     setShowTemplates(false);
     setShowModal(true);
@@ -629,6 +631,17 @@ Write a warm, professional announcement message (3-4 paragraphs). Start with a g
                   <div className="w-9 h-5 bg-slate-300 peer-checked:bg-blue-500 rounded-full transition-colors after:content-[''] after:absolute after:top-0.5 after:left-0.5 after:bg-white after:rounded-full after:w-4 after:h-4 after:transition-all peer-checked:after:translate-x-4" />
                 </label>
               </div>
+
+              {form.send_email && (
+                <div>
+                  <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">Email Language</label>
+                  <select value={form.email_language} onChange={e => set('email_language', e.target.value as 'sq' | 'en')}
+                    className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500">
+                    <option value="sq">Shqip</option>
+                    <option value="en">English</option>
+                  </select>
+                </div>
+              )}
             </div>
 
             <div className="flex gap-3 p-5 border-t border-slate-100">

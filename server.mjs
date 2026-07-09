@@ -466,16 +466,33 @@ function renderInvoiceEmail(opts) {
 }
 function renderAssignmentEmail(opts) {
   const brand = (opts.brandName || "QuizMaster").trim();
-  const subject = `\u{1F4DD} Detyr\xEB e re: ${opts.title} | ${brand}`;
+  const lang = opts.language === "en" ? "en" : "sq";
+  const isEn = lang === "en";
+  const subject = isEn ? `\u{1F4DD} New assignment: ${opts.title} | ${brand}` : `\u{1F4DD} Detyr\xEB e re: ${opts.title} | ${brand}`;
   let dueDateStr = "";
   if (opts.dueDate) {
     try {
-      dueDateStr = new Date(opts.dueDate).toLocaleDateString("sq-AL", { day: "2-digit", month: "long", year: "numeric" });
+      dueDateStr = new Date(opts.dueDate).toLocaleDateString(isEn ? "en-US" : "sq-AL", { day: "2-digit", month: "long", year: "numeric" });
     } catch {
       dueDateStr = String(opts.dueDate).slice(0, 10);
     }
   }
-  const textContent = [
+  const textContent = isEn ? [
+    `New assignment \u2014 ${brand}`,
+    ``,
+    `Hi ${opts.studentName},`,
+    `Your teacher has published a new assignment${opts.className ? ` for class "${opts.className}"` : ""}.`,
+    ``,
+    `Title: ${opts.title}`,
+    opts.courseName ? `Course: ${opts.courseName}` : "",
+    dueDateStr ? `Due date: ${dueDateStr}` : "",
+    opts.maxScore != null ? `Max score: ${opts.maxScore}` : "",
+    opts.description ? `
+Description:
+${opts.description}` : "",
+    ``,
+    `Thank you! \u2014 The ${brand} Team`
+  ].filter(Boolean).join("\n") : [
     `Detyr\xEB e re \u2014 ${brand}`,
     ``,
     `P\xEBrsh\xEBndetje ${opts.studentName},`,
@@ -494,9 +511,32 @@ ${opts.description}` : "",
   const loginBtn = opts.loginUrl ? `
           <div style="text-align:center;margin-bottom:20px;">
             <a href="${opts.loginUrl}" style="display:inline-block;background:#6366f1;color:#ffffff;font-size:14px;font-weight:700;text-decoration:none;padding:13px 28px;border-radius:12px;">
-              \u{1F517} Shiko detyr\xEBn
+              \u{1F517} ${isEn ? "View assignment" : "Shiko detyr\xEBn"}
             </a>
           </div>` : "";
+  const t = isEn ? {
+    headerTag: "New Assignment \u{1F4DD}",
+    greeting: `Hi, ${opts.studentName}!`,
+    intro: `Your teacher has published a new assignment${opts.className ? ` for class <strong>${opts.className}</strong>` : ""}.`,
+    detailsLabel: "Assignment Details",
+    titleLabel: "\u{1F4CC} Title",
+    courseLabel: "\u{1F4DA} Course",
+    dueLabel: "\u{1F4C5} Due date",
+    scoreLabel: "\u{1F3AF} Points",
+    footerNote: "This email was sent automatically when the teacher published a new assignment.",
+    footer: `Sent by the <strong>${brand}</strong> platform \xB7 Thank you!`
+  } : {
+    headerTag: "Detyr\xEB e Re \u{1F4DD}",
+    greeting: `P\xEBrsh\xEBndetje, ${opts.studentName}!`,
+    intro: `M\xEBsuesi juaj ka publikuar nj\xEB detyr\xEB t\xEB re${opts.className ? ` p\xEBr klas\xEBn <strong>${opts.className}</strong>` : ""}.`,
+    detailsLabel: "Detajet e Detyr\xEBs",
+    titleLabel: "\u{1F4CC} Titulli",
+    courseLabel: "\u{1F4DA} Kursi",
+    dueLabel: "\u{1F4C5} Afati",
+    scoreLabel: "\u{1F3AF} Pik\xEBt",
+    footerNote: "Ky email d\xEBrgohet automatikisht kur m\xEBsuesi publikon nj\xEB detyr\xEB t\xEB re.",
+    footer: `D\xEBrguar nga platforma <strong>${brand}</strong> \xB7 Ju faleminderit!`
+  };
   const htmlContent = `<!doctype html>
 <html>
 <body style="margin:0;padding:0;background:#f1f5f9;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;">
@@ -505,33 +545,33 @@ ${opts.description}` : "",
       <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:520px;background:#ffffff;border-radius:20px;overflow:hidden;box-shadow:0 4px 24px rgba(0,0,0,0.06);">
         <tr><td style="background:#6366f1;padding:28px 36px;">
           <div style="font-size:22px;font-weight:800;color:#ffffff;letter-spacing:-0.02em;">${brand}</div>
-          <div style="font-size:13px;color:rgba(255,255,255,0.85);margin-top:4px;">Detyr\xEB e Re \u{1F4DD}</div>
+          <div style="font-size:13px;color:rgba(255,255,255,0.85);margin-top:4px;">${t.headerTag}</div>
         </td></tr>
         <tr><td style="padding:36px;">
-          <p style="margin:0 0 8px;font-size:15px;font-weight:700;color:#0f172a;">P\xEBrsh\xEBndetje, ${opts.studentName}!</p>
+          <p style="margin:0 0 8px;font-size:15px;font-weight:700;color:#0f172a;">${t.greeting}</p>
           <p style="margin:0 0 24px;font-size:14px;line-height:1.6;color:#475569;">
-            M\xEBsuesi juaj ka publikuar nj\xEB detyr\xEB t\xEB re${opts.className ? ` p\xEBr klas\xEBn <strong>${opts.className}</strong>` : ""}.
+            ${t.intro}
           </p>
           <div style="background:#eef2ff;border:1px solid #c7d2fe;border-radius:14px;padding:20px 24px;margin-bottom:24px;">
-            <p style="margin:0 0 14px;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:1px;color:#6b7280;">Detajet e Detyr\xEBs</p>
+            <p style="margin:0 0 14px;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:1px;color:#6b7280;">${t.detailsLabel}</p>
             <table role="presentation" cellpadding="0" cellspacing="0" width="100%">
               <tr>
-                <td style="padding:6px 0;font-size:13px;color:#64748b;width:110px;vertical-align:top;">\u{1F4CC} Titulli</td>
+                <td style="padding:6px 0;font-size:13px;color:#64748b;width:110px;vertical-align:top;">${t.titleLabel}</td>
                 <td style="padding:6px 0;font-size:13px;font-weight:600;color:#0f172a;">${opts.title}</td>
               </tr>
-              ${opts.courseName ? `<tr><td style="padding:6px 0;font-size:13px;color:#64748b;vertical-align:top;">\u{1F4DA} Kursi</td><td style="padding:6px 0;font-size:13px;font-weight:600;color:#0f172a;">${opts.courseName}</td></tr>` : ""}
-              ${dueDateStr ? `<tr><td style="padding:6px 0;font-size:13px;color:#64748b;vertical-align:top;">\u{1F4C5} Afati</td><td style="padding:6px 0;font-size:13px;font-weight:600;color:#0f172a;">${dueDateStr}</td></tr>` : ""}
-              ${opts.maxScore != null ? `<tr><td style="padding:6px 0;font-size:13px;color:#64748b;vertical-align:top;">\u{1F3AF} Pik\xEBt</td><td style="padding:6px 0;font-size:13px;font-weight:600;color:#0f172a;">${opts.maxScore}</td></tr>` : ""}
+              ${opts.courseName ? `<tr><td style="padding:6px 0;font-size:13px;color:#64748b;vertical-align:top;">${t.courseLabel}</td><td style="padding:6px 0;font-size:13px;font-weight:600;color:#0f172a;">${opts.courseName}</td></tr>` : ""}
+              ${dueDateStr ? `<tr><td style="padding:6px 0;font-size:13px;color:#64748b;vertical-align:top;">${t.dueLabel}</td><td style="padding:6px 0;font-size:13px;font-weight:600;color:#0f172a;">${dueDateStr}</td></tr>` : ""}
+              ${opts.maxScore != null ? `<tr><td style="padding:6px 0;font-size:13px;color:#64748b;vertical-align:top;">${t.scoreLabel}</td><td style="padding:6px 0;font-size:13px;font-weight:600;color:#0f172a;">${opts.maxScore}</td></tr>` : ""}
             </table>
           </div>
           ${opts.description ? `<p style="margin:0 0 24px;font-size:13px;line-height:1.6;color:#374151;white-space:pre-wrap;">${opts.description}</p>` : ""}
           ${loginBtn}
           <p style="margin:0;font-size:12px;line-height:1.6;color:#94a3b8;">
-            Ky email d\xEBrgohet automatikisht kur m\xEBsuesi publikon nj\xEB detyr\xEB t\xEB re.
+            ${t.footerNote}
           </p>
         </td></tr>
         <tr><td style="background:#f8fafc;padding:16px 36px;border-top:1px solid #e2e8f0;">
-          <p style="margin:0;font-size:11px;color:#94a3b8;text-align:center;">D\xEBrguar nga platforma <strong>${brand}</strong> \xB7 Ju faleminderit!</p>
+          <p style="margin:0;font-size:11px;color:#94a3b8;text-align:center;">${t.footer}</p>
         </td></tr>
       </table>
     </td></tr>
@@ -4537,7 +4577,8 @@ Assistant:`
           dueDate: opts.dueDate,
           maxScore: opts.maxScore,
           brandName,
-          loginUrl
+          loginUrl,
+          language: opts.language
         });
         return sendEmail({ to: student.email, toName: student.display_name || student.email, subject: tpl.subject, htmlContent: tpl.htmlContent, textContent: tpl.textContent }).catch((err) => console.error(`[assignments] Failed to email ${student.email}:`, err?.message || err));
       });
@@ -15453,7 +15494,8 @@ ${smartUserPrompt}` });
     audience,
     classIds,
     studentIds,
-    sendEmail: shouldSendEmail = false
+    sendEmail: shouldSendEmail = false,
+    language = "sq"
   }) => {
     const recipientIds = /* @__PURE__ */ new Set();
     studentIds.forEach((sid) => recipientIds.add(sid));
@@ -15497,25 +15539,29 @@ ${smartUserPrompt}` });
     if (shouldSendEmail) {
       try {
         if (isEmailConfigured()) {
+          const isEn = language === "en";
           const shortContent = String(content || "").slice(0, 800);
-          const emailSubject = `\u{1F4E2} ${String(title || "New Announcement")}`;
+          const defaultTitle = isEn ? "New Announcement" : "Njoftim i ri";
+          const priorityLabel = isEn ? priority === "urgent" ? "\u{1F6A8} Urgent" : priority === "important" ? "\u26A0\uFE0F Important" : "\u{1F4CC} Notice" : priority === "urgent" ? "\u{1F6A8} Urgjente" : priority === "important" ? "\u26A0\uFE0F E r\xEBnd\xEBsishme" : "\u{1F4CC} Njoftim";
+          const footerNote = isEn ? "This announcement was sent via QuizMaster. You received it because you are a member of this platform." : "Ky njoftim u d\xEBrgua nga QuizMaster. E keni marr\xEB sepse jeni pjes\xEB e k\xEBsaj platforme.";
+          const emailSubject = `\u{1F4E2} ${String(title || defaultTitle)}`;
           const htmlContent = `<!doctype html><html><body style="margin:0;padding:0;background:#f8fafc;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;">
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f8fafc;padding:32px 16px;">
 <tr><td align="center"><table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:520px;background:#ffffff;border:1px solid #e2e8f0;border-radius:16px;overflow:hidden;">
 <tr><td style="background:linear-gradient(135deg,#6366f1,#8b5cf6);padding:24px 28px;">
 <div style="font-size:22px;margin-bottom:4px;">\u{1F4E2}</div>
-<h1 style="margin:0;font-size:20px;color:#ffffff;font-weight:700;">${String(title || "New Announcement")}</h1>
-<div style="font-size:12px;color:rgba(255,255,255,0.7);margin-top:4px;text-transform:uppercase;letter-spacing:0.5px;">${priority === "urgent" ? "\u{1F6A8} Urgent" : priority === "important" ? "\u26A0\uFE0F Important" : "\u{1F4CC} Notice"}</div>
+<h1 style="margin:0;font-size:20px;color:#ffffff;font-weight:700;">${String(title || defaultTitle)}</h1>
+<div style="font-size:12px;color:rgba(255,255,255,0.7);margin-top:4px;text-transform:uppercase;letter-spacing:0.5px;">${priorityLabel}</div>
 </td></tr>
 <tr><td style="padding:24px 28px;">
 <div style="font-size:14px;line-height:1.7;color:#475569;white-space:pre-wrap;">${shortContent}</div>
 </td></tr>
 <tr><td style="padding:12px 28px 24px;border-top:1px solid #f1f5f9;">
-<div style="font-size:11px;color:#94a3b8;">This announcement was sent via QuizMaster. You received it because you are a member of this platform.</div>
+<div style="font-size:11px;color:#94a3b8;">${footerNote}</div>
 </td></tr>
 </table></td></tr></table>
 </body></html>`;
-          const textContent = `${String(title || "New Announcement")}
+          const textContent = `${String(title || defaultTitle)}
 
 ${shortContent}`;
           const recipients = [...recipientIds].map((uid) => profilesById.get(uid)).filter((p) => !!p?.email);
@@ -15588,7 +15634,7 @@ ${shortContent}`;
   };
   app.post("/api/admin/announcements", async (req, res) => {
     try {
-      const { class_ids, student_ids, send_email, ...body } = req.body || {};
+      const { class_ids, student_ids, send_email, email_language, ...body } = req.body || {};
       const payload = {
         ...body,
         published_at: body.status === "published" ? (/* @__PURE__ */ new Date()).toISOString() : null,
@@ -15607,7 +15653,8 @@ ${shortContent}`;
           audience: String(body.target_audience || "all"),
           classIds,
           studentIds,
-          sendEmail: Boolean(send_email)
+          sendEmail: Boolean(send_email),
+          language: email_language === "en" ? "en" : "sq"
         });
       }
       res.json({ success: true, announcement: data });
@@ -15617,7 +15664,7 @@ ${shortContent}`;
   });
   app.patch("/api/admin/announcements/:id", async (req, res) => {
     try {
-      const { class_ids, student_ids, send_email, ...body } = req.body || {};
+      const { class_ids, student_ids, send_email, email_language, ...body } = req.body || {};
       const payload = {
         ...body,
         updated_at: (/* @__PURE__ */ new Date()).toISOString(),
@@ -15635,7 +15682,8 @@ ${shortContent}`;
           audience: String((body.target_audience ?? data?.target_audience) || "all"),
           classIds,
           studentIds,
-          sendEmail: Boolean(send_email)
+          sendEmail: Boolean(send_email),
+          language: email_language === "en" ? "en" : "sq"
         });
       }
       res.json({ success: true, announcement: data });
@@ -15708,7 +15756,7 @@ ${shortContent}`;
       const caller = await assertAuthenticated(req, res);
       if (!caller) return;
       if (caller.role !== "teacher" && caller.role !== "admin") return res.status(403).json({ error: "Forbidden" });
-      const { class_ids, student_ids, send_email, ...body } = req.body || {};
+      const { class_ids, student_ids, send_email, email_language, ...body } = req.body || {};
       const payload = {
         ...body,
         author_id: body.author_id || caller.userId,
@@ -15728,7 +15776,8 @@ ${shortContent}`;
           audience: String(body.target_audience || "all"),
           classIds,
           studentIds,
-          sendEmail: Boolean(send_email)
+          sendEmail: Boolean(send_email),
+          language: email_language === "en" ? "en" : "sq"
         });
       }
       res.json({ success: true, announcement: data });
@@ -15741,7 +15790,7 @@ ${shortContent}`;
       const caller = await assertAuthenticated(req, res);
       if (!caller) return;
       if (caller.role !== "teacher" && caller.role !== "admin") return res.status(403).json({ error: "Forbidden" });
-      const { class_ids, student_ids, send_email, ...body } = req.body || {};
+      const { class_ids, student_ids, send_email, email_language, ...body } = req.body || {};
       const payload = {
         ...body,
         updated_at: (/* @__PURE__ */ new Date()).toISOString(),
@@ -15759,7 +15808,8 @@ ${shortContent}`;
           audience: String((body.target_audience ?? data?.target_audience) || "all"),
           classIds,
           studentIds,
-          sendEmail: Boolean(send_email)
+          sendEmail: Boolean(send_email),
+          language: email_language === "en" ? "en" : "sq"
         });
       }
       res.json({ success: true, announcement: data });
@@ -16281,7 +16331,8 @@ ${shortContent}`;
           title: String(b.title),
           description: b.description != null ? String(b.description) : null,
           dueDate: b.due_date ? String(b.due_date) : null,
-          maxScore: Number(b.max_score) || 100
+          maxScore: Number(b.max_score) || 100,
+          language: b.email_language === "en" ? "en" : "sq"
         });
         return res.json({ success: true, assignment: { id: newId } });
       } catch {
@@ -16314,7 +16365,8 @@ ${shortContent}`;
               title: String(b.title),
               description: b.description != null ? String(b.description) : null,
               dueDate: b.due_date ? String(b.due_date) : null,
-              maxScore: Number(b.max_score) || 100
+              maxScore: Number(b.max_score) || 100,
+              language: b.email_language === "en" ? "en" : "sq"
             });
             return res.json({ success: true, assignment: { id: data.id } });
           }

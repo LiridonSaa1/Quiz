@@ -125,6 +125,7 @@ const emptyForm = {
   submission_config: { ...DEFAULT_CFG },
   autoPublish: false,
   publishAt: '',
+  email_language: 'sq' as 'sq' | 'en',
 };
 
 function SubmissionsPanel({ assignment, onClose }: { assignment: Assignment; onClose: () => void }) {
@@ -462,6 +463,7 @@ export default function TeacherAssignments() {
         allow_late_submission: form.allow_late_submission,
         submission_config: form.submission_config,
         publish_at: form.autoPublish && form.publishAt ? new Date(form.publishAt).toISOString() : null,
+        email_language: form.email_language,
       };
 
       const url = editId ? `/api/teacher/assignments/${editId}` : '/api/teacher/assignments';
@@ -735,6 +737,18 @@ export default function TeacherAssignments() {
                   </select>
                 </div>
               </div>
+
+              {form.class_id && (
+                <div>
+                  <label className="text-xs font-semibold text-slate-600 uppercase tracking-wide">Notification Email Language</label>
+                  <select value={form.email_language} onChange={e => set('email_language', e.target.value as 'sq' | 'en')}
+                    className="mt-1 w-full px-3 py-2.5 text-sm border border-slate-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-amber-500/30">
+                    <option value="sq">Shqip</option>
+                    <option value="en">English</option>
+                  </select>
+                  <p className="mt-1 text-[11px] text-slate-400">Language of the email sent to students about this assignment.</p>
+                </div>
+              )}
 
               {/* Allow late submission */}
               <label className="flex items-center gap-3 cursor-pointer select-none">

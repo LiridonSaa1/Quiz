@@ -2193,6 +2193,7 @@ When giving instructions, number each step clearly. Be precise and technical whe
     description?: string | null;
     dueDate?: string | null;
     maxScore?: number | null;
+    language?: 'sq' | 'en';
   }) => {
     try {
       if (!opts.classId) return;
@@ -2235,6 +2236,7 @@ When giving instructions, number each step clearly. Be precise and technical whe
           maxScore: opts.maxScore,
           brandName,
           loginUrl,
+          language: opts.language,
         });
         return sendEmail({ to: student.email, toName: student.display_name || student.email, subject: tpl.subject, htmlContent: tpl.htmlContent, textContent: tpl.textContent })
           .catch(err => console.error(`[assignments] Failed to email ${student.email}:`, err?.message || err));
@@ -16150,6 +16152,7 @@ Content:\n"""${clipped}"""`;
     classIds,
     studentIds,
     sendEmail: shouldSendEmail = false,
+    language = 'sq',
   }: {
     title: string;
     content: string;
@@ -16158,6 +16161,7 @@ Content:\n"""${clipped}"""`;
     classIds: string[];
     studentIds: string[];
     sendEmail?: boolean;
+    language?: 'sq' | 'en';
   }): Promise<number> => {
     const recipientIds = new Set<string>();
     studentIds.forEach((sid) => recipientIds.add(sid));
@@ -16231,25 +16235,33 @@ Content:\n"""${clipped}"""`;
     if (shouldSendEmail) {
       try {
         if (isEmailConfigured()) {
+          const isEn = language === 'en';
           const shortContent = String(content || '').slice(0, 800);
-          const emailSubject = `📢 ${String(title || 'New Announcement')}`;
+          const defaultTitle = isEn ? 'New Announcement' : 'Njoftim i ri';
+          const priorityLabel = isEn
+            ? (priority === 'urgent' ? '🚨 Urgent' : priority === 'important' ? '⚠️ Important' : '📌 Notice')
+            : (priority === 'urgent' ? '🚨 Urgjente' : priority === 'important' ? '⚠️ E rëndësishme' : '📌 Njoftim');
+          const footerNote = isEn
+            ? 'This announcement was sent via QuizMaster. You received it because you are a member of this platform.'
+            : 'Ky njoftim u dërgua nga QuizMaster. E keni marrë sepse jeni pjesë e kësaj platforme.';
+          const emailSubject = `📢 ${String(title || defaultTitle)}`;
           const htmlContent = `<!doctype html><html><body style="margin:0;padding:0;background:#f8fafc;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;">
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f8fafc;padding:32px 16px;">
 <tr><td align="center"><table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:520px;background:#ffffff;border:1px solid #e2e8f0;border-radius:16px;overflow:hidden;">
 <tr><td style="background:linear-gradient(135deg,#6366f1,#8b5cf6);padding:24px 28px;">
 <div style="font-size:22px;margin-bottom:4px;">📢</div>
-<h1 style="margin:0;font-size:20px;color:#ffffff;font-weight:700;">${String(title || 'New Announcement')}</h1>
-<div style="font-size:12px;color:rgba(255,255,255,0.7);margin-top:4px;text-transform:uppercase;letter-spacing:0.5px;">${priority === 'urgent' ? '🚨 Urgent' : priority === 'important' ? '⚠️ Important' : '📌 Notice'}</div>
+<h1 style="margin:0;font-size:20px;color:#ffffff;font-weight:700;">${String(title || defaultTitle)}</h1>
+<div style="font-size:12px;color:rgba(255,255,255,0.7);margin-top:4px;text-transform:uppercase;letter-spacing:0.5px;">${priorityLabel}</div>
 </td></tr>
 <tr><td style="padding:24px 28px;">
 <div style="font-size:14px;line-height:1.7;color:#475569;white-space:pre-wrap;">${shortContent}</div>
 </td></tr>
 <tr><td style="padding:12px 28px 24px;border-top:1px solid #f1f5f9;">
-<div style="font-size:11px;color:#94a3b8;">This announcement was sent via QuizMaster. You received it because you are a member of this platform.</div>
+<div style="font-size:11px;color:#94a3b8;">${footerNote}</div>
 </td></tr>
 </table></td></tr></table>
 </body></html>`;
-          const textContent = `${String(title || 'New Announcement')}\n\n${shortContent}`;
+          const textContent = `${String(title || defaultTitle)}\n\n${shortContent}`;
 
           // Send emails in small batches to avoid timeout
           const recipients = [...recipientIds]
@@ -16354,7 +16366,7 @@ Content:\n"""${clipped}"""`;
 
   app.post('/api/admin/announcements', async (req, res) => {
     try {
-      const { class_ids, student_ids, send_email, ...body } = req.body || {};
+      const { class_ids, student_ids, send_email, email_language, ...body } = req.body || {};
       const payload = {
         ...body,
         published_at: body.status === 'published' ? new Date().toISOString() : null,
@@ -16375,6 +16387,7 @@ Content:\n"""${clipped}"""`;
           classIds,
           studentIds,
           sendEmail: Boolean(send_email),
+          language: email_language === 'en' ? 'en' : 'sq',
         });
       }
       res.json({ success: true, announcement: data });
@@ -16383,7 +16396,7 @@ Content:\n"""${clipped}"""`;
 
   app.patch('/api/admin/announcements/:id', async (req, res) => {
     try {
-      const { class_ids, student_ids, send_email, ...body } = req.body || {};
+      const { class_ids, student_ids, send_email, email_language, ...body } = req.body || {};
       const payload = {
         ...body,
         updated_at: new Date().toISOString(),
@@ -16403,6 +16416,7 @@ Content:\n"""${clipped}"""`;
           classIds,
           studentIds,
           sendEmail: Boolean(send_email),
+          language: email_language === 'en' ? 'en' : 'sq',
         });
       }
       res.json({ success: true, announcement: data });
@@ -16480,7 +16494,7 @@ Content:\n"""${clipped}"""`;
       const caller = await assertAuthenticated(req, res);
       if (!caller) return;
       if (caller.role !== 'teacher' && caller.role !== 'admin') return res.status(403).json({ error: 'Forbidden' });
-      const { class_ids, student_ids, send_email, ...body } = req.body || {};
+      const { class_ids, student_ids, send_email, email_language, ...body } = req.body || {};
       const payload = {
         ...body,
         author_id: body.author_id || caller.userId,
@@ -16497,6 +16511,7 @@ Content:\n"""${clipped}"""`;
           title: String(body.title || ''), content: String(body.content || ''),
           priority: String(body.priority || 'normal'), audience: String(body.target_audience || 'all'),
           classIds, studentIds, sendEmail: Boolean(send_email),
+          language: email_language === 'en' ? 'en' : 'sq',
         });
       }
       res.json({ success: true, announcement: data });
@@ -16508,7 +16523,7 @@ Content:\n"""${clipped}"""`;
       const caller = await assertAuthenticated(req, res);
       if (!caller) return;
       if (caller.role !== 'teacher' && caller.role !== 'admin') return res.status(403).json({ error: 'Forbidden' });
-      const { class_ids, student_ids, send_email, ...body } = req.body || {};
+      const { class_ids, student_ids, send_email, email_language, ...body } = req.body || {};
       const payload = {
         ...body,
         updated_at: new Date().toISOString(),
@@ -16523,6 +16538,7 @@ Content:\n"""${clipped}"""`;
           title: String((body.title ?? data?.title) || ''), content: String((body.content ?? data?.content) || ''),
           priority: String((body.priority ?? data?.priority) || 'normal'), audience: String((body.target_audience ?? data?.target_audience) || 'all'),
           classIds, studentIds, sendEmail: Boolean(send_email),
+          language: email_language === 'en' ? 'en' : 'sq',
         });
       }
       res.json({ success: true, announcement: data });
@@ -17140,6 +17156,7 @@ Content:\n"""${clipped}"""`;
           description: b.description != null ? String(b.description) : null,
           dueDate: b.due_date ? String(b.due_date) : null,
           maxScore: Number(b.max_score) || 100,
+          language: b.email_language === 'en' ? 'en' : 'sq',
         });
         return res.json({ success: true, assignment: { id: newId } });
       } catch {
@@ -17170,6 +17187,7 @@ Content:\n"""${clipped}"""`;
               description: b.description != null ? String(b.description) : null,
               dueDate: b.due_date ? String(b.due_date) : null,
               maxScore: Number(b.max_score) || 100,
+              language: b.email_language === 'en' ? 'en' : 'sq',
             });
             return res.json({ success: true, assignment: { id: data.id } });
           }

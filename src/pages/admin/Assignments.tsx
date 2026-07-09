@@ -78,6 +78,7 @@ const emptyForm = {
   title: '', description: '', instructions: '', course_id: '', teacher_id: '', class_id: '',
   type: 'homework' as AssignmentType, due_date: '', max_score: 100,
   status: 'published' as AssignmentStatus, allow_late_submission: false,
+  email_language: 'sq' as 'sq' | 'en',
 };
 
 export default function AdminAssignments() {
@@ -160,6 +161,7 @@ export default function AdminAssignments() {
       class_id: a.class_id || '', type: a.type,
       due_date: a.due_date ? a.due_date.substring(0, 10) : '',
       max_score: a.max_score, status: a.status, allow_late_submission: a.allow_late_submission || false,
+      email_language: 'sq',
     });
     setShowModal(true);
   };
@@ -175,6 +177,7 @@ export default function AdminAssignments() {
         class_id: form.class_id || null, type: form.type,
         due_date: form.due_date || null, max_score: Number(form.max_score),
         status: form.status, allow_late_submission: form.allow_late_submission,
+        email_language: form.email_language,
       };
       const url = editId ? `/api/teacher/assignments/${editId}` : '/api/teacher/assignments';
       const method = editId ? 'PATCH' : 'POST';
@@ -440,6 +443,17 @@ export default function AdminAssignments() {
                   {teachers.map(t => <option key={t.id} value={t.id}>{t.display_name}</option>)}
                 </select>
               </div>
+              {form.class_id && (
+                <div>
+                  <label className="text-xs font-semibold text-slate-600 uppercase tracking-wide">Notification Email Language</label>
+                  <select value={form.email_language} onChange={e => setForm(f => ({ ...f, email_language: e.target.value as 'sq' | 'en' }))}
+                    className="mt-1 w-full px-3 py-2.5 text-sm border border-slate-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-amber-500/30">
+                    <option value="sq">Shqip</option>
+                    <option value="en">English</option>
+                  </select>
+                  <p className="mt-1 text-[11px] text-slate-400">Language of the email sent to students about this assignment.</p>
+                </div>
+              )}
               <label className="flex items-center gap-3 cursor-pointer select-none">
                 <div
                   onClick={() => setForm(f => ({ ...f, allow_late_submission: !f.allow_late_submission }))}
