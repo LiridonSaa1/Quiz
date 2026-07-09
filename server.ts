@@ -4052,9 +4052,13 @@ When giving instructions, number each step clearly. Be precise and technical whe
           const existingUser = usersData.users.find((u: any) => u.email === email);
           if (existingUser) {
             userId = existingUser.id;
-            await supabaseAdmin.auth.admin.updateUserById(userId, {
+            // Update BOTH password and metadata so the credentials in the email are valid
+            const { error: pwUpdateError } = await supabaseAdmin.auth.admin.updateUserById(userId, {
+              password,
+              email_confirm: true,
               user_metadata: { displayName: name, role: 'student' }
             });
+            if (pwUpdateError) throw new Error(`Could not update password for existing user: ${pwUpdateError.message}`);
           }
         }
       }

@@ -486,11 +486,14 @@ export function renderTrialWelcomeEmail(opts: {
 
   let expiryDate = opts.trialEndsAt;
   try {
-    expiryDate = new Date(opts.trialEndsAt).toLocaleDateString("sq-AL", {
-      day: "numeric",
-      month: "long",
-      year: "numeric",
-    });
+    const d = new Date(opts.trialEndsAt);
+    if (!isNaN(d.getTime())) {
+      expiryDate = d.toLocaleDateString("sq-AL", {
+        day: "numeric",
+        month: "long",
+        year: "numeric",
+      });
+    }
   } catch { /* fallback to raw ISO */ }
 
   const subject = `Mirë se vini në ${brand} — ${opts.trialDays} ditë falas nga sot`;

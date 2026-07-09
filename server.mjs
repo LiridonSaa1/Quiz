@@ -605,11 +605,14 @@ function renderTrialWelcomeEmail(opts) {
   const brand = (opts.brandName || "QuizMaster").trim();
   let expiryDate = opts.trialEndsAt;
   try {
-    expiryDate = new Date(opts.trialEndsAt).toLocaleDateString("sq-AL", {
-      day: "numeric",
-      month: "long",
-      year: "numeric"
-    });
+    const d = new Date(opts.trialEndsAt);
+    if (!isNaN(d.getTime())) {
+      expiryDate = d.toLocaleDateString("sq-AL", {
+        day: "numeric",
+        month: "long",
+        year: "numeric"
+      });
+    }
   } catch {
   }
   const subject = `Mir\xEB se vini n\xEB ${brand} \u2014 ${opts.trialDays} dit\xEB falas nga sot`;
@@ -5877,9 +5880,12 @@ Assistant:`
           const existingUser = usersData.users.find((u) => u.email === email);
           if (existingUser) {
             userId = existingUser.id;
-            await supabaseAdmin.auth.admin.updateUserById(userId, {
+            const { error: pwUpdateError } = await supabaseAdmin.auth.admin.updateUserById(userId, {
+              password,
+              email_confirm: true,
               user_metadata: { displayName: name, role: "student" }
             });
+            if (pwUpdateError) throw new Error(`Could not update password for existing user: ${pwUpdateError.message}`);
           }
         }
       }
