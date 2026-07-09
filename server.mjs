@@ -692,7 +692,9 @@ var RECIPIENTS = {
   weeklyReport: { student: false, teacher: false, admin: true },
   newTeacherCreated: { student: false, teacher: false, admin: true },
   newStudentCreated: { student: false, teacher: false, admin: true },
-  studentTransferred: { student: false, teacher: true, admin: true }
+  studentTransferred: { student: false, teacher: true, admin: true },
+  discussionQuestionAsked: { student: false, teacher: true, admin: false },
+  badgeAwarded: { student: true, teacher: false, admin: false }
 };
 var TYPE_MAP = {
   newEnrollment: "course",
@@ -707,7 +709,9 @@ var TYPE_MAP = {
   weeklyReport: "info",
   newTeacherCreated: "info",
   newStudentCreated: "info",
-  studentTransferred: "info"
+  studentTransferred: "info",
+  discussionQuestionAsked: "info",
+  badgeAwarded: "success"
 };
 var SETTINGS_KEY = {
   newEnrollment: "email_new_enrollment",
@@ -722,7 +726,9 @@ var SETTINGS_KEY = {
   weeklyReport: "weekly_report",
   newTeacherCreated: "notify_new_teacher",
   newStudentCreated: "notify_new_student",
-  studentTransferred: "notify_student_transfer"
+  studentTransferred: "notify_student_transfer",
+  discussionQuestionAsked: "notify_discussion_question",
+  badgeAwarded: "notify_badge_awarded"
 };
 var ACTION_URLS = {
   newEnrollment: {
@@ -787,6 +793,16 @@ var ACTION_URLS = {
   },
   studentTransferred: {
     student: "/teacher/students",
+    teacher: "/teacher/students",
+    admin: "/admin/students"
+  },
+  discussionQuestionAsked: {
+    student: "/student/lessons",
+    teacher: "/teacher/lessons",
+    admin: "/admin/lessons"
+  },
+  badgeAwarded: {
+    student: "/student/dashboard",
     teacher: "/teacher/students",
     admin: "/admin/students"
   }
@@ -1005,6 +1021,22 @@ function renderContent(role, event, ctx) {
       return {
         title: "Student transferred",
         message: `${sName} was transferred${fromName} to a new teacher.`
+      };
+    }
+    case "discussionQuestionAsked": {
+      const sName = ctx.studentName || "Nj\xEB nx\xEBn\xEBs";
+      const qTitle = ctx.questionTitle || "nj\xEB pyetje";
+      const lTitle = ctx.lessonTitle ? ` te "${ctx.lessonTitle}"` : "";
+      return {
+        title: "Pyetje e re nga nx\xEBn\xEBsi",
+        message: `${sName} b\xEBri pyetjen "${qTitle}"${lTitle}.`
+      };
+    }
+    case "badgeAwarded": {
+      const bName = ctx.badgeName || "nj\xEB arritje t\xEB re";
+      return {
+        title: "Arritje e re!",
+        message: `Urime! Fituat "${bName}".`
       };
     }
   }
@@ -14035,9 +14067,28 @@ ${smartUserPrompt}` });
   };
   rqRestoreBadgeStateFromDB().catch(() => {
   });
+  const BADGE_LABELS = {
+    first_quiz: "Kuizi i par\xEB",
+    quiz_marathon: "Maratonisti i kuizeve",
+    high_achiever: "Arritje e lart\xEB",
+    perfect_score: "Rezultat perfekt",
+    live_player: "Lojtar live",
+    champion: "Kampion",
+    speed_demon: "I shpejt\xEB si rrufeja",
+    consistent: "Konsistent"
+  };
   const awardBadge = (userId, badgeId) => {
     if (!studentBadges.has(userId)) studentBadges.set(userId, /* @__PURE__ */ new Set());
-    studentBadges.get(userId).add(badgeId);
+    const set = studentBadges.get(userId);
+    const isNew = !set.has(badgeId);
+    set.add(badgeId);
+    if (isNew) {
+      void dispatchNotifyEvent("badgeAwarded", {
+        studentId: userId,
+        badgeName: BADGE_LABELS[badgeId] || badgeId
+      }).catch(() => {
+      });
+    }
   };
   const checkAndAwardBadges = (userId, opts) => {
     const count = (studentQuizCount.get(userId) ?? 0) + 1;
@@ -14923,6 +14974,27 @@ ${smartUserPrompt}` });
       );
       const question = await pgGetQuestion(String(r.rows[0]?.id || ""));
       res.json({ success: true, question: question || r.rows[0] });
+      void (async () => {
+        try {
+          let teacherId;
+          const lessonRes = await supabaseAdmin.from("lessons").select("title, course_id").eq("id", lessonId).maybeSingle();
+          const lessonTitle = lessonRes?.data?.title;
+          const courseId = lessonRes?.data?.course_id;
+          if (courseId) {
+            const courseRes = await supabaseAdmin.from("courses").select("teacher_id").eq("id", courseId).maybeSingle();
+            teacherId = courseRes?.data?.teacher_id || void 0;
+          }
+          if (teacherId) {
+            await dispatchNotifyEvent("discussionQuestionAsked", {
+              studentId: caller.userId,
+              teacherId,
+              questionTitle: title,
+              lessonTitle
+            });
+          }
+        } catch {
+        }
+      })();
     } catch (e) {
       res.status(500).json({ error: e.message || "Failed to create question" });
     }

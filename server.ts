@@ -14669,9 +14669,28 @@ Content:\n"""${clipped}"""`;
   rqRestoreBadgeStateFromDB().catch(() => {});
   // ────────────────────────────────────────────────────────────────────────────
 
+  const BADGE_LABELS: Record<string, string> = {
+    first_quiz:    'Kuizi i parë',
+    quiz_marathon: 'Maratonisti i kuizeve',
+    high_achiever: 'Arritje e lartë',
+    perfect_score: 'Rezultat perfekt',
+    live_player:   'Lojtar live',
+    champion:      'Kampion',
+    speed_demon:   'I shpejtë si rrufeja',
+    consistent:    'Konsistent',
+  };
+
   const awardBadge = (userId: string, badgeId: string) => {
     if (!studentBadges.has(userId)) studentBadges.set(userId, new Set());
-    studentBadges.get(userId)!.add(badgeId);
+    const set = studentBadges.get(userId)!;
+    const isNew = !set.has(badgeId);
+    set.add(badgeId);
+    if (isNew) {
+      void dispatchNotifyEvent('badgeAwarded', {
+        studentId: userId,
+        badgeName: BADGE_LABELS[badgeId] || badgeId,
+      }).catch(() => {});
+    }
   };
 
   const checkAndAwardBadges = (
@@ -15621,6 +15640,28 @@ Content:\n"""${clipped}"""`;
       );
       const question = await pgGetQuestion(String(r.rows[0]?.id || ''));
       res.json({ success: true, question: question || r.rows[0] });
+
+      // Fire-and-forget: notify the course's teacher that a student asked a question.
+      void (async () => {
+        try {
+          let teacherId: string | undefined;
+          const lessonRes = await supabaseAdmin.from('lessons').select('title, course_id').eq('id', lessonId).maybeSingle();
+          const lessonTitle = (lessonRes as any)?.data?.title as string | undefined;
+          const courseId = (lessonRes as any)?.data?.course_id as string | undefined;
+          if (courseId) {
+            const courseRes = await supabaseAdmin.from('courses').select('teacher_id').eq('id', courseId).maybeSingle();
+            teacherId = (courseRes as any)?.data?.teacher_id || undefined;
+          }
+          if (teacherId) {
+            await dispatchNotifyEvent('discussionQuestionAsked', {
+              studentId: caller.userId,
+              teacherId,
+              questionTitle: title,
+              lessonTitle,
+            });
+          }
+        } catch { /* best-effort, schema differences tolerated */ }
+      })();
     } catch (e: any) {
       res.status(500).json({ error: e.message || 'Failed to create question' });
     }

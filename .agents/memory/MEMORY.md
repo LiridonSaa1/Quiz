@@ -1,2 +1,3 @@
 - [Render deployment — use Express server, not static serve](render-deployment.md) — Vite production build OOMs; `npx serve -s dist` exposes mockup sandbox when dist is missing
 - [Supabase schema changes need manual SQL](supabase-schema-migrations.md) — this project's Supabase has no `exec_sql` RPC and DATABASE_URL points to a different Postgres than `profiles`/`quizzes`; auto ALTER TABLE on those tables always fails.
+- [Notification event system](notify-events-system.md) — reusable `notifyEvent()` fan-out helper already exists in `src/lib/notifyEvents.ts`; extend it instead of writing bespoke insert logic.

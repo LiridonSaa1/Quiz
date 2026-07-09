@@ -29,7 +29,9 @@ export type NotifyEventKey =
   | "weeklyReport"
   | "newTeacherCreated"
   | "newStudentCreated"
-  | "studentTransferred";
+  | "studentTransferred"
+  | "discussionQuestionAsked"
+  | "badgeAwarded";
 
 export interface NotifyContext {
   studentId?: string;
@@ -74,6 +76,11 @@ export interface NotifyContext {
   teacherEmail?: string;
   fromTeacherName?: string;
   sessionTitle?: string;
+  // Discussion / gamification payloads
+  questionId?: string;
+  questionTitle?: string;
+  lessonTitle?: string;
+  badgeName?: string;
 }
 
 type Role = "student" | "teacher" | "admin";
@@ -92,6 +99,8 @@ const RECIPIENTS: Record<NotifyEventKey, Record<Role, boolean>> = {
   newTeacherCreated:   { student: false, teacher: false, admin: true  },
   newStudentCreated:   { student: false, teacher: false, admin: true  },
   studentTransferred:  { student: false, teacher: true,  admin: true  },
+  discussionQuestionAsked: { student: false, teacher: true,  admin: false },
+  badgeAwarded:            { student: true,  teacher: false, admin: false },
 };
 
 /** Maps an event to the existing notifications.type enum. */
@@ -109,6 +118,8 @@ const TYPE_MAP: Record<NotifyEventKey, string> = {
   newTeacherCreated:   "info",
   newStudentCreated:   "info",
   studentTransferred:  "info",
+  discussionQuestionAsked: "info",
+  badgeAwarded:            "success",
 };
 
 /** Maps the admin "Email Notifications" toggle key to our event key. */
@@ -126,6 +137,8 @@ export const SETTINGS_KEY: Record<NotifyEventKey, string> = {
   newTeacherCreated:   "notify_new_teacher",
   newStudentCreated:   "notify_new_student",
   studentTransferred:  "notify_student_transfer",
+  discussionQuestionAsked: "notify_discussion_question",
+  badgeAwarded:            "notify_badge_awarded",
 };
 
 const ACTION_URLS: Record<NotifyEventKey, Record<Role, string>> = {
@@ -191,6 +204,16 @@ const ACTION_URLS: Record<NotifyEventKey, Record<Role, string>> = {
   },
   studentTransferred: {
     student: "/teacher/students",
+    teacher: "/teacher/students",
+    admin:   "/admin/students",
+  },
+  discussionQuestionAsked: {
+    student: "/student/lessons",
+    teacher: "/teacher/lessons",
+    admin:   "/admin/lessons",
+  },
+  badgeAwarded: {
+    student: "/student/dashboard",
     teacher: "/teacher/students",
     admin:   "/admin/students",
   },
@@ -437,6 +460,24 @@ function renderContent(role: Role, event: NotifyEventKey, ctx: NotifyContext): {
       return {
         title: "Student transferred",
         message: `${sName} was transferred${fromName} to a new teacher.`,
+      };
+    }
+
+    case "discussionQuestionAsked": {
+      const sName = ctx.studentName || "Një nxënës";
+      const qTitle = ctx.questionTitle || "një pyetje";
+      const lTitle = ctx.lessonTitle ? ` te "${ctx.lessonTitle}"` : "";
+      return {
+        title: "Pyetje e re nga nxënësi",
+        message: `${sName} bëri pyetjen "${qTitle}"${lTitle}.`,
+      };
+    }
+
+    case "badgeAwarded": {
+      const bName = ctx.badgeName || "një arritje të re";
+      return {
+        title: "Arritje e re!",
+        message: `Urime! Fituat "${bName}".`,
       };
     }
   }

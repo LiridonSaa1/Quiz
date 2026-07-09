@@ -136,6 +136,13 @@ Teachers/admins can grant a new student N free trial days when creating their ac
 - **Login gate**: `GET /api/auth/check-student-payment` returns `trialActive: true` (skips payment check) while `trial_ends_at` is in the future; once past, `trialExpired: true` is returned and `Login.tsx` shows an Albanian "trial ended" message instead of the generic unpaid message.
 - **Required manual DB step**: this Supabase project has no `exec_sql` RPC function, so the server cannot auto-add columns to `profiles` (same limitation as the existing `quiz_sections` migration). Run `migrations/015_student_trial.sql` once in the Supabase SQL editor to add `trial_days` / `trial_ends_at` to `profiles`. Until that's done, the server logs `[migration] Student trial feature will be disabled until migrations/015_student_trial.sql is run manually` at startup and the trial UI/logic is a no-op (create-student ignores `trialDays`, check-student-payment falls back to the normal monthly-payment gate).
 
+## In-App Notification System
+Server-side fan-out helper `src/lib/notifyEvents.ts` (`notifyEvent()`, invoked via `dispatchNotifyEvent()` in `server.ts`) is the single source of truth for bell notifications. Each `NotifyEventKey` defines: which roles receive it (`RECIPIENTS`), the `notifications.type` badge, the per-role admin toggle key (`SETTINGS_KEY`, under Settings → Notifications), the `action_url` per role, and Albanian/English copy per role (`renderContent`). Adding a new notification type means: add the key, its 4 config entries, a `renderContent` case, then call `dispatchNotifyEvent(key, ctx)` (fire-and-forget, wrapped in try/catch) at the triggering mutation.
+
+**Already wired triggers:** new student/teacher created, student transferred between teachers, course enrollment, quiz submitted, assignment submitted/graded/created, certificate issued, payment received/reminder, maintenance mode toggle, weekly admin digest, discussion question asked (notifies course teacher), badge/achievement awarded (notifies student).
+
+**Known gaps (not wired — would need new detection logic, not just a new endpoint hook):** payment failure, payment-due-soon reminders beyond the existing monthly reminder, attendance-missing / consecutive-absence alerts, schedule/class-time changes, teacher-did-not-mark-attendance nudges, grade-deadline reminders, parent-meeting/event reminders, document-request flows, generic admin↔teacher messaging, system error/backup alerts. These all require either a cron/scheduled job or a feature that doesn't exist yet in the app.
+
 ## Two-Factor Authentication (2FA)
 Per-role 2FA toggle in `/admin/settings` → Security tab. Admin can enable separately for Student / Teacher / Admin.
 
