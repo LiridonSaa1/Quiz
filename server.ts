@@ -4588,6 +4588,87 @@ When giving instructions, number each step clearly. Be precise and technical whe
     }
   });
 
+  /**
+   * Fully removes a student from every table and from Supabase Auth.
+   * Call this instead of bare `profiles.delete()` in any student-deletion endpoint.
+   */
+  async function deleteStudentEverywhere(studentId: string): Promise<void> {
+    const warn = (step: string, err: any) =>
+      console.warn(`[deleteStudent] ${step} failed for ${studentId}: ${err?.message ?? err}`);
+
+    // 1. Remove from courses.student_ids arrays
+    const { data: courses, error: cErr } = await supabaseAdmin
+      .from('courses')
+      .select('id, student_ids')
+      .contains('student_ids', [studentId]);
+    if (cErr) warn('courses query', cErr);
+    if (courses && courses.length > 0) {
+      await Promise.all(courses.map((c: any) => {
+        const ids: string[] = Array.isArray(c.student_ids) ? c.student_ids : [];
+        const next = ids.filter((sid: string) => sid !== studentId);
+        return supabaseAdmin
+          .from('courses')
+          .update({ student_ids: next, total_students: next.length })
+          .eq('id', c.id)
+          .then(({ error }) => { if (error) warn(`courses.update(${c.id})`, error); });
+      }));
+    }
+
+    // 2. Remove from classes.student_ids arrays
+    const { data: classes, error: clErr } = await supabaseAdmin
+      .from('classes')
+      .select('id, student_ids')
+      .contains('student_ids', [studentId]);
+    if (clErr) warn('classes query', clErr);
+    if (classes && classes.length > 0) {
+      await Promise.all(classes.map((cl: any) => {
+        const ids: string[] = Array.isArray(cl.student_ids) ? cl.student_ids : [];
+        const next = ids.filter((sid: string) => sid !== studentId);
+        return supabaseAdmin
+          .from('classes')
+          .update({ student_ids: next })
+          .eq('id', cl.id)
+          .then(({ error }) => { if (error) warn(`classes.update(${cl.id})`, error); });
+      }));
+    }
+
+    // 3. Delete rows in tables that may lack ON DELETE CASCADE.
+    //    Errors here are logged but not fatal — FK cascades may already handle some.
+    const softDelete = async (table: string, col: string) => {
+      const { error } = await supabaseAdmin.from(table).delete().eq(col, studentId);
+      if (error && !error.message?.includes('does not exist')) warn(`${table}.delete`, error);
+    };
+    await Promise.all([
+      softDelete('student_monthly_payments', 'student_id'),
+      softDelete('student_transfers',        'student_id'),
+      softDelete('notifications',            'user_id'),
+      softDelete('quiz_attempts',            'student_id'),
+      softDelete('lesson_progress',          'student_id'),
+      softDelete('quiz_runtime_state',       'student_id'),
+      softDelete('assignment_submissions',   'student_id'),
+      softDelete('attendance',               'student_id'),
+      softDelete('certificates',             'student_id'),
+      // session_participants uses user_id, not student_id
+      softDelete('session_participants',     'user_id'),
+    ]);
+
+    // 4. Delete profile row — this is required; throw on failure
+    const { error: profileErr } = await supabaseAdmin.from('profiles').delete().eq('id', studentId);
+    if (profileErr) throw profileErr;
+
+    // 5. Delete from Supabase Auth — removes all login ability
+    const { error: authErr } = await supabaseAdmin.auth.admin.deleteUser(studentId);
+    if (authErr) {
+      // "User not found" is idempotent — treat as success; everything else is a real error
+      const msg = authErr.message ?? '';
+      if (!msg.toLowerCase().includes('not found') && !msg.toLowerCase().includes('user_not_found')) {
+        throw new Error(`Auth deleteUser failed: ${msg}`);
+      }
+    }
+
+    console.log(`[deleteStudent] ${studentId} fully removed from all tables and auth`);
+  }
+
   // Teacher can delete only students linked to them.
   app.delete('/api/teacher/students/:studentId', async (req, res) => {
     try {
@@ -4612,8 +4693,7 @@ When giving instructions, number each step clearly. Be precise and technical whe
         return res.status(403).json({ error: 'Forbidden: student is not linked to your account' });
       }
 
-      const { error } = await supabaseAdmin.from('profiles').delete().eq('id', studentId);
-      if (error) throw error;
+      await deleteStudentEverywhere(studentId);
       res.json({ success: true });
     } catch (e: any) {
       res.status(500).json({ error: e?.message || 'Failed to delete student' });
@@ -11125,8 +11205,7 @@ Content:\n"""${clipped}"""`;
       if (!profile) return res.status(404).json({ error: 'Student not found' });
       if (profile.role !== 'student') return res.status(400).json({ error: 'Target user is not a student' });
 
-      const { error } = await supabaseAdmin.from('profiles').delete().eq('id', studentId);
-      if (error) throw error;
+      await deleteStudentEverywhere(studentId);
       res.json({ success: true });
     } catch (e: any) {
       res.status(500).json({ error: e?.message || 'Failed to delete student' });
