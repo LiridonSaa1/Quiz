@@ -192,30 +192,35 @@ function SubmissionsPanel({ assignment, onClose }: { assignment: Assignment; onC
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm"
+      className="fixed inset-0 z-50 flex items-end sm:items-center sm:p-4 bg-black/50 backdrop-blur-sm"
       style={{ left: 'var(--sidebar-offset, 0)' } as React.CSSProperties}
       onClick={onClose}
     >
       <motion.div
-        initial={{ opacity: 0, scale: 0.96, y: 12 }}
-        animate={{ opacity: 1, scale: 1, y: 0 }}
-        exit={{ opacity: 0 }}
-        className="bg-white rounded-2xl shadow-2xl w-full max-w-4xl max-h-[92vh] flex flex-col"
+        initial={{ opacity: 0, y: 40 }}
+        animate={{ opacity: 1, y: 0 }}
+        exit={{ opacity: 0, y: 40 }}
+        className="bg-white rounded-t-3xl sm:rounded-2xl shadow-2xl w-full sm:max-w-4xl max-h-[94vh] sm:max-h-[92vh] flex flex-col"
         onClick={e => e.stopPropagation()}
       >
-        <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100">
-          <div>
-            <h2 className="text-base font-bold text-slate-900">Submissions — {assignment.title}</h2>
-            <div className="flex gap-3 mt-1 text-xs text-slate-500">
+        {/* Mobile drag handle */}
+        <div className="flex sm:hidden justify-center pt-3 pb-1">
+          <div className="w-10 h-1 bg-slate-200 rounded-full" />
+        </div>
+
+        <div className="flex items-center justify-between px-4 sm:px-6 py-3 sm:py-4 border-b border-slate-100">
+          <div className="min-w-0 flex-1">
+            <h2 className="text-sm sm:text-base font-bold text-slate-900 truncate">Submissions — {assignment.title}</h2>
+            <div className="flex flex-wrap gap-2 sm:gap-3 mt-1 text-xs text-slate-500">
               <span className="text-blue-600 font-semibold">{submitted} submitted</span>
               <span className="text-emerald-600 font-semibold">{graded} graded</span>
               {late > 0 && <span className="text-rose-500 font-semibold">{late} late</span>}
             </div>
           </div>
-          <button onClick={onClose} className="p-2 hover:bg-slate-100 rounded-lg"><X className="w-4 h-4" /></button>
+          <button onClick={onClose} className="p-2 hover:bg-slate-100 rounded-lg shrink-0 ml-2"><X className="w-4 h-4" /></button>
         </div>
 
-        <div className="overflow-y-auto flex-1 p-4 space-y-2">
+        <div className="overflow-y-auto flex-1 p-3 sm:p-4 space-y-2">
           {loading ? (
             Array(3).fill(0).map((_, i) => (
               <div key={i} className="h-16 rounded-xl bg-slate-100 animate-pulse" />
@@ -227,28 +232,29 @@ function SubmissionsPanel({ assignment, onClose }: { assignment: Assignment; onC
             </div>
           ) : submissions.map(sub => (
             <div key={sub.id} className="border border-slate-100 rounded-xl overflow-hidden">
-              <div className="flex items-center gap-3 px-4 py-3">
-                <div className={cn('w-8 h-8 rounded-lg bg-gradient-to-br flex items-center justify-center text-white text-xs font-bold shrink-0', getAvatarColor(sub.student.display_name))}>
+              <div className="flex items-start gap-3 px-3 sm:px-4 py-3">
+                <div className={cn('w-8 h-8 rounded-lg bg-gradient-to-br flex items-center justify-center text-white text-xs font-bold shrink-0 mt-0.5', getAvatarColor(sub.student.display_name))}>
                   {sub.student.display_name.substring(0, 2).toUpperCase()}
                 </div>
                 <div className="flex-1 min-w-0">
-                  <p className="text-sm font-semibold text-slate-900">{sub.student.display_name}</p>
+                  <p className="text-sm font-semibold text-slate-900 truncate">{sub.student.display_name}</p>
                   <p className="text-xs text-slate-400">{formatDistanceToNow(new Date(sub.submitted_at), { addSuffix: true })}</p>
-                </div>
-                <div className="flex items-center gap-2">
-                  {sub.is_late && <span className="text-xs px-2 py-0.5 rounded-full bg-rose-50 text-rose-600 font-semibold">{t('teacher.assignments.late')}</span>}
-                  {sub.status === 'graded' && sub.grade != null && (
-                    <span className="text-xs px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 font-bold flex items-center gap-1">
-                      <Award className="w-3 h-3" />{sub.grade}/{assignment.max_score}
+                  {/* Badges row — wraps on mobile */}
+                  <div className="flex flex-wrap items-center gap-1.5 mt-1.5">
+                    {sub.is_late && <span className="text-xs px-2 py-0.5 rounded-full bg-rose-50 text-rose-600 font-semibold">{t('teacher.assignments.late')}</span>}
+                    {sub.status === 'graded' && sub.grade != null && (
+                      <span className="text-xs px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 font-bold flex items-center gap-1">
+                        <Award className="w-3 h-3" />{sub.grade}/{assignment.max_score}
+                      </span>
+                    )}
+                    <span className={cn('text-xs px-2 py-0.5 rounded-full font-semibold', sub.status === 'graded' ? 'bg-emerald-50 text-emerald-700' : 'bg-blue-50 text-blue-700')}>
+                      {sub.status === 'graded' ? t('teacher.assignments.graded') : t('teacher.assignments.submitted')}
                     </span>
-                  )}
-                  <span className={cn('text-xs px-2 py-0.5 rounded-full font-semibold', sub.status === 'graded' ? 'bg-emerald-50 text-emerald-700' : 'bg-blue-50 text-blue-700')}>
-                    {sub.status === 'graded' ? t('teacher.assignments.graded') : t('teacher.assignments.submitted')}
-                  </span>
-                  <button onClick={() => initGrading(sub)} className="p-1.5 rounded-lg hover:bg-slate-100 transition-colors">
-                    {expanded === sub.id ? <ChevronUp className="w-4 h-4 text-slate-500" /> : <ChevronDown className="w-4 h-4 text-slate-500" />}
-                  </button>
+                  </div>
                 </div>
+                <button onClick={() => initGrading(sub)} className="p-1.5 rounded-lg hover:bg-slate-100 transition-colors shrink-0">
+                  {expanded === sub.id ? <ChevronUp className="w-4 h-4 text-slate-500" /> : <ChevronDown className="w-4 h-4 text-slate-500" />}
+                </button>
               </div>
 
               <AnimatePresence>
@@ -259,7 +265,7 @@ function SubmissionsPanel({ assignment, onClose }: { assignment: Assignment; onC
                     exit={{ height: 0, opacity: 0 }}
                     className="overflow-hidden"
                   >
-                    <div className="px-4 pb-4 space-y-3 border-t border-slate-100 pt-3">
+                    <div className="px-3 sm:px-4 pb-4 space-y-3 border-t border-slate-100 pt-3">
                       {sub.content && (
                         <div>
                           <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-1">{t('teacher.assignments.textAnswer')}</p>
@@ -295,14 +301,14 @@ function SubmissionsPanel({ assignment, onClose }: { assignment: Assignment; onC
                       {!sub.content && parseJsonField<FileEntry[]>(sub.file_urls, []).length === 0 && parseJsonField<LinkEntry[]>(sub.link_urls, []).length === 0 && (
                         <p className="text-xs text-slate-400 italic">{t('teacher.assignments.noSubmissionContent')}</p>
                       )}
-                      <div className="grid grid-cols-2 gap-3">
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                         <div>
                           <label className="text-xs font-semibold text-slate-500 uppercase tracking-wide">{t('teacher.assignments.grade')} (/{assignment.max_score})</label>
                           <input
                             type="number" min={0} max={assignment.max_score}
                             value={grading[sub.id]?.grade ?? ''}
                             onChange={e => setGrading(prev => ({ ...prev, [sub.id]: { ...prev[sub.id], grade: e.target.value } }))}
-                            className="mt-1 w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-400/30"
+                            className="mt-1 w-full px-3 py-2.5 sm:py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-400/30"
                             placeholder="0"
                           />
                         </div>
@@ -311,7 +317,7 @@ function SubmissionsPanel({ assignment, onClose }: { assignment: Assignment; onC
                           <input
                             value={grading[sub.id]?.feedback ?? ''}
                             onChange={e => setGrading(prev => ({ ...prev, [sub.id]: { ...prev[sub.id], feedback: e.target.value } }))}
-                            className="mt-1 w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-400/30"
+                            className="mt-1 w-full px-3 py-2.5 sm:py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-400/30"
                             placeholder={t('teacher.assignments.writeFeedback')}
                           />
                         </div>
@@ -321,7 +327,7 @@ function SubmissionsPanel({ assignment, onClose }: { assignment: Assignment; onC
                         loading={saving === sub.id}
                         icon={<Award className="w-3.5 h-3.5" />}
                         size="sm"
-                        className="rounded-lg"
+                        className="rounded-lg w-full sm:w-auto"
                       >
                         {t('teacher.assignments.saveGrade')}
                       </LoadingButton>
@@ -692,13 +698,17 @@ export default function TeacherAssignments() {
 
       {/* Create/Edit Modal */}
       {showModal && (
-        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto">
-            <div className="flex items-center justify-between p-5 border-b border-slate-100">
-              <h2 className="text-lg font-bold text-slate-800">{editId ? t('teacher.assignments.editAssignment') : t('teacher.assignments.newAssignment')}</h2>
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-end sm:items-center sm:p-4">
+          <div className="bg-white rounded-t-3xl sm:rounded-2xl shadow-2xl w-full sm:max-w-lg max-h-[94vh] sm:max-h-[90vh] overflow-y-auto flex flex-col">
+            {/* Mobile drag handle */}
+            <div className="flex sm:hidden justify-center pt-3 pb-1 shrink-0">
+              <div className="w-10 h-1 bg-slate-200 rounded-full" />
+            </div>
+            <div className="flex items-center justify-between px-4 sm:px-5 py-3 sm:py-4 border-b border-slate-100 shrink-0">
+              <h2 className="text-base font-bold text-slate-800">{editId ? t('teacher.assignments.editAssignment') : t('teacher.assignments.newAssignment')}</h2>
               <button type="button" onClick={() => setShowModal(false)} className="p-2 hover:bg-slate-100 rounded-lg"><X className="w-4 h-4" /></button>
             </div>
-            <div className="p-5 space-y-4">
+            <div className="p-4 sm:p-5 space-y-4 overflow-y-auto flex-1">
               {/* Title */}
               <div>
                 <label className="text-xs font-semibold text-slate-600 uppercase tracking-wide">Title *</label>
@@ -721,7 +731,7 @@ export default function TeacherAssignments() {
                   placeholder="Detailed step-by-step instructions for students..." />
               </div>
               {/* Type + Status */}
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
                   <label className="text-xs font-semibold text-slate-600 uppercase tracking-wide">Type</label>
                   <select value={form.type} onChange={e => set('type', e.target.value as AssignmentType)}
@@ -741,7 +751,7 @@ export default function TeacherAssignments() {
                 </div>
               </div>
               {/* Due Date + Max Score */}
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
                   <label className="text-xs font-semibold text-slate-600 uppercase tracking-wide">Due Date</label>
                   <input type="date" value={form.due_date} onChange={e => set('due_date', e.target.value)}
@@ -754,7 +764,7 @@ export default function TeacherAssignments() {
                 </div>
               </div>
               {/* Course + Class */}
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
                   <label className="text-xs font-semibold text-slate-600 uppercase tracking-wide">Course</label>
                   <select value={form.course_id}
@@ -963,12 +973,12 @@ export default function TeacherAssignments() {
               </div>
             </div>
 
-            <div className="flex justify-end gap-3 p-5 border-t border-slate-100">
-              <button type="button" onClick={() => setShowModal(false)} className="px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-100 rounded-lg">Cancel</button>
+            <div className="flex flex-col-reverse sm:flex-row sm:justify-end gap-2 sm:gap-3 p-4 sm:p-5 border-t border-slate-100 shrink-0">
+              <button type="button" onClick={() => setShowModal(false)} className="w-full sm:w-auto px-4 py-2.5 sm:py-2 text-sm font-medium text-slate-600 hover:bg-slate-100 rounded-xl sm:rounded-lg text-center">Cancel</button>
               <LoadingButton
                 onClick={handleSave}
                 loading={saving}
-                className="rounded-lg"
+                className="rounded-xl sm:rounded-lg w-full sm:w-auto"
                 style={{ background: saving ? '#f59e0b99' : '#f59e0b' }}
               >
                 {editId ? 'Update' : 'Create'}
