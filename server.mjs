@@ -16761,6 +16761,22 @@ ${shortContent}`;
       const { subId } = req.params;
       const { grade, feedback } = req.body;
       const now = (/* @__PURE__ */ new Date()).toISOString();
+      if (grade !== void 0 && grade !== "" && grade !== null) {
+        const gradeNum = Number(grade);
+        if (isNaN(gradeNum) || gradeNum < 0) {
+          return res.status(400).json({ error: "Nota duhet t\xEB jet\xEB nj\xEB num\xEBr pozitiv." });
+        }
+        try {
+          const { data: subData } = await supabaseAdmin.from("assignment_submissions").select("assignment_id").eq("id", subId).single();
+          if (subData?.assignment_id) {
+            const { data: aData } = await supabaseAdmin.from("assignments").select("max_score").eq("id", subData.assignment_id).single();
+            if (aData?.max_score != null && gradeNum > Number(aData.max_score)) {
+              return res.status(400).json({ error: `Nota nuk mund t\xEB jet\xEB m\xEB e madhe se ${aData.max_score} pik\xEB (maksimumi i caktuar).` });
+            }
+          }
+        } catch {
+        }
+      }
       let updatedRow = null;
       try {
         const result = await poolQuery(

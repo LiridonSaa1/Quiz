@@ -304,13 +304,32 @@ function SubmissionsPanel({ assignment, onClose }: { assignment: Assignment; onC
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                         <div>
                           <label className="text-xs font-semibold text-slate-500 uppercase tracking-wide">{t('teacher.assignments.grade')} (/{assignment.max_score})</label>
-                          <input
-                            type="number" min={0} max={assignment.max_score}
-                            value={grading[sub.id]?.grade ?? ''}
-                            onChange={e => setGrading(prev => ({ ...prev, [sub.id]: { ...prev[sub.id], grade: e.target.value } }))}
-                            className="mt-1 w-full px-3 py-2.5 sm:py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-400/30"
-                            placeholder="0"
-                          />
+                          {(() => {
+                            const raw   = grading[sub.id]?.grade ?? '';
+                            const num   = raw === '' ? NaN : Number(raw);
+                            const over  = !isNaN(num) && num > assignment.max_score;
+                            const under = !isNaN(num) && num < 0;
+                            const invalid = over || under;
+                            return (
+                              <>
+                                <input
+                                  type="number" min={0} max={assignment.max_score}
+                                  value={raw}
+                                  onChange={e => {
+                                    const v = e.target.value;
+                                    if (v === '' || v === '-') { setGrading(prev => ({ ...prev, [sub.id]: { ...prev[sub.id], grade: v } })); return; }
+                                    const n = Number(v);
+                                    const clamped = Math.min(Math.max(0, n), assignment.max_score);
+                                    setGrading(prev => ({ ...prev, [sub.id]: { ...prev[sub.id], grade: String(clamped) } }));
+                                  }}
+                                  className={`mt-1 w-full px-3 py-2.5 sm:py-2 text-sm border rounded-lg focus:outline-none focus:ring-2 transition-colors ${invalid ? 'border-rose-400 bg-rose-50 focus:ring-rose-300/40' : 'border-slate-200 focus:ring-indigo-400/30'}`}
+                                  placeholder="0"
+                                />
+                                {over  && <p className="mt-1 text-[11px] text-rose-500 font-medium">Maksimumi është {assignment.max_score} pikë.</p>}
+                                {under && <p className="mt-1 text-[11px] text-rose-500 font-medium">Nota nuk mund të jetë negative.</p>}
+                              </>
+                            );
+                          })()}
                         </div>
                         <div>
                           <label className="text-xs font-semibold text-slate-500 uppercase tracking-wide">{t('teacher.assignments.feedback')}</label>

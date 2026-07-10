@@ -17548,6 +17548,26 @@ Content:\n"""${clipped}"""`;
       const { grade, feedback } = req.body;
       const now = new Date().toISOString();
 
+      // Validate grade against assignment max_score
+      if (grade !== undefined && grade !== '' && grade !== null) {
+        const gradeNum = Number(grade);
+        if (isNaN(gradeNum) || gradeNum < 0) {
+          return res.status(400).json({ error: 'Nota duhet të jetë një numër pozitiv.' });
+        }
+        // Fetch assignment max_score to validate
+        try {
+          const { data: subData } = await supabaseAdmin
+            .from('assignment_submissions').select('assignment_id').eq('id', subId).single();
+          if (subData?.assignment_id) {
+            const { data: aData } = await supabaseAdmin
+              .from('assignments').select('max_score').eq('id', subData.assignment_id).single();
+            if (aData?.max_score != null && gradeNum > Number(aData.max_score)) {
+              return res.status(400).json({ error: `Nota nuk mund të jetë më e madhe se ${aData.max_score} pikë (maksimumi i caktuar).` });
+            }
+          }
+        } catch { /* ignore validation fetch errors — proceed with save */ }
+      }
+
       let updatedRow: any = null;
       try {
         const result = await poolQuery(
