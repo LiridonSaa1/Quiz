@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useMemo, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import TeacherLayout from '../../components/layout/TeacherLayout';
 import { toast } from 'sonner';
@@ -46,6 +46,7 @@ interface Assignment {
   course?: { title: string } | null;
   class_name?: string | null;
   submissions_count?: number;
+  attachments?: FileEntry[] | null;
 }
 
 type FileEntry = { name: string; url: string; size: number; mime_type: string };
@@ -88,7 +89,7 @@ function getFileIcon(mime: string) {
 function formatBytes(b: number) { if (b < 1024) return `${b} B`; if (b < 1048576) return `${(b / 1024).toFixed(1)} KB`; return `${(b / 1048576).toFixed(1)} MB`; }
 
 interface Course { id: string; title: string }
-interface ClassRec { id: string; name: string }
+interface ClassRec { id: string; name: string; course_id?: string | null }
 
 const STATUS_CFG: Record<AssignmentStatus, { label: string; bg: string; text: string; dot: string; icon: React.ElementType }> = {
   draft:     { label: 'Draft',     bg: 'bg-slate-100',   text: 'text-slate-600',  dot: 'bg-slate-400',   icon: FileText     },
@@ -353,6 +354,9 @@ export default function TeacherAssignments() {
   const [deleteId, setDeleteId] = useState<string | null>(null);
   const [deleting, setDeleting] = useState(false);
   const [submissionsFor, setSubmissionsFor] = useState<Assignment | null>(null);
+  const [formAttachments, setFormAttachments] = useState<FileEntry[]>([]);
+  const [uploadingAttachments, setUploadingAttachments] = useState<string[]>([]);
+  const attachmentInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     // Trigger server-side auto-publish check immediately on page load
@@ -382,7 +386,7 @@ export default function TeacherAssignments() {
       const clJson = clRes.ok ? await clRes.json() : { classes: [] };
 
       const coursesData: Course[] = (cJson.courses || []).map((c: any) => ({ id: String(c.id), title: String(c.title || 'Untitled') }));
-      const classesData: ClassRec[] = (clJson.classes || []).map((c: any) => ({ id: String(c.id), name: String(c.name || 'Untitled') }));
+      const classesData: ClassRec[] = (clJson.classes || []).map((c: any) => ({ id: String(c.id), name: String(c.name || 'Untitled'), course_id: c.course_id ? String(c.course_id) : null }));
       const courseMap: Record<string, string> = {};
       coursesData.forEach(c => { courseMap[c.id] = c.title; });
       const classMap: Record<string, string> = {};
@@ -421,7 +425,7 @@ export default function TeacherAssignments() {
     { label: 'Overdue',   value: assignments.filter(a => a.due_date && isPast(new Date(a.due_date)) && !isToday(new Date(a.due_date)) && a.status === 'published').length, gradient: 'from-rose-500 to-pink-600', shadow: 'shadow-rose-500/25', icon: AlertCircle },
   ];
 
-  const openAdd = () => { setEditId(null); setForm(emptyForm); setShowModal(true); };
+  const openAdd = () => { setEditId(null); setForm(emptyForm); setFormAttachments([]); setShowModal(true); };
   const openEdit = (a: Assignment) => {
     setEditId(a.id);
     const cfg = a.submission_config ? parseJsonField<SubmissionConfig>(a.submission_config, { ...DEFAULT_CFG }) : { ...DEFAULT_CFG };
@@ -441,6 +445,7 @@ export default function TeacherAssignments() {
       autoPublish: hasPublishAt,
       publishAt: publishAtLocal,
     });
+    setFormAttachments(parseJsonField<FileEntry[]>(a.attachments, []));
     setShowModal(true);
   };
 
@@ -464,6 +469,7 @@ export default function TeacherAssignments() {
         submission_config: form.submission_config,
         publish_at: form.autoPublish && form.publishAt ? new Date(form.publishAt).toISOString() : null,
         email_language: form.email_language,
+        attachments: formAttachments,
       };
 
       const url = editId ? `/api/teacher/assignments/${editId}` : '/api/teacher/assignments';
@@ -505,6 +511,35 @@ export default function TeacherAssignments() {
 
   const set = <K extends keyof typeof emptyForm>(key: K, val: typeof emptyForm[K]) =>
     setForm(f => ({ ...f, [key]: val }));
+
+  const filteredClasses = useMemo(() =>
+    form.course_id ? classes.filter(c => c.course_id === form.course_id) : classes,
+    [classes, form.course_id]
+  );
+
+  const handleAttachmentUpload = async (fileList: FileList | File[]) => {
+    const arr = Array.from(fileList);
+    for (const file of arr) {
+      if (file.size > 104857600) { toast.error(`${file.name} exceeds 100 MB`); continue; }
+      setUploadingAttachments(prev => [...prev, file.name]);
+      try {
+        const res = await authFetch('/api/teacher/assignments/upload-attachment', {
+          method: 'POST',
+          body: JSON.stringify({ filename: file.name, mime_type: file.type }),
+        });
+        const json = await res.json();
+        if (!json.signedUrl) throw new Error(json.error || 'Upload URL failed');
+        await fetch(json.signedUrl, { method: 'PUT', body: file, headers: { 'Content-Type': file.type } });
+        const entry: FileEntry = { name: file.name, url: json.publicUrl, size: file.size, mime_type: file.type };
+        setFormAttachments(prev => [...prev, entry]);
+        toast.success(`${file.name} uploaded`);
+      } catch (e: any) {
+        toast.error(`Failed to upload ${file.name}: ${e.message}`);
+      } finally {
+        setUploadingAttachments(prev => prev.filter(n => n !== file.name));
+      }
+    }
+  };
 
   return (
     <TeacherLayout>
@@ -722,19 +757,32 @@ export default function TeacherAssignments() {
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="text-xs font-semibold text-slate-600 uppercase tracking-wide">Course</label>
-                  <select value={form.course_id} onChange={e => set('course_id', e.target.value)}
+                  <select value={form.course_id}
+                    onChange={e => {
+                      const newCourseId = e.target.value;
+                      setForm(f => {
+                        const valid = newCourseId ? classes.filter(c => c.course_id === newCourseId) : classes;
+                        const classOk = valid.some(c => c.id === f.class_id);
+                        return { ...f, course_id: newCourseId, class_id: classOk ? f.class_id : '' };
+                      });
+                    }}
                     className="mt-1 w-full px-3 py-2.5 text-sm border border-slate-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-amber-500/30">
                     <option value="">No course</option>
                     {courses.map(c => <option key={c.id} value={c.id}>{c.title}</option>)}
                   </select>
                 </div>
                 <div>
-                  <label className="text-xs font-semibold text-slate-600 uppercase tracking-wide">Class</label>
+                  <label className="text-xs font-semibold text-slate-600 uppercase tracking-wide">
+                    Class {form.course_id && filteredClasses.length === 0 && <span className="text-slate-400 normal-case font-normal">(none linked)</span>}
+                  </label>
                   <select value={form.class_id} onChange={e => set('class_id', e.target.value)}
                     className="mt-1 w-full px-3 py-2.5 text-sm border border-slate-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-amber-500/30">
                     <option value="">No class</option>
-                    {classes.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                    {filteredClasses.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
                   </select>
+                  {form.course_id && filteredClasses.length > 0 && (
+                    <p className="mt-1 text-[11px] text-slate-400">Showing classes linked to selected course.</p>
+                  )}
                 </div>
               </div>
 
@@ -805,6 +853,76 @@ export default function TeacherAssignments() {
                     )}
                   </div>
                 )}
+              </div>
+
+              {/* Attachment Resources (teacher uploads for students) */}
+              <div className="border border-slate-200 rounded-xl p-4 space-y-3">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-xs font-bold text-slate-700 uppercase tracking-wide">Attachments / Resources</p>
+                    <p className="text-xs text-slate-400 mt-0.5">Upload images, videos or documents that students will see.</p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => attachmentInputRef.current?.click()}
+                    disabled={uploadingAttachments.length > 0}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg bg-indigo-50 text-indigo-700 hover:bg-indigo-100 transition-colors disabled:opacity-50"
+                  >
+                    <Video className="w-3.5 h-3.5" />
+                    Add File
+                  </button>
+                </div>
+                <input
+                  ref={attachmentInputRef}
+                  type="file"
+                  multiple
+                  accept="image/*,video/*,.pdf,.doc,.docx,.ppt,.pptx,.xls,.xlsx,.txt,.zip"
+                  className="hidden"
+                  onChange={e => { if (e.target.files?.length) { handleAttachmentUpload(e.target.files); e.target.value = ''; } }}
+                />
+
+                {/* Uploading progress */}
+                {uploadingAttachments.length > 0 && (
+                  <div className="space-y-1">
+                    {uploadingAttachments.map(name => (
+                      <div key={name} className="flex items-center gap-2 px-3 py-2 bg-indigo-50 rounded-lg animate-pulse">
+                        <div className="w-3 h-3 rounded-full border-2 border-indigo-400 border-t-transparent animate-spin" />
+                        <span className="text-xs text-indigo-600 font-medium truncate">{name}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {/* Existing attachments */}
+                {formAttachments.length > 0 ? (
+                  <div className="space-y-1.5">
+                    {formAttachments.map((f, i) => (
+                      <div key={i} className="flex items-center gap-2.5 p-2 rounded-lg bg-slate-50 border border-slate-100 group">
+                        <span className="text-slate-500">{getFileIcon(f.mime_type)}</span>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-xs font-semibold text-slate-700 truncate">{f.name}</p>
+                          <p className="text-[10px] text-slate-400">{formatBytes(f.size)}</p>
+                        </div>
+                        <a href={f.url} target="_blank" rel="noopener noreferrer" className="p-1 text-slate-300 hover:text-indigo-500 transition-colors">
+                          <ExternalLink className="w-3.5 h-3.5" />
+                        </a>
+                        <button type="button" onClick={() => setFormAttachments(prev => prev.filter((_, idx) => idx !== i))}
+                          className="p-1 text-slate-300 hover:text-rose-500 transition-colors">
+                          <X className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                ) : uploadingAttachments.length === 0 ? (
+                  <div
+                    className="flex flex-col items-center justify-center py-5 rounded-lg border-2 border-dashed border-slate-200 text-slate-400 cursor-pointer hover:border-indigo-300 hover:text-indigo-400 transition-colors"
+                    onClick={() => attachmentInputRef.current?.click()}
+                  >
+                    <Paperclip className="w-6 h-6 mb-1" />
+                    <p className="text-xs font-medium">Click or drop files here</p>
+                    <p className="text-[10px] mt-0.5">Images, videos, PDFs, docs — max 100 MB each</p>
+                  </div>
+                ) : null}
               </div>
 
               {/* Submission Methods */}

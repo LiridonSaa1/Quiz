@@ -90,6 +90,7 @@ type AssignmentRow = {
   allow_late_submission: boolean;
   submission_config: SubmissionConfig | null;
   created_at: string | null;
+  attachments: FileEntry[] | null;
 };
 
 type Submission = {
@@ -356,6 +357,15 @@ export default function StudentAssignmentDetail() {
         }
       }
 
+      let parsedAttachments: FileEntry[] | null = null;
+      if (assignmentRow.attachments) {
+        try {
+          parsedAttachments = typeof assignmentRow.attachments === 'string'
+            ? JSON.parse(assignmentRow.attachments)
+            : assignmentRow.attachments;
+        } catch { parsedAttachments = null; }
+      }
+
       setAssignment({
         id: String(assignmentRow.id),
         title: String(assignmentRow.title || "Untitled"),
@@ -376,6 +386,7 @@ export default function StudentAssignmentDetail() {
         allow_late_submission: Boolean(assignmentRow.allow_late_submission),
         submission_config: parsedConfig,
         created_at: assignmentRow.created_at || null,
+        attachments: parsedAttachments,
       });
 
       try {
@@ -856,6 +867,53 @@ export default function StudentAssignmentDetail() {
                 </div>
               </div>
             </motion.div>
+
+            {/* ── Teacher Attachments / Resources ── */}
+            {assignment.attachments && assignment.attachments.length > 0 && (
+              <motion.div
+                initial={{ opacity: 0, y: 8 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: 0.03 }}
+                className="bg-white rounded-3xl border border-indigo-100 shadow-sm overflow-hidden"
+              >
+                <div className="px-6 py-4 border-b border-indigo-50 flex items-center gap-2 bg-indigo-50/40">
+                  <Paperclip className="w-4 h-4 text-indigo-500" />
+                  <h2 className="text-sm font-bold text-indigo-700">Resources & Attachments</h2>
+                  <span className="ml-auto text-xs font-semibold text-indigo-400 bg-indigo-100 px-2 py-0.5 rounded-full">
+                    {assignment.attachments.length}
+                  </span>
+                </div>
+                <div className="p-4 grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  {assignment.attachments.map((att, i) => {
+                    const isImage = att.mime_type?.startsWith('image/');
+                    const isVideo = att.mime_type?.startsWith('video/');
+                    return (
+                      <div key={i} className="border border-slate-100 rounded-2xl overflow-hidden bg-slate-50 hover:shadow-md transition-shadow">
+                        {isImage && (
+                          <img src={att.url} alt={att.name} className="w-full h-40 object-cover border-b border-slate-100" />
+                        )}
+                        {isVideo && (
+                          <video src={att.url} controls className="w-full max-h-48 border-b border-slate-100 bg-black" />
+                        )}
+                        <div className="flex items-center gap-3 px-3 py-2.5">
+                          <span className="text-slate-500 shrink-0">{getFileIcon(att.mime_type)}</span>
+                          <div className="flex-1 min-w-0">
+                            <p className="text-xs font-semibold text-slate-800 truncate">{att.name}</p>
+                            <p className="text-[10px] text-slate-400">
+                              {att.size ? (att.size < 1048576 ? `${(att.size / 1024).toFixed(1)} KB` : `${(att.size / 1048576).toFixed(1)} MB`) : ''}
+                            </p>
+                          </div>
+                          <a href={att.url} target="_blank" rel="noopener noreferrer"
+                            className="shrink-0 p-1.5 rounded-lg bg-indigo-50 text-indigo-600 hover:bg-indigo-100 transition-colors">
+                            <ExternalLink className="w-3.5 h-3.5" />
+                          </a>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </motion.div>
+            )}
 
             {/* ── Details Panel ── */}
             <motion.div

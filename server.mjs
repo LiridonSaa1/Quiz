@@ -16415,6 +16415,23 @@ ${shortContent}`;
       res.status(500).json({ error: e.message });
     }
   });
+  app.post("/api/teacher/assignments/upload-attachment", async (req, res) => {
+    try {
+      const caller = await assertAuthenticated(req, res);
+      if (!caller) return;
+      if (caller.role !== "teacher" && caller.role !== "admin") return res.status(403).json({ error: "Forbidden" });
+      const { filename, mime_type } = req.body;
+      if (!filename) return res.status(400).json({ error: "filename required" });
+      const safe = filename.replace(/[^a-zA-Z0-9._-]/g, "_");
+      const storagePath = `${caller.userId}/${Date.now()}-${safe}`;
+      const { data, error } = await supabaseAdmin.storage.from("assignment-attachments").createSignedUploadUrl(storagePath);
+      if (error) return res.status(500).json({ error: error.message });
+      const { data: { publicUrl } } = supabaseAdmin.storage.from("assignment-attachments").getPublicUrl(storagePath);
+      return res.json({ signedUrl: data.signedUrl, path: storagePath, publicUrl });
+    } catch (e) {
+      res.status(500).json({ error: e.message });
+    }
+  });
   app.post("/api/teacher/assignments/trigger-autopublish", async (req, res) => {
     try {
       const caller = await assertAuthenticated(req, res);
@@ -16492,8 +16509,8 @@ ${shortContent}`;
           `INSERT INTO assignments
              (title, description, instructions, course_id, class_id, teacher_id,
               type, due_date, max_score, status, allow_late_submission,
-              submission_config, publish_at, created_at, updated_at)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12::jsonb,$13,now(),now())
+              submission_config, publish_at, attachments, created_at, updated_at)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12::jsonb,$13,$14::jsonb,now(),now())
            RETURNING id`,
           [
             String(b.title),
@@ -16508,7 +16525,8 @@ ${shortContent}`;
             b.status || "draft",
             b.allow_late_submission ? true : false,
             b.submission_config != null ? JSON.stringify(b.submission_config) : null,
-            publishAt
+            publishAt,
+            b.attachments != null ? JSON.stringify(b.attachments) : "[]"
           ]
         );
         const newId = result.rows[0].id;
@@ -16538,11 +16556,12 @@ ${shortContent}`;
           allow_late_submission: Boolean(b.allow_late_submission),
           instructions: b.instructions != null ? String(b.instructions) : null,
           submission_config: b.submission_config != null ? b.submission_config : null,
+          attachments: b.attachments != null ? b.attachments : [],
           created_at: now,
           updated_at: now
         };
         if (publishAt) payload.publish_at = publishAt;
-        const STRIP_COLS = ["publish_at", "allow_late_submission", "instructions", "submission_config"];
+        const STRIP_COLS = ["publish_at", "allow_late_submission", "instructions", "submission_config", "attachments"];
         for (let i = 0; i < STRIP_COLS.length + 2; i++) {
           const { data, error } = await supabaseAdmin.from("assignments").insert(payload).select("id").single();
           if (!error && data?.id) {
@@ -16601,6 +16620,7 @@ ${shortContent}`;
         if (b.instructions !== void 0) col("instructions", b.instructions != null ? String(b.instructions) : null);
         if (b.allow_late_submission !== void 0) col("allow_late_submission", Boolean(b.allow_late_submission));
         if (b.submission_config !== void 0) col("submission_config", b.submission_config != null ? JSON.stringify(b.submission_config) : null);
+        if (b.attachments !== void 0) col("attachments", b.attachments != null ? JSON.stringify(b.attachments) : "[]");
         if ("publish_at" in b) col("publish_at", b.publish_at ? new Date(String(b.publish_at)).toISOString() : null);
         params.push(aId);
         await poolQuery(`UPDATE assignments SET ${sets.join(", ")} WHERE id = $${pi}`, params);
@@ -16618,8 +16638,9 @@ ${shortContent}`;
         if (b.instructions !== void 0) payload.instructions = b.instructions != null ? String(b.instructions) : null;
         if (b.allow_late_submission !== void 0) payload.allow_late_submission = Boolean(b.allow_late_submission);
         if (b.submission_config !== void 0) payload.submission_config = b.submission_config;
+        if (b.attachments !== void 0) payload.attachments = b.attachments != null ? b.attachments : [];
         if ("publish_at" in b && b.publish_at) payload.publish_at = new Date(String(b.publish_at)).toISOString();
-        const STRIP_COLS = ["publish_at", "allow_late_submission", "instructions", "submission_config"];
+        const STRIP_COLS = ["publish_at", "allow_late_submission", "instructions", "submission_config", "attachments"];
         for (let i = 0; i < STRIP_COLS.length + 2; i++) {
           const { error } = await supabaseAdmin.from("assignments").update(payload).eq("id", aId);
           if (!error) return res.json({ success: true });
