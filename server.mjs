@@ -6012,14 +6012,16 @@ Assistant:`
         if (authError) throw authError;
         throw new Error("Could not find or create user in Supabase Auth.");
       }
-      const { error: profileError } = await supabaseAdmin.from("profiles").upsert({
+      const teacherProfilePayload = {
         id: userId,
         email,
         display_name: name,
         role: "teacher",
         status: "active",
-        created_at: (/* @__PURE__ */ new Date()).toISOString()
-      });
+        created_at: (/* @__PURE__ */ new Date()).toISOString(),
+        ...profilesHasForcePasswordChange ? { force_password_change: true } : {}
+      };
+      const { error: profileError } = await supabaseAdmin.from("profiles").upsert(teacherProfilePayload);
       if (profileError) throw profileError;
       const names = name.split(" ");
       const firstName = names[0];
@@ -6148,7 +6150,8 @@ Assistant:`
         role: "student",
         teacher_id: resolvedTeacherId,
         status: "active",
-        ...profilesHasTrialColumns ? { trial_days: hasTrial ? trialDaysNum : null, trial_ends_at: trialEndsAt } : {}
+        ...profilesHasTrialColumns ? { trial_days: hasTrial ? trialDaysNum : null, trial_ends_at: trialEndsAt } : {},
+        ...profilesHasForcePasswordChange ? { force_password_change: true } : {}
       };
       const { error: upsertError } = await supabaseAdmin.from("profiles").upsert(profilePayload, { onConflict: "id" });
       if (!upsertError) {
@@ -10596,6 +10599,36 @@ ${e?.stack || ""}`),
       res.json({ success: true });
     } catch (e) {
       res.status(500).json({ error: e.message || "Failed to delete payment" });
+    }
+  });
+  app.post("/api/auth/change-password", async (req, res) => {
+    try {
+      const caller = await assertAuthenticated(req, res);
+      if (!caller) return;
+      const { newPassword } = req.body || {};
+      if (!newPassword || typeof newPassword !== "string" || newPassword.length < 8) {
+        return res.status(400).json({ error: "Fjal\xEBkalimi duhet t\xEB ket\xEB t\xEB pakt\xEBn 8 karaktere." });
+      }
+      const { error: pwErr } = await supabaseAdmin.auth.admin.updateUserById(caller.userId, { password: newPassword });
+      if (pwErr) throw pwErr;
+      if (profilesHasForcePasswordChange) {
+        await supabaseAdmin.from("profiles").update({ force_password_change: false }).eq("id", caller.userId);
+      }
+      return res.json({ success: true });
+    } catch (err) {
+      console.error("[change-password]", err?.message);
+      return res.status(500).json({ error: err?.message || "Ndryshimi i fjal\xEBkalimit d\xEBshtoi." });
+    }
+  });
+  app.get("/api/auth/check-student-password-change", async (req, res) => {
+    try {
+      const caller = await assertAuthenticated(req, res);
+      if (!caller) return;
+      if (!profilesHasForcePasswordChange) return res.json({ required: false });
+      const { data: prof } = await supabaseAdmin.from("profiles").select("force_password_change").eq("id", caller.userId).single();
+      return res.json({ required: Boolean(prof?.force_password_change) });
+    } catch {
+      return res.json({ required: false });
     }
   });
   app.get("/api/auth/check-student-payment", async (req, res) => {
@@ -17384,6 +17417,34 @@ async function runAnnouncementColumnsMigration() {
   }
   console.log("[migration] announcements columns: will use graceful fallback in API handlers");
 }
+var profilesHasForcePasswordChange = false;
+async function runForcePasswordChangeMigration() {
+  const ddl = `ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS force_password_change BOOLEAN NOT NULL DEFAULT false`;
+  try {
+    await poolQuery(ddl);
+    await poolQuery(`NOTIFY pgrst, 'reload schema'`).catch(() => {
+    });
+    console.log("[migration] profiles.force_password_change column ensured \u2713");
+    profilesHasForcePasswordChange = true;
+    return;
+  } catch {
+  }
+  try {
+    const probe = await supabaseAdmin.from("profiles").select("force_password_change").limit(1);
+    if (!probe.error) {
+      console.log("[migration] profiles.force_password_change column already exists \u2713");
+      profilesHasForcePasswordChange = true;
+      return;
+    }
+    const rpc = await supabaseAdmin.rpc("exec_sql", { sql: ddl });
+    if (rpc.error) throw rpc.error;
+    console.log("[migration] profiles.force_password_change added via RPC \u2713");
+    profilesHasForcePasswordChange = true;
+  } catch (err) {
+    console.warn("[migration] profiles.force_password_change could not be auto-created:", err?.message?.split("\n")[0]);
+    console.warn("[migration] Run manually: migrations/017_force_password_change.sql");
+  }
+}
 var profilesHasTrialColumns = false;
 async function runStudentTrialMigration() {
   const cols = [
@@ -17994,6 +18055,7 @@ async function startServer() {
   void runStudentMonthlyPaymentsMigration();
   void runStudentTrialMigration();
   void runTeacherHoursMigration();
+  void runForcePasswordChangeMigration();
   void ensureAssignmentFilesBucket();
   void ensureHeadwayMediaBucket();
   void ensureHeadwayMediaTable();

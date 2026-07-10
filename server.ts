@@ -4045,16 +4045,18 @@ When giving instructions, number each step clearly. Be precise and technical whe
       }
 
       // 2. Create profile in public.profiles table
+      const teacherProfilePayload: Record<string, unknown> = {
+        id: userId,
+        email,
+        display_name: name,
+        role: 'teacher',
+        status: 'active',
+        created_at: new Date().toISOString(),
+        ...(profilesHasForcePasswordChange ? { force_password_change: true } : {}),
+      };
       const { error: profileError } = await supabaseAdmin
         .from('profiles')
-        .upsert({
-          id: userId,
-          email,
-          display_name: name,
-          role: 'teacher',
-          status: 'active',
-          created_at: new Date().toISOString()
-        });
+        .upsert(teacherProfilePayload);
 
       if (profileError) throw profileError;
 
@@ -4216,6 +4218,7 @@ When giving instructions, number each step clearly. Be precise and technical whe
         teacher_id: resolvedTeacherId,
         status: 'active',
         ...(profilesHasTrialColumns ? { trial_days: hasTrial ? trialDaysNum : null, trial_ends_at: trialEndsAt } : {}),
+        ...(profilesHasForcePasswordChange ? { force_password_change: true } : {}),
       };
 
       const { error: upsertError } = await supabaseAdmin
@@ -9908,6 +9911,39 @@ Rules:
   });
 
   // Called during login to check if student has paid the current month
+  // ── Change password (first-login forced reset) ──────────────────────────────
+  app.post('/api/auth/change-password', async (req, res) => {
+    try {
+      const caller = await assertAuthenticated(req, res);
+      if (!caller) return;
+      const { newPassword } = req.body || {};
+      if (!newPassword || typeof newPassword !== 'string' || newPassword.length < 8) {
+        return res.status(400).json({ error: 'Fjalëkalimi duhet të ketë të paktën 8 karaktere.' });
+      }
+      const { error: pwErr } = await supabaseAdmin.auth.admin.updateUserById(caller.userId, { password: newPassword });
+      if (pwErr) throw pwErr;
+      if (profilesHasForcePasswordChange) {
+        await supabaseAdmin.from('profiles').update({ force_password_change: false }).eq('id', caller.userId);
+      }
+      return res.json({ success: true });
+    } catch (err: any) {
+      console.error('[change-password]', err?.message);
+      return res.status(500).json({ error: err?.message || 'Ndryshimi i fjalëkalimit dështoi.' });
+    }
+  });
+
+  app.get('/api/auth/check-student-password-change', async (req, res) => {
+    try {
+      const caller = await assertAuthenticated(req, res);
+      if (!caller) return;
+      if (!profilesHasForcePasswordChange) return res.json({ required: false });
+      const { data: prof } = await supabaseAdmin.from('profiles').select('force_password_change').eq('id', caller.userId).single();
+      return res.json({ required: Boolean((prof as any)?.force_password_change) });
+    } catch {
+      return res.json({ required: false });
+    }
+  });
+
   app.get('/api/auth/check-student-payment', async (req, res) => {
     try {
       const token = (req.headers.authorization || '').replace('Bearer ', '').trim();
@@ -18201,6 +18237,35 @@ async function runAnnouncementColumnsMigration(): Promise<void> {
   console.log('[migration] announcements columns: will use graceful fallback in API handlers');
 }
 
+// ─── Force Password Change Migration ─────────────────────────────────────────
+let profilesHasForcePasswordChange = false;
+
+async function runForcePasswordChangeMigration(): Promise<void> {
+  const ddl = `ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS force_password_change BOOLEAN NOT NULL DEFAULT false`;
+  try {
+    await poolQuery(ddl);
+    await poolQuery(`NOTIFY pgrst, 'reload schema'`).catch(() => {});
+    console.log('[migration] profiles.force_password_change column ensured ✓');
+    profilesHasForcePasswordChange = true;
+    return;
+  } catch { /* fall through */ }
+  try {
+    const probe = await supabaseAdmin.from('profiles').select('force_password_change').limit(1);
+    if (!probe.error) {
+      console.log('[migration] profiles.force_password_change column already exists ✓');
+      profilesHasForcePasswordChange = true;
+      return;
+    }
+    const rpc = await (supabaseAdmin as any).rpc('exec_sql', { sql: ddl });
+    if (rpc.error) throw rpc.error;
+    console.log('[migration] profiles.force_password_change added via RPC ✓');
+    profilesHasForcePasswordChange = true;
+  } catch (err: any) {
+    console.warn('[migration] profiles.force_password_change could not be auto-created:', err?.message?.split('\n')[0]);
+    console.warn('[migration] Run manually: migrations/017_force_password_change.sql');
+  }
+}
+
 // ─── Student Trial Period Migration ──────────────────────────────────────────
 let profilesHasTrialColumns = false;
 
@@ -18874,6 +18939,7 @@ async function startServer() {
   void runStudentMonthlyPaymentsMigration();
   void runStudentTrialMigration();
   void runTeacherHoursMigration();
+  void runForcePasswordChangeMigration();
   void ensureAssignmentFilesBucket();
   void ensureHeadwayMediaBucket();
   void ensureHeadwayMediaTable();

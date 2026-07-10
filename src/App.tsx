@@ -103,6 +103,7 @@ import { apiUrl } from './lib/apiUrl';
 import { isProfileAccessAllowed } from './lib/profileAccess';
 import { normalizeUserRole } from './lib/userRole';
 import { defaultFeatureFlags, extractFeatureFlags, FeatureFlags } from './lib/platformFeatures';
+import ForcePasswordChangeModal from './components/ForcePasswordChangeModal';
 
 const PLATFORM_CONFIG_CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
 const SESSION_STORAGE_KEY = 'qm_platform_init';
@@ -132,6 +133,7 @@ export default function App() {
   const [loading, setLoading] = useState(true);
   const [features, setFeatures] = useState<FeatureFlags>(defaultFeatureFlags);
   const [maintenanceMode, setMaintenanceMode] = useState(false);
+  const [forcePasswordChange, setForcePasswordChange] = useState(false);
   // Tracks the userId that initSession already loaded so onAuthStateChange
   // doesn't trigger a redundant second fetchProfile on startup.
   const initializedUserIdRef = useRef<string | null>(null);
@@ -300,6 +302,10 @@ export default function App() {
           status: profile.status,
           createdAt: profile.created_at
         });
+
+        if (Boolean(profile.force_password_change)) {
+          setForcePasswordChange(true);
+        }
       }
     } catch (error) {
       console.error('Error fetching profile:', error);
@@ -392,6 +398,9 @@ export default function App() {
   return (
     <Router>
       <Toaster position="top-right" richColors />
+      {forcePasswordChange && user && (
+        <ForcePasswordChangeModal onDone={() => setForcePasswordChange(false)} />
+      )}
       <Suspense fallback={<AppBootSkeleton />}>
       <Routes>
         <Route path="/login" element={!user ? <Login /> : <Navigate to="/" />} />
