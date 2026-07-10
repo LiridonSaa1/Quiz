@@ -16201,8 +16201,16 @@ ${shortContent}`;
              LEFT JOIN public.courses c ON c.id = a.course_id
              WHERE a.teacher_id = ANY($1::uuid[])
                AND a.status = 'published'
+               AND (
+                 a.class_id IS NULL
+                 OR EXISTS (
+                   SELECT 1 FROM public.classes cl
+                   WHERE cl.id = a.class_id
+                     AND cl.student_ids @> ARRAY[$2::uuid]
+                 )
+               )
              ORDER BY a.due_date ASC NULLS LAST, a.created_at DESC`,
-            [teacherIds]
+            [teacherIds, caller.userId]
           );
           assignments = result.rows;
           didJoin = true;
@@ -16211,8 +16219,16 @@ ${shortContent}`;
             `SELECT a.* FROM public.assignments a
              WHERE a.teacher_id = ANY($1::uuid[])
                AND a.status = 'published'
+               AND (
+                 a.class_id IS NULL
+                 OR EXISTS (
+                   SELECT 1 FROM public.classes cl
+                   WHERE cl.id = a.class_id
+                     AND cl.student_ids @> ARRAY[$2::uuid]
+                 )
+               )
              ORDER BY a.due_date ASC NULLS LAST, a.created_at DESC`,
-            [teacherIds]
+            [teacherIds, caller.userId]
           );
           assignments = result.rows.map((r) => ({ ...r, course_title: "" }));
         }
@@ -16220,11 +16236,15 @@ ${shortContent}`;
       } catch (sqlErr) {
         console.warn("[student/assignments] poolQuery failed entirely:", sqlErr?.message);
         try {
+          const { data: classRows } = await supabaseAdmin.from("classes").select("id, student_ids").contains("student_ids", [caller.userId]);
+          const studentClassIds = new Set((classRows || []).map((c) => String(c.id)));
           const { data, error } = await supabaseAdmin.from("assignments").select("*").eq("status", "published").order("created_at", { ascending: false });
           if (error) throw error;
-          const filtered = (data || []).filter(
-            (a) => a.teacher_id && teacherIds.includes(String(a.teacher_id))
-          );
+          const filtered = (data || []).filter((a) => {
+            if (!a.teacher_id || !teacherIds.includes(String(a.teacher_id))) return false;
+            if (!a.class_id) return true;
+            return studentClassIds.has(String(a.class_id));
+          });
           assignments = filtered.map((a) => ({ ...a, course_title: "" }));
           console.log(`[student/assignments] supabaseAdmin fallback: ${assignments.length} of ${data?.length || 0}`);
         } catch (fbErr) {

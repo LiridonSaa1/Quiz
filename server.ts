@@ -16918,7 +16918,9 @@ Content:\n"""${clipped}"""`;
         const { total, published } = countResult.rows[0] || {};
         console.log(`[student/assignments] teacher has ${total} total assignments, ${published} published`);
 
-        // Try with courses JOIN first
+        // Try with courses JOIN first; also filter by class membership:
+        // - assignments with class_id=NULL are visible to all teacher's students
+        // - assignments with a class_id are visible only to students in that class
         let didJoin = false;
         try {
           const result = await poolQuery(
@@ -16927,8 +16929,16 @@ Content:\n"""${clipped}"""`;
              LEFT JOIN public.courses c ON c.id = a.course_id
              WHERE a.teacher_id = ANY($1::uuid[])
                AND a.status = 'published'
+               AND (
+                 a.class_id IS NULL
+                 OR EXISTS (
+                   SELECT 1 FROM public.classes cl
+                   WHERE cl.id = a.class_id
+                     AND cl.student_ids @> ARRAY[$2::uuid]
+                 )
+               )
              ORDER BY a.due_date ASC NULLS LAST, a.created_at DESC`,
-            [teacherIds]
+            [teacherIds, caller.userId]
           );
           assignments = result.rows;
           didJoin = true;
@@ -16938,8 +16948,16 @@ Content:\n"""${clipped}"""`;
             `SELECT a.* FROM public.assignments a
              WHERE a.teacher_id = ANY($1::uuid[])
                AND a.status = 'published'
+               AND (
+                 a.class_id IS NULL
+                 OR EXISTS (
+                   SELECT 1 FROM public.classes cl
+                   WHERE cl.id = a.class_id
+                     AND cl.student_ids @> ARRAY[$2::uuid]
+                 )
+               )
              ORDER BY a.due_date ASC NULLS LAST, a.created_at DESC`,
-            [teacherIds]
+            [teacherIds, caller.userId]
           );
           assignments = result.rows.map((r: any) => ({ ...r, course_title: '' }));
         }
@@ -16948,16 +16966,25 @@ Content:\n"""${clipped}"""`;
         console.warn('[student/assignments] poolQuery failed entirely:', sqlErr?.message);
         // Last resort: raw SQL via supabaseAdmin RPC or direct query
         try {
+          // Fetch student's class memberships for fallback filtering
+          const { data: classRows } = await supabaseAdmin
+            .from('classes')
+            .select('id, student_ids')
+            .contains('student_ids', [caller.userId]);
+          const studentClassIds = new Set((classRows || []).map((c: any) => String(c.id)));
+
           const { data, error } = await supabaseAdmin
             .from('assignments')
             .select('*')
             .eq('status', 'published')
             .order('created_at', { ascending: false });
           if (error) throw error;
-          // Filter client-side since PostgREST may not support .in() for teacher_id
-          const filtered = (data || []).filter((a: any) =>
-            a.teacher_id && teacherIds.includes(String(a.teacher_id))
-          );
+          // Filter by teacher AND class membership
+          const filtered = (data || []).filter((a: any) => {
+            if (!a.teacher_id || !teacherIds.includes(String(a.teacher_id))) return false;
+            if (!a.class_id) return true; // no class restriction — visible to all
+            return studentClassIds.has(String(a.class_id)); // class-restricted
+          });
           assignments = filtered.map((a: any) => ({ ...a, course_title: '' }));
           console.log(`[student/assignments] supabaseAdmin fallback: ${assignments.length} of ${data?.length || 0}`);
         } catch (fbErr: any) {
