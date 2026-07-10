@@ -19068,8 +19068,42 @@ async function startServer() {
 
 // ─── Payment deadline reminders ────────────────────────────────────────────────
 // Sends reminder emails to unpaid students on/after the 5th of each month.
-// Called by the daily scheduler and also via the admin API endpoint.
-const _reminderSentThisMonth = new Set<string>(); // key = "userId:YYYY-MM"
+// Maximum 3 reminders per student per month (stops once paid).
+// Counts are persisted to platform_config so they survive server restarts.
+const MAX_REMINDERS_PER_MONTH = 3;
+const REMINDER_COUNTS_SECTION  = 'payment_reminder_counts';
+
+// In-memory cache: key = "userId:YYYY-MM", value = times sent this month
+const _reminderCounts = new Map<string, number>();
+
+async function loadReminderCounts(monthYear: string): Promise<void> {
+  try {
+    const { data } = await supabaseAdmin
+      .from('platform_config')
+      .select('value')
+      .eq('section', REMINDER_COUNTS_SECTION)
+      .maybeSingle();
+    const stored: Record<string, number> = data?.value ?? {};
+    // Load only entries for current month (prune stale months automatically)
+    for (const [k, v] of Object.entries(stored)) {
+      if (k.endsWith(`:${monthYear}`)) _reminderCounts.set(k, Number(v));
+    }
+  } catch { /* use in-memory fallback */ }
+}
+
+async function saveReminderCounts(monthYear: string): Promise<void> {
+  try {
+    // Build object with only current month's entries (keeps config table lean)
+    const snapshot: Record<string, number> = {};
+    for (const [k, v] of _reminderCounts.entries()) {
+      if (k.endsWith(`:${monthYear}`)) snapshot[k] = v;
+    }
+    await supabaseAdmin.from('platform_config').upsert(
+      { section: REMINDER_COUNTS_SECTION, value: snapshot },
+      { onConflict: 'section' }
+    );
+  } catch { /* non-critical — in-memory count still guards duplicates */ }
+}
 
 async function runPaymentDeadlineReminders({ force = false } = {}): Promise<{ sent: number; skipped: number; monthYear: string }> {
   const now = new Date();
@@ -19079,6 +19113,9 @@ async function runPaymentDeadlineReminders({ force = false } = {}): Promise<{ se
   if (!force && dayOfMonth < 5) {
     return { sent: 0, skipped: 0, monthYear };
   }
+
+  // Sync counts from DB so server restarts don't reset the tally
+  await loadReminderCounts(monthYear);
 
   // Fetch settings directly (getConfigSection is scoped inside createApp)
   let brandName = 'QuizMaster';
@@ -19122,13 +19159,19 @@ async function runPaymentDeadlineReminders({ force = false } = {}): Promise<{ se
 
   for (const student of unpaid) {
     const cacheKey = `${student.id}:${monthYear}`;
-    if (!force && _reminderSentThisMonth.has(cacheKey)) { skipped++; continue; }
+    const timesSent = _reminderCounts.get(cacheKey) ?? 0;
+
+    // Skip if already reached the monthly limit (force mode overrides the cap)
+    if (!force && timesSent >= MAX_REMINDERS_PER_MONTH) {
+      skipped++;
+      continue;
+    }
 
     const studentName = student.display_name || student.email || 'Student';
     const tpl = renderPaymentReminderEmail({ studentName, monthLabel, dayOfMonth, brandName, loginUrl });
     try {
       await sendEmail({ to: student.email, toName: studentName, subject: tpl.subject, htmlContent: tpl.htmlContent, textContent: tpl.textContent });
-      _reminderSentThisMonth.add(cacheKey);
+      _reminderCounts.set(cacheKey, timesSent + 1);
       sent++;
     } catch (e: any) {
       console.error(`[payment-reminder] Failed to email ${student.email}:`, e.message);
@@ -19136,8 +19179,12 @@ async function runPaymentDeadlineReminders({ force = false } = {}): Promise<{ se
     }
   }
 
+  if (sent > 0) {
+    await saveReminderCounts(monthYear);
+  }
+
   if (sent > 0 || skipped > 0) {
-    console.log(`[payment-reminder] ${monthYear}: sent=${sent}, skipped=${skipped}`);
+    console.log(`[payment-reminder] ${monthYear}: sent=${sent}, skipped=${skipped} (limit=${MAX_REMINDERS_PER_MONTH}/month)`);
   }
   return { sent, skipped, monthYear };
 }
