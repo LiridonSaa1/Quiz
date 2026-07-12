@@ -246,3 +246,265 @@ html.season-spring .season-particle { animation: season-petal-float linear infin
 .bg-season { background-color: var(--season-bg); }
 .text-season { color: var(--season-primary); }
 .border-season { border-color: var(--season-accent); }
+
+/* ═══════════════════════════════════════════════════════════════════
+   HOLIDAY EFFECTS — per-holiday visual system for Kosovo holidays
+   Applied via: html.holiday-{key}  class on <html> element
+   ═══════════════════════════════════════════════════════════════════ */
+
+/* ── CSS custom properties per holiday ─────────────────────────── */
+html.holiday-new-year           { --h-glow: rgba(251,191,36,.55); --h-shimmer: rgba(255,215,0,.28); --h-accent: #fbbf24; --h-card: #1d4ed8; }
+html.holiday-orthodox-christmas { --h-glow: rgba(147,197,253,.5); --h-shimmer: rgba(255,255,255,.28); --h-accent: #93c5fd; --h-card: #1e40af; }
+html.holiday-independence-day   { --h-glow: rgba(245,166,35,.55); --h-shimmer: rgba(245,166,35,.22); --h-accent: #f5a623; --h-card: #1a56db; }
+html.holiday-eid-al-fitr        { --h-glow: rgba(212,175,55,.55); --h-shimmer: rgba(212,175,55,.22); --h-accent: #d4af37; --h-card: #15803d; }
+html.holiday-catholic-easter    { --h-glow: rgba(244,114,182,.45); --h-shimmer: rgba(255,200,230,.22); --h-accent: #f472b6; --h-card: #86efac; }
+html.holiday-orthodox-easter    { --h-glow: rgba(167,139,250,.45); --h-shimmer: rgba(210,200,255,.22); --h-accent: #a78bfa; --h-card: #c4b5fd; }
+html.holiday-constitution-day   { --h-glow: rgba(99,102,241,.45);  --h-shimmer: rgba(200,210,255,.22); --h-accent: #6366f1; --h-card: #4338ca; }
+html.holiday-labour-day         { --h-glow: rgba(34,197,94,.45);   --h-shimmer: rgba(200,255,210,.22); --h-accent: #22c55e; --h-card: #16a34a; }
+html.holiday-europe-day         { --h-glow: rgba(250,204,21,.5);   --h-shimmer: rgba(255,235,0,.18);   --h-accent: #facc15; --h-card: #2563eb; }
+html.holiday-eid-al-adha        { --h-glow: rgba(212,175,55,.55);  --h-shimmer: rgba(212,175,55,.18);  --h-accent: #d4af37; --h-card: #15803d; }
+html.holiday-catholic-christmas { --h-glow: rgba(220,38,38,.45);   --h-shimmer: rgba(255,200,200,.18); --h-accent: #dc2626; --h-card: #16a34a; }
+
+/* ── Keyframes ─────────────────────────────────────────────────── */
+@keyframes h-snowfall {
+  0%   { transform: translateY(-20px) translateX(0) rotate(0deg);    opacity: 0; }
+  5%   { opacity: 1; }
+  90%  { opacity: .85; }
+  100% { transform: translateY(110vh) translateX(22px) rotate(360deg); opacity: 0; }
+}
+@keyframes h-confetti {
+  0%   { transform: translateY(-20px) rotate(0deg) scaleX(1);    opacity: 0; }
+  5%   { opacity: 1; }
+  50%  { transform: translateY(50vh) rotate(200deg) scaleX(-1);  opacity: .9; }
+  100% { transform: translateY(110vh) rotate(400deg) scaleX(1);  opacity: 0; }
+}
+@keyframes h-petal {
+  0%   { transform: translateY(-10px) rotate(0deg) scale(1) translateX(0);     opacity: 0; }
+  5%   { opacity: .9; }
+  50%  { transform: translateY(55vh) rotate(180deg) scale(.85) translateX(14px); opacity: .8; }
+  100% { transform: translateY(110vh) rotate(360deg) scale(.6) translateX(-8px); opacity: 0; }
+}
+@keyframes h-float-up {
+  0%   { transform: translateY(110vh) translateX(0) scale(.9); opacity: 0; }
+  8%   { opacity: .9; }
+  50%  { transform: translateY(45vh) translateX(10px) scale(1); }
+  100% { transform: translateY(-20px) translateX(5px) scale(.8); opacity: 0; }
+}
+@keyframes h-star-orbit {
+  from { transform: rotate(0deg) translateX(8px) rotate(0deg); }
+  to   { transform: rotate(360deg) translateX(8px) rotate(-360deg); }
+}
+@keyframes h-leaf {
+  0%   { transform: translateY(-20px) rotate(0deg) translateX(0);     opacity: 0; }
+  8%   { opacity: .9; }
+  80%  { opacity: .7; }
+  100% { transform: translateY(110vh) rotate(380deg) translateX(30px); opacity: 0; }
+}
+@keyframes h-sparkle {
+  0%,100% { opacity: 0; transform: scale(0) rotate(0deg); }
+  50%     { opacity: 1; transform: scale(1.3) rotate(30deg); }
+}
+@keyframes h-shimmer-sweep {
+  0%   { left: -150%; }
+  55%  { left: 160%; }
+  100% { left: 160%; }
+}
+@keyframes h-glow-pulse {
+  0%,100% { box-shadow: 0 0 6px var(--h-glow, transparent),  0 1px 3px rgba(0,0,0,.08); }
+  50%     { box-shadow: 0 0 16px var(--h-glow, transparent), 0 2px 6px rgba(0,0,0,.12); }
+}
+@keyframes h-lantern-sway {
+  0%,100% { transform: translateY(0) rotate(-4deg); }
+  50%     { transform: translateY(-8px) rotate(4deg); }
+}
+@keyframes h-banner-fade {
+  0%   { opacity: 0; transform: translateY(-8px); }
+  10%  { opacity: 1; transform: translateY(0); }
+  75%  { opacity: 1; transform: translateY(0); }
+  100% { opacity: 0; transform: translateY(-8px); }
+}
+@keyframes h-accessory-bounce {
+  0%,100% { transform: translateY(0) rotate(-5deg); }
+  50%     { transform: translateY(-4px) rotate(5deg); }
+}
+@keyframes h-card-ribbon {
+  from { opacity: 0; transform: scale(0.5); }
+  to   { opacity: 1; transform: scale(1); }
+}
+
+/* ── Holiday particle base ─────────────────────────────────────── */
+.holiday-particle {
+  position: fixed;
+  top: 0;
+  pointer-events: none;
+  z-index: 0;
+  user-select: none;
+  will-change: transform, opacity;
+  line-height: 1;
+}
+
+/* ── Per-holiday particle animations ───────────────────────────── */
+html.holiday-new-year           .holiday-particle { animation: h-confetti   linear infinite; }
+html.holiday-orthodox-christmas .holiday-particle { animation: h-snowfall   linear infinite; }
+html.holiday-independence-day   .holiday-particle { animation: h-confetti   linear infinite; }
+html.holiday-eid-al-fitr        .holiday-particle { animation: h-float-up   ease-in-out infinite; }
+html.holiday-catholic-easter    .holiday-particle { animation: h-petal      linear infinite; }
+html.holiday-orthodox-easter    .holiday-particle { animation: h-petal      linear infinite; }
+html.holiday-constitution-day   .holiday-particle { animation: h-sparkle    ease-in-out infinite; position: fixed; top: auto; }
+html.holiday-labour-day         .holiday-particle { animation: h-leaf       linear infinite; }
+html.holiday-europe-day         .holiday-particle { animation: h-star-orbit linear infinite; }
+html.holiday-eid-al-adha        .holiday-particle { animation: h-lantern-sway ease-in-out infinite; }
+html.holiday-catholic-christmas .holiday-particle { animation: h-snowfall   linear infinite; }
+
+/* ── Button effects — glow + shimmer sweep on all holidays ─────── */
+html[class*="holiday-"] button:not([disabled]):not([data-no-holiday]) {
+  position: relative;
+  overflow: hidden;
+  animation: h-glow-pulse 3s ease-in-out infinite;
+  transition: box-shadow .2s ease, transform .15s ease;
+}
+html[class*="holiday-"] button:not([disabled]):not([data-no-holiday]):hover {
+  transform: translateY(-1px);
+}
+html[class*="holiday-"] button:not([disabled]):not([data-no-holiday])::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  top: 0;
+  left: -150%;
+  width: 55%;
+  height: 100%;
+  background: linear-gradient(90deg, transparent, var(--h-shimmer, rgba(255,255,255,.2)), transparent);
+  animation: h-shimmer-sweep 3.2s ease-in-out infinite;
+  pointer-events: none;
+  border-radius: inherit;
+}
+
+/* Per-holiday button icon hints via CSS variables (injected as content on nav items) */
+html.holiday-new-year           [data-holiday-icon]::before { content: '🎆 '; }
+html.holiday-orthodox-christmas [data-holiday-icon]::before { content: '❄️ '; }
+html.holiday-independence-day   [data-holiday-icon]::before { content: '🇽🇰 '; }
+html.holiday-eid-al-fitr        [data-holiday-icon]::before,
+html.holiday-eid-al-adha        [data-holiday-icon]::before { content: '🌙 '; }
+html.holiday-catholic-easter    [data-holiday-icon]::before,
+html.holiday-orthodox-easter    [data-holiday-icon]::before { content: '🥚 '; }
+html.holiday-constitution-day   [data-holiday-icon]::before { content: '📜 '; }
+html.holiday-labour-day         [data-holiday-icon]::before { content: '🌿 '; }
+html.holiday-europe-day         [data-holiday-icon]::before { content: '⭐ '; }
+html.holiday-catholic-christmas [data-holiday-icon]::before { content: '🎄 '; }
+
+/* ── Holiday card decoration ───────────────────────────────────── */
+html[class*="holiday-"] .holiday-card {
+  border-color: var(--h-card, #e2e8f0) !important;
+  border-width: 2px !important;
+  position: relative;
+  overflow: hidden;
+}
+html[class*="holiday-"] .holiday-card::before {
+  content: '';
+  position: absolute;
+  top: 0; right: 0;
+  width: 0; height: 0;
+  border-style: solid;
+  border-width: 0 36px 36px 0;
+  border-color: transparent var(--h-card, #6366f1) transparent transparent;
+  pointer-events: none;
+  z-index: 5;
+  animation: h-card-ribbon .4s ease-out;
+}
+html[class*="holiday-"] .holiday-card::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(135deg, rgba(255,255,255,0) 60%, color-mix(in srgb, var(--h-accent, #6366f1) 8%, transparent) 100%);
+  pointer-events: none;
+  z-index: 1;
+}
+
+/* ── Dashboard widget background patterns ──────────────────────── */
+html.holiday-new-year .dashboard-bg-pattern {
+  background-image: radial-gradient(circle, rgba(251,191,36,.07) 1px, transparent 1px);
+  background-size: 28px 28px;
+}
+html.holiday-independence-day .dashboard-bg-pattern {
+  background-image: repeating-linear-gradient(
+    45deg, rgba(26,86,219,.04) 0, rgba(26,86,219,.04) 1px, transparent 0, transparent 50%
+  );
+  background-size: 22px 22px;
+}
+html.holiday-eid-al-fitr .dashboard-bg-pattern,
+html.holiday-eid-al-adha .dashboard-bg-pattern {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='60' height='60'%3E%3Cpath d='M30 2L32 28L58 30L32 32L30 58L28 32L2 30L28 28Z' fill='%23d4af3716'/%3E%3C/svg%3E");
+  background-size: 60px 60px;
+}
+html.holiday-catholic-christmas .dashboard-bg-pattern,
+html.holiday-orthodox-christmas .dashboard-bg-pattern {
+  background-image: radial-gradient(circle, rgba(147,197,253,.06) 1px, transparent 1px);
+  background-size: 24px 24px;
+}
+html.holiday-europe-day .dashboard-bg-pattern {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='50' height='50'%3E%3Ctext y='30' font-size='20' opacity='.05'%3E⭐%3C/text%3E%3C/svg%3E");
+  background-size: 50px 50px;
+}
+html.holiday-catholic-easter .dashboard-bg-pattern,
+html.holiday-orthodox-easter .dashboard-bg-pattern {
+  background-image: radial-gradient(ellipse, rgba(244,114,182,.05) 0, transparent 70%);
+  background-size: 40px 40px;
+}
+
+/* ── Custom cursors ────────────────────────────────────────────── */
+html.holiday-new-year,
+html.holiday-catholic-christmas,
+html.holiday-orthodox-christmas {
+  cursor: url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' width='32' height='32'><text y='26' font-size='24'>❄️</text></svg>") 16 16, auto;
+}
+html.holiday-independence-day {
+  cursor: url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' width='32' height='32'><text y='26' font-size='24'>⭐</text></svg>") 16 16, auto;
+}
+html.holiday-eid-al-fitr,
+html.holiday-eid-al-adha {
+  cursor: url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' width='32' height='32'><text y='26' font-size='24'>🌙</text></svg>") 16 16, auto;
+}
+html.holiday-catholic-easter,
+html.holiday-orthodox-easter {
+  cursor: url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' width='32' height='32'><text y='26' font-size='24'>🥚</text></svg>") 16 16, auto;
+}
+html.holiday-labour-day {
+  cursor: url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' width='32' height='32'><text y='26' font-size='24'>🌿</text></svg>") 16 16, auto;
+}
+html.holiday-europe-day {
+  cursor: url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' width='32' height='32'><text y='26' font-size='24'>⭐</text></svg>") 16 16, auto;
+}
+
+/* ── Notification holiday badge ────────────────────────────────── */
+.notification-holiday-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-weight: 700;
+  border-radius: 999px;
+  font-size: .72rem;
+  letter-spacing: .25px;
+  white-space: nowrap;
+}
+html.holiday-new-year           .notification-holiday-badge { background: linear-gradient(135deg,#1d4ed8,#7c3aed); color:#fff; }
+html.holiday-independence-day   .notification-holiday-badge { background: linear-gradient(135deg,#1a56db,#0e3db3); color:#fbbf24; }
+html.holiday-eid-al-fitr        .notification-holiday-badge,
+html.holiday-eid-al-adha        .notification-holiday-badge { background: linear-gradient(135deg,#15803d,#14532d); color:#d4af37; }
+html.holiday-catholic-christmas .notification-holiday-badge { background: linear-gradient(135deg,#dc2626,#16a34a); color:#fff; }
+html.holiday-orthodox-christmas .notification-holiday-badge { background: linear-gradient(135deg,#1e40af,#3b82f6); color:#e0f2fe; }
+html.holiday-catholic-easter    .notification-holiday-badge { background: linear-gradient(135deg,#ec4899,#a855f7); color:#fff; }
+html.holiday-orthodox-easter    .notification-holiday-badge { background: linear-gradient(135deg,#7c3aed,#a855f7); color:#fff; }
+html.holiday-constitution-day   .notification-holiday-badge { background: linear-gradient(135deg,#4338ca,#6366f1); color:#fff; }
+html.holiday-labour-day         .notification-holiday-badge { background: linear-gradient(135deg,#15803d,#22c55e); color:#fff; }
+html.holiday-europe-day         .notification-holiday-badge { background: linear-gradient(135deg,#1d4ed8,#2563eb); color:#facc15; }
+
+/* ── Reduced motion ────────────────────────────────────────────── */
+@media (prefers-reduced-motion: reduce) {
+  html[class*="holiday-"] button::after { animation: none; }
+  html[class*="holiday-"] button        { animation: none; }
+  .holiday-particle { display: none; }
+  .holiday-canvas   { display: none; }
+  .holiday-banner   { animation: none !important; }
+  .holiday-logo-accessory { animation: none; }
+}
