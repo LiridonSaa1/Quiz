@@ -382,6 +382,8 @@ export default function TeacherAssignments() {
   const [formAttachments, setFormAttachments] = useState<FileEntry[]>([]);
   const [uploadingAttachments, setUploadingAttachments] = useState<string[]>([]);
   const attachmentInputRef = useRef<HTMLInputElement>(null);
+  const [attachMode, setAttachMode] = useState<'upload' | 'url'>('upload');
+  const [urlInput, setUrlInput] = useState('');
 
   useEffect(() => {
     // Trigger server-side auto-publish check immediately on page load
@@ -857,74 +859,139 @@ export default function TeacherAssignments() {
                 )}
               </div>
 
-              {/* Attachment Resources (teacher uploads for students) */}
+              {/* Attachment Resources */}
               <div className="border border-slate-200 rounded-xl p-4 space-y-3">
                 <div className="flex items-center justify-between">
                   <div>
                     <p className="text-xs font-bold text-slate-700 uppercase tracking-wide">Attachments / Resources</p>
-                    <p className="text-xs text-slate-400 mt-0.5">Upload images, videos or documents that students will see.</p>
+                    <p className="text-xs text-slate-400 mt-0.5">Add files or links that students will see.</p>
                   </div>
-                  <button
-                    type="button"
-                    onClick={() => attachmentInputRef.current?.click()}
-                    disabled={uploadingAttachments.length > 0}
-                    className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg bg-indigo-50 text-indigo-700 hover:bg-indigo-100 transition-colors disabled:opacity-50"
-                  >
-                    <Video className="w-3.5 h-3.5" />
-                    Add File
-                  </button>
+                  {/* Upload / URL toggle */}
+                  <div className="flex items-center gap-1 p-1 bg-slate-100 rounded-lg">
+                    <button
+                      type="button"
+                      onClick={() => setAttachMode('upload')}
+                      className={`inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-semibold rounded-md transition-all ${attachMode === 'upload' ? 'bg-white text-indigo-700 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
+                    >
+                      <Paperclip className="w-3.5 h-3.5" /> Upload
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setAttachMode('url')}
+                      className={`inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-semibold rounded-md transition-all ${attachMode === 'url' ? 'bg-white text-indigo-700 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
+                    >
+                      <Link2 className="w-3.5 h-3.5" /> URL
+                    </button>
+                  </div>
                 </div>
-                <input
-                  ref={attachmentInputRef}
-                  type="file"
-                  multiple
-                  accept="image/*,video/*,.pdf,.doc,.docx,.ppt,.pptx,.xls,.xlsx,.txt,.zip"
-                  className="hidden"
-                  onChange={e => { if (e.target.files?.length) { handleAttachmentUpload(e.target.files); e.target.value = ''; } }}
-                />
 
-                {/* Uploading progress */}
-                {uploadingAttachments.length > 0 && (
-                  <div className="space-y-1">
-                    {uploadingAttachments.map(name => (
-                      <div key={name} className="flex items-center gap-2 px-3 py-2 bg-indigo-50 rounded-lg animate-pulse">
-                        <div className="w-3 h-3 rounded-full border-2 border-indigo-400 border-t-transparent animate-spin" />
-                        <span className="text-xs text-indigo-600 font-medium truncate">{name}</span>
-                      </div>
-                    ))}
+                {/* URL mode */}
+                {attachMode === 'url' && (
+                  <div className="flex gap-2">
+                    <input
+                      type="url"
+                      value={urlInput}
+                      onChange={e => setUrlInput(e.target.value)}
+                      onKeyDown={e => {
+                        if (e.key === 'Enter') {
+                          e.preventDefault();
+                          const trimmed = urlInput.trim();
+                          if (!trimmed) return;
+                          let label = trimmed;
+                          try { label = new URL(trimmed).hostname; } catch { /* keep full */ }
+                          setFormAttachments(prev => [...prev, { name: label, url: trimmed, size: 0, mime_type: 'text/uri-list' }]);
+                          setUrlInput('');
+                        }
+                      }}
+                      placeholder="https://example.com/resource"
+                      className="flex-1 px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-400/40"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const trimmed = urlInput.trim();
+                        if (!trimmed) return;
+                        let label = trimmed;
+                        try { label = new URL(trimmed).hostname; } catch { /* keep full */ }
+                        setFormAttachments(prev => [...prev, { name: label, url: trimmed, size: 0, mime_type: 'text/uri-list' }]);
+                        setUrlInput('');
+                      }}
+                      className="px-3 py-2 text-xs font-semibold rounded-lg bg-indigo-600 text-white hover:bg-indigo-700 transition-colors"
+                    >
+                      Add
+                    </button>
                   </div>
                 )}
 
-                {/* Existing attachments */}
-                {formAttachments.length > 0 ? (
-                  <div className="space-y-1.5">
+                {/* Upload mode */}
+                {attachMode === 'upload' && (
+                  <>
+                    <input
+                      ref={attachmentInputRef}
+                      type="file"
+                      multiple
+                      accept="image/*,video/*,.pdf,.doc,.docx,.ppt,.pptx,.xls,.xlsx,.txt,.zip"
+                      className="hidden"
+                      onChange={e => { if (e.target.files?.length) { handleAttachmentUpload(e.target.files); e.target.value = ''; } }}
+                    />
+                    {uploadingAttachments.length > 0 && (
+                      <div className="space-y-1">
+                        {uploadingAttachments.map(name => (
+                          <div key={name} className="flex items-center gap-2 px-3 py-2 bg-indigo-50 rounded-lg animate-pulse">
+                            <div className="w-3 h-3 rounded-full border-2 border-indigo-400 border-t-transparent animate-spin" />
+                            <span className="text-xs text-indigo-600 font-medium truncate">{name}</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                    {formAttachments.filter(f => f.mime_type !== 'text/uri-list').length === 0 && uploadingAttachments.length === 0 && (
+                      <div
+                        className="flex flex-col items-center justify-center py-5 rounded-lg border-2 border-dashed border-slate-200 text-slate-400 cursor-pointer hover:border-indigo-300 hover:text-indigo-400 transition-colors"
+                        onClick={() => attachmentInputRef.current?.click()}
+                      >
+                        <Paperclip className="w-6 h-6 mb-1" />
+                        <p className="text-xs font-medium">Click or drop files here</p>
+                        <p className="text-[10px] mt-0.5">Images, videos, PDFs, docs — max 100 MB each</p>
+                      </div>
+                    )}
+                    {formAttachments.filter(f => f.mime_type !== 'text/uri-list').length > 0 && (
+                      <button
+                        type="button"
+                        onClick={() => attachmentInputRef.current?.click()}
+                        disabled={uploadingAttachments.length > 0}
+                        className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg bg-indigo-50 text-indigo-700 hover:bg-indigo-100 transition-colors disabled:opacity-50"
+                      >
+                        <Paperclip className="w-3.5 h-3.5" /> Add More Files
+                      </button>
+                    )}
+                  </>
+                )}
+
+                {/* All attachments list (files + URLs together) */}
+                {formAttachments.length > 0 && (
+                  <div className="space-y-1.5 mt-1">
                     {formAttachments.map((f, i) => (
-                      <div key={i} className="flex items-center gap-2.5 p-2 rounded-lg bg-slate-50 border border-slate-100 group">
-                        <span className="text-slate-500">{getFileIcon(f.mime_type)}</span>
+                      <div key={i} className="flex items-center gap-2.5 p-2 rounded-lg bg-slate-50 border border-slate-100">
+                        <span className="text-slate-500 shrink-0">
+                          {f.mime_type === 'text/uri-list' ? <Link2 className="w-4 h-4 text-indigo-400" /> : getFileIcon(f.mime_type)}
+                        </span>
                         <div className="flex-1 min-w-0">
                           <p className="text-xs font-semibold text-slate-700 truncate">{f.name}</p>
-                          <p className="text-[10px] text-slate-400">{formatBytes(f.size)}</p>
+                          <p className="text-[10px] text-slate-400">
+                            {f.mime_type === 'text/uri-list' ? <span className="truncate">{f.url}</span> : formatBytes(f.size)}
+                          </p>
                         </div>
-                        <a href={f.url} target="_blank" rel="noopener noreferrer" className="p-1 text-slate-300 hover:text-indigo-500 transition-colors">
+                        <a href={f.url} target="_blank" rel="noopener noreferrer" className="p-1 text-slate-300 hover:text-indigo-500 transition-colors shrink-0">
                           <ExternalLink className="w-3.5 h-3.5" />
                         </a>
                         <button type="button" onClick={() => setFormAttachments(prev => prev.filter((_, idx) => idx !== i))}
-                          className="p-1 text-slate-300 hover:text-rose-500 transition-colors">
+                          className="p-1 text-slate-300 hover:text-rose-500 transition-colors shrink-0">
                           <X className="w-3.5 h-3.5" />
                         </button>
                       </div>
                     ))}
                   </div>
-                ) : uploadingAttachments.length === 0 ? (
-                  <div
-                    className="flex flex-col items-center justify-center py-5 rounded-lg border-2 border-dashed border-slate-200 text-slate-400 cursor-pointer hover:border-indigo-300 hover:text-indigo-400 transition-colors"
-                    onClick={() => attachmentInputRef.current?.click()}
-                  >
-                    <Paperclip className="w-6 h-6 mb-1" />
-                    <p className="text-xs font-medium">Click or drop files here</p>
-                    <p className="text-[10px] mt-0.5">Images, videos, PDFs, docs — max 100 MB each</p>
-                  </div>
-                ) : null}
+                )}
               </div>
 
               {/* Submission Methods */}
