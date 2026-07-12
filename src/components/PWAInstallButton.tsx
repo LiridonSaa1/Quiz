@@ -6,7 +6,7 @@ import { useBranding } from '../lib/useBranding';
 import { cn } from '../lib/utils';
 import { useTranslation } from 'react-i18next';
 
-function IOSInstructionsModal({ onClose, schoolName }: { onClose: () => void; schoolName: string }) {
+export function IOSInstructionsModal({ onClose, schoolName }: { onClose: () => void; schoolName: string }) {
   const { t } = useTranslation();
   return (
     <div

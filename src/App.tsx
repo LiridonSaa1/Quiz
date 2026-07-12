@@ -4,6 +4,8 @@ import { Toaster, toast } from 'sonner';
 import { supabase } from './supabase';
 import { UserProfile } from './types';
 import { AppBootSkeleton } from './components/ui/Skeleton';
+import { usePWAInstall } from './hooks/usePWAInstall';
+import { IOSInstructionsModal } from './components/PWAInstallButton';
 
 // Pages — loaded lazily to enable code splitting (reduces initial bundle from 3.5MB to ~200KB)
 const Login = lazy(() => import('./pages/Login'));
@@ -134,6 +136,9 @@ export default function App() {
   const [features, setFeatures] = useState<FeatureFlags>(defaultFeatureFlags);
   const [maintenanceMode, setMaintenanceMode] = useState(false);
   const [forcePasswordChange, setForcePasswordChange] = useState(false);
+  const [showFirstLoginPWA, setShowFirstLoginPWA] = useState(false);
+  const pendingPWARef = useRef(false);
+  const { state: pwaState, install: pwaInstall } = usePWAInstall();
   // Tracks the userId that initSession already loaded so onAuthStateChange
   // doesn't trigger a redundant second fetchProfile on startup.
   const initializedUserIdRef = useRef<string | null>(null);
@@ -303,14 +308,30 @@ export default function App() {
           createdAt: profile.created_at
         });
 
-        if (Boolean(profile.force_password_change)) {
+        const isFirstLogin = sessionStorage.getItem('firstLoginHint') === '1';
+        if (Boolean(profile.force_password_change) || isFirstLogin) {
           setForcePasswordChange(true);
+          if (isFirstLogin) pendingPWARef.current = true;
         }
       }
     } catch (error) {
       console.error('Error fetching profile:', error);
     } finally {
       setLoading(false);
+    }
+  };
+
+  // After the force-password modal is dismissed, trigger PWA install if this was a first login
+  const handlePasswordChangeDone = () => {
+    setForcePasswordChange(false);
+    sessionStorage.removeItem('firstLoginHint');
+    if (pendingPWARef.current) {
+      pendingPWARef.current = false;
+      if (pwaState === 'available') {
+        pwaInstall();
+      } else if (pwaState === 'ios') {
+        setShowFirstLoginPWA(true);
+      }
     }
   };
 
@@ -399,7 +420,13 @@ export default function App() {
     <Router>
       <Toaster position="top-right" richColors />
       {forcePasswordChange && user && (
-        <ForcePasswordChangeModal onDone={() => setForcePasswordChange(false)} />
+        <ForcePasswordChangeModal onDone={handlePasswordChangeDone} />
+      )}
+      {showFirstLoginPWA && (
+        <IOSInstructionsModal
+          onClose={() => setShowFirstLoginPWA(false)}
+          schoolName={user?.displayName ? '' : 'QuizMaster'}
+        />
       )}
       <Suspense fallback={<AppBootSkeleton />}>
       <Routes>
