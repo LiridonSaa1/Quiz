@@ -4734,8 +4734,8 @@ Assistant:`
     try {
       if (!opts.userIds || opts.userIds.length === 0) return;
       if (!isEmailConfigured()) return;
-      const { data: recipients } = await supabaseAdmin.from("profiles").select("id, display_name, email").in("id", opts.userIds);
-      const withEmail = (recipients || []).filter((r) => r?.email);
+      const { data: recipients } = await supabaseAdmin.from("profiles").select("id, display_name, email, status").in("id", opts.userIds);
+      const withEmail = (recipients || []).filter((r) => r?.email && r?.status !== "inactive");
       if (withEmail.length === 0) return;
       let hostName = null;
       if (opts.hostId) {
@@ -10493,9 +10493,12 @@ ${e?.stack || ""}`),
       if (!isEmailConfigured()) {
         return res.status(400).json({ error: "Email is not configured (Brevo). Check BREVO_API_KEY and BREVO_SENDER_EMAIL." });
       }
-      const { data: student } = await supabaseAdmin.from("profiles").select("display_name, email").eq("id", String(student_id)).single();
+      const { data: student } = await supabaseAdmin.from("profiles").select("display_name, email, status").eq("id", String(student_id)).single();
       if (!student?.email) {
         return res.status(400).json({ error: "Student not found or has no email address" });
+      }
+      if (student.status === "inactive") {
+        return res.status(400).json({ error: "Cannot send reminder to a disabled student" });
       }
       const [yr, mo] = String(month_year).split("-");
       const monthLabel = new Date(Number(yr), Number(mo) - 1, 1).toLocaleString("default", { month: "long", year: "numeric" });
@@ -15723,7 +15726,7 @@ ${smartUserPrompt}` });
     }
     let profilesById = /* @__PURE__ */ new Map();
     if (recipientIds.size > 0) {
-      const { data: invitedProfiles } = await supabaseAdmin.from("profiles").select("id, role, email, display_name").in("id", [...recipientIds]);
+      const { data: invitedProfiles } = await supabaseAdmin.from("profiles").select("id, role, email, display_name, status").in("id", [...recipientIds]).neq("status", "inactive");
       profilesById = new Map((invitedProfiles || []).map((p) => [
         String(p.id),
         { role: String(p.role || "").toLowerCase(), email: String(p.email || ""), name: String(p.display_name || p.email || "") }
@@ -15731,7 +15734,7 @@ ${smartUserPrompt}` });
     } else {
       const normalizedAudience = String(audience || "all").toLowerCase();
       const targetRoles = normalizedAudience === "students" ? ["student"] : normalizedAudience === "teachers" ? ["teacher"] : ["student", "teacher"];
-      const { data: audienceProfiles } = await supabaseAdmin.from("profiles").select("id, role, email, display_name").in("role", targetRoles);
+      const { data: audienceProfiles } = await supabaseAdmin.from("profiles").select("id, role, email, display_name").in("role", targetRoles).eq("status", "active");
       profilesById = new Map((audienceProfiles || []).map((p) => [
         String(p.id),
         { role: String(p.role || "").toLowerCase(), email: String(p.email || ""), name: String(p.display_name || p.email || "") }

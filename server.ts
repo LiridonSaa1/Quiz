@@ -2351,9 +2351,9 @@ When giving instructions, number each step clearly. Be precise and technical whe
 
       const { data: recipients } = await supabaseAdmin
         .from('profiles')
-        .select('id, display_name, email')
+        .select('id, display_name, email, status')
         .in('id', opts.userIds);
-      const withEmail = (recipients || []).filter((r: any) => r?.email);
+      const withEmail = (recipients || []).filter((r: any) => r?.email && r?.status !== 'inactive');
       if (withEmail.length === 0) return;
 
       let hostName: string | null = null;
@@ -9791,11 +9791,14 @@ Rules:
       }
       const { data: student } = await supabaseAdmin
         .from('profiles')
-        .select('display_name, email')
+        .select('display_name, email, status')
         .eq('id', String(student_id))
         .single();
       if (!student?.email) {
         return res.status(400).json({ error: 'Student not found or has no email address' });
+      }
+      if (student.status === 'inactive') {
+        return res.status(400).json({ error: 'Cannot send reminder to a disabled student' });
       }
       const [yr, mo] = String(month_year).split('-');
       const monthLabel = new Date(Number(yr), Number(mo) - 1, 1).toLocaleString('default', { month: 'long', year: 'numeric' });
@@ -16365,8 +16368,9 @@ Content:\n"""${clipped}"""`;
     if (recipientIds.size > 0) {
       const { data: invitedProfiles } = await supabaseAdmin
         .from('profiles')
-        .select('id, role, email, display_name')
-        .in('id', [...recipientIds]);
+        .select('id, role, email, display_name, status')
+        .in('id', [...recipientIds])
+        .neq('status', 'inactive');
       profilesById = new Map((invitedProfiles || []).map((p: any) => [
         String(p.id),
         { role: String(p.role || '').toLowerCase(), email: String(p.email || ''), name: String(p.display_name || p.email || '') },
@@ -16382,7 +16386,8 @@ Content:\n"""${clipped}"""`;
       const { data: audienceProfiles } = await supabaseAdmin
         .from('profiles')
         .select('id, role, email, display_name')
-        .in('role', targetRoles);
+        .in('role', targetRoles)
+        .eq('status', 'active');
 
       profilesById = new Map((audienceProfiles || []).map((p: any) => [
         String(p.id),
