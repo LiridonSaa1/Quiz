@@ -3841,15 +3841,18 @@ async function createApp(options = {}) {
       ]);
       const b = branding || {};
       const s = settings || {};
-      const schoolName = typeof s?.general?.school_name === "string" && s.general.school_name.trim() || typeof b?.schoolName === "string" && b.schoolName.trim() || "QuizMaster";
-      const primaryColor = typeof b?.colors?.primary === "string" && b.colors.primary || "#4f46e5";
-      const bgColor = typeof b?.colors?.sidebar_bg === "string" && b.colors.sidebar_bg || "#0f172a";
+      const pwa = b?.pwa && typeof b.pwa === "object" ? b.pwa : {};
+      const schoolName = typeof pwa.name === "string" && pwa.name.trim() || typeof s?.general?.school_name === "string" && s.general.school_name.trim() || typeof b?.schoolName === "string" && b.schoolName.trim() || "QuizMaster";
+      const shortName = typeof pwa.shortName === "string" && pwa.shortName.trim() || (schoolName.length > 14 ? schoolName.slice(0, 14) : schoolName);
+      const description = typeof pwa.description === "string" && pwa.description.trim() || `${schoolName} \u2014 Education Platform`;
+      const primaryColor = typeof pwa.themeColor === "string" && pwa.themeColor.trim() || typeof b?.colors?.primary === "string" && b.colors.primary || "#4f46e5";
+      const bgColor = typeof pwa.backgroundColor === "string" && pwa.backgroundColor.trim() || typeof b?.colors?.sidebar_bg === "string" && b.colors.sidebar_bg || "#0f172a";
       res.setHeader("Content-Type", "application/manifest+json");
       res.setHeader("Cache-Control", "no-store");
       res.json({
         name: schoolName,
-        short_name: schoolName.length > 14 ? schoolName.slice(0, 14) : schoolName,
-        description: `${schoolName} \u2014 Education Platform`,
+        short_name: shortName,
+        description,
         start_url: "/",
         scope: "/",
         display: "standalone",
@@ -5196,7 +5199,9 @@ Assistant:`
         colors: b.colors && typeof b.colors === "object" ? b.colors : null,
         typography: b.typography && typeof b.typography === "object" ? b.typography : null,
         copy: b.copy && typeof b.copy === "object" ? b.copy : null,
-        darkMode: Boolean(b.darkMode)
+        darkMode: Boolean(b.darkMode),
+        seasonal: b.seasonal && typeof b.seasonal === "object" ? b.seasonal : null,
+        pwa: b.pwa && typeof b.pwa === "object" ? b.pwa : null
       });
     } catch (e) {
       if (isPlatformConfigMissing(e)) return res.json(fallback);

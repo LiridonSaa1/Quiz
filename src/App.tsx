@@ -106,6 +106,7 @@ import { isProfileAccessAllowed } from './lib/profileAccess';
 import { normalizeUserRole } from './lib/userRole';
 import { defaultFeatureFlags, extractFeatureFlags, FeatureFlags } from './lib/platformFeatures';
 import ForcePasswordChangeModal from './components/ForcePasswordChangeModal';
+import { SeasonalThemeProvider } from './components/SeasonalThemeProvider';
 
 const PLATFORM_CONFIG_CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
 const SESSION_STORAGE_KEY = 'qm_platform_init';
@@ -417,6 +418,7 @@ export default function App() {
   }
 
   return (
+    <SeasonalThemeProvider>
     <Router>
       <Toaster position="top-right" richColors />
       {forcePasswordChange && user && (
@@ -446,6 +448,7 @@ export default function App() {
       </Routes>
       </Suspense>
     </Router>
+    </SeasonalThemeProvider>
   );
 }
 

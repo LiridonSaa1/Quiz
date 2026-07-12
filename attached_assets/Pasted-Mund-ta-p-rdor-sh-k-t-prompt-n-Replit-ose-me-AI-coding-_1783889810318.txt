@@ -1,0 +1,103 @@
+Mund ta përdorësh këtë prompt në Replit ose me AI coding assistant:
+
+# Britannica School – Seasonal Theme & Dynamic PWA Branding
+
+Update the entire **Britannica School** platform with a modern dynamic branding system.
+
+## 1. Automatic Seasonal Theme
+
+Create a global theme manager that automatically changes the application's appearance based on the current season.
+
+### Spring
+
+* Fresh green gradients
+* Flowers and nature accents
+* Light backgrounds
+* Green buttons
+* Smooth animations
+
+### Summer
+
+* Blue sky and yellow accents
+* Bright interface
+* Sunny illustrations
+* Ocean-inspired colors
+
+### Autumn
+
+* Orange, brown and amber palette
+* Falling leaves animation (lightweight)
+* Warm backgrounds
+
+### Winter
+
+* White and blue colors
+* Snowflake accents
+* Frosted glass effect
+* Optional subtle snowfall animation
+
+The system should:
+
+* Detect the current season automatically from the server/client date.
+* Apply the correct colors, gradients, illustrations and icons globally.
+* Support dark mode and light mode.
+* Work without requiring a page refresh.
+* Use CSS variables so the entire application updates consistently.
+
+---
+
+## 2. Dynamic PWA Branding
+
+Improve the Admin Panel by adding a new section:
+
+**Settings → Branding → PWA**
+
+The administrator should be able to customize:
+
+* Application Name
+* Short Name
+* Description
+* Theme Color
+* Background Color
+* Splash Screen Color
+* Favicon
+* PWA Icon (192x192)
+* PWA Icon (512x512)
+* Apple Touch Icon
+* Shortcut Icons
+* Maskable Icon
+
+After saving:
+
+* Regenerate the PWA manifest automatically.
+* Update all icons without requiring developer intervention.
+* Clear the old service worker cache if needed.
+* Show a notification when the branding update is completed successfully.
+
+---
+
+## 3. Theme Customization
+
+The administrator should also be able to:
+
+* Enable or disable automatic seasonal themes.
+* Select a fixed season manually.
+* Choose custom primary and secondary colors.
+* Upload seasonal background images.
+* Preview the selected theme before saving.
+* Restore default theme with one click.
+
+---
+
+## 4. Technical Requirements
+
+* React + TypeScript
+* Responsive on desktop, tablet and mobile.
+* Optimized performance.
+* Lazy-load seasonal assets.
+* Store settings in the database.
+* Apply branding globally throughout the application.
+* No hardcoded colors.
+* Clean, reusable and maintainable code.
+
+The implementation should feel polished, modern and production-ready, similar to high-quality educational platforms.

@@ -147,3 +147,102 @@ a, button, [role="button"], input, select, textarea, label {
     transition-duration: 0.01ms !important;
   }
 }
+
+/* ═══════════════════════════════════════════════════════
+   SEASONAL THEME SYSTEM
+   CSS variables applied dynamically via JS on <html>
+   ═══════════════════════════════════════════════════════ */
+
+:root {
+  --season-primary:   #2563eb;
+  --season-accent:    #fbbf24;
+  --season-bg:        #eff6ff;
+  --season-grad-from: #3b82f6;
+  --season-grad-to:   #1d4ed8;
+  --season-text:      #1e3a5f;
+}
+
+/* ─── Spring ─── */
+html.season-spring {
+  --season-primary:   #16a34a;
+  --season-accent:    #86efac;
+  --season-bg:        #f0fdf4;
+  --season-grad-from: #22c55e;
+  --season-grad-to:   #15803d;
+  --season-text:      #14532d;
+}
+
+/* ─── Summer ─── */
+html.season-summer {
+  --season-primary:   #2563eb;
+  --season-accent:    #fbbf24;
+  --season-bg:        #eff6ff;
+  --season-grad-from: #3b82f6;
+  --season-grad-to:   #1d4ed8;
+  --season-text:      #1e3a5f;
+}
+
+/* ─── Autumn ─── */
+html.season-autumn {
+  --season-primary:   #ea580c;
+  --season-accent:    #fbbf24;
+  --season-bg:        #fff7ed;
+  --season-grad-from: #f97316;
+  --season-grad-to:   #c2410c;
+  --season-text:      #431407;
+}
+
+/* ─── Winter ─── */
+html.season-winter {
+  --season-primary:   #1e40af;
+  --season-accent:    #93c5fd;
+  --season-bg:        #f0f9ff;
+  --season-grad-from: #3b82f6;
+  --season-grad-to:   #1e3a5f;
+  --season-text:      #1e3a5f;
+}
+
+/* ─── Decorative particle keyframes ─── */
+@keyframes season-leaf-fall {
+  0%   { transform: translateY(-20px) rotate(0deg) translateX(0);   opacity: 0; }
+  8%   { opacity: 0.9; }
+  80%  { opacity: 0.7; }
+  100% { transform: translateY(110vh) rotate(380deg) translateX(35px); opacity: 0; }
+}
+
+@keyframes season-snowfall {
+  0%   { transform: translateY(-10px) translateX(0);    opacity: 0; }
+  8%   { opacity: 0.85; }
+  90%  { opacity: 0.7; }
+  100% { transform: translateY(110vh) translateX(18px);  opacity: 0; }
+}
+
+@keyframes season-petal-float {
+  0%   { transform: translateY(-10px) rotate(0deg)   scale(1)   translateX(0);    opacity: 0; }
+  8%   { opacity: 0.85; }
+  50%  { transform: translateY(50vh)  rotate(200deg) scale(0.8) translateX(14px); opacity: 0.8; }
+  100% { transform: translateY(110vh) rotate(380deg) scale(0.5) translateX(-8px); opacity: 0; }
+}
+
+.season-particle {
+  position: fixed;
+  top: 0;
+  pointer-events: none;
+  z-index: 0;
+  user-select: none;
+  will-change: transform, opacity;
+  line-height: 1;
+}
+
+html.season-autumn .season-particle { animation: season-leaf-fall  linear infinite; }
+html.season-winter .season-particle { animation: season-snowfall   linear infinite; }
+html.season-spring .season-particle { animation: season-petal-float linear infinite; }
+
+/* ─── Utility classes using seasonal variables ─── */
+.btn-season {
+  background: linear-gradient(135deg, var(--season-grad-from), var(--season-grad-to));
+  color: #fff;
+}
+.bg-season { background-color: var(--season-bg); }
+.text-season { color: var(--season-primary); }
+.border-season { border-color: var(--season-accent); }

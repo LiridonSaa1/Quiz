@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react';
 import { apiUrl } from './apiUrl';
 
+import { SeasonConfig, DEFAULT_SEASON_CONFIG } from './seasonalTheme';
+
 export interface BrandingPayload {
   logoUrl: string | null;
   faviconUrl: string | null;
@@ -10,7 +12,25 @@ export interface BrandingPayload {
   typography: Record<string, string> | null;
   copy: Record<string, string> | null;
   darkMode: boolean;
+  seasonal: SeasonConfig;
+  pwa: {
+    name: string;
+    shortName: string;
+    description: string;
+    themeColor: string;
+    backgroundColor: string;
+    logoText: string;
+  };
 }
+
+const DEFAULT_PWA = {
+  name: '',
+  shortName: '',
+  description: '',
+  themeColor: '#4f46e5',
+  backgroundColor: '#0f172a',
+  logoText: '',
+};
 
 const DEFAULT_BRANDING: BrandingPayload = {
   logoUrl: null,
@@ -21,6 +41,8 @@ const DEFAULT_BRANDING: BrandingPayload = {
   typography: null,
   copy: null,
   darkMode: false,
+  seasonal: DEFAULT_SEASON_CONFIG,
+  pwa: DEFAULT_PWA,
 };
 
 const FONT_HREF_BASE = 'https://fonts.googleapis.com/css2?display=swap&family=';
@@ -98,6 +120,12 @@ const fetchBranding = async (): Promise<BrandingPayload> => {
         typography: json.typography ?? null,
         copy: json.copy ?? null,
         darkMode: Boolean(json.darkMode),
+        seasonal: json.seasonal && typeof json.seasonal === 'object'
+          ? { ...DEFAULT_SEASON_CONFIG, ...json.seasonal }
+          : DEFAULT_SEASON_CONFIG,
+        pwa: json.pwa && typeof json.pwa === 'object'
+          ? { ...DEFAULT_PWA, ...json.pwa }
+          : DEFAULT_PWA,
       };
       cachedBranding = next;
       return next;
