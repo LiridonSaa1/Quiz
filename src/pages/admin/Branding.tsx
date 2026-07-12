@@ -7,9 +7,15 @@ import { useTranslation } from 'react-i18next';
 import {
   Palette, Upload, Save, Eye,
   Type, Image, Monitor, Smartphone, Sun, Moon,
-  Sparkles, Snowflake, Leaf, Flower2, Wind, Info, RotateCcw, Check
+  Sparkles, Snowflake, Leaf, Flower2, Wind, Info, RotateCcw, Check,
+  CalendarDays, Flag, Star, MessageSquare, ChevronDown, ChevronUp
 } from 'lucide-react';
 import { applySeasonalTheme, getCurrentSeason, SEASON_THEMES, DEFAULT_SEASON_CONFIG, Season } from '../../lib/seasonalTheme';
+import {
+  HOLIDAY_THEMES, HOLIDAY_ORDER, HolidayKey, HolidayConfig,
+  DEFAULT_HOLIDAY_CONFIG, applyHolidayTheme, clearHolidayTheme,
+  getActiveHoliday,
+} from '../../lib/holidayTheme';
 
 const PRESET_PALETTES = [
   { name: 'Indigo',   primary: '#6366f1', accent: '#8b5cf6', bg: '#eef2ff' },
@@ -56,6 +62,16 @@ const DEFAULT_PWA: PwaCfg = {
   logoText: '',
 };
 
+type PwaIconKey = 'icon192' | 'icon512' | 'appleTouchIcon' | 'maskableIcon' | 'splashScreen';
+
+const PWA_ICON_SLOTS: { key: PwaIconKey; label: string; hint: string }[] = [
+  { key: 'icon192',        label: 'App Icon 192×192',  hint: 'Android home screen (192×192 px)' },
+  { key: 'icon512',        label: 'App Icon 512×512',  hint: 'Splash screen & stores (512×512 px)' },
+  { key: 'appleTouchIcon', label: 'Apple Touch Icon',  hint: 'iOS home screen (180×180 px)' },
+  { key: 'maskableIcon',   label: 'Maskable Icon',     hint: 'Adaptive icon with safe zone (512×512 px)' },
+  { key: 'splashScreen',   label: 'Splash Screen',     hint: 'Launch image for mobile devices' },
+];
+
 export default function AdminBranding() {
   const { t } = useTranslation();
   const [saving, setSaving] = useState(false);
@@ -66,8 +82,23 @@ export default function AdminBranding() {
   const [logoText, setLogoText] = useState('QM');
   const logoInputRef = useRef<HTMLInputElement>(null);
   const faviconInputRef = useRef<HTMLInputElement>(null);
+  const [pwaIcons, setPwaIcons] = useState<Partial<Record<PwaIconKey, string | null>>>({});
+  const pwaIcon192Ref      = useRef<HTMLInputElement>(null);
+  const pwaIcon512Ref      = useRef<HTMLInputElement>(null);
+  const pwaAppleTouchRef   = useRef<HTMLInputElement>(null);
+  const pwaMaskableRef     = useRef<HTMLInputElement>(null);
+  const pwaSplashRef       = useRef<HTMLInputElement>(null);
+  const pwaIconRefs: Record<PwaIconKey, React.RefObject<HTMLInputElement | null>> = {
+    icon192:        pwaIcon192Ref,
+    icon512:        pwaIcon512Ref,
+    appleTouchIcon: pwaAppleTouchRef,
+    maskableIcon:   pwaMaskableRef,
+    splashScreen:   pwaSplashRef,
+  };
 
-  const [activeSection, setActiveSection] = useState<'colors' | 'seasonal' | 'pwa'>('colors');
+  const [activeSection, setActiveSection] = useState<'colors' | 'seasonal' | 'holiday' | 'pwa'>('colors');
+  const [previewingHoliday, setPreviewingHoliday] = useState<HolidayKey | null>(null);
+  const [expandedHoliday, setExpandedHoliday] = useState<HolidayKey | null>(null);
 
   const [colors, setColors] = useState({
     primary: '#6366f1',
@@ -94,6 +125,8 @@ export default function AdminBranding() {
   const [seasonal, setSeasonal] = useState<SeasonalCfg>({
     ...DEFAULT_SEASON_CONFIG,
   });
+
+  const [holiday, setHoliday] = useState<HolidayConfig>({ ...DEFAULT_HOLIDAY_CONFIG });
 
   const [pwa, setPwa] = useState<PwaCfg>({ ...DEFAULT_PWA });
 
@@ -131,7 +164,7 @@ export default function AdminBranding() {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          value: { colors, typography, copy, darkMode, preview, logoUrl, faviconUrl, logoText, seasonal, pwa },
+          value: { colors, typography, copy, darkMode, preview, logoUrl, faviconUrl, logoText, seasonal, holiday, pwa, pwaIcons },
         }),
       });
       const json = await res.json();
@@ -140,7 +173,7 @@ export default function AdminBranding() {
       applySeasonalTheme(seasonal);
 
       window.dispatchEvent(new CustomEvent('branding-updated', {
-        detail: { logoUrl, faviconUrl, logoText, colors, typography, copy, darkMode, seasonal, pwa },
+        detail: { logoUrl, faviconUrl, logoText, colors, typography, copy, darkMode, seasonal, holiday, pwa },
       }));
       toast.success(t('branding.toasts.saved'));
     } catch (e: any) {
@@ -171,7 +204,9 @@ export default function AdminBranding() {
         if (typeof v.faviconUrl === 'string' || v.faviconUrl === null) setFaviconUrl(v.faviconUrl ?? null);
         if (typeof v.logoText === 'string' && v.logoText.trim()) setLogoText(v.logoText.trim().toUpperCase());
         if (v.seasonal && typeof v.seasonal === 'object') setSeasonal((prev) => ({ ...prev, ...v.seasonal }));
+        if (v.holiday && typeof v.holiday === 'object') setHoliday((prev) => ({ ...prev, ...v.holiday }));
         if (v.pwa && typeof v.pwa === 'object') setPwa((prev) => ({ ...prev, ...v.pwa }));
+        if (v.pwaIcons && typeof v.pwaIcons === 'object') setPwaIcons((prev) => ({ ...prev, ...v.pwaIcons }));
       } catch {
         // fallback to defaults
       }
@@ -179,9 +214,10 @@ export default function AdminBranding() {
   }, []);
 
   const SECTION_TABS = [
-    { id: 'colors' as const, label: 'Colors & Fonts', icon: Palette },
-    { id: 'seasonal' as const, label: 'Seasonal Theme', icon: Sparkles },
-    { id: 'pwa' as const, label: 'PWA Settings', icon: Smartphone },
+    { id: 'colors' as const,   label: 'Colors & Fonts',    icon: Palette },
+    { id: 'seasonal' as const, label: 'Seasonal Themes',   icon: Sparkles },
+    { id: 'holiday' as const,  label: 'Holiday Themes',    icon: CalendarDays },
+    { id: 'pwa' as const,      label: 'PWA & App Icons',   icon: Smartphone },
   ];
 
   return (
@@ -574,6 +610,216 @@ export default function AdminBranding() {
           </div>
         )}
 
+        {/* ── Holiday Themes ── */}
+        {activeSection === 'holiday' && (
+          <div className="max-w-4xl space-y-5">
+
+            {/* Master control */}
+            <Card title="Holiday Themes" subtitle="Automatically apply themed decorations for Kosovo's official holidays" icon={CalendarDays}>
+              <div className="flex items-start justify-between gap-4 py-2">
+                <div>
+                  <p className="text-sm font-semibold text-slate-800">Enable Holiday Themes</p>
+                  <p className="text-xs text-slate-400 mt-0.5">When a holiday is active, override the seasonal theme with holiday-specific colors and decorations</p>
+                </div>
+                <button
+                  onClick={() => setHoliday(p => ({ ...p, enabled: !p.enabled }))}
+                  className={cn('shrink-0 w-11 h-6 rounded-full transition-colors relative mt-0.5', holiday.enabled ? 'bg-indigo-600' : 'bg-slate-200')}
+                >
+                  <span className={cn('absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full shadow-sm transition-transform', holiday.enabled ? 'translate-x-5' : 'translate-x-0')} />
+                </button>
+              </div>
+
+              {holiday.enabled && (
+                <div className="pt-4 border-t border-slate-100 grid grid-cols-1 sm:grid-cols-2 gap-6">
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-600 uppercase tracking-wide mb-1">
+                      Days Before Holiday Starts
+                    </label>
+                    <p className="text-xs text-slate-400 mb-3">Theme activates this many days before the holiday</p>
+                    <div className="flex items-center gap-3">
+                      <input
+                        type="range" min={0} max={7} value={holiday.daysBeforeStart}
+                        onChange={e => setHoliday(p => ({ ...p, daysBeforeStart: Number(e.target.value) }))}
+                        className="flex-1 accent-indigo-600"
+                      />
+                      <span className="w-8 text-center text-sm font-bold text-indigo-600">{holiday.daysBeforeStart}d</span>
+                    </div>
+                  </div>
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-600 uppercase tracking-wide mb-1">
+                      Days After Holiday Ends
+                    </label>
+                    <p className="text-xs text-slate-400 mb-3">Theme remains active this many days after the holiday</p>
+                    <div className="flex items-center gap-3">
+                      <input
+                        type="range" min={0} max={7} value={holiday.daysAfterEnd}
+                        onChange={e => setHoliday(p => ({ ...p, daysAfterEnd: Number(e.target.value) }))}
+                        className="flex-1 accent-indigo-600"
+                      />
+                      <span className="w-8 text-center text-sm font-bold text-indigo-600">{holiday.daysAfterEnd}d</span>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              <div className="flex items-center justify-between pt-4 border-t border-slate-100">
+                <button
+                  onClick={() => { setHoliday({ ...DEFAULT_HOLIDAY_CONFIG }); toast.success('Holiday themes reset to defaults.'); }}
+                  className="inline-flex items-center gap-1.5 text-xs text-slate-500 hover:text-rose-600 font-semibold transition-colors"
+                >
+                  <RotateCcw className="w-3.5 h-3.5" /> Reset to defaults
+                </button>
+                {previewingHoliday && (
+                  <button
+                    onClick={() => {
+                      clearHolidayTheme();
+                      const active = getActiveHoliday(new Date(), holiday);
+                      if (active) applyHolidayTheme(active.theme);
+                      setPreviewingHoliday(null);
+                      toast.success('Preview cleared — restored active theme.');
+                    }}
+                    className="inline-flex items-center gap-1.5 text-xs text-amber-600 hover:text-amber-800 font-semibold transition-colors bg-amber-50 px-3 py-1.5 rounded-lg border border-amber-200"
+                  >
+                    <RotateCcw className="w-3.5 h-3.5" /> Clear preview
+                  </button>
+                )}
+                <button onClick={handleSave} disabled={saving} className="inline-flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-60 text-white text-sm font-semibold px-4 py-2 rounded-xl transition-colors">
+                  <Save className="w-4 h-4" />
+                  {saving ? 'Saving…' : 'Save Holiday Settings'}
+                </button>
+              </div>
+            </Card>
+
+            {/* Per-holiday cards */}
+            <div>
+              <div className="flex items-center justify-between mb-3">
+                <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Kosovo Official Holidays ({HOLIDAY_ORDER.length})</p>
+                {previewingHoliday && (
+                  <span className="text-xs font-semibold text-amber-600 bg-amber-50 px-3 py-1 rounded-full border border-amber-200 animate-pulse">
+                    Previewing: {HOLIDAY_THEMES[previewingHoliday].emoji} {HOLIDAY_THEMES[previewingHoliday].label}
+                  </span>
+                )}
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                {HOLIDAY_ORDER.map(key => {
+                  const theme = HOLIDAY_THEMES[key];
+                  const isDisabled = holiday.disabledHolidays.includes(key);
+                  const isExpanded = expandedHoliday === key;
+                  const isPreviewing = previewingHoliday === key;
+                  const customMsg = holiday.customMessages[key] ?? '';
+
+                  return (
+                    <div key={key} className={cn(
+                      'bg-white rounded-2xl border-2 overflow-hidden transition-all shadow-sm',
+                      isPreviewing ? 'border-amber-400 shadow-amber-100' : isDisabled ? 'border-slate-100 opacity-60' : 'border-slate-100 hover:border-slate-200'
+                    )}>
+                      {/* Color strip */}
+                      <div className="h-2" style={{ background: `linear-gradient(90deg, ${theme.gradFrom}, ${theme.gradTo})` }} />
+
+                      <div className="p-4">
+                        <div className="flex items-start gap-3">
+                          <span className="text-2xl shrink-0">{theme.emoji}</span>
+                          <div className="flex-1 min-w-0">
+                            <p className="text-sm font-bold text-slate-800 truncate">{theme.label}</p>
+                            <p className="text-xs text-slate-400 mt-0.5 line-clamp-1">{theme.description}</p>
+                          </div>
+                          {/* Enabled toggle */}
+                          <button
+                            onClick={() => setHoliday(p => ({
+                              ...p,
+                              disabledHolidays: isDisabled
+                                ? p.disabledHolidays.filter(k => k !== key)
+                                : [...p.disabledHolidays, key],
+                            }))}
+                            className={cn('shrink-0 w-9 h-5 rounded-full transition-colors relative mt-0.5', isDisabled ? 'bg-slate-200' : 'bg-emerald-500')}
+                          >
+                            <span className={cn('absolute top-0.5 left-0.5 w-4 h-4 bg-white rounded-full shadow-sm transition-transform', isDisabled ? 'translate-x-0' : 'translate-x-4')} />
+                          </button>
+                        </div>
+
+                        <div className="flex items-center gap-2 mt-3">
+                          {/* Preview button */}
+                          <button
+                            onClick={() => {
+                              if (isPreviewing) {
+                                clearHolidayTheme();
+                                setPreviewingHoliday(null);
+                                toast.success('Preview cleared.');
+                              } else {
+                                applyHolidayTheme(theme);
+                                setPreviewingHoliday(key);
+                                toast.success(`Previewing: ${theme.label}`, { description: 'Click again to clear.' });
+                              }
+                            }}
+                            className={cn(
+                              'flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-semibold transition-all border',
+                              isPreviewing
+                                ? 'bg-amber-100 text-amber-700 border-amber-300'
+                                : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-indigo-50 hover:text-indigo-600 hover:border-indigo-200'
+                            )}
+                          >
+                            <Eye className="w-3 h-3" />
+                            {isPreviewing ? 'Clear' : 'Preview'}
+                          </button>
+
+                          {/* Color swatches */}
+                          <div className="flex items-center gap-1 ml-auto">
+                            <div className="w-4 h-4 rounded-full border-2 border-white shadow-sm" style={{ background: theme.primary }} title={`Primary: ${theme.primary}`} />
+                            <div className="w-4 h-4 rounded-full border-2 border-white shadow-sm" style={{ background: theme.accent }} title={`Accent: ${theme.accent}`} />
+                            <div className="w-4 h-4 rounded-full border-2 border-white shadow-sm" style={{ background: theme.bg }} title={`BG: ${theme.bg}`} />
+                          </div>
+
+                          {/* Expand message editor */}
+                          <button
+                            onClick={() => setExpandedHoliday(isExpanded ? null : key)}
+                            className="flex items-center gap-1 text-xs text-slate-400 hover:text-slate-600 transition-colors"
+                          >
+                            <MessageSquare className="w-3.5 h-3.5" />
+                            {isExpanded ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
+                          </button>
+                        </div>
+
+                        {/* Custom message editor */}
+                        {isExpanded && (
+                          <div className="mt-3 pt-3 border-t border-slate-100">
+                            <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wide mb-1.5">
+                              Custom Greeting Message
+                            </label>
+                            <input
+                              value={customMsg}
+                              onChange={e => setHoliday(p => ({
+                                ...p,
+                                customMessages: { ...p.customMessages, [key]: e.target.value },
+                              }))}
+                              placeholder={theme.defaultMessage}
+                              className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-400 bg-white text-slate-800"
+                            />
+                            <p className="text-[10px] text-slate-400 mt-1">Default: "{theme.defaultMessage}"</p>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* Info box */}
+            <div className="flex items-start gap-3 p-4 bg-blue-50 border border-blue-100 rounded-xl text-sm text-blue-700">
+              <Info className="w-4 h-4 mt-0.5 shrink-0" />
+              <div>
+                <p className="font-semibold">How holiday themes work</p>
+                <p className="text-xs mt-0.5 text-blue-600">
+                  Holiday themes override seasonal themes when a holiday is active (within the "days before/after" window).
+                  Decorative particles (🎆 ❄️ 🌙 etc.) appear automatically. Fixed-date holidays use the calendar; variable holidays
+                  (Eid al-Fitr, Eid al-Adha, Orthodox & Catholic Easter) use precomputed dates for Kosovo. Use "Preview" to see
+                  any theme live without saving.
+                </p>
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* ── PWA Settings ── */}
         {activeSection === 'pwa' && (
           <div className="max-w-3xl space-y-5">
@@ -641,6 +887,64 @@ export default function AdminBranding() {
               <div className="flex items-start gap-2 mt-2 p-3 bg-indigo-50 rounded-xl text-xs text-indigo-700">
                 <Info className="w-3.5 h-3.5 mt-0.5 shrink-0" />
                 After saving, the PWA manifest is regenerated automatically. Users may need to clear browser cache or reinstall the app to see icon changes.
+              </div>
+            </Card>
+
+            {/* PWA Icon Uploads */}
+            <Card title="App Icons" subtitle="Upload custom icons for home screen, splash, and browser tabs" icon={Image}>
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
+                {PWA_ICON_SLOTS.map(slot => {
+                  const url = pwaIcons[slot.key] ?? null;
+                  return (
+                    <div key={slot.key}>
+                      <label className="block text-xs font-semibold text-slate-600 uppercase tracking-wide mb-1.5">{slot.label}</label>
+                      <p className="text-[10px] text-slate-400 mb-2">{slot.hint}</p>
+                      <div
+                        onClick={() => pwaIconRefs[slot.key].current?.click()}
+                        className="relative border-2 border-dashed border-slate-200 rounded-xl h-24 flex flex-col items-center justify-center cursor-pointer hover:border-indigo-400 hover:bg-indigo-50/30 transition-all group overflow-hidden"
+                      >
+                        {url ? (
+                          <img src={url} alt={slot.label} className="max-h-20 max-w-full object-contain p-1" />
+                        ) : (
+                          <>
+                            <Upload className="w-5 h-5 text-slate-300 group-hover:text-indigo-500 transition-colors mb-1" />
+                            <span className="text-[10px] text-slate-400 group-hover:text-indigo-500">Upload</span>
+                          </>
+                        )}
+                        <input
+                          ref={pwaIconRefs[slot.key]}
+                          type="file"
+                          accept="image/*"
+                          className="hidden"
+                          onChange={e => {
+                            const file = e.target.files?.[0];
+                            if (!file) return;
+                            const reader = new FileReader();
+                            reader.onload = () => {
+                              const dataUrl = typeof reader.result === 'string' ? reader.result : null;
+                              if (!dataUrl) return;
+                              setPwaIcons(p => ({ ...p, [slot.key]: dataUrl }));
+                              toast.success(`${slot.label} uploaded.`);
+                            };
+                            reader.readAsDataURL(file);
+                          }}
+                        />
+                      </div>
+                      {url && (
+                        <button
+                          onClick={() => setPwaIcons(p => ({ ...p, [slot.key]: null }))}
+                          className="mt-1 text-[10px] text-rose-500 hover:underline font-medium"
+                        >
+                          Remove
+                        </button>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+              <div className="flex items-start gap-2 mt-4 p-3 bg-blue-50 rounded-xl text-xs text-blue-700">
+                <Info className="w-3.5 h-3.5 mt-0.5 shrink-0" />
+                Icons are stored and served via the platform. Recommended: PNG format, transparent background for all icon types.
               </div>
             </Card>
 

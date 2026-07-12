@@ -3861,14 +3861,25 @@ async function createApp(options = {}) {
         theme_color: primaryColor,
         lang: "en",
         categories: ["education", "productivity"],
-        icons: [
-          { src: "/bs-icon.jpg", sizes: "512x512", type: "image/jpeg", purpose: "any" },
-          { src: "/bs-icon.jpg", sizes: "192x192", type: "image/jpeg", purpose: "any" },
-          { src: "/api/pwa/icon.svg", sizes: "any", type: "image/svg+xml", purpose: "any" },
-          { src: "/icon-192.png", sizes: "192x192", type: "image/png", purpose: "any" },
-          { src: "/icon-512.png", sizes: "512x512", type: "image/png", purpose: "any" },
-          { src: "/icon-maskable-512.png", sizes: "512x512", type: "image/png", purpose: "maskable" }
-        ],
+        icons: (() => {
+          const icons = [];
+          const pi = b?.pwaIcons ?? {};
+          if (pi.icon192) icons.push({ src: pi.icon192, sizes: "192x192", type: "image/png", purpose: "any" });
+          if (pi.icon512) icons.push({ src: pi.icon512, sizes: "512x512", type: "image/png", purpose: "any" });
+          if (pi.appleTouchIcon) icons.push({ src: pi.appleTouchIcon, sizes: "180x180", type: "image/png", purpose: "any" });
+          if (pi.maskableIcon) icons.push({ src: pi.maskableIcon, sizes: "512x512", type: "image/png", purpose: "maskable" });
+          if (!icons.length) {
+            icons.push(
+              { src: "/bs-icon.jpg", sizes: "512x512", type: "image/jpeg", purpose: "any" },
+              { src: "/bs-icon.jpg", sizes: "192x192", type: "image/jpeg", purpose: "any" },
+              { src: "/api/pwa/icon.svg", sizes: "any", type: "image/svg+xml", purpose: "any" },
+              { src: "/icon-192.png", sizes: "192x192", type: "image/png", purpose: "any" },
+              { src: "/icon-512.png", sizes: "512x512", type: "image/png", purpose: "any" },
+              { src: "/icon-maskable-512.png", sizes: "512x512", type: "image/png", purpose: "maskable" }
+            );
+          }
+          return icons;
+        })(),
         shortcuts: [
           { name: "Dashboard", short_name: "Dashboard", url: "/", icons: [{ src: "/icon-192.png", sizes: "192x192" }] }
         ]
@@ -5201,6 +5212,7 @@ Assistant:`
         copy: b.copy && typeof b.copy === "object" ? b.copy : null,
         darkMode: Boolean(b.darkMode),
         seasonal: b.seasonal && typeof b.seasonal === "object" ? b.seasonal : null,
+        holiday: b.holiday && typeof b.holiday === "object" ? b.holiday : null,
         pwa: b.pwa && typeof b.pwa === "object" ? b.pwa : null
       });
     } catch (e) {
