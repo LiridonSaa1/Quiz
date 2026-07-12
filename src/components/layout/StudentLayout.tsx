@@ -280,7 +280,10 @@ export default function StudentLayout({ children }: { children: React.ReactNode 
     <div className="min-h-screen bg-slate-50 flex overflow-x-hidden">
 
       {/* ── Desktop Sidebar ── */}
-      <aside className="hidden lg:flex flex-col w-60 bg-slate-800 fixed h-full z-30 overflow-hidden">
+      <aside
+        className="hidden lg:flex flex-col w-60 bg-slate-800 fixed h-full z-30 overflow-hidden"
+        style={activeHoliday ? { background: `linear-gradient(180deg, ${activeHoliday.theme.gradFrom}ee 0%, ${activeHoliday.theme.gradTo}dd 100%)` } : undefined}
+      >
         <SidebarContent />
       </aside>
 
@@ -304,10 +307,7 @@ export default function StudentLayout({ children }: { children: React.ReactNode 
       {/* ── Mobile Header (safe-area aware) ── */}
       <div
         className="lg:hidden fixed top-0 left-0 right-0 z-50 bg-slate-800 flex flex-col justify-end mobile-header"
-        style={{
-          paddingLeft: 'env(safe-area-inset-left)',
-          paddingRight: 'env(safe-area-inset-right)',
-        }}
+        style={{ paddingLeft: 'env(safe-area-inset-left)', paddingRight: 'env(safe-area-inset-right)', ...(activeHoliday ? { background: `linear-gradient(90deg, ${activeHoliday.theme.gradFrom}ee, ${activeHoliday.theme.gradTo}ee)` } : {}) }}
       >
         <div className="flex items-center justify-between px-4 h-14">
           <div className="flex items-center gap-2.5 min-w-0">
@@ -350,6 +350,7 @@ export default function StudentLayout({ children }: { children: React.ReactNode 
             className="w-72 max-w-[85vw] bg-slate-800 h-full flex flex-col overflow-hidden sidebar-panel"
             onClick={e => e.stopPropagation()}
             aria-label="Navigation sidebar"
+            style={activeHoliday ? { background: `linear-gradient(180deg, ${activeHoliday.theme.gradFrom}ee 0%, ${activeHoliday.theme.gradTo}dd 100%)` } : undefined}
           >
             <SidebarContent onLinkClick={() => setIsSidebarOpen(false)} />
           </aside>

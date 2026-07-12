@@ -111,7 +111,10 @@ function SidebarContent({
   const initials = displayName.split(' ').map((w) => w[0]).join('').toUpperCase().slice(0, 2);
 
   return (
-    <div className="flex flex-col h-full" style={{ background: 'linear-gradient(180deg,#0c0e16 0%,#0f1525 60%,#0e1320 100%)' }}>
+    <div
+      className="flex flex-col h-full"
+      style={{ background: activeHoliday ? `linear-gradient(180deg, ${activeHoliday.theme.gradFrom}ee 0%, ${activeHoliday.theme.gradTo}dd 100%)` : 'linear-gradient(180deg,#0c0e16 0%,#0f1525 60%,#0e1320 100%)' }}
+    >
       {/* Logo */}
       <div className={cn(
         'flex items-center border-b border-white/[0.06] transition-all duration-300 shrink-0',
@@ -361,10 +364,13 @@ export default function TeacherLayout({ children }: { children: React.ReactNode 
     >
 
       {/* ── Desktop Sidebar ── */}
-      <aside className={cn(
-        'hidden lg:flex flex-col fixed h-full z-30 overflow-hidden border-r border-white/[0.04] transition-all duration-300 ease-in-out',
-        sidebarW
-      )}>
+      <aside
+        className={cn(
+          'hidden lg:flex flex-col fixed h-full z-30 overflow-hidden border-r border-white/[0.04] transition-all duration-300 ease-in-out',
+          sidebarW
+        )}
+        style={activeHoliday ? { background: `linear-gradient(180deg, ${activeHoliday.theme.gradFrom}ee 0%, ${activeHoliday.theme.gradTo}dd 100%)` } : undefined}
+      >
         <SidebarContent
           activePath={location.pathname}
           collapsed={collapsed}
@@ -400,7 +406,7 @@ export default function TeacherLayout({ children }: { children: React.ReactNode 
       <div
         className="lg:hidden fixed top-0 left-0 right-0 z-50 flex flex-col justify-end mobile-header border-b border-white/[0.06]"
         style={{
-          background: '#0c0e16',
+          background: activeHoliday ? `linear-gradient(90deg, ${activeHoliday.theme.gradFrom}ee, ${activeHoliday.theme.gradTo}ee)` : '#0c0e16',
           paddingLeft: 'env(safe-area-inset-left)',
           paddingRight: 'env(safe-area-inset-right)',
         }}
@@ -444,6 +450,7 @@ export default function TeacherLayout({ children }: { children: React.ReactNode 
             className="relative w-72 max-w-[85vw] h-full z-50 sidebar-panel"
             onClick={e => e.stopPropagation()}
             aria-label="Navigation sidebar"
+            style={activeHoliday ? { background: `linear-gradient(180deg, ${activeHoliday.theme.gradFrom}ee 0%, ${activeHoliday.theme.gradTo}dd 100%)` } : undefined}
           >
             <SidebarContent
               activePath={location.pathname}

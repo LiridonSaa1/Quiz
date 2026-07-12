@@ -111,7 +111,7 @@ const fetchBranding = async (): Promise<BrandingPayload> => {
   if (inflight) return inflight;
   inflight = (async () => {
     try {
-      const res = await fetch(apiUrl('/api/platform/branding'));
+      const res = await fetch(apiUrl('/api/platform/branding'), { cache: 'no-store' });
       const json = await res.json().catch(() => null);
       if (!res.ok || !json?.success) return DEFAULT_BRANDING;
       const next: BrandingPayload = {

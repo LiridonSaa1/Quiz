@@ -2949,6 +2949,7 @@ When giving instructions, number each step clearly. Be precise and technical whe
   // student) and the login screen can render the same logo, colors, fonts and
   // copy that the admin configures at /admin/branding.
   app.get("/api/platform/branding", async (_req, res) => {
+    res.set("Cache-Control", "no-store");
     const fallback = {
       success: true as const,
       logoUrl: null as string | null,

@@ -5183,6 +5183,7 @@ Assistant:`
     }
   });
   app.get("/api/platform/branding", async (_req, res) => {
+    res.set("Cache-Control", "no-store");
     const fallback = {
       success: true,
       logoUrl: null,

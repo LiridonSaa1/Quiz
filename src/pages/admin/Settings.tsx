@@ -247,7 +247,7 @@ export default function AdminSettings() {
     try {
       setSavingSeasonal(true);
       // Load existing branding first so we don't clobber logo/colors/etc.
-      const existingRes = await fetch('/api/admin/config/branding');
+      const existingRes = await authFetch('/api/admin/config/branding');
       const existing = await existingRes.json();
       const existingValue = existing.value ?? existing.config?.value ?? {};
       const res = await authFetch('/api/admin/config/branding', {
