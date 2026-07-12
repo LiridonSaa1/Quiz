@@ -33,6 +33,7 @@ export interface HolidayConfig {
   daysAfterEnd: number;
   customMessages: Partial<Record<HolidayKey, string>>;
   disabledHolidays: HolidayKey[];
+  forcedKey?: HolidayKey | null;
 }
 
 export const DEFAULT_HOLIDAY_CONFIG: HolidayConfig = {
@@ -299,6 +300,12 @@ export function getActiveHoliday(
   config: HolidayConfig,
 ): ActiveHoliday | null {
   if (!config.enabled) return null;
+
+  if (config.forcedKey && HOLIDAY_THEMES[config.forcedKey]) {
+    const theme = HOLIDAY_THEMES[config.forcedKey];
+    const message = (config.customMessages ?? {})[config.forcedKey] ?? theme.defaultMessage;
+    return { key: config.forcedKey, theme, message };
+  }
 
   const year = date.getFullYear();
   const before = Math.max(0, config.daysBeforeStart ?? 1);

@@ -10,8 +10,10 @@ import {
   Settings, Globe, Bell, Shield, Database, Mail,
   Clock, Languages, Save, ToggleLeft, ToggleRight,
   ChevronRight, School, Phone, MapPin, AlertTriangle,
-  GraduationCap, Briefcase, Crown, Info, Trash2, X
+  GraduationCap, Briefcase, Crown, Info, Trash2, X,
+  Sparkles, CheckCircle2, CalendarDays,
 } from 'lucide-react';
+import { HOLIDAY_THEMES, HOLIDAY_ORDER, type HolidayKey } from '../../lib/holidayTheme';
 import PWAInstallCard from '../../components/PWAInstallCard';
 
 type Role = 'student' | 'teacher' | 'admin';
@@ -65,11 +67,19 @@ export default function AdminSettings() {
   const [clearConfirmText, setClearConfirmText] = useState('');
   const [clearing, setClearing] = useState(false);
 
+  // ── Seasonal / Holiday ──────────────────────────────────────────────────
+  const [holidayEnabled, setHolidayEnabled] = useState(true);
+  const [forcedKey, setForcedKey] = useState<HolidayKey | null>(null);
+  const [daysBeforeStart, setDaysBeforeStart] = useState(1);
+  const [daysAfterEnd, setDaysAfterEnd] = useState(1);
+  const [savingSeasonal, setSavingSeasonal] = useState(false);
+
   const TABS_LOCAL = [
     { id: 'general',       label: t('settings.tabs.general'),       icon: School },
     { id: 'notifications', label: t('settings.tabs.notifications'),  icon: Bell },
     { id: 'email',         label: t('settings.tabs.email'),          icon: Mail },
     { id: 'security',      label: t('settings.tabs.security'),       icon: Shield },
+    { id: 'seasonal',      label: 'Seasonal',                        icon: Sparkles },
     { id: 'advanced',      label: t('settings.tabs.advanced'),       icon: Database },
   ];
 
@@ -215,6 +225,58 @@ export default function AdminSettings() {
       }
     })();
   }, []);
+
+  // ── Load branding holiday config ─────────────────────────────────────────
+  useEffect(() => {
+    (async () => {
+      try {
+        const res = await fetch('/api/admin/config/branding');
+        const json = await res.json();
+        const h = (json.value ?? json.config?.value)?.holiday;
+        if (h && typeof h === 'object') {
+          if (typeof h.enabled === 'boolean') setHolidayEnabled(h.enabled);
+          setForcedKey(typeof h.forcedKey === 'string' ? h.forcedKey as HolidayKey : null);
+          if (typeof h.daysBeforeStart === 'number') setDaysBeforeStart(h.daysBeforeStart);
+          if (typeof h.daysAfterEnd === 'number') setDaysAfterEnd(h.daysAfterEnd);
+        }
+      } catch { /* keep defaults */ }
+    })();
+  }, []);
+
+  const handleSaveSeasonal = async () => {
+    try {
+      setSavingSeasonal(true);
+      // Load existing branding first so we don't clobber logo/colors/etc.
+      const existingRes = await fetch('/api/admin/config/branding');
+      const existing = await existingRes.json();
+      const existingValue = existing.value ?? existing.config?.value ?? {};
+      const res = await authFetch('/api/admin/config/branding', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          value: {
+            ...existingValue,
+            holiday: {
+              ...(existingValue.holiday ?? {}),
+              enabled: holidayEnabled,
+              forcedKey: forcedKey ?? null,
+              daysBeforeStart,
+              daysAfterEnd,
+            },
+          },
+        }),
+      });
+      const json = await res.json();
+      if (!res.ok || !json?.success) throw new Error(json?.error || 'Failed to save');
+      window.dispatchEvent(new CustomEvent('settings-updated'));
+      window.dispatchEvent(new CustomEvent('branding-updated'));
+      toast.success('Seasonal settings saved');
+    } catch (e: any) {
+      toast.error(e?.message || 'Failed to save seasonal settings');
+    } finally {
+      setSavingSeasonal(false);
+    }
+  };
 
   const handleClearDatabase = async () => {
     if (clearConfirmText !== 'DELETE') return;
@@ -700,6 +762,118 @@ export default function AdminSettings() {
                     suffix="tries"
                   />
                 </Section>
+              </>
+            )}
+
+            {/* SEASONAL */}
+            {activeTab === 'seasonal' && (
+              <>
+                <Section title="Holiday Themes" subtitle="Enable festive visuals — particles, banners, logo accessories and header greetings — automatically by date.">
+                  <Toggle
+                    label="Enable holiday themes"
+                    description="When on, festive effects appear automatically during each holiday window. When off, all effects are hidden for every user."
+                    value={holidayEnabled}
+                    onChange={setHolidayEnabled}
+                  />
+                </Section>
+
+                <Section title="Force Override" subtitle="Force a specific holiday theme to display for all users right now, regardless of today's date. Useful for previewing or early activation.">
+                  <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-4 gap-3">
+                    {/* None / Auto card */}
+                    <button
+                      type="button"
+                      onClick={() => setForcedKey(null)}
+                      className={cn(
+                        'relative flex flex-col items-center gap-2 p-3 rounded-2xl border-2 text-center transition-all',
+                        forcedKey === null
+                          ? 'border-indigo-500 bg-indigo-50 shadow-md shadow-indigo-100'
+                          : 'border-slate-200 bg-white hover:border-slate-300 hover:bg-slate-50'
+                      )}
+                    >
+                      {forcedKey === null && (
+                        <CheckCircle2 className="absolute top-2 right-2 w-4 h-4 text-indigo-600" />
+                      )}
+                      <span className="text-2xl">📅</span>
+                      <div>
+                        <p className="text-xs font-bold text-slate-800">Auto / None</p>
+                        <p className="text-[10px] text-slate-400 mt-0.5 leading-tight">Date-based activation</p>
+                      </div>
+                    </button>
+
+                    {HOLIDAY_ORDER.map(key => {
+                      const th = HOLIDAY_THEMES[key];
+                      const selected = forcedKey === key;
+                      return (
+                        <button
+                          key={key}
+                          type="button"
+                          onClick={() => setForcedKey(key)}
+                          className={cn(
+                            'relative flex flex-col items-center gap-2 p-3 rounded-2xl border-2 text-center transition-all',
+                            selected
+                              ? 'border-indigo-500 bg-indigo-50 shadow-md shadow-indigo-100'
+                              : 'border-slate-200 bg-white hover:border-slate-300 hover:bg-slate-50'
+                          )}
+                        >
+                          {selected && (
+                            <CheckCircle2 className="absolute top-2 right-2 w-4 h-4 text-indigo-600" />
+                          )}
+                          <span className="text-2xl">{th.emoji}</span>
+                          <div>
+                            <p className="text-xs font-bold text-slate-800 leading-tight">{th.label}</p>
+                            <p className="text-[10px] text-slate-400 mt-0.5 leading-tight">{th.description}</p>
+                          </div>
+                        </button>
+                      );
+                    })}
+                  </div>
+
+                  {forcedKey && (
+                    <div className="mt-4 flex items-center gap-3 px-4 py-3 rounded-xl border border-indigo-200 bg-indigo-50">
+                      <span className="text-xl">{HOLIDAY_THEMES[forcedKey].emoji}</span>
+                      <div>
+                        <p className="text-sm font-bold text-indigo-900">{HOLIDAY_THEMES[forcedKey].label} is active for all users</p>
+                        <p className="text-xs text-indigo-600 mt-0.5">{HOLIDAY_THEMES[forcedKey].defaultMessage}</p>
+                      </div>
+                    </div>
+                  )}
+                </Section>
+
+                <Section title="Schedule Window" subtitle="How many days before and after each holiday's date should the theme be shown.">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <Field label="Days before start" icon={CalendarDays}>
+                      <input
+                        type="number"
+                        min={0}
+                        max={14}
+                        value={daysBeforeStart}
+                        onChange={e => setDaysBeforeStart(Math.max(0, Math.min(14, Number(e.target.value))))}
+                        className={inputCls}
+                      />
+                    </Field>
+                    <Field label="Days after end" icon={CalendarDays}>
+                      <input
+                        type="number"
+                        min={0}
+                        max={14}
+                        value={daysAfterEnd}
+                        onChange={e => setDaysAfterEnd(Math.max(0, Math.min(14, Number(e.target.value))))}
+                        className={inputCls}
+                      />
+                    </Field>
+                  </div>
+                </Section>
+
+                <div className="flex justify-end">
+                  <LoadingButton
+                    onClick={handleSaveSeasonal}
+                    loading={savingSeasonal}
+                    icon={<Save className="w-4 h-4" />}
+                    className="bg-indigo-600 hover:bg-indigo-700 px-5 py-2.5"
+                  >
+                    Save Seasonal Settings
+                  </LoadingButton>
+                </div>
               </>
             )}
 
