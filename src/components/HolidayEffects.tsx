@@ -226,19 +226,6 @@ export function HolidayEffects({ holidayKey, customGreeting }: Props) {
         </div>
       )}
 
-      {/* Logo accessory — positioned near top-left where logos typically live */}
-      <div
-        className="holiday-logo-accessory"
-        style={{
-          position: 'fixed', top: 8, left: 230,
-          zIndex: 9600, pointerEvents: 'none',
-          fontSize: '1.1rem', lineHeight: 1,
-          animation: 'h-accessory-bounce 2s ease-in-out infinite',
-        }}
-        aria-hidden
-      >
-        {accessory}
-      </div>
     </>
   );
 }

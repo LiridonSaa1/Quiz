@@ -9,6 +9,8 @@ import LanguageDropdown from '../LanguageDropdown';
 import { authFetch, authFetchJsonCached } from '../../lib/apiUrl';
 import { defaultFeatureFlags, extractFeatureFlags, FeatureFlags } from '../../lib/platformFeatures';
 import { useBranding } from '../../lib/useBranding';
+import { useActiveHoliday } from '../../lib/useActiveHoliday';
+import { HOLIDAY_ACCESSORIES } from '../HolidayEffects';
 import {
   LayoutDashboard, BookOpen, Layers, PlayCircle, FileText, Users, ShieldCheck,
   School, ClipboardList, CalendarCheck, Award, Video, MessageSquare, Megaphone,
@@ -23,6 +25,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
   const [features, setFeatures] = useState<FeatureFlags>(defaultFeatureFlags);
   const branding = useBranding();
   const brandLogoUrl = branding.logoUrl;
+  const activeHoliday = useActiveHoliday();
   const location = useLocation();
   const navigate = useNavigate();
   const overlayRef = useRef<HTMLDivElement>(null);
@@ -190,11 +193,18 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
     <div className="flex flex-col h-full min-h-0">
       <div className="p-5 border-b border-slate-700/50 shrink-0">
         <div className="flex items-center gap-3">
-          <div className="w-9 h-9 bg-indigo-600 rounded-xl flex items-center justify-center shadow-lg shadow-indigo-900/40 shrink-0 overflow-hidden">
-            {brandLogoUrl ? (
-              <img src={brandLogoUrl} alt="Brand logo" className="w-full h-full object-contain rounded-xl" />
-            ) : (
-              <GraduationCap className="w-5 h-5 text-white" />
+          <div className="relative shrink-0">
+            <div className="w-9 h-9 bg-indigo-600 rounded-xl flex items-center justify-center shadow-lg shadow-indigo-900/40 overflow-hidden">
+              {brandLogoUrl ? (
+                <img src={brandLogoUrl} alt="Brand logo" className="w-full h-full object-contain rounded-xl" />
+              ) : (
+                <GraduationCap className="w-5 h-5 text-white" />
+              )}
+            </div>
+            {activeHoliday && (
+              <span className="absolute -top-2 -right-2 text-sm leading-none pointer-events-none z-10 animate-bounce" aria-hidden="true">
+                {HOLIDAY_ACCESSORIES[activeHoliday.key]}
+              </span>
             )}
           </div>
           <div className="min-w-0">
@@ -240,7 +250,14 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
 
       {/* ── Desktop Top Bar ── */}
       <header className="hidden lg:flex fixed top-0 right-0 left-60 h-14 bg-white border-b border-slate-200 items-center justify-between px-6 z-20">
-        <span className="text-sm font-semibold text-slate-500">{currentLabel}</span>
+        <div className="flex items-center gap-3 min-w-0">
+          <span className="text-sm font-semibold text-slate-500 shrink-0">{currentLabel}</span>
+          {activeHoliday && (
+            <span className="notification-holiday-badge px-2.5 py-1 hidden xl:inline-flex shrink-0">
+              {activeHoliday.theme.emoji} {activeHoliday.theme.defaultMessage}
+            </span>
+          )}
+        </div>
         <div className="flex items-center gap-2">
           <BackendStatus />
           <LanguageDropdown variant="light" />

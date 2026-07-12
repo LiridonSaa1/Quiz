@@ -17,6 +17,8 @@ import { authFetch, authFetchJsonCached } from '../../lib/apiUrl';
 import { defaultFeatureFlags, extractFeatureFlags, FeatureFlags } from '../../lib/platformFeatures';
 import { getTeacherPagePermission, useTeacherPermissions } from '../../lib/teacherPermissions';
 import { useBranding } from '../../lib/useBranding';
+import { useActiveHoliday } from '../../lib/useActiveHoliday';
+import { HOLIDAY_ACCESSORIES } from '../HolidayEffects';
 
 function NavItem({
   item, active, collapsed, onClick,
@@ -86,6 +88,7 @@ function SidebarContent({
   const [userEmail, setUserEmail] = useState('');
   const [displayName, setDisplayName] = useState('');
   const branding = useBranding();
+  const activeHoliday = useActiveHoliday();
   const navRef = useRef<HTMLElement>(null);
 
   useEffect(() => {
@@ -123,6 +126,11 @@ function SidebarContent({
             )}
           </div>
           <div className="absolute -inset-0.5 rounded-xl bg-gradient-to-br from-violet-500 to-indigo-600 opacity-25 blur-md -z-10" />
+          {activeHoliday && (
+            <span className="absolute -top-2 -right-2 text-sm leading-none pointer-events-none z-10 animate-bounce" aria-hidden="true">
+              {HOLIDAY_ACCESSORIES[activeHoliday.key]}
+            </span>
+          )}
         </div>
         {!collapsed && (
           <div className="overflow-hidden min-w-0">
@@ -211,6 +219,7 @@ export default function TeacherLayout({ children }: { children: React.ReactNode 
   const [collapsed, setCollapsed] = useState(false);
   const [features, setFeatures] = useState<FeatureFlags>(defaultFeatureFlags);
   const branding = useBranding();
+  const activeHoliday = useActiveHoliday();
   const { can } = useTeacherPermissions();
   const location = useLocation();
   const navigate = useNavigate();
@@ -370,10 +379,15 @@ export default function TeacherLayout({ children }: { children: React.ReactNode 
         'hidden lg:flex fixed top-0 right-0 h-14 bg-white/95 backdrop-blur-md border-b border-slate-100/80 items-center justify-between px-6 z-20 transition-all duration-300 ease-in-out shadow-sm shadow-slate-100/50',
         headerL
       )}>
-        <div className="flex items-center gap-2 text-sm min-w-0">
+        <div className="flex items-center gap-3 text-sm min-w-0">
           <span className="text-slate-400 text-xs font-medium shrink-0">{t('nav.teacherPortal')}</span>
           <ChevronRight className="w-3.5 h-3.5 text-slate-300 shrink-0" />
           <span className="text-slate-800 font-semibold text-sm truncate">{currentLabel}</span>
+          {activeHoliday && (
+            <span className="notification-holiday-badge px-2.5 py-1 hidden xl:inline-flex shrink-0">
+              {activeHoliday.theme.emoji} {activeHoliday.theme.defaultMessage}
+            </span>
+          )}
         </div>
         <div className="flex items-center gap-2 shrink-0">
           <BackendStatus />

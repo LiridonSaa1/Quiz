@@ -107,6 +107,13 @@ import { normalizeUserRole } from './lib/userRole';
 import { defaultFeatureFlags, extractFeatureFlags, FeatureFlags } from './lib/platformFeatures';
 import ForcePasswordChangeModal from './components/ForcePasswordChangeModal';
 import { SeasonalThemeProvider } from './components/SeasonalThemeProvider';
+import { HolidayEffects } from './components/HolidayEffects';
+import { useActiveHoliday } from './lib/useActiveHoliday';
+
+function ActiveHolidayEffects() {
+  const active = useActiveHoliday();
+  return <HolidayEffects holidayKey={active?.key ?? null} />;
+}
 
 const PLATFORM_CONFIG_CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
 const SESSION_STORAGE_KEY = 'qm_platform_init';
@@ -419,6 +426,7 @@ export default function App() {
 
   return (
     <SeasonalThemeProvider>
+    <ActiveHolidayEffects />
     <Router>
       <Toaster position="top-right" richColors />
       {forcePasswordChange && user && (
