@@ -8,6 +8,7 @@ import { toast } from 'sonner';
 import { UserProfile, UserRole } from '../../types';
 import { cn } from '../../lib/utils';
 import AddStudentModal from '../../components/AddStudentModal';
+import EditStudentModal from '../../components/EditStudentModal';
 import { resolveTeacherIdCandidates } from '../../lib/teacherScope';
 import { apiUrl, authFetch } from '../../lib/apiUrl';
 import { isMissingCoursesStudentIdsError } from '../../lib/schemaErrors';
@@ -129,6 +130,7 @@ export default function StudentManagement() {
   const [courseFilter, setCourseFilter] = useState('all');
   const [classFilter, setClassFilter] = useState('all');
   const [showAddModal, setShowAddModal] = useState(false);
+  const [editTarget, setEditTarget] = useState<StudentWithCourses | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<StudentWithCourses | null>(null);
   const [deleteLoading, setDeleteLoading] = useState(false);
   const [resettingProgressId, setResettingProgressId] = useState<string | null>(null);
@@ -327,24 +329,7 @@ export default function StudentManagement() {
     } catch { toast.error(t('teacher.studentManagement.failedUpdateStatus')); }
   };
 
-  const editStudent = async (student: StudentWithCourses) => {
-    const displayName = window.prompt(t('teacher.studentManagement.addStudent'), student.displayName || '');
-    if (displayName === null) return;
-    const email = window.prompt('Email', student.email || '');
-    if (email === null) return;
-    try {
-      const res = await authFetch(`/api/teacher/students/${encodeURIComponent(student.uid)}`, {
-        method: 'PATCH',
-        body: JSON.stringify({ display_name: displayName, email }),
-      });
-      const json = await res.json().catch(() => ({}));
-      if (!res.ok || !json?.success) throw new Error(json?.error || t('teacher.studentManagement.failedUpdateStudent'));
-      toast.success(t('teacher.studentManagement.studentUpdated'));
-      fetchData();
-    } catch (e: any) {
-      toast.error(e?.message || t('teacher.studentManagement.failedUpdateStudent'));
-    }
-  };
+  const editStudent = (student: StudentWithCourses) => setEditTarget(student);
 
   const handleResetProgress = async (student: StudentWithCourses) => {
     if (!window.confirm(`Reset all quiz attempts and lesson progress for ${student.displayName || student.email}? This cannot be undone.`)) return;
@@ -595,6 +580,21 @@ export default function StudentManagement() {
           accentColor="emerald"
           onClose={() => setShowAddModal(false)}
           onSuccess={() => fetchData()}
+        />
+      )}
+      {editTarget && (
+        <EditStudentModal
+          student={editTarget}
+          endpoint="teacher"
+          onClose={() => setEditTarget(null)}
+          onSuccess={updated => {
+            setStudents(prev => prev.map(s =>
+              s.uid === editTarget.uid
+                ? { ...s, ...updated }
+                : s
+            ));
+            setEditTarget(null);
+          }}
         />
       )}
     </TeacherLayout>

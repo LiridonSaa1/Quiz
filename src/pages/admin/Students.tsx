@@ -11,6 +11,7 @@ import { toast } from 'sonner';
 import AdminLayout from '../../components/layout/AdminLayout';
 import { cn } from '../../lib/utils';
 import AddStudentModal from '../../components/AddStudentModal';
+import EditStudentModal from '../../components/EditStudentModal';
 import { motion, AnimatePresence } from 'motion/react';
 import { apiUrl, authFetch } from '../../lib/apiUrl';
 import {
@@ -103,6 +104,7 @@ export default function AdminStudents() {
   const [teacherFilter, setTeacherFilter] = useState('all');
   const [teacherOptions, setTeacherOptions] = useState<{ id: string; name: string }[]>([]);
   const [showAddModal, setShowAddModal] = useState(false);
+  const [editTarget, setEditTarget] = useState<StudentWithMeta | null>(null);
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
   const [deleting, setDeleting] = useState(false);
   const studentToDelete = students.find(s => s.uid === confirmDeleteId);
@@ -167,24 +169,7 @@ export default function AdminStudents() {
     }
   };
 
-  const editStudent = async (student: StudentWithMeta) => {
-    const displayName = window.prompt(t('dashboard.studentNamePrompt'), student.displayName || '');
-    if (displayName === null) return;
-    const email = window.prompt(t('dashboard.studentEmailPrompt'), student.email || '');
-    if (email === null) return;
-    try {
-      const res = await authFetch(apiUrl(`/api/admin/students/${encodeURIComponent(student.uid)}`), {
-        method: 'PATCH',
-        body: JSON.stringify({ display_name: displayName, email }),
-      });
-      const json = await res.json().catch(() => ({}));
-      if (!res.ok || !json?.success) throw new Error(json?.error || t('errors.saveFailed'));
-      toast.success(t('dashboard.studentUpdated'));
-      setStudents(prev => prev.map(s => s.uid === student.uid ? { ...s, displayName: displayName || s.displayName, email: email || s.email } : s));
-    } catch (e: any) {
-      toast.error(e?.message || t('errors.saveFailed'));
-    }
-  };
+  const editStudent = (student: StudentWithMeta) => setEditTarget(student);
 
   const resetWelcome = async (student: StudentWithMeta) => {
     try {
@@ -631,6 +616,22 @@ export default function AdminStudents() {
           onSuccess={() => fetchData()}
           teacherId={teacherFilter !== 'all' ? teacherFilter : undefined}
           teachers={teacherOptions}
+        />
+      )}
+      {editTarget && (
+        <EditStudentModal
+          student={editTarget}
+          endpoint="admin"
+          teachers={teacherOptions}
+          onClose={() => setEditTarget(null)}
+          onSuccess={updated => {
+            setStudents(prev => prev.map(s =>
+              s.uid === editTarget.uid
+                ? { ...s, ...updated }
+                : s
+            ));
+            setEditTarget(null);
+          }}
         />
       )}
     </AdminLayout>
