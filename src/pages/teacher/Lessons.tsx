@@ -455,7 +455,7 @@ export default function TeacherLessons() {
         className="min-h-screen -mx-4 sm:-mx-6 lg:-mx-8 -mt-7"
         style={{ fontFamily: "'Inter', 'Poppins', system-ui, sans-serif" }}
       >
-        <div className="relative overflow-hidden">
+        <div className="relative">
           <div className="pointer-events-none absolute -top-24 -left-24 w-96 h-96 rounded-full bg-indigo-200/30 blur-3xl" />
           <div className="pointer-events-none absolute -top-12 right-0 w-80 h-80 rounded-full bg-violet-200/25 blur-3xl" />
           <div className="pointer-events-none absolute top-96 left-1/2 w-72 h-72 rounded-full bg-indigo-100/20 blur-3xl" />
