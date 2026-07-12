@@ -1,0 +1,149 @@
+# Britannica School – Dynamic Themes Based on Official Holidays of Kosovo
+
+Enhance the Britannica School platform with an intelligent event and holiday theme system.
+
+## Dynamic Holiday Themes
+
+Instead of only changing the design based on seasons, the platform should automatically detect important **official holidays and commemorative days in Kosovo** and apply a unique theme.
+
+### New Year (1–2 January)
+
+* Fireworks animation
+* Gold, blue and white colors
+* Celebration illustrations
+* Snow background
+* Happy New Year banner
+
+### Orthodox Christmas (7 January)
+
+* Winter theme
+* Snowflakes
+* Warm blue and white palette
+
+### Independence Day of Kosovo (17 February)
+
+* Kosovo flag colors
+* Blue and yellow gradients
+* Kosovo map illustration
+* Animated flag in the header
+* Welcome message celebrating Independence Day
+
+### Eid al-Fitr (First Day)
+
+* Elegant Islamic geometric patterns
+* Green and gold colors
+* Moon and stars decorations
+* Greeting banner: "Eid Mubarak"
+
+### Catholic Easter Monday
+
+* Spring flowers
+* Eggs and spring decorations
+* Pastel colors
+
+### Orthodox Easter Monday
+
+* Traditional Easter decorations
+* Soft spring colors
+
+### Constitution Day (9 April)
+
+* Professional blue theme
+* Kosovo Constitution-inspired banner
+* Government-style design
+
+### Labour Day (1 May)
+
+* Spring park theme
+* Fresh green colors
+* Outdoor illustrations
+
+### Europe Day (9 May)
+
+* European Union colors
+* Blue and yellow stars
+* European-inspired background
+
+### Eid al-Adha (First Day)
+
+* Premium green and gold design
+* Elegant festive decorations
+* Greeting banner
+
+### Catholic Christmas (25 December)
+
+* Christmas tree
+* Snow
+* Red, green and gold colors
+* Christmas lights animation
+
+---
+
+## Seasonal Themes
+
+When no holiday is active, automatically use seasonal themes:
+
+* Spring
+* Summer
+* Autumn
+* Winter
+
+---
+
+## Admin Panel
+
+Create a new menu:
+
+**Settings → Themes & Branding**
+
+Administrator can:
+
+* Enable/Disable automatic holiday themes.
+* Enable/Disable seasonal themes.
+* Choose how many days before a holiday the theme starts (1–7 days).
+* Choose how many days after a holiday the theme remains active.
+* Upload custom background images for every holiday.
+* Upload custom logos for each holiday.
+* Customize greeting messages.
+* Preview every holiday theme.
+* Restore default themes.
+* Schedule future themes.
+
+---
+
+## Dynamic PWA Branding
+
+Inside the same Branding page allow administrators to:
+
+* Upload App Icon (192x192)
+* Upload App Icon (512x512)
+* Upload Apple Touch Icon
+* Upload Maskable Icon
+* Upload Splash Screen
+* Change Theme Color
+* Change Background Color
+* Change App Name
+* Change Short Name
+* Change Description
+
+Whenever branding changes:
+
+* Automatically regenerate the manifest.json.
+* Refresh the Service Worker.
+* Update PWA icons immediately.
+* Clear cached icons if necessary.
+* Display a success notification.
+
+---
+
+## Technical Requirements
+
+* React + TypeScript
+* Responsive on desktop, tablet and mobile
+* Lazy-load holiday assets
+* Store all settings in the database
+* Automatic scheduling based on Kosovo's official holiday calendar
+* If a holiday falls on a weekend, follow Kosovo's official holiday rules.
+* Clean architecture with reusable components.
+* Smooth transitions between themes.
+* High performance and production-ready implementation.

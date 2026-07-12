@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { apiUrl } from './apiUrl';
 
 import { SeasonConfig, DEFAULT_SEASON_CONFIG } from './seasonalTheme';
+import { HolidayConfig, DEFAULT_HOLIDAY_CONFIG } from './holidayTheme';
 
 export interface BrandingPayload {
   logoUrl: string | null;
@@ -13,6 +14,7 @@ export interface BrandingPayload {
   copy: Record<string, string> | null;
   darkMode: boolean;
   seasonal: SeasonConfig;
+  holiday: HolidayConfig;
   pwa: {
     name: string;
     shortName: string;
@@ -42,6 +44,7 @@ const DEFAULT_BRANDING: BrandingPayload = {
   copy: null,
   darkMode: false,
   seasonal: DEFAULT_SEASON_CONFIG,
+  holiday: DEFAULT_HOLIDAY_CONFIG,
   pwa: DEFAULT_PWA,
 };
 
@@ -123,6 +126,9 @@ const fetchBranding = async (): Promise<BrandingPayload> => {
         seasonal: json.seasonal && typeof json.seasonal === 'object'
           ? { ...DEFAULT_SEASON_CONFIG, ...json.seasonal }
           : DEFAULT_SEASON_CONFIG,
+        holiday: json.holiday && typeof json.holiday === 'object'
+          ? { ...DEFAULT_HOLIDAY_CONFIG, ...json.holiday }
+          : DEFAULT_HOLIDAY_CONFIG,
         pwa: json.pwa && typeof json.pwa === 'object'
           ? { ...DEFAULT_PWA, ...json.pwa }
           : DEFAULT_PWA,
