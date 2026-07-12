@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { X, User, Mail, UserCheck, UserX, Clock, Pencil, Loader2 } from 'lucide-react';
+import { X, User, Mail, UserCheck, UserX, Clock, Pencil, Loader2, GraduationCap } from 'lucide-react';
 import { toast } from 'sonner';
 import { useTranslation } from 'react-i18next';
 import { cn } from '../lib/utils';
@@ -15,12 +15,28 @@ interface StudentData {
 
 interface Props {
   student: StudentData;
-  /** 'admin' endpoint: /api/admin/students/:id  |  'teacher' endpoint: /api/teacher/students/:id */
   endpoint: 'admin' | 'teacher';
-  /** Optional teacher list for admin to reassign */
   teachers?: Array<{ id: string; name: string }>;
   onClose: () => void;
   onSuccess: (updated: Partial<StudentData>) => void;
+}
+
+function getInitials(name: string, email: string) {
+  const src = name?.trim() || email?.trim() || '?';
+  return src.split(' ').map(w => w[0]).join('').toUpperCase().slice(0, 2);
+}
+
+const AVATAR_COLORS = [
+  ['from-violet-500 to-indigo-600', 'bg-indigo-50 border-indigo-200'],
+  ['from-emerald-500 to-teal-600', 'bg-emerald-50 border-emerald-200'],
+  ['from-rose-500 to-pink-600', 'bg-rose-50 border-rose-200'],
+  ['from-amber-500 to-orange-600', 'bg-amber-50 border-amber-200'],
+  ['from-sky-500 to-blue-600', 'bg-sky-50 border-sky-200'],
+];
+
+function pickColor(uid: string) {
+  const idx = (uid || '').charCodeAt(0) % AVATAR_COLORS.length;
+  return AVATAR_COLORS[idx];
 }
 
 export default function EditStudentModal({ student, endpoint, teachers, onClose, onSuccess }: Props) {
@@ -35,6 +51,8 @@ export default function EditStudentModal({ student, endpoint, teachers, onClose,
   const [saving, setSaving] = useState(false);
 
   const set = (k: keyof typeof form, v: string) => setForm(f => ({ ...f, [k]: v }));
+  const [avatarGrad, avatarBg] = pickColor(student.uid);
+  const initials = getInitials(form.displayName, form.email);
 
   const handleSave = async () => {
     if (!form.displayName.trim()) { toast.error('Name is required.'); return; }
@@ -72,110 +90,138 @@ export default function EditStudentModal({ student, endpoint, teachers, onClose,
     }
   };
 
-  const inputCls = 'w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400/50 transition-all';
-  const labelCls = 'block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5';
+  const inputCls = 'w-full px-4 py-2.5 bg-white border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400/60 focus:border-indigo-300 transition-all placeholder:text-slate-300';
+  const labelCls = 'block text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-1.5';
 
   return (
     <div
-      className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[60] flex items-center justify-center p-4"
+      className="fixed inset-0 z-[60] flex items-center justify-center p-4"
       style={{ paddingTop: 'max(1rem, env(safe-area-inset-top))', paddingBottom: 'max(1rem, env(safe-area-inset-bottom))' }}
     >
-      <div className="bg-white w-full max-w-lg rounded-2xl shadow-2xl overflow-hidden flex flex-col" style={{ maxHeight: 'min(90dvh, 640px)' }}>
+      <div className="absolute inset-0 bg-slate-900/50 backdrop-blur-[3px]" onClick={onClose} />
 
-        {/* Header */}
-        <div className="px-6 pt-6 pb-5 bg-gradient-to-r from-indigo-50 to-violet-50 border-b border-slate-100">
-          <div className="flex items-start justify-between">
-            <div>
-              <h2 className="text-lg font-bold text-slate-900 flex items-center gap-2">
-                <Pencil className="w-5 h-5 text-indigo-500" />
-                Edit Student
-              </h2>
-              <p className="text-xs text-slate-500 mt-0.5">Update student account information</p>
+      <div
+        className="relative bg-white w-full max-w-md rounded-3xl shadow-2xl overflow-hidden flex flex-col"
+        style={{ maxHeight: 'min(92dvh, 660px)' }}
+      >
+        {/* ── Gradient Header ── */}
+        <div className="relative overflow-hidden px-6 pt-6 pb-5"
+          style={{ background: 'linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%)' }}>
+          <div
+            className="absolute inset-0 opacity-10"
+            style={{ backgroundImage: 'radial-gradient(circle, #fff 1px, transparent 1px)', backgroundSize: '20px 20px' }}
+          />
+          <div className="relative flex items-start justify-between">
+            <div className="flex items-center gap-4">
+              {/* Avatar */}
+              <div className={cn(
+                'w-14 h-14 rounded-2xl bg-gradient-to-br flex items-center justify-center shadow-lg text-white text-lg font-extrabold shrink-0',
+                avatarGrad
+              )}>
+                {initials || <GraduationCap className="w-7 h-7" />}
+              </div>
+              <div>
+                <p className="text-xs font-bold text-indigo-200 uppercase tracking-widest mb-0.5">Edit Student</p>
+                <h2 className="text-lg font-extrabold text-white leading-tight">
+                  {student.displayName || student.email || 'Student'}
+                </h2>
+                <p className="text-xs text-indigo-300 mt-0.5 truncate max-w-[200px]">{student.email}</p>
+              </div>
             </div>
-            <button onClick={onClose} className="p-2 hover:bg-white/60 rounded-xl transition-all -mt-1 -mr-2">
-              <X className="w-5 h-5 text-slate-400" />
+            <button
+              onClick={onClose}
+              className="p-2 hover:bg-white/20 rounded-xl transition-all -mt-1 -mr-1 text-white/70 hover:text-white"
+            >
+              <X className="w-5 h-5" />
             </button>
           </div>
         </div>
 
-        {/* Body */}
-        <div className="p-6 space-y-4 overflow-y-auto flex-1">
+        {/* ── Body ── */}
+        <div className="p-6 space-y-5 overflow-y-auto flex-1 bg-slate-50/40">
 
-          {/* Name */}
-          <div>
-            <label className={labelCls}>Full Name <span className="text-red-400 normal-case font-normal">*</span></label>
-            <div className="relative">
-              <User className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
-              <input
-                type="text"
-                value={form.displayName}
-                onChange={e => set('displayName', e.target.value)}
-                placeholder="Student's full name"
-                className={`${inputCls} pl-9`}
-              />
+          {/* Name + Email — 2 col */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div>
+              <label className={labelCls}>Full Name <span className="text-rose-400 normal-case font-normal">*</span></label>
+              <div className="relative">
+                <User className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-300" />
+                <input
+                  type="text"
+                  value={form.displayName}
+                  onChange={e => set('displayName', e.target.value)}
+                  placeholder="Full name"
+                  className={`${inputCls} pl-9`}
+                />
+              </div>
+            </div>
+            <div>
+              <label className={labelCls}>Email <span className="text-rose-400 normal-case font-normal">*</span></label>
+              <div className="relative">
+                <Mail className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-300" />
+                <input
+                  type="email"
+                  value={form.email}
+                  onChange={e => set('email', e.target.value)}
+                  placeholder="email@domain.com"
+                  className={`${inputCls} pl-9`}
+                />
+              </div>
             </div>
           </div>
 
-          {/* Email */}
+          {/* Status pills */}
           <div>
-            <label className={labelCls}>Email <span className="text-red-400 normal-case font-normal">*</span></label>
-            <div className="relative">
-              <Mail className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
-              <input
-                type="email"
-                value={form.email}
-                onChange={e => set('email', e.target.value)}
-                placeholder="student@example.com"
-                className={`${inputCls} pl-9`}
-              />
-            </div>
-          </div>
-
-          {/* Status */}
-          <div>
-            <label className={labelCls}>Status</label>
+            <label className={labelCls}>Account Status</label>
             <div className="flex gap-3">
-              {(['active', 'inactive'] as const).map(s => (
-                <button
-                  key={s}
-                  type="button"
-                  onClick={() => set('status', s)}
-                  className={cn(
-                    'flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl border text-sm font-semibold transition-all',
-                    form.status === s
-                      ? s === 'active'
-                        ? 'bg-emerald-50 border-emerald-300 text-emerald-700'
-                        : 'bg-slate-100 border-slate-300 text-slate-600'
-                      : 'border-slate-200 text-slate-400 hover:bg-slate-50'
-                  )}
-                >
-                  {s === 'active'
-                    ? <><UserCheck className="w-4 h-4" /> Active</>
-                    : <><UserX className="w-4 h-4" /> Inactive</>}
-                </button>
-              ))}
+              <button
+                type="button"
+                onClick={() => set('status', 'active')}
+                className={cn(
+                  'flex-1 flex items-center justify-center gap-2 py-3 rounded-2xl border-2 text-sm font-bold transition-all',
+                  form.status === 'active'
+                    ? 'bg-emerald-50 border-emerald-400 text-emerald-700 shadow-sm shadow-emerald-100'
+                    : 'border-slate-200 text-slate-400 hover:bg-slate-50 bg-white'
+                )}
+              >
+                <div className={cn('w-2 h-2 rounded-full', form.status === 'active' ? 'bg-emerald-500' : 'bg-slate-300')} />
+                <UserCheck className="w-4 h-4" />
+                Active
+              </button>
+              <button
+                type="button"
+                onClick={() => set('status', 'inactive')}
+                className={cn(
+                  'flex-1 flex items-center justify-center gap-2 py-3 rounded-2xl border-2 text-sm font-bold transition-all',
+                  form.status === 'inactive'
+                    ? 'bg-slate-100 border-slate-400 text-slate-700 shadow-sm'
+                    : 'border-slate-200 text-slate-400 hover:bg-slate-50 bg-white'
+                )}
+              >
+                <div className={cn('w-2 h-2 rounded-full', form.status === 'inactive' ? 'bg-slate-500' : 'bg-slate-300')} />
+                <UserX className="w-4 h-4" />
+                Inactive
+              </button>
             </div>
           </div>
 
           {/* Trial days */}
           <div>
             <label className={labelCls}>
-              Free Trial Days <span className="text-slate-300 normal-case font-normal">(optional — leave blank to keep current)</span>
+              Free Trial Days
+              <span className="ml-1.5 normal-case font-normal text-slate-300">(leave blank = keep current · 0 = remove)</span>
             </label>
             <div className="relative">
-              <Clock className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+              <Clock className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-300" />
               <input
                 type="number"
                 min={0}
                 value={form.trialDays}
                 onChange={e => set('trialDays', e.target.value)}
-                placeholder="e.g. 7  (0 = clear trial)"
+                placeholder="e.g. 7"
                 className={`${inputCls} pl-9`}
               />
             </div>
-            <p className="mt-1.5 text-[11px] text-slate-400">
-              Set a new trial period, or enter 0 to remove the existing one.
-            </p>
           </div>
 
           {/* Teacher selector — admin only */}
@@ -196,8 +242,8 @@ export default function EditStudentModal({ student, endpoint, teachers, onClose,
           )}
         </div>
 
-        {/* Footer */}
-        <div className="px-6 pb-6 pt-4 flex gap-3 shrink-0 border-t border-slate-100">
+        {/* ── Footer ── */}
+        <div className="px-6 pb-6 pt-4 flex items-center gap-3 shrink-0 bg-white border-t border-slate-100">
           <button
             type="button"
             onClick={onClose}
@@ -210,9 +256,12 @@ export default function EditStudentModal({ student, endpoint, teachers, onClose,
             type="button"
             onClick={handleSave}
             disabled={saving}
-            className="flex items-center gap-2 px-6 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-semibold text-sm transition-all shadow-lg shadow-indigo-200 disabled:opacity-60 disabled:cursor-not-allowed"
+            className="flex items-center gap-2 px-6 py-2.5 rounded-xl font-bold text-sm text-white transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+            style={{ background: 'linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%)', boxShadow: '0 4px 16px rgba(99,102,241,0.35)' }}
           >
-            {saving ? <><Loader2 className="w-4 h-4 animate-spin" /> Saving…</> : 'Save Changes'}
+            {saving
+              ? <><Loader2 className="w-4 h-4 animate-spin" /> Saving…</>
+              : <><Pencil className="w-4 h-4" /> Save Changes</>}
           </button>
         </div>
       </div>

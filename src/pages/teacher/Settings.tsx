@@ -7,6 +7,7 @@ import {
   ArrowRightLeft, User, Search, X, ChevronRight, AlertTriangle,
   RefreshCw, Clock, History, KeyRound, Eye, EyeOff,
 } from 'lucide-react';
+import PWAInstallCard from '../../components/PWAInstallCard';
 import { toast } from 'sonner';
 import { cn } from '../../lib/utils';
 import { authFetch, readApiError } from '../../lib/apiUrl';
@@ -302,6 +303,14 @@ export default function TeacherSettings() {
             </div>
           ) : (
             <>
+              {/* ── PWA Install ── */}
+              <motion.div
+                initial={{ opacity: 0, y: 12 }}
+                animate={{ opacity: 1, y: 0 }}
+              >
+                <PWAInstallCard />
+              </motion.div>
+
               {/* ── Headway Toggle ── */}
               <motion.div
                 initial={{ opacity: 0, y: 12 }}

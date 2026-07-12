@@ -6,6 +6,7 @@ import {
   Camera, CheckCircle2, AlertTriangle, BookOpen, Award,
   HelpCircle, TrendingUp, Phone, Globe, FileText, Sparkles, X, KeyRound,
 } from 'lucide-react';
+import PWAInstallCard from '../../components/PWAInstallCard';
 import { toast } from 'sonner';
 import StudentLayout from '../../components/layout/StudentLayout';
 import { motion } from 'motion/react';
@@ -377,6 +378,9 @@ export default function StudentProfile() {
                 )}
               </div>
             </div>
+
+            {/* PWA Install */}
+            <PWAInstallCard />
 
             <div ref={securityRef}>
             {showFirstLoginHint && (

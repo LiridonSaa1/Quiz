@@ -12,6 +12,7 @@ import {
   ChevronRight, School, Phone, MapPin, AlertTriangle,
   GraduationCap, Briefcase, Crown, Info, Trash2, X
 } from 'lucide-react';
+import PWAInstallCard from '../../components/PWAInstallCard';
 
 type Role = 'student' | 'teacher' | 'admin';
 type RoleBoolMap = Record<Role, boolean>;
@@ -340,6 +341,10 @@ export default function AdminSettings() {
                     value={requireEmailVerify}
                     onChange={setRequireEmailVerify}
                   />
+                </Section>
+
+                <Section title="App Installation" subtitle="Let users install QuizMaster as a native-like app on any device.">
+                  <PWAInstallCard />
                 </Section>
               </>
             )}
