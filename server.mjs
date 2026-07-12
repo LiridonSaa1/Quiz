@@ -18156,7 +18156,32 @@ async function startServer() {
     });
   }
 }
-var _reminderSentThisMonth = /* @__PURE__ */ new Set();
+var MAX_REMINDERS_PER_MONTH = 3;
+var REMINDER_COUNTS_SECTION = "payment_reminder_counts";
+var _reminderCounts = /* @__PURE__ */ new Map();
+async function loadReminderCounts(monthYear) {
+  try {
+    const { data } = await supabaseAdmin.from("platform_config").select("value").eq("section", REMINDER_COUNTS_SECTION).maybeSingle();
+    const stored = data?.value ?? {};
+    for (const [k, v2] of Object.entries(stored)) {
+      if (k.endsWith(`:${monthYear}`)) _reminderCounts.set(k, Number(v2));
+    }
+  } catch {
+  }
+}
+async function saveReminderCounts(monthYear) {
+  try {
+    const snapshot = {};
+    for (const [k, v2] of _reminderCounts.entries()) {
+      if (k.endsWith(`:${monthYear}`)) snapshot[k] = v2;
+    }
+    await supabaseAdmin.from("platform_config").upsert(
+      { section: REMINDER_COUNTS_SECTION, value: snapshot },
+      { onConflict: "section" }
+    );
+  } catch {
+  }
+}
 async function runPaymentDeadlineReminders({ force = false } = {}) {
   const now = /* @__PURE__ */ new Date();
   const dayOfMonth = now.getDate();
@@ -18164,6 +18189,7 @@ async function runPaymentDeadlineReminders({ force = false } = {}) {
   if (!force && dayOfMonth < 5) {
     return { sent: 0, skipped: 0, monthYear };
   }
+  await loadReminderCounts(monthYear);
   let brandName = "QuizMaster";
   let baseUrl = process.env.REPLIT_DEV_DOMAIN ? `https://${process.env.REPLIT_DEV_DOMAIN}` : "http://localhost:5000";
   try {
@@ -18189,7 +18215,8 @@ async function runPaymentDeadlineReminders({ force = false } = {}) {
   }
   for (const student of unpaid) {
     const cacheKey = `${student.id}:${monthYear}`;
-    if (!force && _reminderSentThisMonth.has(cacheKey)) {
+    const timesSent = _reminderCounts.get(cacheKey) ?? 0;
+    if (!force && timesSent >= MAX_REMINDERS_PER_MONTH) {
       skipped++;
       continue;
     }
@@ -18197,15 +18224,18 @@ async function runPaymentDeadlineReminders({ force = false } = {}) {
     const tpl = renderPaymentReminderEmail({ studentName, monthLabel, dayOfMonth, brandName, loginUrl });
     try {
       await sendEmail({ to: student.email, toName: studentName, subject: tpl.subject, htmlContent: tpl.htmlContent, textContent: tpl.textContent });
-      _reminderSentThisMonth.add(cacheKey);
+      _reminderCounts.set(cacheKey, timesSent + 1);
       sent++;
     } catch (e) {
       console.error(`[payment-reminder] Failed to email ${student.email}:`, e.message);
       skipped++;
     }
   }
+  if (sent > 0) {
+    await saveReminderCounts(monthYear);
+  }
   if (sent > 0 || skipped > 0) {
-    console.log(`[payment-reminder] ${monthYear}: sent=${sent}, skipped=${skipped}`);
+    console.log(`[payment-reminder] ${monthYear}: sent=${sent}, skipped=${skipped} (limit=${MAX_REMINDERS_PER_MONTH}/month)`);
   }
   return { sent, skipped, monthYear };
 }
