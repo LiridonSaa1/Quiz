@@ -179,6 +179,7 @@ export default function StudentLayout({ children }: { children: React.ReactNode 
     .filter((section) => section.items.length > 0);
 
   const NavItem = ({ item, onClick }: { item: NavItemDef; onClick?: () => void }) => {
+    const isActive = location.pathname === item.path;
     const isLiveSessions = item.path === '/student/live-sessions';
     const isAnnouncements = item.path === '/student/announcements';
     const badge = isLiveSessions && liveSessionCount > 0
@@ -191,9 +192,10 @@ export default function StudentLayout({ children }: { children: React.ReactNode 
       <Link
         to={item.path}
         onClick={onClick}
+        data-active={isActive ? 'true' : undefined}
         className={cn(
           'flex items-center gap-3 px-3 rounded-lg transition-all text-sm font-medium min-h-[44px] py-2',
-          location.pathname === item.path
+          isActive
             ? 'bg-emerald-600 text-white shadow-lg shadow-emerald-900/30'
             : 'text-slate-400 hover:bg-slate-700/60 hover:text-white active:bg-slate-700'
         )}
@@ -212,7 +214,15 @@ export default function StudentLayout({ children }: { children: React.ReactNode 
     );
   };
 
-  const SidebarContent = ({ onLinkClick }: { onLinkClick?: () => void }) => (
+  const SidebarContent = ({ onLinkClick }: { onLinkClick?: () => void }) => {
+    const navRef = useRef<HTMLElement>(null);
+    useEffect(() => {
+      const nav = navRef.current;
+      if (!nav) return;
+      const activeEl = nav.querySelector<HTMLElement>('[data-active="true"]');
+      if (activeEl) activeEl.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+    }, [location.pathname]);
+    return (
     <div className="flex flex-col h-full bg-slate-800">
       <div className="p-5 border-b border-slate-700/50 shrink-0">
         <div className="flex items-center gap-3">
@@ -229,7 +239,7 @@ export default function StudentLayout({ children }: { children: React.ReactNode 
           </div>
         </div>
       </div>
-      <nav className="flex-1 px-3 py-4 space-y-5 overflow-y-auto scrollbar-none">
+      <nav ref={navRef} className="flex-1 px-3 py-4 space-y-5 overflow-y-auto scrollbar-none">
         {visibleSections.map((section) => (
           <div key={section.key} className="space-y-0.5">
             <h3 className="px-3 text-[9px] font-bold text-slate-500 uppercase tracking-widest mb-1.5">
@@ -251,7 +261,8 @@ export default function StudentLayout({ children }: { children: React.ReactNode 
         </div>
       </nav>
     </div>
-  );
+    );
+  };
 
   const currentLabel = visibleSections.flatMap(s => s.items).find(i => i.path === location.pathname)?.label || t('nav.dashboard');
 

@@ -157,24 +157,36 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
     }))
     .filter((section) => section.items.length > 0);
 
-  const NavItem = ({ item, onClick }: { item: any; onClick?: () => void }) => (
-    <Link
-      to={item.path}
-      onClick={onClick}
-      className={cn(
-        'flex items-center gap-3 px-3 rounded-lg transition-all text-sm font-medium',
-        'min-h-[44px] py-2',
-        location.pathname === item.path
-          ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-900/30'
-          : 'text-slate-400 hover:bg-slate-700/60 hover:text-white active:bg-slate-700'
-      )}
-    >
-      <item.icon className="w-4 h-4 shrink-0" />
-      <span className="truncate">{item.label}</span>
-    </Link>
-  );
+  const NavItem = ({ item, onClick }: { item: any; onClick?: () => void }) => {
+    const isActive = location.pathname === item.path;
+    return (
+      <Link
+        to={item.path}
+        onClick={onClick}
+        data-active={isActive ? 'true' : undefined}
+        className={cn(
+          'flex items-center gap-3 px-3 rounded-lg transition-all text-sm font-medium',
+          'min-h-[44px] py-2',
+          isActive
+            ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-900/30'
+            : 'text-slate-400 hover:bg-slate-700/60 hover:text-white active:bg-slate-700'
+        )}
+      >
+        <item.icon className="w-4 h-4 shrink-0" />
+        <span className="truncate">{item.label}</span>
+      </Link>
+    );
+  };
 
-  const SidebarContent = ({ onLinkClick }: { onLinkClick?: () => void }) => (
+  const SidebarContent = ({ onLinkClick }: { onLinkClick?: () => void }) => {
+    const navRef = useRef<HTMLElement>(null);
+    useEffect(() => {
+      const nav = navRef.current;
+      if (!nav) return;
+      const activeEl = nav.querySelector<HTMLElement>('[data-active="true"]');
+      if (activeEl) activeEl.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+    }, [location.pathname]);
+    return (
     <div className="flex flex-col h-full min-h-0">
       <div className="p-5 border-b border-slate-700/50 shrink-0">
         <div className="flex items-center gap-3">
@@ -191,7 +203,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
           </div>
         </div>
       </div>
-      <nav className="flex-1 min-h-0 px-3 py-4 space-y-5 overflow-y-auto scrollbar-none">
+      <nav ref={navRef} className="flex-1 min-h-0 px-3 py-4 space-y-5 overflow-y-auto scrollbar-none">
         {visibleSections.map((section) => (
           <div key={section.key} className="space-y-0.5">
             <h3 className="px-3 text-[9px] font-bold text-slate-500 uppercase tracking-widest mb-1.5">
@@ -213,7 +225,8 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
         </button>
       </div>
     </div>
-  );
+    );
+  };
 
   const currentLabel = visibleSections.flatMap(s => s.items).find(i => i.path === location.pathname)?.label || t('nav.dashboard');
 

@@ -31,6 +31,7 @@ function NavItem({
       to={item.path}
       onClick={onClick}
       title={collapsed ? item.label : undefined}
+      data-active={active ? 'true' : undefined}
       className={cn(
         'group relative flex items-center rounded-xl transition-all duration-200 text-sm min-h-[44px]',
         collapsed ? 'justify-center p-2.5' : 'gap-3 px-3 py-2.5',
@@ -85,6 +86,7 @@ function SidebarContent({
   const [userEmail, setUserEmail] = useState('');
   const [displayName, setDisplayName] = useState('');
   const branding = useBranding();
+  const navRef = useRef<HTMLElement>(null);
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
@@ -94,6 +96,14 @@ function SidebarContent({
       }
     });
   }, []);
+
+  // Scroll active item into view whenever the active path changes
+  useEffect(() => {
+    const nav = navRef.current;
+    if (!nav) return;
+    const activeEl = nav.querySelector<HTMLElement>('[data-active="true"]');
+    if (activeEl) activeEl.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+  }, [activePath]);
 
   const initials = displayName.split(' ').map((w) => w[0]).join('').toUpperCase().slice(0, 2);
 
@@ -123,7 +133,7 @@ function SidebarContent({
       </div>
 
       {/* Nav */}
-      <nav className="flex-1 px-2 py-4 overflow-y-auto space-y-4 scrollbar-none">
+      <nav ref={navRef} className="flex-1 px-2 py-4 overflow-y-auto space-y-4 scrollbar-none">
         {sections.map((section) => (
           <div key={section.key} className="space-y-0.5">
             {!collapsed ? (
