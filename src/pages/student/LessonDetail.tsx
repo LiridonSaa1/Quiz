@@ -581,8 +581,8 @@ export default function StudentLessonDetail() {
                 {t('student.lessons.noContentAdded')}
               </div>
             )}
-            {/* ── OUP Headway Resources panel ── */}
-            <div className="bg-white rounded-3xl border border-slate-100 overflow-hidden">
+            {/* ── OUP Headway Resources panel — teacher-only, hidden from students ── */}
+            {isTeacher && <div className="bg-white rounded-3xl border border-slate-100 overflow-hidden">
               <button
                 onClick={() => setShowOupPanel(v => !v)}
                 className="w-full flex items-center justify-between px-6 py-4 hover:bg-slate-50 transition-colors"
@@ -953,7 +953,7 @@ export default function StudentLessonDetail() {
                   })()}
                 </div>
               )}
-            </div>
+            </div>}
 
             <LessonDiscussionBoard lessonId={lesson.id} title={t('student.lessons.questionsAboutLesson')} />
           </div>
