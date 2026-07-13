@@ -3091,21 +3091,27 @@ async function processZipEntries(zipBuffer, zipName, zipDriveId, type, level, jo
     return;
   }
   job.total += entries.length;
+  job.zipTotal = entries.length;
+  job.zipDone = 0;
   job.logs.push(`   \u21B3 ${entries.length} media files inside "${zipName}"`);
   for (const entry of entries) {
     const baseName = (entry.entryName.split("/").pop() || entry.entryName).replace(/\s+/g, "_");
     const ext = baseName.split(".").pop()?.toLowerCase() || "";
     const compositeId = `${zipDriveId}::${entry.entryName}`;
+    job.currentFile = baseName;
+    job.phase = "extracting";
     try {
       const { data: existing } = await supabaseAdmin.from("headway_media").select("id").eq("drive_file_id", compositeId).maybeSingle();
       if (existing) {
         job.skipped++;
+        job.zipDone = (job.zipDone ?? 0) + 1;
         job.logs.push(`\u21B7 Skip (exists): ${baseName}`);
         continue;
       }
       const fileData = entry.getData();
       const storagePath = `headway/${level}/${type}/unit${unitNum ?? 0}/${baseName}`;
       const mime = mimeForExt(ext);
+      job.phase = "uploading";
       const { error: uploadErr } = await supabaseAdmin.storage.from("headway-media").upload(storagePath, fileData, { contentType: mime, upsert: true });
       if (uploadErr) throw new Error(`Storage upload failed: ${uploadErr.message}`);
       const { data: { publicUrl } } = supabaseAdmin.storage.from("headway-media").getPublicUrl(storagePath);
@@ -3132,12 +3138,15 @@ async function processZipEntries(zipBuffer, zipName, zipDriveId, type, level, jo
         throw new Error(insResult.error.message);
       }
       job.done++;
+      job.zipDone = (job.zipDone ?? 0) + 1;
       job.logs.push(`\u2713 ${baseName}${unitNum ? ` \u2192 Unit ${unitNum}` : ""}`);
     } catch (err) {
+      job.zipDone = (job.zipDone ?? 0) + 1;
       job.errors.push(`${baseName}: ${err?.message}`);
       job.logs.push(`\u2717 ${baseName}: ${err?.message}`);
     }
   }
+  job.currentFile = void 0;
 }
 var _poolPermanentlyDown = false;
 var getPool = async () => {
@@ -8643,16 +8652,25 @@ Rules:
             job.logs.push(`   \u21B3 ${zipFiles.length} ZIP(s), ${plainMedia.length} plain media file(s)`);
             for (const zipFile of zipFiles) {
               try {
+                job.currentZip = zipFile.name;
+                job.phase = "downloading";
+                job.currentFile = void 0;
+                job.zipDone = 0;
+                job.zipTotal = 0;
                 job.logs.push(`\u{1F4E6} Downloading ZIP: ${zipFile.name}\u2026`);
                 const zipBuf = await downloadDriveFileBuffer(zipFile.id, apiKey);
                 job.logs.push(`   \u21B3 ${(zipBuf.length / 1024 / 1024).toFixed(1)} MB \u2014 extracting\u2026`);
+                job.phase = "extracting";
                 await processZipEntries(zipBuf, zipFile.name, zipFile.id, type, level, job, courseId);
               } catch (err) {
                 job.errors.push(`${zipFile.name}: ${err?.message}`);
                 job.logs.push(`\u2717 ${zipFile.name}: ${err?.message}`);
               }
+              job.currentZip = void 0;
+              job.currentFile = void 0;
               await new Promise((r) => setTimeout(r, 200));
             }
+            job.phase = "plain";
             for (const driveFile of plainMedia) {
               try {
                 const compositeId = driveFile.id;

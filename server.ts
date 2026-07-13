@@ -81,6 +81,11 @@ interface DriveImportJob {
   skipped: number;
   errors: string[];
   logs: string[];
+  currentZip?: string;
+  currentFile?: string;
+  zipDone?: number;
+  zipTotal?: number;
+  phase?: 'listing' | 'downloading' | 'extracting' | 'uploading' | 'plain' | 'done';
 }
 const driveImportJobs = new Map<string, DriveImportJob>();
 
@@ -203,6 +208,8 @@ async function processZipEntries(
   }
 
   job.total += entries.length;
+  job.zipTotal = entries.length;
+  job.zipDone = 0;
   job.logs.push(`   ↳ ${entries.length} media files inside "${zipName}"`);
 
   for (const entry of entries) {
@@ -210,11 +217,15 @@ async function processZipEntries(
     const ext = baseName.split('.').pop()?.toLowerCase() || '';
     const compositeId = `${zipDriveId}::${entry.entryName}`;
 
+    job.currentFile = baseName;
+    job.phase = 'extracting';
+
     try {
       const { data: existing } = await supabaseAdmin
         .from('headway_media').select('id').eq('drive_file_id', compositeId).maybeSingle();
       if (existing) {
         job.skipped++;
+        job.zipDone = (job.zipDone ?? 0) + 1;
         job.logs.push(`↷ Skip (exists): ${baseName}`);
         continue;
       }
@@ -223,6 +234,7 @@ async function processZipEntries(
       const storagePath = `headway/${level}/${type}/unit${unitNum ?? 0}/${baseName}`;
       const mime = mimeForExt(ext);
 
+      job.phase = 'uploading';
       const { error: uploadErr } = await supabaseAdmin.storage
         .from('headway-media')
         .upload(storagePath, fileData, { contentType: mime, upsert: true });
@@ -240,7 +252,6 @@ async function processZipEntries(
 
       let insResult = await supabaseAdmin.from('headway_media').insert(insertPayload);
       if (insertPayload.course_id && isMissingColumnError(insResult.error, 'course_id')) {
-        // course_id column not yet visible in PostgREST schema cache — retry without it
         const { course_id: _dropped, ...payloadWithoutCourse } = insertPayload;
         insResult = await supabaseAdmin.from('headway_media').insert(payloadWithoutCourse);
       }
@@ -250,12 +261,15 @@ async function processZipEntries(
       }
 
       job.done++;
+      job.zipDone = (job.zipDone ?? 0) + 1;
       job.logs.push(`✓ ${baseName}${unitNum ? ` → Unit ${unitNum}` : ''}`);
     } catch (err: any) {
+      job.zipDone = (job.zipDone ?? 0) + 1;
       job.errors.push(`${baseName}: ${err?.message}`);
       job.logs.push(`✗ ${baseName}: ${err?.message}`);
     }
   }
+  job.currentFile = undefined;
 }
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -7449,18 +7463,27 @@ Rules:
             // ── Process ZIP files ──────────────────────────────────────────
             for (const zipFile of zipFiles) {
               try {
+                job.currentZip = zipFile.name;
+                job.phase = 'downloading';
+                job.currentFile = undefined;
+                job.zipDone = 0;
+                job.zipTotal = 0;
                 job.logs.push(`📦 Downloading ZIP: ${zipFile.name}…`);
                 const zipBuf = await downloadDriveFileBuffer(zipFile.id, apiKey);
                 job.logs.push(`   ↳ ${(zipBuf.length / 1024 / 1024).toFixed(1)} MB — extracting…`);
+                job.phase = 'extracting';
                 await processZipEntries(zipBuf, zipFile.name, zipFile.id, type, level, job, courseId);
               } catch (err: any) {
                 job.errors.push(`${zipFile.name}: ${err?.message}`);
                 job.logs.push(`✗ ${zipFile.name}: ${err?.message}`);
               }
+              job.currentZip = undefined;
+              job.currentFile = undefined;
               await new Promise(r => setTimeout(r, 200));
             }
 
             // ── Process plain media files (non-ZIP) ────────────────────────
+            job.phase = 'plain';
             for (const driveFile of plainMedia) {
               try {
                 const compositeId = driveFile.id;

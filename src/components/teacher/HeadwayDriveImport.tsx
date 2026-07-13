@@ -36,6 +36,11 @@ interface ImportJob {
   skipped: number;
   errors: string[];
   logs: string[];
+  currentZip?: string;
+  currentFile?: string;
+  zipDone?: number;
+  zipTotal?: number;
+  phase?: 'listing' | 'downloading' | 'extracting' | 'uploading' | 'plain' | 'done';
 }
 
 const TYPE_LABELS: Record<string, { label: string; color: string; icon: React.ElementType }> = {
@@ -422,22 +427,84 @@ export default function HeadwayDriveImport() {
           {/* Progress */}
           {job && (
             <div className="rounded-2xl border border-slate-100 bg-slate-50 p-4 space-y-3">
+              {/* Status header */}
               <div className="flex items-center justify-between text-xs font-bold text-slate-700">
-                <span>{job.status === 'running' ? '⟳ Importing…' : job.status === 'done' ? '✓ Done' : '✗ Error'}</span>
-                <span>{job.done}/{job.total} files</span>
+                <span className="flex items-center gap-1.5">
+                  {job.status === 'running' && <Loader2 className="w-3.5 h-3.5 text-indigo-500 animate-spin" />}
+                  {job.status === 'done' && <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500" />}
+                  {job.status === 'error' && <AlertCircle className="w-3.5 h-3.5 text-red-500" />}
+                  {job.status === 'running' ? 'Importing…' : job.status === 'done' ? 'Import complete' : 'Finished with errors'}
+                </span>
+                <span className="tabular-nums text-slate-500">{job.done}/{job.total > 0 ? job.total : '?'} files</span>
               </div>
+
+              {/* Overall progress bar */}
               <div className="h-2 rounded-full bg-slate-200 overflow-hidden">
-                <motion.div
-                  className={`h-full rounded-full ${job.status === 'error' ? 'bg-red-500' : 'bg-indigo-500'}`}
-                  animate={{ width: `${pct}%` }}
-                  transition={{ duration: 0.4, ease: 'easeOut' }}
-                />
+                {job.total > 0 ? (
+                  <motion.div
+                    className={`h-full rounded-full ${job.status === 'error' ? 'bg-red-500' : 'bg-gradient-to-r from-indigo-500 to-violet-500'}`}
+                    animate={{ width: `${pct}%` }}
+                    transition={{ duration: 0.4, ease: 'easeOut' }}
+                  />
+                ) : (
+                  /* Indeterminate bar while total is unknown (listing/downloading phase) */
+                  <div className="h-full w-1/3 rounded-full bg-gradient-to-r from-indigo-500 to-violet-500 animate-[slide_1.4s_ease-in-out_infinite]"
+                    style={{ animation: 'indeterminate 1.4s ease-in-out infinite' }} />
+                )}
               </div>
+              <style>{`
+                @keyframes indeterminate {
+                  0%   { transform: translateX(-100%); width: 40%; }
+                  50%  { transform: translateX(150%);  width: 40%; }
+                  100% { transform: translateX(300%);  width: 40%; }
+                }
+              `}</style>
+
+              {/* Current ZIP being processed */}
+              {job.status === 'running' && job.currentZip && (
+                <div className="rounded-xl bg-indigo-50 border border-indigo-100 px-3 py-2 space-y-1.5">
+                  <div className="flex items-center gap-1.5 text-[11px] font-bold text-indigo-700">
+                    <span>📦</span>
+                    <span className="truncate">{job.currentZip}</span>
+                    {job.phase === 'downloading' && (
+                      <span className="ml-auto shrink-0 text-indigo-400 font-medium">downloading…</span>
+                    )}
+                  </div>
+                  {/* Per-ZIP sub-bar (only while extracting/uploading) */}
+                  {(job.phase === 'extracting' || job.phase === 'uploading') && (job.zipTotal ?? 0) > 0 && (
+                    <>
+                      <div className="h-1.5 rounded-full bg-indigo-100 overflow-hidden">
+                        <motion.div
+                          className="h-full rounded-full bg-indigo-400"
+                          animate={{ width: `${Math.round(((job.zipDone ?? 0) / (job.zipTotal ?? 1)) * 100)}%` }}
+                          transition={{ duration: 0.3, ease: 'easeOut' }}
+                        />
+                      </div>
+                      <div className="flex items-center justify-between text-[10px] text-indigo-500">
+                        <span className="truncate">
+                          {job.phase === 'uploading' ? '⬆ uploading: ' : '↗ extracting: '}
+                          <span className="font-mono">{job.currentFile ?? '…'}</span>
+                        </span>
+                        <span className="shrink-0 ml-2 tabular-nums font-semibold">
+                          {job.zipDone ?? 0}/{job.zipTotal ?? 0}
+                        </span>
+                      </div>
+                    </>
+                  )}
+                </div>
+              )}
+
+              {/* Stats row */}
               <div className="flex gap-4 text-[11px] text-slate-500">
                 <span className="text-emerald-600 font-semibold">✓ {job.done} imported</span>
                 <span className="text-slate-500">↷ {job.skipped} skipped</span>
                 {job.errors.length > 0 && <span className="text-red-500">✗ {job.errors.length} errors</span>}
+                {job.total > 0 && pct > 0 && job.status === 'running' && (
+                  <span className="ml-auto text-indigo-500 font-semibold">{pct}%</span>
+                )}
               </div>
+
+              {/* Log console */}
               {job.logs.length > 0 && (
                 <div className="max-h-40 overflow-y-auto bg-slate-900 rounded-xl p-3 font-mono text-[10px] space-y-0.5">
                   {job.logs.map((log, i) => (
@@ -446,6 +513,9 @@ export default function HeadwayDriveImport() {
                       log.startsWith('✓') ? 'text-emerald-400' :
                       log.startsWith('↷') ? 'text-slate-400' :
                       log.startsWith('✗') ? 'text-red-400' :
+                      log.startsWith('📦') ? 'text-amber-300' :
+                      log.startsWith('📂') ? 'text-sky-300' :
+                      log.startsWith('🏁') ? 'text-violet-300' :
                       'text-slate-300'
                     )}>{log}</p>
                   ))}
