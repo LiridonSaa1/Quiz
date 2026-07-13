@@ -14,6 +14,7 @@ import {
 } from 'recharts';
 import { motion } from 'motion/react';
 import { authFetchJsonCached, authFetch, apiUrl } from '../../lib/apiUrl';
+import HolidayDashboardBanner from '../../components/HolidayDashboardBanner';
 
 const CHART_DATA = [
   { day: 'Mon', attempts: 0 },
@@ -210,6 +211,8 @@ export default function TeacherDashboard() {
   return (
     <TeacherLayout>
       <div className="space-y-7">
+
+        <HolidayDashboardBanner />
 
         {/* Header */}
         <motion.div

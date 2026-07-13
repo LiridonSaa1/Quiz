@@ -331,6 +331,26 @@ html.holiday-catholic-christmas { --h-glow: rgba(220,38,38,.45);   --h-shimmer: 
   from { opacity: 0; transform: scale(0.5); }
   to   { opacity: 1; transform: scale(1); }
 }
+@keyframes h-modal-bg-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+@keyframes h-modal-card-in {
+  from { opacity: 0; transform: scale(0.82) translateY(20px); }
+  to   { opacity: 1; transform: scale(1) translateY(0); }
+}
+@keyframes h-bounce-pop {
+  0%   { opacity: 0; transform: scale(0.4) translateY(8px); }
+  70%  { transform: scale(1.18) translateY(-4px); }
+  100% { opacity: 1; transform: scale(1) translateY(0); }
+}
+
+/* ── Holiday card glow ──────────────────────────────────────────── */
+.holiday-card-glow {
+  box-shadow: 0 0 0 1.5px color-mix(in srgb, var(--season-primary, #6366f1) 35%, transparent),
+              0 4px 20px color-mix(in srgb, var(--season-primary, #6366f1) 15%, transparent) !important;
+  transition: box-shadow 0.3s ease;
+}
 
 /* ── Holiday particle base ─────────────────────────────────────── */
 .holiday-particle {

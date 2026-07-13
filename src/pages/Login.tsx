@@ -7,6 +7,7 @@ import { apiUrl } from '../lib/apiUrl';
 import { isProfileAccessAllowed } from '../lib/profileAccess';
 import LanguageDropdown from '../components/LanguageDropdown';
 import { usePWAInstall } from '../hooks/usePWAInstall';
+import { useActiveHoliday } from '../lib/useActiveHoliday';
 import {
   Mail, Lock, Shield, GraduationCap,
   BookOpen, Users, Trophy, Eye, EyeOff,
@@ -47,6 +48,7 @@ export default function Login() {
   const mouseRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
   const blobRef  = useRef<HTMLDivElement>(null);
   const navigate = useNavigate();
+  const activeHoliday = useActiveHoliday();
 
   const FEATURES = [
     { icon: BookOpen,  title: t('login.features.smartCourseBuilder'),    desc: t('login.features.smartCourseBuilderDesc') },
@@ -228,7 +230,7 @@ export default function Login() {
       {/* ═══════════════════ LEFT ═══════════════════ */}
       <div
         className="hidden lg:flex lg:w-[55%] flex-col relative overflow-hidden"
-        style={{ background: 'linear-gradient(135deg,#0d0f1e 0%,#110d2a 50%,#0a0d1e 100%)' }}
+        style={{ background: activeHoliday ? `linear-gradient(145deg, ${activeHoliday.theme.gradFrom} 0%, ${activeHoliday.theme.gradTo} 100%)` : 'linear-gradient(135deg,#0d0f1e 0%,#110d2a 50%,#0a0d1e 100%)' }}
       >
         <Noise />
         <Ring size={700} opacity={0.12} className="-top-[200px] -left-[200px]" />
@@ -243,6 +245,27 @@ export default function Login() {
         <div className="absolute top-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-violet-500/30 to-transparent" />
 
         <div className="relative z-10 flex flex-col h-full px-14 py-12">
+          {/* Holiday badge */}
+          {activeHoliday && (
+            <div style={{
+              display: 'inline-flex', alignItems: 'center', gap: '0.45rem',
+              background: 'rgba(255,255,255,0.15)',
+              border: '1px solid rgba(255,255,255,0.28)',
+              borderRadius: '999px',
+              padding: '0.3rem 0.9rem',
+              color: '#fff',
+              fontSize: '0.78rem',
+              fontWeight: 700,
+              marginBottom: '1.25rem',
+              width: 'fit-content',
+              backdropFilter: 'blur(4px)',
+              letterSpacing: '0.02em',
+              boxShadow: '0 2px 12px rgba(0,0,0,0.15)',
+            }}>
+              <span style={{ fontSize: '1rem' }}>{activeHoliday.theme.emoji}</span>
+              {activeHoliday.message}
+            </div>
+          )}
           {/* Logo */}
           <div className="flex items-center gap-3 mb-auto">
             <div className="relative">

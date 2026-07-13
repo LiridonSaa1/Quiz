@@ -1,0 +1,324 @@
+🎆 1. VITI I RI (1–2 Janar)
+🎨 Theme
+Gradient: #0F172A → #2563EB → #F59E0B
+Background: Night Sky
+Glass Cards
+Golden Glow
+🃏 Cards
+╭──────────────────────────╮
+🎆 Happy New Year
+──────────────────────────
+📚 Students
+👨‍🏫 Teachers
+📖 Courses
+╰──────────────────────────╯
+
+Card Animation
+
+Fireworks
+Confetti
+Sparkles
+Buttons
+🎆 Save
+🎁 Dashboard
+✨ Login
+🎉 Students
+
+Hover
+
+Glow
+Sparkles
+
+Logo
+
+🎅
+ Britannica School
+
+Background
+
+Fireworks
+Stars
+Snow
+❄️ 2. KRISHTLINDJET ORTODOKSE
+
+Theme
+
+Blue
+White
+Silver
+
+Cards
+
+🎄 Orthodox Christmas
+
+Buttons
+
+🎄 Save
+⭐ Login
+🔔 Dashboard
+
+Animation
+
+Snow
+Christmas Lights
+Bells
+
+Logo
+
+🎄 Britannica
+🇽🇰 3. DITA E PAVARËSISË
+
+Theme
+
+Blue
+Yellow
+
+Cards
+
+🇽🇰 Independence Day
+
+Buttons
+
+🇽🇰 Dashboard
+⭐ Students
+🦅 Reports
+
+Animation
+
+Kosovo Flag Waves
+Confetti Blue/Yellow
+
+Header
+
+Large Kosovo Flag
+
+Background
+
+Kosovo outline watermark
+
+🌙 4. BAJRAMI I MADH
+
+Theme
+
+Dark Green
+Gold
+
+Cards
+
+🌙 Eid Mubarak
+
+Buttons
+
+🌙 Login
+🕌 Dashboard
+⭐ Reports
+
+Animation
+
+Crescent Moon
+Lantern Glow
+Stars
+
+Background
+
+Islamic Pattern
+
+Logo
+
+🌙 Britannica
+🥚 5. PASHKËT KATOLIKE
+
+Theme
+
+Pastel
+
+Cards
+
+🥚 Happy Easter
+
+Buttons
+
+🥚 Dashboard
+🐇 Students
+🌸 Save
+
+Animation
+
+Flowers
+Easter Eggs
+Rabbits
+
+Background
+
+Spring Garden
+
+🥚 6. PASHKËT ORTODOKSE
+
+Theme
+
+Orange
+Cream
+
+Cards
+
+🥚 Христос Воскресе
+
+Buttons
+
+🥚 Dashboard
+🕊️ Reports
+
+Animation
+
+Petals
+Eggs
+📜 7. DITA E KUSHTETUTËS
+
+Theme
+
+Royal Blue
+
+Cards
+
+📜 Constitution Day
+
+Buttons
+
+📜 Save
+⚖️ Dashboard
+🏛️ Reports
+
+Animation
+
+Elegant shimmer
+Gold Line
+
+Background
+
+Official Pattern
+
+🌿 8. DITA E PUNËS
+
+Theme
+
+Green
+
+Cards
+
+🌿 Labour Day
+
+Buttons
+
+🌿 Dashboard
+🌳 Reports
+
+Animation
+
+Leaves
+Grass
+
+Background
+
+Nature
+
+🇪🇺 9. DITA E EVROPËS
+
+Theme
+
+EU Blue
+
+Cards
+
+🇪🇺 Europe Day
+
+Buttons
+
+🇪🇺 Dashboard
+⭐ Reports
+
+Animation
+
+Rotating Stars
+Light Glow
+
+Background
+
+EU Stars
+
+🌙 10. BAJRAMI I VOGËL
+
+Theme
+
+Emerald
+Gold
+
+Cards
+
+🌙 Eid al-Adha
+
+Buttons
+
+🌙 Dashboard
+🕌 Save
+
+Animation
+
+Lanterns
+Gold Stars
+
+Background
+
+Mosque Silhouette
+
+🎄 11. KRISHTLINDJET KATOLIKE
+
+Theme
+
+Christmas Red
+
+Cards
+
+🎄 Merry Christmas
+
+Buttons
+
+🎄 Dashboard
+🎅 Login
+🎁 Save
+🔔 Reports
+
+Animation
+
+Snow
+Christmas Lights
+Santa Flying
+Bells
+
+Background
+
+Christmas Village
+
+🌟 Elemente që ndryshojnë në të gjithë aplikacionin
+Element	Ndryshon sipas festës
+🏫 Logo	Kapelë e Babagjyshit, flamur 🇽🇰, hënë 🌙, vezë 🥚, etj.
+🔘 Buttons	Ikona festive + hover glow
+🃏 Cards	Gradient, border dhe ilustrime tematike
+📊 Dashboard	Banner festiv + widget i personalizuar
+🔔 Notifications	Mesazh urimi me ikonë përkatëse
+📅 Calendar	Data e festës e theksuar me ikonë
+📈 Charts	Ngjyra sipas temës festive
+👤 Avatar	Kornizë festive rreth fotos
+📂 Sidebar	Ikona dhe accent color sipas festës
+🌄 Background	Borë, fishekzjarre, gjethe, petale, yje ose flamur
+🖱 Cursor	Ikonë tematike (opsionale)
+✨ Hover Effects	Sparkles, shimmer, confetti, glow
+🎊 Animations	Snowfall, Fireworks, Falling Leaves, Floating Stars, Lantern Glow, Flag Wave
+💎 Bonus
+
+Për ta bërë platformën të duket si një produkt premium, shto edhe:
+
+Countdown para çdo feste ("3 days until Independence Day").
+Greeting Modal vetëm herën e parë që përdoruesi hyn gjatë festës.
+Holiday Badge në header ("🇽🇰 Happy Independence Day", "🌙 Eid Mubarak", "🎄 Merry Christmas").
+Festive Loader (p.sh. top bore, hënë, flamur ose fishekzjarre gjatë ngarkimit).
+Seasonal Login Screen me ilustrime dhe sfond që ndryshojnë automatikisht sipas festës. Kjo e bën aplikacionin të ndihet unik dhe profesional.

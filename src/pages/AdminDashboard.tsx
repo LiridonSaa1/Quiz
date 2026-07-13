@@ -21,6 +21,7 @@ import LoadingButton from '../components/ui/LoadingButton';
 import { motion, AnimatePresence } from 'motion/react';
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, ResponsiveContainer, BarChart, Bar, Cell } from 'recharts';
 import { authFetch, authFetchJsonCached } from '../lib/apiUrl';
+import HolidayDashboardBanner from '../components/HolidayDashboardBanner';
 
 const CustomTooltip = ({ active, payload, label }: any) => {
   if (!active || !payload?.length) return null;
@@ -204,6 +205,8 @@ export default function AdminDashboard() {
   return (
     <AdminLayout>
       <div className="space-y-6">
+        <HolidayDashboardBanner />
+
         {/* Page Header */}
         <motion.div 
           initial={{ opacity: 0, y: -20 }}

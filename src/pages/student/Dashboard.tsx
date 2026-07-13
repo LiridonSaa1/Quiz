@@ -12,6 +12,7 @@ import { selectPublishedQuizzesCompat } from '../../lib/quizzesCompat';
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, ResponsiveContainer, Tooltip } from 'recharts';
 import { format, subDays } from 'date-fns';
 import WelcomeCelebration from '../../components/WelcomeCelebration';
+import HolidayDashboardBanner from '../../components/HolidayDashboardBanner';
 import { hasSeenWelcome, markWelcomeSeen } from '../../components/welcomeStorage';
 
 // Module-level — survives React Strict Mode's unmount/remount so the state
@@ -217,6 +218,8 @@ export default function StudentDashboard() {
         />
       )}
       <div className="space-y-6">
+        <HolidayDashboardBanner />
+
         {/* Live Session Banner */}
         {liveSessions.length > 0 && (
           <div className="space-y-2">

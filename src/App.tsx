@@ -109,6 +109,7 @@ import ForcePasswordChangeModal from './components/ForcePasswordChangeModal';
 import { SeasonalThemeProvider } from './components/SeasonalThemeProvider';
 import { HolidayEffects } from './components/HolidayEffects';
 import { useActiveHoliday } from './lib/useActiveHoliday';
+import HolidayGreetingModal from './components/HolidayGreetingModal';
 
 function ActiveHolidayEffects() {
   const active = useActiveHoliday();
@@ -427,6 +428,7 @@ export default function App() {
   return (
     <SeasonalThemeProvider>
     <ActiveHolidayEffects />
+    <HolidayGreetingModal />
     <Router>
       <Toaster position="top-right" richColors />
       {forcePasswordChange && user && (
