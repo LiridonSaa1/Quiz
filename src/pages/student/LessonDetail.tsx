@@ -478,8 +478,8 @@ export default function StudentLessonDetail() {
               </div>
             )}
 
-            {/* ── OUP Headway link cards (added by teacher via Headway Resources panel) ── */}
-            {sections.link.length > 0 && (
+            {/* ── OUP Headway link cards (only links from elt.oup.com) ── */}
+            {sections.link.filter(item => String(item.text_content || '').includes('elt.oup.com')).length > 0 && (
               <div className="bg-white rounded-3xl border border-slate-100 p-5 space-y-3">
                 <div className="flex items-center gap-2 mb-1">
                   <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-blue-600 to-indigo-700 flex items-center justify-center shrink-0">
@@ -488,7 +488,7 @@ export default function StudentLessonDetail() {
                   <span className="text-sm font-bold text-slate-800">Headway Resources</span>
                 </div>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  {sections.link.map((item) => {
+                  {sections.link.filter(item => String(item.text_content || '').includes('elt.oup.com')).map((item) => {
                     const url = item.text_content || '';
                     const isAudio = url.includes('/audiodl') || (item.title || '').toLowerCase().includes('audio');
                     const isVideo = url.includes('/video_bandw') || (item.title || '').toLowerCase().includes('video');
@@ -522,6 +522,42 @@ export default function StudentLessonDetail() {
                             <ExternalLink className="w-3 h-3" /> Open on OUP
                           </p>
                         </div>
+                      </a>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
+            {/* ── Regular links (non-OUP, teacher-created) ── */}
+            {sections.link.filter(item => !String(item.text_content || '').includes('elt.oup.com')).length > 0 && (
+              <div className="bg-white rounded-3xl border border-slate-100 p-5 space-y-3">
+                <div className="flex items-center gap-2 mb-1">
+                  <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-slate-500 to-slate-700 flex items-center justify-center shrink-0">
+                    <ExternalLink className="w-4 h-4 text-white" />
+                  </div>
+                  <span className="text-sm font-bold text-slate-800">Links</span>
+                </div>
+                <div className="flex flex-col gap-2">
+                  {sections.link.filter(item => !String(item.text_content || '').includes('elt.oup.com')).map((item) => {
+                    const url = item.text_content || '';
+                    return (
+                      <a
+                        key={item.id}
+                        href={url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="flex items-center gap-3 p-3 rounded-xl border border-slate-200 bg-slate-50 hover:bg-slate-100 hover:border-slate-300 transition-all group"
+                      >
+                        <div className="w-8 h-8 rounded-lg bg-slate-200 flex items-center justify-center shrink-0">
+                          <ExternalLink className="w-4 h-4 text-slate-600" />
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          <p className="text-sm font-semibold text-slate-800 truncate">{item.title || url}</p>
+                          {item.description && <p className="text-xs text-slate-500 mt-0.5 truncate">{item.description}</p>}
+                          {url && <p className="text-xs text-slate-400 mt-0.5 truncate">{url}</p>}
+                        </div>
+                        <ExternalLink className="w-3.5 h-3.5 text-slate-300 group-hover:text-slate-500 shrink-0" />
                       </a>
                     );
                   })}
