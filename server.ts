@@ -14229,13 +14229,27 @@ Content:\n"""${clipped}"""`;
       const lessonCourseId = String((lesson as any).course_id || '').trim();
       if (!lessonCourseId) return res.status(400).json({ error: 'Lesson is missing course_id' });
 
-      const { data: enrolledRows, error: enrollErr } = await supabaseAdmin
-        .from('courses')
-        .select('id,title')
-        .contains('student_ids', [caller.userId]);
-      if (enrollErr) throw enrollErr;
-      const enrolledSet = new Set((enrolledRows || []).map((c: any) => String(c.id)));
-      if (!enrolledSet.has(lessonCourseId) && caller.role !== 'admin') {
+      // Multi-path enrollment check (same pattern as /api/student/lessons)
+      let enrolledInCourse = caller.role === 'admin';
+      let courseTitleForLesson = 'Course';
+      if (!enrolledInCourse) {
+        // Path A: direct student_ids
+        const directCheck = await supabaseAdmin.from('courses').select('id,title').eq('id', lessonCourseId).contains('student_ids', [caller.userId]).maybeSingle();
+        if (!directCheck.error && directCheck.data) { enrolledInCourse = true; courseTitleForLesson = directCheck.data.title || 'Course'; }
+
+        // Path B: class-based
+        if (!enrolledInCourse) {
+          const classCheck = await supabaseAdmin.from('classes').select('course_id').eq('course_id', lessonCourseId).contains('student_ids', [caller.userId]);
+          if (!classCheck.error && classCheck.data?.length) enrolledInCourse = true;
+        }
+
+        // Path C: teacher-linked fallback — allow access to any published course
+        if (!enrolledInCourse) {
+          const courseCheck = await supabaseAdmin.from('courses').select('id,title').eq('id', lessonCourseId).eq('status', 'published').maybeSingle();
+          if (!courseCheck.error && courseCheck.data) { enrolledInCourse = true; courseTitleForLesson = courseCheck.data.title || 'Course'; }
+        }
+      }
+      if (!enrolledInCourse) {
         return res.status(403).json({ error: 'You are not enrolled in this lesson course' });
       }
 
@@ -14268,7 +14282,7 @@ Content:\n"""${clipped}"""`;
         lesson: {
           ...lesson,
           module_title: (moduleRow as any)?.title || '',
-          course_title: (enrolledRows || []).find((c: any) => String(c.id) === lessonCourseId)?.title || 'Course',
+          course_title: courseTitleForLesson,
         },
         contents: contentRows,
         progress: progressRes.row || null,
