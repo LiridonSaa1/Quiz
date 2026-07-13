@@ -14313,8 +14313,63 @@ Content:\n"""${clipped}"""`;
         if (!path || /^https?:\/\//i.test(path)) continue;
         await ensureLessonMediaBucket();
         const signed = await supabaseAdmin.storage.from('lesson-media').createSignedUrl(path, 3600);
-        row.signed_url = signed.error ? null : signed.data?.signedUrl || null;
+        if (!signed.error && signed.data?.signedUrl) {
+          row.signed_url = signed.data.signedUrl;
+        } else {
+          // Fallback: try headway-media bucket (for media imported from Headway library)
+          const hwSigned = await supabaseAdmin.storage.from('headway-media').createSignedUrl(path, 3600);
+          row.signed_url = hwSigned.error ? null : hwSigned.data?.signedUrl || null;
+        }
       }
+
+      // Also include media imported from the Headway library (stored in headway_media table)
+      let hwMediaRows: any[] = [];
+      try {
+        const { data: byLesson, error: hwErr } = await supabaseAdmin
+          .from('headway_media')
+          .select('id, title, file_name, url, mime_type, type, level, unit_number')
+          .eq('lesson_id', lessonId)
+          .order('type', { ascending: true })
+          .order('file_name', { ascending: true });
+        if (!hwErr) {
+          // Also check lesson short_description for headway:levelSlug:unitNum tag
+          let byUnit: any[] = [];
+          const desc = String((lesson as any)?.short_description || '');
+          const hwMatch = desc.match(/headway:([^:\n]+):(\d+)/i);
+          if (hwMatch) {
+            const levelSlug = hwMatch[1].trim();
+            const unitNum = parseInt(hwMatch[2], 10);
+            const { data: unitRows } = await supabaseAdmin
+              .from('headway_media')
+              .select('id, title, file_name, url, mime_type, type, level, unit_number')
+              .ilike('level', levelSlug)
+              .eq('unit_number', unitNum)
+              .order('type', { ascending: true })
+              .order('file_name', { ascending: true });
+            byUnit = unitRows ?? [];
+          }
+          // Merge + deduplicate
+          const allHw = [...(byLesson ?? []), ...byUnit];
+          const seen = new Set<string>();
+          hwMediaRows = allHw
+            .filter((r: any) => { if (seen.has(r.id)) return false; seen.add(r.id); return true; })
+            .map((r: any, idx: number) => ({
+              id: `hw_${r.id}`,
+              type: String(r.type || '').includes('video') ? 'video' : 'audio',
+              title: r.file_name || r.title || 'Headway Media',
+              description: r.level && r.unit_number ? `${r.level} — Unit ${r.unit_number}` : null,
+              text_content: null,
+              signed_url: r.url || null,
+              storage_path: r.url || null,
+              position: 1000 + idx,
+            }));
+        }
+      } catch { /* headway_media table may not exist — ignore */ }
+
+      // Merge: lesson_contents rows first, then headway_media rows (deduplicate by url)
+      const existingUrls = new Set(contentRows.map((r: any) => r.signed_url).filter(Boolean));
+      const newHwRows = hwMediaRows.filter((r: any) => !r.signed_url || !existingUrls.has(r.signed_url));
+      const allContents = [...contentRows, ...newHwRows];
 
       return res.json({
         success: true,
@@ -14323,7 +14378,7 @@ Content:\n"""${clipped}"""`;
           module_title: (moduleRow as any)?.title || '',
           course_title: courseTitleForLesson,
         },
-        contents: contentRows,
+        contents: allContents,
         progress: progressRes.row || null,
       });
     } catch (e: any) {
