@@ -655,7 +655,7 @@ export default function Exams() {
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4"
+            className="fixed inset-0 lg:left-60 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4"
             onClick={() => setShowCreate(false)}
           >
             <motion.div
@@ -799,7 +799,7 @@ export default function Exams() {
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            className="fixed inset-0 z-[60] flex items-center justify-center p-4"
+            className="fixed inset-0 lg:left-60 z-[60] flex items-center justify-center p-4"
             style={{ background: 'rgba(15,10,40,0.55)', backdropFilter: 'blur(6px)' }}
             onClick={() => setConfirmDeleteId(null)}
           >

@@ -471,7 +471,7 @@ export default function TeacherLiveSessions() {
 
       {/* Edit modal — teacher PATCH whitelist */}
       {showModal && editing && can('actions.teacher.live_sessions.manage') && (
-        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4" onClick={() => setShowModal(false)}>
+        <div className="fixed inset-0 lg:left-60 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4" onClick={() => setShowModal(false)}>
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
             <div className="flex items-center justify-between p-5 border-b border-slate-100">
               <div>
@@ -551,7 +551,7 @@ export default function TeacherLiveSessions() {
         {confirmDeleteId && (
           <motion.div
             initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-            className="fixed inset-0 z-50 flex items-center justify-center p-4"
+            className="fixed inset-0 lg:left-60 z-50 flex items-center justify-center p-4"
             style={{ background: 'rgba(15,10,40,0.55)', backdropFilter: 'blur(6px)' }}
           >
             <motion.div
@@ -792,7 +792,7 @@ function NewSessionModal({
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
-      className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4"
+      className="fixed inset-0 lg:left-60 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4"
       onClick={e => { if (e.target === e.currentTarget) onClose(); }}
     >
       <motion.div

@@ -192,7 +192,7 @@ function SubmissionsPanel({ assignment, onClose }: { assignment: Assignment; onC
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-end sm:items-center sm:p-4 bg-black/50 backdrop-blur-sm"
+      className="fixed inset-0 lg:left-60 z-50 flex items-end sm:items-center sm:p-4 bg-black/50 backdrop-blur-sm"
       style={{ left: 'var(--sidebar-offset, 0)' } as React.CSSProperties}
       onClick={onClose}
     >
@@ -719,7 +719,7 @@ export default function TeacherAssignments() {
 
       {/* Create/Edit Modal */}
       {showModal && (
-        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+        <div className="fixed inset-0 lg:left-60 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto flex flex-col">
             <div className="flex items-center justify-between px-4 sm:px-5 py-3 sm:py-4 border-b border-slate-100 shrink-0">
               <h2 className="text-base font-bold text-slate-800">{editId ? t('teacher.assignments.editAssignment') : t('teacher.assignments.newAssignment')}</h2>
@@ -1049,7 +1049,7 @@ export default function TeacherAssignments() {
 
       {/* Delete Confirm */}
       {deleteId && (
-        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+        <div className="fixed inset-0 lg:left-60 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm p-6 text-center">
             <div className="w-12 h-12 bg-rose-50 rounded-full flex items-center justify-center mx-auto mb-3">
               <Trash2 className="w-6 h-6 text-rose-500" />

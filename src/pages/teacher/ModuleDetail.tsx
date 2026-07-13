@@ -106,7 +106,7 @@ function MediaPreviewModal({ lesson, onClose }: { lesson: any; onClose: () => vo
   return (
     <AnimatePresence>
       <motion.div
-        className="fixed inset-0 z-50 flex items-center justify-center p-4"
+        className="fixed inset-0 lg:left-60 z-50 flex items-center justify-center p-4"
         initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
       >
         <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} />

@@ -1335,7 +1335,7 @@ export default function TeacherModules() {
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4"
+            className="fixed inset-0 lg:left-60 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4"
           >
             <motion.div
               initial={{ opacity: 0, scale: 0.95, y: 16 }}
@@ -1535,7 +1535,7 @@ export default function TeacherModules() {
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[60] flex items-center justify-center p-4"
+            className="fixed inset-0 lg:left-60 bg-black/60 backdrop-blur-sm z-[60] flex items-center justify-center p-4"
             onClick={() => !headwayImporting && setShowHeadwayModal(false)}
           >
             <motion.div
@@ -1823,7 +1823,7 @@ export default function TeacherModules() {
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[60] flex items-center justify-center p-4"
+            className="fixed inset-0 lg:left-60 bg-black/60 backdrop-blur-sm z-[60] flex items-center justify-center p-4"
             onClick={() => !deleting && setDeleteTarget(null)}
           >
             <motion.div
@@ -1879,7 +1879,7 @@ export default function TeacherModules() {
 
       {/* Completion Dashboard Modal */}
       {showCompletionDashboard && (
-        <div className="fixed inset-0 bg-slate-900/70 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+        <div className="fixed inset-0 lg:left-60 bg-slate-900/70 backdrop-blur-sm flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-2xl w-full max-w-4xl max-h-[90vh] flex flex-col shadow-2xl border border-slate-100 overflow-hidden">
             <div className="px-6 py-5 border-b border-slate-100 flex items-center justify-between shrink-0">
               <div className="flex items-center gap-3">

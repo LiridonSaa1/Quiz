@@ -606,7 +606,7 @@ export default function TeacherSettings() {
       <AnimatePresence>
         {transferStudent && (
           <motion.div
-            className="fixed inset-0 z-50 flex items-center justify-center p-4"
+            className="fixed inset-0 lg:left-60 z-50 flex items-center justify-center p-4"
             initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
           >
             <motion.div
@@ -801,7 +801,7 @@ export default function TeacherSettings() {
       <AnimatePresence>
         {resetStudent && (
           <motion.div
-            className="fixed inset-0 z-50 flex items-center justify-center p-4"
+            className="fixed inset-0 lg:left-60 z-50 flex items-center justify-center p-4"
             initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
           >
             <motion.div

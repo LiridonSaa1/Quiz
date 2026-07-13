@@ -566,7 +566,7 @@ export default function TeacherClasses() {
       </AdminListPageShell>
 
       {showModal && (
-        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+        <div className="fixed inset-0 lg:left-60 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-2xl w-full max-w-lg overflow-hidden shadow-2xl border border-slate-100 max-h-[90vh] flex flex-col">
             <div className="px-6 py-5 border-b border-slate-100 flex items-center justify-between shrink-0">
               <div className="flex items-center gap-3">
@@ -681,7 +681,7 @@ export default function TeacherClasses() {
       )}
 
       {viewClass && (
-        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+        <div className="fixed inset-0 lg:left-60 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-2xl w-full max-w-md shadow-2xl border border-slate-100 overflow-hidden">
             <div className={`bg-gradient-to-br ${getAvatar(viewClass.name)} p-6 relative`}>
               <button
@@ -741,7 +741,7 @@ export default function TeacherClasses() {
 
       {/* CSV Enrollment Modal */}
       {csvClass && (
-        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+        <div className="fixed inset-0 lg:left-60 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-2xl w-full max-w-md overflow-hidden shadow-2xl border border-slate-100">
             <div className="px-6 py-5 border-b border-slate-100 flex items-center justify-between">
               <div className="flex items-center gap-3">
@@ -807,7 +807,7 @@ export default function TeacherClasses() {
         {confirmDeleteId && (
           <motion.div
             initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-            className="fixed inset-0 z-50 flex items-center justify-center p-4"
+            className="fixed inset-0 lg:left-60 z-50 flex items-center justify-center p-4"
             style={{ background: 'rgba(15,10,40,0.55)', backdropFilter: 'blur(6px)' }}
           >
             <motion.div

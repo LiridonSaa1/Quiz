@@ -887,7 +887,7 @@ export default function TeacherLessons() {
         {showDriveModal && (
           <motion.div
             initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-            className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[60] flex items-center justify-center p-4"
+            className="fixed inset-0 lg:left-60 bg-black/60 backdrop-blur-sm z-[60] flex items-center justify-center p-4"
             onClick={() => setShowDriveModal(false)}
           >
             <motion.div
@@ -928,7 +928,7 @@ export default function TeacherLessons() {
       <AnimatePresence>
         {showModal && (
           <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-            className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+            className="fixed inset-0 lg:left-60 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
             <motion.div
               initial={{ opacity: 0, scale: 0.95, y: 16 }} animate={{ opacity: 1, scale: 1, y: 0 }}
               exit={{ opacity: 0, scale: 0.95, y: 16 }} transition={{ type: 'spring', duration: 0.4 }}
@@ -1134,7 +1134,7 @@ export default function TeacherLessons() {
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            className="fixed inset-0 z-[60] flex items-center justify-center p-4"
+            className="fixed inset-0 lg:left-60 z-[60] flex items-center justify-center p-4"
             style={{ background: 'rgba(15,10,40,0.55)', backdropFilter: 'blur(6px)' }}
             onClick={() => !deleting && setDeleteTarget(null)}
           >

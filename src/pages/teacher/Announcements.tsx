@@ -579,7 +579,7 @@ Write a warm, professional message (2-3 paragraphs). Start with a friendly greet
       </AdminListPageShell>
 
       {showModal && (
-        <div className="fixed inset-0 lg:[left:var(--sidebar-offset,0rem)] bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4" onClick={() => setShowModal(false)}>
+        <div className="fixed inset-0 lg:left-60 lg:[left:var(--sidebar-offset,0rem)] bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4" onClick={() => setShowModal(false)}>
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-xl max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
             <div className="flex items-center justify-between p-5 border-b border-slate-100">
               <div>
@@ -789,7 +789,7 @@ Write a warm, professional message (2-3 paragraphs). Start with a friendly greet
         {confirmDeleteId && (
           <motion.div
             initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-            className="fixed inset-0 z-50 flex items-center justify-center p-4"
+            className="fixed inset-0 lg:left-60 z-50 flex items-center justify-center p-4"
             style={{ background: 'rgba(15,10,40,0.55)', backdropFilter: 'blur(6px)' }}
           >
             <motion.div

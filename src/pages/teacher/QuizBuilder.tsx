@@ -2100,7 +2100,7 @@ export default function QuizBuilder() {
       <AnimatePresence>
         {showRegenConfirm && (
           <motion.div
-            className="fixed inset-0 z-50 flex items-center justify-center p-4"
+            className="fixed inset-0 lg:left-60 z-50 flex items-center justify-center p-4"
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}

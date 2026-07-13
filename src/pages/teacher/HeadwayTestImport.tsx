@@ -626,7 +626,7 @@ export default function HeadwayTestImport() {
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[70] flex items-center justify-center p-4"
+            className="fixed inset-0 lg:left-60 bg-black/60 backdrop-blur-sm z-[70] flex items-center justify-center p-4"
             onClick={() => !importing && setShowImportPanel(false)}
           >
             <motion.div
@@ -895,7 +895,7 @@ export default function HeadwayTestImport() {
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
-              className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[80] flex items-center justify-center p-4"
+              className="fixed inset-0 lg:left-60 bg-black/60 backdrop-blur-sm z-[80] flex items-center justify-center p-4"
               onClick={() => setShowPreviewModal(false)}
             >
               <motion.div
