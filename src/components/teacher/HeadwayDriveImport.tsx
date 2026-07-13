@@ -84,6 +84,39 @@ const CONFIGURED_LEVELS = [
       video: '1tl7tpMoajGSOX1y6G1Y3-OvvZtnFgnCH',
     },
   },
+  {
+    key: 'Intermediate',
+    units: 12,
+    color: 'from-amber-500 to-orange-500',
+    badge: 'bg-amber-50 text-amber-700 border-amber-200',
+    folders: {
+      student_audio: '1y9n26-bwMSjgBLf7nIlDa78JRl8kbXhC',
+      workbook_audio: '17uCWpB8cR19IBq5CWAEnpDICnG4Jt2nb',
+      video: '1gwUtDG0rJtLsTdqEIL_ruyJi1BRnm0b1',
+    },
+  },
+  {
+    key: 'Upper-Intermediate',
+    units: 12,
+    color: 'from-rose-500 to-pink-600',
+    badge: 'bg-rose-50 text-rose-700 border-rose-200',
+    folders: {
+      student_audio: '1wcQQo8QVizTO5EOvlB-HLXgG9vFeIPeY',
+      workbook_audio: '1lJy7YXPzJDGGeDZ5_uXaDpCACJe5eS1W',
+      video: '1RzOHZznbJBQVEVFP9bjofX7s3AKI3TVW',
+    },
+  },
+  {
+    key: 'Advanced',
+    units: 12,
+    color: 'from-slate-600 to-slate-800',
+    badge: 'bg-slate-100 text-slate-700 border-slate-300',
+    folders: {
+      student_audio: '1kd_i7PQR2Magx6NYl-LGCf-3ptdxinqZ',
+      workbook_audio: '1iLIaD-8bEQIVajlnILiJnra5p4PdwNyc',
+      video: '1-IjwpSZ1_AtmUf5B8OM8ALepr2zL6OnM',
+    },
+  },
 ];
 
 const FOLDER_META = [

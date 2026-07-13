@@ -2998,6 +2998,21 @@ var LEVEL_DRIVE_FOLDERS = {
     student_audio: "1-MS0Eu2-uXELtasjK23r5wpIxSYw13WZ",
     workbook_audio: "1pmBAkEVHE8E0NlZoaZf7VZKrhCUAK5yL",
     video: "1tl7tpMoajGSOX1y6G1Y3-OvvZtnFgnCH"
+  },
+  "Intermediate": {
+    student_audio: "1y9n26-bwMSjgBLf7nIlDa78JRl8kbXhC",
+    workbook_audio: "17uCWpB8cR19IBq5CWAEnpDICnG4Jt2nb",
+    video: "1gwUtDG0rJtLsTdqEIL_ruyJi1BRnm0b1"
+  },
+  "Upper-Intermediate": {
+    student_audio: "1wcQQo8QVizTO5EOvlB-HLXgG9vFeIPeY",
+    workbook_audio: "1lJy7YXPzJDGGeDZ5_uXaDpCACJe5eS1W",
+    video: "1RzOHZznbJBQVEVFP9bjofX7s3AKI3TVW"
+  },
+  "Advanced": {
+    student_audio: "1kd_i7PQR2Magx6NYl-LGCf-3ptdxinqZ",
+    workbook_audio: "1iLIaD-8bEQIVajlnILiJnra5p4PdwNyc",
+    video: "1-IjwpSZ1_AtmUf5B8OM8ALepr2zL6OnM"
   }
 };
 var BEGINNER_DRIVE_FOLDERS = LEVEL_DRIVE_FOLDERS["Beginner"];
