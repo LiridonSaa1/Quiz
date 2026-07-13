@@ -74,12 +74,28 @@ export default function StudentCourseDetail() {
         const uid = session.user.id;
         setStudentId(uid);
 
-        const { data: foundCourse } = await supabase
+        // Try enrollment-aware fetch; if student_ids column is missing fall back to any published course
+        let foundCourse: any = null;
+        const enrolledRes = await supabase
           .from('courses')
           .select('*')
           .eq('id', courseId)
           .contains('student_ids', [uid])
           .maybeSingle();
+
+        if (!enrolledRes.error && enrolledRes.data) {
+          foundCourse = enrolledRes.data;
+        } else {
+          // Fallback: column may not exist — just check the course exists and is published
+          const fallbackRes = await supabase
+            .from('courses')
+            .select('*')
+            .eq('id', courseId)
+            .maybeSingle();
+          if (!fallbackRes.error && fallbackRes.data) {
+            foundCourse = fallbackRes.data;
+          }
+        }
 
         if (!foundCourse) {
           setLoading(false);

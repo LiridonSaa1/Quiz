@@ -14082,14 +14082,42 @@ Content:\n"""${clipped}"""`;
       }
 
       const requestedCourseId = typeof req.query.courseId === 'string' ? req.query.courseId.trim() : '';
+      const uid = caller.userId;
 
-      const { data: enrolledCourses, error: ecErr } = await supabaseAdmin
-        .from('courses')
-        .select('id,title')
-        .contains('student_ids', [caller.userId]);
-      if (ecErr) throw ecErr;
+      // ── Multi-path enrollment resolution (mirrors /api/student/modules) ──────
+      let enrolledCourseIds: string[] = [];
+      const enrolledCoursesMap: Record<string, string> = {};  // id → title
 
-      const enrolledCourseIds = (enrolledCourses || []).map((c: any) => String(c.id));
+      // Path A: direct student_ids on courses
+      const directRes = await supabaseAdmin.from('courses').select('id,title').contains('student_ids', [uid]).eq('status', 'published');
+      if (!directRes.error && directRes.data?.length) {
+        directRes.data.forEach((c: any) => { enrolledCoursesMap[String(c.id)] = String(c.title || 'Course'); enrolledCourseIds.push(String(c.id)); });
+      }
+
+      // Path B: class-based enrollment
+      const classRes = await supabaseAdmin.from('classes').select('course_id').contains('student_ids', [uid]);
+      if (!classRes.error && classRes.data?.length) {
+        const classCourseIds = classRes.data.map((r: any) => String(r.course_id)).filter(Boolean).filter((id) => !enrolledCourseIds.includes(id));
+        if (classCourseIds.length) {
+          const extraRes = await supabaseAdmin.from('courses').select('id,title').in('id', classCourseIds).eq('status', 'published');
+          if (!extraRes.error) extraRes.data?.forEach((c: any) => { enrolledCoursesMap[String(c.id)] = String(c.title || 'Course'); enrolledCourseIds.push(String(c.id)); });
+        }
+      }
+
+      // Path C: teacher-linked → all teacher courses → fallback all published
+      if (!enrolledCourseIds.length) {
+        const profileRes = await supabaseAdmin.from('profiles').select('teacher_id').eq('id', uid).single();
+        const teacherId = profileRes.data?.teacher_id;
+        let fallbackRes;
+        if (teacherId) {
+          fallbackRes = await supabaseAdmin.from('courses').select('id,title').eq('teacher_id', teacherId).eq('status', 'published');
+        } else {
+          fallbackRes = await supabaseAdmin.from('courses').select('id,title').eq('status', 'published');
+        }
+        if (!fallbackRes?.error) fallbackRes?.data?.forEach((c: any) => { enrolledCoursesMap[String(c.id)] = String(c.title || 'Course'); enrolledCourseIds.push(String(c.id)); });
+      }
+
+      enrolledCourseIds = [...new Set(enrolledCourseIds)];
       if (enrolledCourseIds.length === 0) return res.json({ success: true, lessons: [] });
 
       const scopedCourseIds = requestedCourseId
@@ -14144,10 +14172,7 @@ Content:\n"""${clipped}"""`;
       (modules || []).forEach((m: any) => {
         moduleMap[String(m.id)] = { title: String(m.title || ''), courseId: String(m.course_id || '') };
       });
-      const courseMap: Record<string, string> = {};
-      (enrolledCourses || []).forEach((c: any) => {
-        courseMap[String(c.id)] = String(c.title || 'Course');
-      });
+      const courseMap: Record<string, string> = enrolledCoursesMap;
       const allowedCourseIds = new Set(scopedCourseIds);
       const lessonIds = (lessonRows || []).map((l: any) => String(l.id)).filter(Boolean);
       let progressMap: Record<string, { completed: boolean; last_video_position: number }> = {};

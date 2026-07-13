@@ -13752,9 +13752,42 @@ ${smartUserPrompt}` });
         return res.status(403).json({ error: "Forbidden: student or admin role required" });
       }
       const requestedCourseId = typeof req.query.courseId === "string" ? req.query.courseId.trim() : "";
-      const { data: enrolledCourses, error: ecErr } = await supabaseAdmin.from("courses").select("id,title").contains("student_ids", [caller.userId]);
-      if (ecErr) throw ecErr;
-      const enrolledCourseIds = (enrolledCourses || []).map((c) => String(c.id));
+      const uid = caller.userId;
+      let enrolledCourseIds = [];
+      const enrolledCoursesMap = {};
+      const directRes = await supabaseAdmin.from("courses").select("id,title").contains("student_ids", [uid]).eq("status", "published");
+      if (!directRes.error && directRes.data?.length) {
+        directRes.data.forEach((c) => {
+          enrolledCoursesMap[String(c.id)] = String(c.title || "Course");
+          enrolledCourseIds.push(String(c.id));
+        });
+      }
+      const classRes = await supabaseAdmin.from("classes").select("course_id").contains("student_ids", [uid]);
+      if (!classRes.error && classRes.data?.length) {
+        const classCourseIds = classRes.data.map((r) => String(r.course_id)).filter(Boolean).filter((id) => !enrolledCourseIds.includes(id));
+        if (classCourseIds.length) {
+          const extraRes = await supabaseAdmin.from("courses").select("id,title").in("id", classCourseIds).eq("status", "published");
+          if (!extraRes.error) extraRes.data?.forEach((c) => {
+            enrolledCoursesMap[String(c.id)] = String(c.title || "Course");
+            enrolledCourseIds.push(String(c.id));
+          });
+        }
+      }
+      if (!enrolledCourseIds.length) {
+        const profileRes = await supabaseAdmin.from("profiles").select("teacher_id").eq("id", uid).single();
+        const teacherId = profileRes.data?.teacher_id;
+        let fallbackRes;
+        if (teacherId) {
+          fallbackRes = await supabaseAdmin.from("courses").select("id,title").eq("teacher_id", teacherId).eq("status", "published");
+        } else {
+          fallbackRes = await supabaseAdmin.from("courses").select("id,title").eq("status", "published");
+        }
+        if (!fallbackRes?.error) fallbackRes?.data?.forEach((c) => {
+          enrolledCoursesMap[String(c.id)] = String(c.title || "Course");
+          enrolledCourseIds.push(String(c.id));
+        });
+      }
+      enrolledCourseIds = [...new Set(enrolledCourseIds)];
       if (enrolledCourseIds.length === 0) return res.json({ success: true, lessons: [] });
       const scopedCourseIds = requestedCourseId ? enrolledCourseIds.includes(requestedCourseId) ? [requestedCourseId] : [] : enrolledCourseIds;
       if (scopedCourseIds.length === 0) return res.json({ success: true, lessons: [] });
@@ -13781,10 +13814,7 @@ ${smartUserPrompt}` });
       (modules || []).forEach((m) => {
         moduleMap[String(m.id)] = { title: String(m.title || ""), courseId: String(m.course_id || "") };
       });
-      const courseMap = {};
-      (enrolledCourses || []).forEach((c) => {
-        courseMap[String(c.id)] = String(c.title || "Course");
-      });
+      const courseMap = enrolledCoursesMap;
       const allowedCourseIds = new Set(scopedCourseIds);
       const lessonIds = (lessonRows || []).map((l) => String(l.id)).filter(Boolean);
       let progressMap = {};
