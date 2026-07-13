@@ -12,6 +12,7 @@ import {
   ChevronRight, School, Phone, MapPin, AlertTriangle,
   GraduationCap, Briefcase, Crown, Info, Trash2, X,
   Sparkles, CheckCircle2, CalendarDays,
+  KeyRound, Search, UserCog, Eye, EyeOff, Copy, RotateCcw, RefreshCw,
 } from 'lucide-react';
 import { HOLIDAY_THEMES, HOLIDAY_ORDER, type HolidayKey } from '../../lib/holidayTheme';
 import PWAInstallCard from '../../components/PWAInstallCard';
@@ -74,13 +75,70 @@ export default function AdminSettings() {
   const [daysAfterEnd, setDaysAfterEnd] = useState(1);
   const [savingSeasonal, setSavingSeasonal] = useState(false);
 
+  // ── Configurations: Reset Password ──────────────────────────────────────
+  interface CfgUser { id: string; email: string; display_name: string; role: string; status: string; }
+  const [cfgUsers, setCfgUsers] = useState<CfgUser[]>([]);
+  const [cfgLoading, setCfgLoading] = useState(false);
+  const [cfgSearch, setCfgSearch] = useState('');
+  const [cfgRoleFilter, setCfgRoleFilter] = useState<'all' | 'student' | 'teacher' | 'admin'>('all');
+  const [resetTarget, setResetTarget] = useState<CfgUser | null>(null);
+  const [resetPwd, setResetPwd] = useState('');
+  const [showResetPwd, setShowResetPwd] = useState(false);
+  const [resetLoading, setResetLoading] = useState(false);
+  const [resetDone, setResetDone] = useState(false);
+
+  const generatePwd = () => {
+    const chars = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!@#$';
+    return Array.from({ length: 12 }, () => chars[Math.floor(Math.random() * chars.length)]).join('');
+  };
+
+  const loadCfgUsers = async () => {
+    setCfgLoading(true);
+    try {
+      const res = await authFetch('/api/admin/all-users');
+      const json = await res.json().catch(() => ({}));
+      if (json?.success) setCfgUsers(json.users || []);
+    } catch { /* silent */ }
+    setCfgLoading(false);
+  };
+
+  useEffect(() => {
+    if (activeTab === 'configurations') void loadCfgUsers();
+  }, [activeTab]);
+
+  const handleResetPassword = async () => {
+    if (!resetTarget || !resetPwd.trim()) return;
+    setResetLoading(true);
+    try {
+      const res = await authFetch('/api/admin/reset-password', {
+        method: 'POST',
+        body: JSON.stringify({ userId: resetTarget.id, newPassword: resetPwd.trim() }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok || !json.success) throw new Error(json.error || 'Failed to reset password');
+      setResetDone(true);
+      toast.success(`Password reset for ${resetTarget.display_name || resetTarget.email}`);
+    } catch (e: any) {
+      toast.error(e.message || 'Failed to reset password');
+    }
+    setResetLoading(false);
+  };
+
+  const cfgFiltered = cfgUsers.filter(u => {
+    const q = cfgSearch.toLowerCase();
+    const matchSearch = (u.display_name || '').toLowerCase().includes(q) || (u.email || '').toLowerCase().includes(q);
+    const matchRole = cfgRoleFilter === 'all' || u.role === cfgRoleFilter;
+    return matchSearch && matchRole;
+  });
+
   const TABS_LOCAL = [
-    { id: 'general',       label: t('settings.tabs.general'),       icon: School },
-    { id: 'notifications', label: t('settings.tabs.notifications'),  icon: Bell },
-    { id: 'email',         label: t('settings.tabs.email'),          icon: Mail },
-    { id: 'security',      label: t('settings.tabs.security'),       icon: Shield },
-    { id: 'seasonal',      label: 'Seasonal',                        icon: Sparkles },
-    { id: 'advanced',      label: t('settings.tabs.advanced'),       icon: Database },
+    { id: 'general',        label: t('settings.tabs.general'),       icon: School },
+    { id: 'notifications',  label: t('settings.tabs.notifications'),  icon: Bell },
+    { id: 'email',          label: t('settings.tabs.email'),          icon: Mail },
+    { id: 'security',       label: t('settings.tabs.security'),       icon: Shield },
+    { id: 'seasonal',       label: 'Seasonal',                        icon: Sparkles },
+    { id: 'configurations', label: 'Configurations',                  icon: UserCog },
+    { id: 'advanced',       label: t('settings.tabs.advanced'),       icon: Database },
   ];
 
   const NOTIF_LABELS_LOCAL: Record<string, { label: string; desc: string }> = {
@@ -971,6 +1029,171 @@ export default function AdminSettings() {
                     </button>
                   </div>
                 </div>
+              </>
+            )}
+
+            {/* CONFIGURATIONS */}
+            {activeTab === 'configurations' && (
+              <>
+                <Section title="Reset User Password" subtitle="Directly reset the password for any student, teacher, or admin account.">
+                  {/* Toolbar */}
+                  <div className="flex flex-col sm:flex-row gap-3">
+                    <div className="relative flex-1">
+                      <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+                      <input
+                        type="text"
+                        value={cfgSearch}
+                        onChange={e => setCfgSearch(e.target.value)}
+                        placeholder="Search by name or email…"
+                        className="w-full pl-9 pr-3 py-2.5 text-sm border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-400 bg-white"
+                      />
+                    </div>
+                    <div className="flex gap-1.5">
+                      {(['all', 'student', 'teacher', 'admin'] as const).map(r => (
+                        <button
+                          key={r}
+                          onClick={() => setCfgRoleFilter(r)}
+                          className={cn(
+                            'px-3 py-2 rounded-xl text-xs font-bold border transition-all capitalize',
+                            cfgRoleFilter === r
+                              ? r === 'all' ? 'bg-indigo-600 border-indigo-600 text-white' : r === 'student' ? 'bg-emerald-500 border-emerald-500 text-white' : r === 'teacher' ? 'bg-violet-500 border-violet-500 text-white' : 'bg-amber-500 border-amber-500 text-white'
+                              : 'bg-white border-slate-200 text-slate-600 hover:border-slate-300'
+                          )}
+                        >{r}</button>
+                      ))}
+                      <button
+                        onClick={() => void loadCfgUsers()}
+                        disabled={cfgLoading}
+                        title="Refresh"
+                        className="p-2 rounded-xl border border-slate-200 hover:bg-slate-50 transition-colors disabled:opacity-50"
+                      >
+                        <RefreshCw className={cn('w-4 h-4 text-slate-500', cfgLoading && 'animate-spin')} />
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* User list */}
+                  {cfgLoading ? (
+                    <div className="flex items-center justify-center py-10 gap-2 text-slate-400">
+                      <div className="w-5 h-5 border-2 border-slate-200 border-t-indigo-500 rounded-full animate-spin" />
+                      <span className="text-sm">Loading users…</span>
+                    </div>
+                  ) : cfgFiltered.length === 0 ? (
+                    <div className="text-center py-10 text-slate-400 text-sm">No users found</div>
+                  ) : (
+                    <div className="space-y-2 max-h-[460px] overflow-y-auto pr-1">
+                      {cfgFiltered.map(u => {
+                        const roleColor = u.role === 'student' ? 'bg-emerald-100 text-emerald-700' : u.role === 'teacher' ? 'bg-violet-100 text-violet-700' : 'bg-amber-100 text-amber-700';
+                        const initials = (u.display_name || u.email || '?').slice(0, 2).toUpperCase();
+                        return (
+                          <div key={u.id} className="flex items-center gap-3 px-4 py-3 rounded-xl border border-slate-100 bg-slate-50 hover:bg-white hover:border-slate-200 transition-all group">
+                            <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-slate-200 to-slate-300 flex items-center justify-center text-xs font-bold text-slate-600 shrink-0">
+                              {initials}
+                            </div>
+                            <div className="flex-1 min-w-0">
+                              <p className="text-sm font-semibold text-slate-800 truncate">{u.display_name || '—'}</p>
+                              <p className="text-xs text-slate-400 truncate">{u.email}</p>
+                            </div>
+                            <span className={cn('text-[10px] font-bold px-2 py-0.5 rounded-md shrink-0 capitalize', roleColor)}>{u.role}</span>
+                            <span className={cn('text-[10px] font-bold px-2 py-0.5 rounded-md shrink-0', u.status === 'active' ? 'bg-green-100 text-green-700' : 'bg-rose-100 text-rose-600')}>{u.status || 'active'}</span>
+                            <button
+                              onClick={() => { setResetTarget(u); setResetPwd(generatePwd()); setShowResetPwd(false); setResetDone(false); }}
+                              className="shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-indigo-50 hover:bg-indigo-100 text-indigo-700 text-xs font-bold transition-all border border-indigo-100 opacity-0 group-hover:opacity-100"
+                            >
+                              <KeyRound className="w-3.5 h-3.5" /> Reset
+                            </button>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                  <p className="text-xs text-slate-400 pt-1">{cfgFiltered.length} of {cfgUsers.length} user{cfgUsers.length !== 1 ? 's' : ''}</p>
+                </Section>
+
+                {/* ── Reset Password Modal ── */}
+                {resetTarget && (
+                  <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
+                    <div className="bg-white rounded-3xl border border-slate-200 shadow-2xl w-full max-w-sm p-6 space-y-5">
+                      {/* Header */}
+                      <div className="flex items-start justify-between">
+                        <div className="flex items-center gap-3">
+                          <div className="w-10 h-10 rounded-2xl bg-indigo-100 flex items-center justify-center">
+                            <KeyRound className="w-5 h-5 text-indigo-600" />
+                          </div>
+                          <div>
+                            <h2 className="text-base font-black text-slate-900">Reset Password</h2>
+                            <p className="text-xs text-slate-500 truncate max-w-[180px]">{resetTarget.display_name || resetTarget.email}</p>
+                          </div>
+                        </div>
+                        <button onClick={() => setResetTarget(null)} className="p-1.5 rounded-xl hover:bg-slate-100 transition-colors">
+                          <X className="w-4 h-4 text-slate-500" />
+                        </button>
+                      </div>
+
+                      {resetDone ? (
+                        <div className="flex flex-col items-center gap-3 py-4 text-center">
+                          <div className="w-12 h-12 rounded-full bg-emerald-100 flex items-center justify-center">
+                            <CheckCircle2 className="w-6 h-6 text-emerald-600" />
+                          </div>
+                          <p className="text-sm font-semibold text-slate-800">Password reset successfully!</p>
+                          <p className="text-xs text-slate-500">Share the new password with the user securely.</p>
+                          <button
+                            onClick={() => setResetTarget(null)}
+                            className="mt-2 px-5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-semibold transition-colors"
+                          >Done</button>
+                        </div>
+                      ) : (
+                        <>
+                          <div className="space-y-2">
+                            <label className="block text-xs font-bold text-slate-600 uppercase tracking-wide">New Password</label>
+                            <div className="flex gap-2">
+                              <div className="relative flex-1">
+                                <input
+                                  type={showResetPwd ? 'text' : 'password'}
+                                  value={resetPwd}
+                                  onChange={e => setResetPwd(e.target.value)}
+                                  className="w-full pr-9 pl-4 py-2.5 text-sm border border-slate-200 rounded-xl font-mono focus:outline-none focus:ring-2 focus:ring-indigo-400 bg-slate-50"
+                                  autoFocus
+                                />
+                                <button type="button" onClick={() => setShowResetPwd(v => !v)}
+                                  className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600">
+                                  {showResetPwd ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                                </button>
+                              </div>
+                              <button type="button" title="Copy" onClick={() => { navigator.clipboard.writeText(resetPwd); toast.success('Copied!'); }}
+                                className="p-2.5 border border-slate-200 rounded-xl hover:bg-slate-100 transition-colors">
+                                <Copy className="w-4 h-4 text-slate-500" />
+                              </button>
+                              <button type="button" title="Regenerate" onClick={() => setResetPwd(generatePwd())}
+                                className="p-2.5 border border-slate-200 rounded-xl hover:bg-slate-100 transition-colors">
+                                <RotateCcw className="w-4 h-4 text-slate-500" />
+                              </button>
+                            </div>
+                            {resetPwd.length > 0 && resetPwd.length < 6 && (
+                              <p className="text-xs text-rose-500">Password must be at least 6 characters</p>
+                            )}
+                          </div>
+
+                          <div className="flex gap-3">
+                            <button onClick={() => setResetTarget(null)}
+                              className="flex-1 px-4 py-2.5 rounded-xl border border-slate-200 text-sm font-semibold text-slate-700 hover:bg-slate-50 transition-colors">
+                              Cancel
+                            </button>
+                            <button
+                              onClick={() => void handleResetPassword()}
+                              disabled={resetLoading || !resetPwd.trim() || resetPwd.length < 6}
+                              className="flex-1 px-4 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 disabled:opacity-40 text-white text-sm font-semibold transition-colors inline-flex items-center justify-center gap-2"
+                            >
+                              {resetLoading
+                                ? <><div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" /> Resetting…</>
+                                : <><KeyRound className="w-4 h-4" /> Reset Password</>}
+                            </button>
+                          </div>
+                        </>
+                      )}
+                    </div>
+                  </div>
+                )}
               </>
             )}
 

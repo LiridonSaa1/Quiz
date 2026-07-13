@@ -4150,6 +4150,45 @@ When giving instructions, number each step clearly. Be precise and technical whe
   });
 
   // Route to create a student
+  /** Admin: reset any user's password directly (no email required). */
+  app.post("/api/admin/reset-password", async (req, res) => {
+    try {
+      const caller = await assertAuthenticated(req, res);
+      if (!caller) return;
+      if (caller.role !== "admin") return res.status(403).json({ error: "Admin only" });
+
+      const userId = typeof req.body?.userId === "string" ? req.body.userId.trim() : "";
+      const newPassword = typeof req.body?.newPassword === "string" ? req.body.newPassword.trim() : "";
+      if (!userId) return res.status(400).json({ error: "userId is required" });
+      if (!newPassword || newPassword.length < 6) return res.status(400).json({ error: "Password must be at least 6 characters" });
+
+      const { error } = await supabaseAdmin.auth.admin.updateUserById(userId, { password: newPassword });
+      if (error) return res.status(500).json({ error: error.message });
+
+      return res.json({ success: true });
+    } catch (e: any) {
+      return res.status(500).json({ error: e?.message || "Failed to reset password" });
+    }
+  });
+
+  /** Admin: list all users (all roles) for the configurations panel. */
+  app.get("/api/admin/all-users", async (req, res) => {
+    try {
+      const caller = await assertAuthenticated(req, res);
+      if (!caller) return;
+      if (caller.role !== "admin") return res.status(403).json({ error: "Admin only" });
+
+      const { data, error } = await supabaseAdmin
+        .from("profiles")
+        .select("id, email, display_name, role, status, created_at")
+        .order("created_at", { ascending: false });
+      if (error) throw error;
+      return res.json({ success: true, users: data || [] });
+    } catch (e: any) {
+      return res.status(500).json({ error: e?.message || "Failed to load users" });
+    }
+  });
+
   app.post("/api/admin/reset-all-welcome", async (req, res) => {
     try {
       const caller = await assertAuthenticated(req, res);
