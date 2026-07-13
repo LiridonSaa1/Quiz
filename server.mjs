@@ -15365,6 +15365,11 @@ ${smartUserPrompt}` });
     } catch (e) {
       const isDbDown = e.message === "DB_UNAVAILABLE" || _poolPermanentlyDown;
       if (isDbDown) return res.status(503).json({ db_unavailable: true, error: "Discussion database unavailable" });
+      const poolUnavailable = e.message === "Database pool not available";
+      const tableMissing = e.code === "42P01" || String(e.message || "").toLowerCase().includes("does not exist");
+      if (poolUnavailable || tableMissing) {
+        return res.json({ success: true, questions: [], hasMore: false, disabled: true });
+      }
       res.status(500).json({ error: e.message || "Failed to load lesson discussions" });
     }
   });

@@ -266,9 +266,7 @@ export default function LessonDiscussionBoard({ lessonId, canModerate = false, t
 
       {dbDown && dbUnavailableBanner ? (
         <>{dbUnavailableBanner}</>
-      ) : discussionDisabled ? (
-        <DiscussionSetupBanner onRetry={() => void loadQuestions(false)} />
-      ) : (
+      ) : discussionDisabled ? null : (
       <div className="grid grid-cols-1 md:grid-cols-[320px_1fr] gap-5">
         <div className="space-y-3">
           <div className="relative">

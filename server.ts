@@ -15981,6 +15981,12 @@ Content:\n"""${clipped}"""`;
     } catch (e: any) {
       const isDbDown = e.message === 'DB_UNAVAILABLE' || _poolPermanentlyDown;
       if (isDbDown) return res.status(503).json({ db_unavailable: true, error: 'Discussion database unavailable' });
+      // Pool unavailable or tables not yet installed — return gracefully so client doesn't retry-loop
+      const poolUnavailable = e.message === 'Database pool not available';
+      const tableMissing = (e as any).code === '42P01' || String(e.message || '').toLowerCase().includes('does not exist');
+      if (poolUnavailable || tableMissing) {
+        return res.json({ success: true, questions: [], hasMore: false, disabled: true });
+      }
       res.status(500).json({ error: e.message || 'Failed to load lesson discussions' });
     }
   });

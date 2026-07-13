@@ -314,14 +314,18 @@ export default function StudentLessonDetail() {
     return lesson.type === 'quiz' ? t('common.quizLesson') : t('common.inProgress');
   }, [lesson, completed, t]);
 
+  // Separate headway library media (id starts with hw_) from regular lesson content
+  const hwContents = useMemo(() => contents.filter(c => String(c.id).startsWith('hw_')), [contents]);
+  const regularContents = useMemo(() => contents.filter(c => !String(c.id).startsWith('hw_')), [contents]);
+
   const sections = useMemo(() => {
     const byType: Record<string, LessonContentRow[]> = { video: [], audio: [], pdf: [], text: [], link: [] };
-    contents.forEach((c) => {
+    regularContents.forEach((c) => {
       if (!byType[c.type]) byType[c.type] = [];
       byType[c.type].push(c);
     });
     return byType;
-  }, [contents]);
+  }, [regularContents]);
 
   const tabConfig = [
     { key: 'video', label: t('common.video'), icon: Video },
@@ -525,7 +529,60 @@ export default function StudentLessonDetail() {
               </div>
             )}
 
-            {contents.length > 0 ? (
+            {/* ── Lesson Resources: Headway library media imported by teacher ── */}
+            {hwContents.length > 0 && (
+              <div className="bg-white rounded-3xl border border-slate-100 p-5 space-y-4">
+                <div className="flex items-center gap-3">
+                  <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-violet-500 to-indigo-600 flex items-center justify-center shrink-0">
+                    <Music className="w-4 h-4 text-white" />
+                  </div>
+                  <div>
+                    <p className="text-sm font-bold text-slate-800">Lesson Resources</p>
+                    <p className="text-xs text-slate-400">{hwContents.length} {hwContents.length === 1 ? 'file' : 'files'} — Audio &amp; Video</p>
+                  </div>
+                </div>
+                {/* Audio files */}
+                {hwContents.filter(f => f.type === 'audio').length > 0 && (
+                  <div className="space-y-2">
+                    <p className="text-xs font-bold text-slate-500 uppercase tracking-wider flex items-center gap-1.5">
+                      <Headphones className="w-3.5 h-3.5" /> Audio ({hwContents.filter(f => f.type === 'audio').length})
+                    </p>
+                    {hwContents.filter(f => f.type === 'audio').map(item => (
+                      <div key={item.id} className="rounded-2xl bg-gradient-to-r from-indigo-50 to-violet-50 border border-indigo-100 px-4 py-3 space-y-1.5">
+                        <p className="text-xs font-semibold text-slate-700 truncate">{(item.title || '').replace(/\.[^.]+$/, '') || 'Audio track'}</p>
+                        <audio
+                          controls
+                          src={item.signed_url ?? undefined}
+                          className="w-full"
+                          style={{ borderRadius: '10px', height: '40px' }}
+                        />
+                      </div>
+                    ))}
+                  </div>
+                )}
+                {/* Video files */}
+                {hwContents.filter(f => f.type === 'video').length > 0 && (
+                  <div className="space-y-2">
+                    <p className="text-xs font-bold text-slate-500 uppercase tracking-wider flex items-center gap-1.5">
+                      <Film className="w-3.5 h-3.5" /> Video ({hwContents.filter(f => f.type === 'video').length})
+                    </p>
+                    {hwContents.filter(f => f.type === 'video').map(item => (
+                      <div key={item.id} className="rounded-2xl bg-gradient-to-r from-rose-50 to-orange-50 border border-rose-100 p-3 space-y-1.5">
+                        <p className="text-xs font-semibold text-slate-700 truncate">{(item.title || '').replace(/\.[^.]+$/, '') || 'Video clip'}</p>
+                        <video
+                          controls
+                          src={item.signed_url ?? undefined}
+                          className="w-full rounded-xl"
+                          style={{ background: '#1e1e2e', maxHeight: '360px' }}
+                        />
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {regularContents.length > 0 ? (
               <div className="bg-white rounded-3xl border border-slate-100 p-6 space-y-4">
                 {/* Only show tabs if there are non-video/audio content types */}
                 {(sections.pdf.length > 0 || sections.text.length > 0) && (
