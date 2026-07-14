@@ -18403,27 +18403,34 @@ async function startServer() {
     });
   }
 }
-var MAX_REMINDERS_PER_MONTH = 3;
-var REMINDER_COUNTS_SECTION = "payment_reminder_counts";
-var _reminderCounts = /* @__PURE__ */ new Map();
-async function loadReminderCounts(monthYear) {
+var REMINDER_SENT_SECTION = "payment_reminder_sent";
+var _reminderSent = /* @__PURE__ */ new Set();
+function getReminderWindow(day, daysInMonth2) {
+  if (day <= 2) return "start";
+  if (day >= daysInMonth2 - 2) return "end";
+  return null;
+}
+function daysInMonth(year, month) {
+  return new Date(year, month, 0).getDate();
+}
+async function loadReminderSent(monthYear) {
   try {
-    const { data } = await supabaseAdmin.from("platform_config").select("value").eq("section", REMINDER_COUNTS_SECTION).maybeSingle();
+    const { data } = await supabaseAdmin.from("platform_config").select("value").eq("section", REMINDER_SENT_SECTION).maybeSingle();
     const stored = data?.value ?? {};
     for (const [k, v2] of Object.entries(stored)) {
-      if (k.endsWith(`:${monthYear}`)) _reminderCounts.set(k, Number(v2));
+      if (k.includes(`:${monthYear}:`) && v2) _reminderSent.add(k);
     }
   } catch {
   }
 }
-async function saveReminderCounts(monthYear) {
+async function saveReminderSent(monthYear) {
   try {
     const snapshot = {};
-    for (const [k, v2] of _reminderCounts.entries()) {
-      if (k.endsWith(`:${monthYear}`)) snapshot[k] = v2;
+    for (const k of _reminderSent) {
+      if (k.includes(`:${monthYear}:`)) snapshot[k] = true;
     }
     await supabaseAdmin.from("platform_config").upsert(
-      { section: REMINDER_COUNTS_SECTION, value: snapshot },
+      { section: REMINDER_SENT_SECTION, value: snapshot },
       { onConflict: "section" }
     );
   } catch {
@@ -18432,11 +18439,16 @@ async function saveReminderCounts(monthYear) {
 async function runPaymentDeadlineReminders({ force = false } = {}) {
   const now = /* @__PURE__ */ new Date();
   const dayOfMonth = now.getDate();
-  const monthYear = now.toISOString().slice(0, 7);
-  if (!force && dayOfMonth < 5) {
-    return { sent: 0, skipped: 0, monthYear };
+  const yr = now.getFullYear();
+  const mo = now.getMonth() + 1;
+  const monthYear = `${yr}-${String(mo).padStart(2, "0")}`;
+  const dim = daysInMonth(yr, mo);
+  const window = getReminderWindow(dayOfMonth, dim);
+  if (!force && !window) {
+    return { sent: 0, skipped: 0, monthYear, window: "none" };
   }
-  await loadReminderCounts(monthYear);
+  const activeWindow = window ?? "start";
+  await loadReminderSent(monthYear);
   let brandName = "QuizMaster";
   let baseUrl = process.env.REPLIT_DEV_DOMAIN ? `https://${process.env.REPLIT_DEV_DOMAIN}` : "http://localhost:5000";
   try {
@@ -18447,10 +18459,9 @@ async function runPaymentDeadlineReminders({ force = false } = {}) {
   } catch {
   }
   const loginUrl = `${baseUrl}/login`;
-  const [yr, mo] = monthYear.split("-");
-  const monthLabel = new Date(Number(yr), Number(mo) - 1, 1).toLocaleString("default", { month: "long", year: "numeric" });
+  const monthLabel = new Date(yr, mo - 1, 1).toLocaleString("default", { month: "long", year: "numeric" });
   const { data: allStudents, error: sErr } = await supabaseAdmin.from("profiles").select("id, display_name, email").eq("role", "student").eq("status", "active");
-  if (sErr || !allStudents) return { sent: 0, skipped: 0, monthYear };
+  if (sErr || !allStudents) return { sent: 0, skipped: 0, monthYear, window: activeWindow };
   const { data: paidRows } = await supabaseAdmin.from("student_monthly_payments").select("student_id").eq("month_year", monthYear);
   const paidSet = new Set((paidRows || []).map((r) => r.student_id));
   const unpaid = allStudents.filter((s) => !paidSet.has(s.id) && s.email);
@@ -18458,12 +18469,11 @@ async function runPaymentDeadlineReminders({ force = false } = {}) {
   let skipped = 0;
   if (!isEmailConfigured()) {
     console.log(`[payment-reminder] Email not configured \u2014 skipping ${unpaid.length} reminders`);
-    return { sent: 0, skipped: unpaid.length, monthYear };
+    return { sent: 0, skipped: unpaid.length, monthYear, window: activeWindow };
   }
   for (const student of unpaid) {
-    const cacheKey = `${student.id}:${monthYear}`;
-    const timesSent = _reminderCounts.get(cacheKey) ?? 0;
-    if (!force && timesSent >= MAX_REMINDERS_PER_MONTH) {
+    const sentKey = `${student.id}:${monthYear}:${activeWindow}`;
+    if (!force && _reminderSent.has(sentKey)) {
       skipped++;
       continue;
     }
@@ -18471,7 +18481,7 @@ async function runPaymentDeadlineReminders({ force = false } = {}) {
     const tpl = renderPaymentReminderEmail({ studentName, monthLabel, dayOfMonth, brandName, loginUrl });
     try {
       await sendEmail({ to: student.email, toName: studentName, subject: tpl.subject, htmlContent: tpl.htmlContent, textContent: tpl.textContent });
-      _reminderCounts.set(cacheKey, timesSent + 1);
+      _reminderSent.add(sentKey);
       sent++;
     } catch (e) {
       console.error(`[payment-reminder] Failed to email ${student.email}:`, e.message);
@@ -18479,12 +18489,12 @@ async function runPaymentDeadlineReminders({ force = false } = {}) {
     }
   }
   if (sent > 0) {
-    await saveReminderCounts(monthYear);
+    await saveReminderSent(monthYear);
   }
   if (sent > 0 || skipped > 0) {
-    console.log(`[payment-reminder] ${monthYear}: sent=${sent}, skipped=${skipped} (limit=${MAX_REMINDERS_PER_MONTH}/month)`);
+    console.log(`[payment-reminder] ${monthYear} [${activeWindow}]: sent=${sent}, skipped=${skipped}`);
   }
-  return { sent, skipped, monthYear };
+  return { sent, skipped, monthYear, window: activeWindow };
 }
 async function runAutoPublishQuizzes() {
   try {
@@ -18604,7 +18614,7 @@ if (!process.env.VERCEL) {
   void flushFailedTelegramAlerts();
   setInterval(() => {
     void runPaymentDeadlineReminders();
-  }, 6 * 60 * 60 * 1e3);
+  }, 60 * 60 * 1e3);
   void runPaymentDeadlineReminders();
   process.on("unhandledRejection", (reason) => {
     const details = serializeUnknownError(reason);
