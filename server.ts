@@ -2248,6 +2248,7 @@ When giving instructions, number each step clearly. Be precise and technical whe
     dueDate?: string | null;
     maxScore?: number | null;
     language?: 'sq' | 'en';
+    notifyParents?: boolean;
   }) => {
     try {
       let students: Array<{ id: string; email: string; display_name: string | null }> = [];
@@ -2339,6 +2340,46 @@ When giving instructions, number each step clearly. Be precise and technical whe
       });
       await Promise.allSettled(emailPromises);
       console.log(`[assignments] Sent new-assignment email to ${students.length} student(s) in class ${opts.classId}`);
+
+      // Also send to parent emails if notifyParents is enabled
+      if (opts.notifyParents && isEmailConfigured() && students.length > 0) {
+        try {
+          const studentIds = students.map(s => s.id);
+          const { data: parentRows } = await supabaseAdmin
+            .from('profiles').select('id, parent_email').in('id', studentIds);
+          const parentEmailMap = new Map<string, string>(
+            (parentRows || []).filter((r: any) => r.parent_email).map((r: any) => [String(r.id), String(r.parent_email)])
+          );
+          if (parentEmailMap.size > 0) {
+            const isEn = opts.language === 'en';
+            const parentEmailPromises = students
+              .map(student => {
+                const parentEmail = parentEmailMap.get(student.id);
+                if (!parentEmail) return null;
+                const studentLabel = student.display_name || student.email;
+                const tpl = renderAssignmentEmail({
+                  studentName: isEn ? `Parent of ${studentLabel}` : `Prindi i ${studentLabel}`,
+                  title: opts.title,
+                  description: opts.description,
+                  courseName,
+                  className,
+                  dueDate: opts.dueDate,
+                  maxScore: opts.maxScore,
+                  brandName,
+                  loginUrl,
+                  language: opts.language,
+                });
+                return sendEmail({ to: parentEmail, toName: isEn ? `Parent of ${studentLabel}` : `Prindi i ${studentLabel}`, subject: tpl.subject, htmlContent: tpl.htmlContent, textContent: tpl.textContent })
+                  .catch(err => console.error(`[assignments] Failed to email parent ${parentEmail}:`, err?.message || err));
+              })
+              .filter(Boolean) as Promise<any>[];
+            await Promise.allSettled(parentEmailPromises);
+            console.log(`[assignments] Sent parent notification email to ${parentEmailPromises.length} parent(s)`);
+          }
+        } catch (pErr: any) {
+          console.error('[assignments] parent email error:', pErr?.message || pErr);
+        }
+      }
 
       // Also insert in-app notifications for each student in the class
       const inAppRows = students.map((s: any) => ({
@@ -4240,7 +4281,7 @@ When giving instructions, number each step clearly. Be precise and technical whe
   app.post("/api/admin/create-student", async (req, res) => {
     const {
       name, email, password, teacherId,
-      phone, dateOfBirth, gender, preferredLanguage, currentLevel, notes, classId, trialDays
+      phone, dateOfBirth, gender, preferredLanguage, currentLevel, notes, classId, trialDays, parentEmail,
     } = req.body;
     
     try {
@@ -4307,6 +4348,7 @@ When giving instructions, number each step clearly. Be precise and technical whe
         ? new Date(Date.now() + trialDaysNum * 24 * 60 * 60 * 1000).toISOString()
         : null;
 
+      const parentEmailVal = typeof parentEmail === 'string' ? parentEmail.trim() : '';
       const profilePayload: Record<string, unknown> = {
         id: userId,
         email,
@@ -4316,6 +4358,7 @@ When giving instructions, number each step clearly. Be precise and technical whe
         status: 'active',
         ...(profilesHasTrialColumns ? { trial_days: hasTrial ? trialDaysNum : null, trial_ends_at: trialEndsAt } : {}),
         ...(profilesHasForcePasswordChange ? { force_password_change: true } : {}),
+        ...(profilesHasParentEmail && parentEmailVal ? { parent_email: parentEmailVal } : {}),
       };
 
       const { error: upsertError } = await supabaseAdmin
@@ -4326,7 +4369,7 @@ When giving instructions, number each step clearly. Be precise and technical whe
       if (!upsertError) {
         await supabaseAdmin
           .from('profiles')
-          .update({ teacher_id: resolvedTeacherId, role: 'student', display_name: name, status: 'active', email, ...(profilesHasTrialColumns ? { trial_days: hasTrial ? trialDaysNum : null, trial_ends_at: trialEndsAt } : {}) })
+          .update({ teacher_id: resolvedTeacherId, role: 'student', display_name: name, status: 'active', email, ...(profilesHasTrialColumns ? { trial_days: hasTrial ? trialDaysNum : null, trial_ends_at: trialEndsAt } : {}), ...(profilesHasParentEmail && parentEmailVal ? { parent_email: parentEmailVal } : {}) })
           .eq('id', userId);
       } else {
         throw upsertError;
@@ -9721,13 +9764,19 @@ Rules:
 
         // Send invoice email to student (fire-and-forget)
         if (sendInvoice !== false && isEmailConfigured()) {
-          supabaseAdmin.from('profiles').select('display_name, email').eq('id', String(student_id)).single().then(({ data: sProf }) => {
+          supabaseAdmin.from('profiles').select('display_name, email, parent_email').eq('id', String(student_id)).single().then(({ data: sProf }) => {
             if (sProf?.email) {
               try {
                 const [yr, mo] = String(payment_date).slice(0, 7).split('-');
                 const monthLabel = new Date(Number(yr), Number(mo) - 1, 1).toLocaleString('default', { month: 'long', year: 'numeric' });
-                const tpl = renderInvoiceEmail({ studentName: sProf.display_name || sProf.email, amount: numericAmount, monthLabel, notes: String(description || '').trim() || undefined, paidAt: String(payment_date) });
-                sendEmail({ to: sProf.email, toName: sProf.display_name || sProf.email, subject: tpl.subject, htmlContent: tpl.htmlContent, textContent: tpl.textContent }).catch((e: any) => console.error('[invoice-email] failed:', e.message));
+                const studentLabel = (sProf as any).display_name || sProf.email;
+                const tpl = renderInvoiceEmail({ studentName: studentLabel, amount: numericAmount, monthLabel, notes: String(description || '').trim() || undefined, paidAt: String(payment_date) });
+                sendEmail({ to: sProf.email, toName: studentLabel, subject: tpl.subject, htmlContent: tpl.htmlContent, textContent: tpl.textContent }).catch((e: any) => console.error('[invoice-email] failed:', e.message));
+                if ((sProf as any).parent_email) {
+                  const parentLabel = `Prindi i ${studentLabel}`;
+                  const ptpl = renderInvoiceEmail({ studentName: parentLabel, amount: numericAmount, monthLabel, notes: String(description || '').trim() || undefined, paidAt: String(payment_date) });
+                  sendEmail({ to: String((sProf as any).parent_email), toName: parentLabel, subject: ptpl.subject, htmlContent: ptpl.htmlContent, textContent: ptpl.textContent }).catch((e: any) => console.error('[invoice-email-parent] failed:', e.message));
+                }
               } catch (e: any) { console.error('[invoice-email] render failed:', e.message); }
             }
           });
@@ -9940,7 +9989,7 @@ Rules:
       const monthYear = month_year || new Date().toISOString().slice(0, 7);
 
       const { data: student, error: sErr } = await supabaseAdmin
-        .from('profiles').select('id, display_name, email, teacher_id').eq('id', student_id).single();
+        .from('profiles').select('id, display_name, email, teacher_id, parent_email').eq('id', student_id).single();
       if (sErr || !student) return res.status(400).json({ error: 'Student not found' });
 
       const { data: inserted, error: insErr } = await supabaseAdmin
@@ -9987,6 +10036,12 @@ Rules:
         });
         sendEmail({ to: student.email, toName: studentName, subject: tpl.subject, htmlContent: tpl.htmlContent, textContent: tpl.textContent })
           .catch((e: any) => console.error('[invoice-email] failed:', e.message));
+        if ((student as any).parent_email) {
+          const parentLabel = `Prindi i ${studentName}`;
+          const ptpl = renderInvoiceEmail({ studentName: parentLabel, amount: Number(amount) || 0, monthLabel, notes: notes || undefined, paidAt, brandName });
+          sendEmail({ to: String((student as any).parent_email), toName: parentLabel, subject: ptpl.subject, htmlContent: ptpl.htmlContent, textContent: ptpl.textContent })
+            .catch((e: any) => console.error('[invoice-email-parent] failed:', e.message));
+        }
       }
 
       res.json({ success: true, id: paymentId, invoice_sent: !!(send_invoice && student.email && isEmailConfigured()) });
@@ -16534,6 +16589,7 @@ Content:\n"""${clipped}"""`;
     studentIds,
     sendEmail: shouldSendEmail = false,
     language = 'sq',
+    notifyParents = false,
   }: {
     title: string;
     content: string;
@@ -16543,6 +16599,7 @@ Content:\n"""${clipped}"""`;
     studentIds: string[];
     sendEmail?: boolean;
     language?: 'sq' | 'en';
+    notifyParents?: boolean;
   }): Promise<number> => {
     const recipientIds = new Set<string>();
     studentIds.forEach((sid) => recipientIds.add(sid));
@@ -16655,6 +16712,32 @@ Content:\n"""${clipped}"""`;
             sendEmail({ to: p.email, toName: p.name, subject: emailSubject, htmlContent, textContent }).catch(() => null)
           );
           await Promise.allSettled(emailPromises);
+
+          // Also send to parent emails if notifyParents is enabled
+          if (notifyParents) {
+            try {
+              const studentRecipientIds = recipients.filter(p => p.role === 'student').map(p => p.email);
+              // Map email → uid to fetch parent_email
+              const studentUids = [...recipientIds].filter(uid => {
+                const p = profilesById.get(uid);
+                return p?.role === 'student';
+              });
+              if (studentUids.length > 0) {
+                const { data: parentRows } = await supabaseAdmin
+                  .from('profiles').select('id, display_name, parent_email').in('id', studentUids);
+                const parentRecipients = (parentRows || []).filter((r: any) => r.parent_email);
+                const parentPromises = parentRecipients.map((r: any) =>
+                  sendEmail({ to: String(r.parent_email), toName: isEn ? `Parent of ${r.display_name || r.id}` : `Prindi i ${r.display_name || r.id}`, subject: emailSubject, htmlContent, textContent }).catch(() => null)
+                );
+                if (parentPromises.length > 0) {
+                  await Promise.allSettled(parentPromises);
+                  console.log(`[announcements] Sent announcement email to ${parentPromises.length} parent(s)`);
+                }
+              }
+            } catch (pErr: any) {
+              console.warn('[announcements] parent email error:', pErr?.message || pErr);
+            }
+          }
         }
       } catch (emailErr) {
         console.warn('[announcements] Email sending skipped:', emailErr);
@@ -16749,7 +16832,7 @@ Content:\n"""${clipped}"""`;
 
   app.post('/api/admin/announcements', async (req, res) => {
     try {
-      const { class_ids, student_ids, send_email, email_language, ...body } = req.body || {};
+      const { class_ids, student_ids, send_email, email_language, notify_parents, ...body } = req.body || {};
       const payload = {
         ...body,
         published_at: body.status === 'published' ? new Date().toISOString() : null,
@@ -16771,6 +16854,7 @@ Content:\n"""${clipped}"""`;
           studentIds,
           sendEmail: Boolean(send_email),
           language: email_language === 'en' ? 'en' : 'sq',
+          notifyParents: Boolean(notify_parents),
         });
       }
       res.json({ success: true, announcement: data });
@@ -16779,7 +16863,7 @@ Content:\n"""${clipped}"""`;
 
   app.patch('/api/admin/announcements/:id', async (req, res) => {
     try {
-      const { class_ids, student_ids, send_email, email_language, ...body } = req.body || {};
+      const { class_ids, student_ids, send_email, email_language, notify_parents, ...body } = req.body || {};
       const payload = {
         ...body,
         updated_at: new Date().toISOString(),
@@ -16800,6 +16884,7 @@ Content:\n"""${clipped}"""`;
           studentIds,
           sendEmail: Boolean(send_email),
           language: email_language === 'en' ? 'en' : 'sq',
+          notifyParents: Boolean(notify_parents),
         });
       }
       res.json({ success: true, announcement: data });
@@ -16877,7 +16962,7 @@ Content:\n"""${clipped}"""`;
       const caller = await assertAuthenticated(req, res);
       if (!caller) return;
       if (caller.role !== 'teacher' && caller.role !== 'admin') return res.status(403).json({ error: 'Forbidden' });
-      const { class_ids, student_ids, send_email, email_language, ...body } = req.body || {};
+      const { class_ids, student_ids, send_email, email_language, notify_parents, ...body } = req.body || {};
       const payload = {
         ...body,
         author_id: body.author_id || caller.userId,
@@ -16895,6 +16980,7 @@ Content:\n"""${clipped}"""`;
           priority: String(body.priority || 'normal'), audience: String(body.target_audience || 'all'),
           classIds, studentIds, sendEmail: Boolean(send_email),
           language: email_language === 'en' ? 'en' : 'sq',
+          notifyParents: Boolean(notify_parents),
         });
       }
       res.json({ success: true, announcement: data });
@@ -16906,7 +16992,7 @@ Content:\n"""${clipped}"""`;
       const caller = await assertAuthenticated(req, res);
       if (!caller) return;
       if (caller.role !== 'teacher' && caller.role !== 'admin') return res.status(403).json({ error: 'Forbidden' });
-      const { class_ids, student_ids, send_email, email_language, ...body } = req.body || {};
+      const { class_ids, student_ids, send_email, email_language, notify_parents, ...body } = req.body || {};
       const payload = {
         ...body,
         updated_at: new Date().toISOString(),
@@ -16922,6 +17008,7 @@ Content:\n"""${clipped}"""`;
           priority: String((body.priority ?? data?.priority) || 'normal'), audience: String((body.target_audience ?? data?.target_audience) || 'all'),
           classIds, studentIds, sendEmail: Boolean(send_email),
           language: email_language === 'en' ? 'en' : 'sq',
+          notifyParents: Boolean(notify_parents),
         });
       }
       res.json({ success: true, announcement: data });
@@ -17588,6 +17675,7 @@ Content:\n"""${clipped}"""`;
           dueDate: b.due_date ? String(b.due_date) : null,
           maxScore: Number(b.max_score) || 100,
           language: b.email_language === 'en' ? 'en' : 'sq',
+          notifyParents: b.notify_parents === true,
         });
         return res.json({ success: true, assignment: { id: newId } });
       } catch {
@@ -17620,6 +17708,7 @@ Content:\n"""${clipped}"""`;
               dueDate: b.due_date ? String(b.due_date) : null,
               maxScore: Number(b.max_score) || 100,
               language: b.email_language === 'en' ? 'en' : 'sq',
+              notifyParents: b.notify_parents === true,
             });
             return res.json({ success: true, assignment: { id: data.id } });
           }
@@ -18549,6 +18638,36 @@ async function runStudentTrialMigration(): Promise<void> {
   }
 }
 
+// ─── Parent Email Migration ───────────────────────────────────────────────────
+let profilesHasParentEmail = false;
+
+async function runParentEmailMigration(): Promise<void> {
+  const ddl = `ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS parent_email TEXT NULL`;
+  try {
+    await poolQuery(ddl);
+    await poolQuery(`NOTIFY pgrst, 'reload schema'`).catch(() => {});
+    console.log('[migration] profiles.parent_email column ensured ✓');
+    profilesHasParentEmail = true;
+    return;
+  } catch { /* fall through */ }
+  try {
+    const probe = await supabaseAdmin.from('profiles').select('parent_email').limit(1);
+    if (!probe.error) {
+      console.log('[migration] profiles.parent_email column already exists ✓');
+      profilesHasParentEmail = true;
+      return;
+    }
+    const rpc = await (supabaseAdmin as any).rpc('exec_sql', { sql: ddl });
+    if (rpc.error) throw rpc.error;
+    console.log('[migration] profiles.parent_email added via RPC ✓');
+    profilesHasParentEmail = true;
+  } catch (err: any) {
+    console.warn('[migration] profiles.parent_email could not be auto-created:', err?.message?.split('\n')[0]);
+    console.warn('[migration] Run manually: migrations/016_parent_email.sql');
+    console.warn('[migration] Parent email feature will be disabled until that migration runs.');
+  }
+}
+
 // ─── Student Monthly Payments Migration ──────────────────────────────────────
 async function runStudentMonthlyPaymentsMigration() {
   const dbUrl = process.env.DATABASE_URL?.trim();
@@ -19184,6 +19303,7 @@ async function startServer() {
   void runStudentTransfersMigration();
   void runStudentMonthlyPaymentsMigration();
   void runStudentTrialMigration();
+  void runParentEmailMigration();
   void runTeacherHoursMigration();
   void runForcePasswordChangeMigration();
   void ensureAssignmentFilesBucket();

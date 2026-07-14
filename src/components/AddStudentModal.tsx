@@ -22,6 +22,7 @@ interface FormData {
   currentLevel: string;
   classId: string;
   trialDays: string;
+  parentEmail: string;
 }
 
 interface Props {
@@ -61,6 +62,7 @@ export default function AddStudentModal({ onClose, onSuccess, accentColor = 'vio
     currentLevel: '',
     classId: '',
     trialDays: '',
+    parentEmail: '',
   });
   const [classes, setClasses] = useState<Array<{ id: string; name: string; capacity: number; enrolled: number }>>([]);
   const [selectedTeacherId, setSelectedTeacherId] = useState<string>(propTeacherId ?? '');
@@ -144,6 +146,7 @@ export default function AddStudentModal({ onClose, onSuccess, accentColor = 'vio
           currentLevel: form.currentLevel || undefined,
           classId: form.classId || undefined,
           trialDays: form.trialDays ? Number(form.trialDays) : undefined,
+          parentEmail: form.parentEmail.trim() || undefined,
         }),
       });
       const json = await res.json();
@@ -304,6 +307,20 @@ export default function AddStudentModal({ onClose, onSuccess, accentColor = 'vio
                   <option value="">{t('modals.addStudent.selectGender')}</option>
                   {GENDERS.map(g => <option key={g} value={g}>{g}</option>)}
                 </select>
+              </div>
+              <div className="col-span-2">
+                <label className={labelCls}>Email prindi <span className="text-slate-300 normal-case font-normal">{t('modals.addStudent.optional')}</span></label>
+                <div className="relative">
+                  <Mail className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+                  <input
+                    type="email"
+                    value={form.parentEmail}
+                    onChange={e => set('parentEmail', e.target.value)}
+                    placeholder="parent@example.com"
+                    className={`${inputCls} pl-9`}
+                  />
+                </div>
+                <p className="mt-1.5 text-[11px] text-slate-400">Nëse plotësohet, prindi do të marrë email-e për pagesat dhe detyrat e nxënësit.</p>
               </div>
             </div>
           )}

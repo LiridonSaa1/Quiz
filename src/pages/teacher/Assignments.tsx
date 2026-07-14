@@ -127,6 +127,7 @@ const emptyForm = {
   autoPublish: false,
   publishAt: '',
   email_language: 'sq' as 'sq' | 'en',
+  notify_parents: false,
 };
 
 function SubmissionsPanel({ assignment, onClose }: { assignment: Assignment; onClose: () => void }) {
@@ -471,6 +472,8 @@ export default function TeacherAssignments() {
       submission_config: cfg,
       autoPublish: hasPublishAt,
       publishAt: publishAtLocal,
+      email_language: 'sq',
+      notify_parents: false,
     });
     setFormAttachments(parseJsonField<FileEntry[]>(a.attachments, []));
     setShowModal(true);
@@ -496,6 +499,7 @@ export default function TeacherAssignments() {
         submission_config: form.submission_config,
         publish_at: form.autoPublish && form.publishAt ? new Date(form.publishAt).toISOString() : null,
         email_language: form.email_language,
+        notify_parents: form.notify_parents,
         attachments: formAttachments,
       };
 
@@ -800,6 +804,14 @@ export default function TeacherAssignments() {
                   </select>
                   <p className="mt-1 text-[11px] text-slate-400">Language of the email sent to students about this assignment.</p>
                 </div>
+              )}
+
+              {form.class_id && (
+                <label className="flex items-center gap-2 cursor-pointer select-none">
+                  <input type="checkbox" checked={form.notify_parents} onChange={e => set('notify_parents', e.target.checked as any)}
+                    className="rounded border-slate-300 text-amber-500 focus:ring-amber-500" />
+                  <span className="text-sm text-slate-600">Njofto prindërit me email (Also notify parents)</span>
+                </label>
               )}
 
               {/* Allow late submission */}

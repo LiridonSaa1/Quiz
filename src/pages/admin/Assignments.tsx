@@ -79,6 +79,7 @@ const emptyForm = {
   type: 'homework' as AssignmentType, due_date: '', max_score: 100,
   status: 'published' as AssignmentStatus, allow_late_submission: false,
   email_language: 'sq' as 'sq' | 'en',
+  notify_parents: false,
 };
 
 export default function AdminAssignments() {
@@ -162,6 +163,7 @@ export default function AdminAssignments() {
       due_date: a.due_date ? a.due_date.substring(0, 10) : '',
       max_score: a.max_score, status: a.status, allow_late_submission: a.allow_late_submission || false,
       email_language: 'sq',
+      notify_parents: false,
     });
     setShowModal(true);
   };
@@ -178,6 +180,7 @@ export default function AdminAssignments() {
         due_date: form.due_date || null, max_score: Number(form.max_score),
         status: form.status, allow_late_submission: form.allow_late_submission,
         email_language: form.email_language,
+        notify_parents: form.notify_parents,
       };
       const url = editId ? `/api/teacher/assignments/${editId}` : '/api/teacher/assignments';
       const method = editId ? 'PATCH' : 'POST';
@@ -453,6 +456,13 @@ export default function AdminAssignments() {
                   </select>
                   <p className="mt-1 text-[11px] text-slate-400">Language of the email sent to students about this assignment.</p>
                 </div>
+              )}
+              {form.class_id && (
+                <label className="flex items-center gap-2 cursor-pointer select-none">
+                  <input type="checkbox" checked={form.notify_parents} onChange={e => setForm(f => ({ ...f, notify_parents: e.target.checked }))}
+                    className="rounded border-slate-300 text-amber-500 focus:ring-amber-500" />
+                  <span className="text-sm text-slate-600">Njofto prindërit me email (Also notify parents)</span>
+                </label>
               )}
               <label className="flex items-center gap-3 cursor-pointer select-none">
                 <div

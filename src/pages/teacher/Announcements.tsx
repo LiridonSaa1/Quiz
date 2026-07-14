@@ -146,6 +146,7 @@ const emptyForm = {
   scheduled_at: '',
   send_email: false,
   email_language: 'sq' as 'sq' | 'en',
+  notify_parents: false,
 };
 
 interface BrevoStatus { configured: boolean; connected: boolean; reason?: string; email?: string; plan?: string; senderEmail?: string; senderName?: string; }
@@ -328,6 +329,7 @@ export default function TeacherAnnouncements() {
       scheduled_at: a.scheduled_at ? a.scheduled_at.slice(0, 16) : '',
       send_email: false,
       email_language: 'sq',
+      notify_parents: false,
     });
     setSelectedClassIds([]); setSelectedUsers([]); setUserSearch('');
     setSearchResults([]); setShowTemplates(false); setShowModal(true);
@@ -704,6 +706,14 @@ Write a warm, professional message (2-3 paragraphs). Start with a friendly greet
                     <option value="en">English</option>
                   </select>
                 </div>
+              )}
+
+              {form.send_email && (form.target_audience === 'all' || form.target_audience === 'students') && (
+                <label className="flex items-center gap-2 cursor-pointer select-none">
+                  <input type="checkbox" checked={form.notify_parents} onChange={e => set('notify_parents', e.target.checked)}
+                    className="rounded border-slate-300 text-indigo-600 focus:ring-indigo-500" />
+                  <span className="text-sm text-slate-600">Njofto prindërit me email (Also notify parents)</span>
+                </label>
               )}
 
               {/* Class targeting */}
