@@ -233,28 +233,28 @@ export default function TeacherLayout({ children }: { children: React.ReactNode 
       key: 'main',
       title: t('nav.sections.main'),
       items: [
-        { icon: LayoutDashboard, label: t('nav.dashboard'),  path: '/teacher' },
-        { icon: BookOpen,        label: t('nav.myCourses'),  path: '/teacher/courses' },
-        { icon: Layers,          label: t('nav.modules'),    path: '/teacher/modules' },
-        { icon: PlayCircle,      label: t('nav.lessons'),    path: '/teacher/lessons' },
-        { icon: FileText,        label: t('nav.quizzes'),    path: '/teacher/quizzes' },
-        { icon: ScrollText,      label: 'Tests',             path: '/teacher/exams' },
+        { icon: LayoutDashboard, label: t('nav.dashboard'), path: '/teacher' },
+      ],
+    },
+    {
+      key: 'content',
+      title: 'Content',
+      items: [
+        { icon: BookOpen,   label: t('nav.myCourses'), path: '/teacher/courses' },
+        { icon: Layers,     label: t('nav.modules'),   path: '/teacher/modules' },
+        { icon: PlayCircle, label: t('nav.lessons'),   path: '/teacher/lessons' },
+        { icon: FileText,   label: t('nav.quizzes'),   path: '/teacher/quizzes' },
+        { icon: ScrollText, label: 'Tests',            path: '/teacher/exams' },
       ],
     },
     {
       key: 'students',
       title: t('nav.sections.students'),
       items: [
-        { icon: Users,  label: t('nav.myStudents'), path: '/teacher/students' },
-        { icon: School, label: t('nav.classes'),    path: '/teacher/classes' },
-      ],
-    },
-    {
-      key: 'learning',
-      title: t('nav.sections.learning'),
-      items: [
-        { icon: ClipboardList, label: t('nav.assignments'),    path: '/teacher/assignments' },
-        { icon: CalendarCheck, label: t('nav.attendance'),    path: '/teacher/attendance' },
+        { icon: Users,         label: t('nav.myStudents'),  path: '/teacher/students' },
+        { icon: School,        label: t('nav.classes'),     path: '/teacher/classes' },
+        { icon: ClipboardList, label: t('nav.assignments'), path: '/teacher/assignments' },
+        { icon: CalendarCheck, label: t('nav.attendance'),  path: '/teacher/attendance' },
       ],
     },
     {
@@ -278,9 +278,8 @@ export default function TeacherLayout({ children }: { children: React.ReactNode 
       key: 'account',
       title: t('nav.sections.account'),
       items: [
-        { icon: User,        label: t('nav.profile'),  path: '/teacher/profile' },
-        { icon: Settings,    label: 'Settings',         path: '/teacher/settings' },
-        { icon: HelpCircle,  label: 'Udhëzues',         path: '/teacher/guide' },
+        { icon: User,     label: t('nav.profile'), path: '/teacher/profile' },
+        { icon: Settings, label: 'Settings',       path: '/teacher/settings' },
       ],
     },
   ];
