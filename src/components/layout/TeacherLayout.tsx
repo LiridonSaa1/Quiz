@@ -238,7 +238,7 @@ export default function TeacherLayout({ children }: { children: React.ReactNode 
         { icon: Layers,          label: t('nav.modules'),    path: '/teacher/modules' },
         { icon: PlayCircle,      label: t('nav.lessons'),    path: '/teacher/lessons' },
         { icon: FileText,        label: t('nav.quizzes'),    path: '/teacher/quizzes' },
-        { icon: ScrollText,      label: t('nav.exams'),      path: '/teacher/exams' },
+        { icon: ScrollText,      label: 'Tests',             path: '/teacher/exams' },
       ],
     },
     {
@@ -255,18 +255,15 @@ export default function TeacherLayout({ children }: { children: React.ReactNode 
       items: [
         { icon: ClipboardList, label: t('nav.assignments'),    path: '/teacher/assignments' },
         { icon: CalendarCheck, label: t('nav.attendance'),    path: '/teacher/attendance' },
-        { icon: Award,         label: t('nav.certificates'),  path: '/teacher/certificates' },
       ],
     },
     {
       key: 'interaction',
       title: t('nav.sections.interaction'),
       items: [
-        { icon: Zap,           label: t('nav.liveQuiz'),      path: '/teacher/live-quiz' },
-        { icon: FileBarChart2, label: t('nav.quizReports'),   path: '/teacher/live-quiz/reports' },
-        { icon: Video,         label: t('nav.liveSessions'),  path: '/teacher/live-sessions' },
-        { icon: MessageSquare, label: t('nav.community'),     path: '/teacher/community' },
-        { icon: Megaphone,     label: t('nav.announcements'), path: '/teacher/announcements' },
+        { icon: Zap,       label: t('nav.liveQuiz'),      path: '/teacher/live-quiz' },
+        { icon: Video,     label: t('nav.liveSessions'),  path: '/teacher/live-sessions' },
+        { icon: Megaphone, label: t('nav.announcements'), path: '/teacher/announcements' },
       ],
     },
     {
