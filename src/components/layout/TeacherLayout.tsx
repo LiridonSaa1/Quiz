@@ -244,7 +244,7 @@ export default function TeacherLayout({ children }: { children: React.ReactNode 
         { icon: Layers,     label: t('nav.modules'),   path: '/teacher/modules' },
         { icon: PlayCircle, label: t('nav.lessons'),   path: '/teacher/lessons' },
         { icon: FileText,   label: t('nav.quizzes'),   path: '/teacher/quizzes' },
-        { icon: ScrollText, label: 'Tests',            path: '/teacher/exams' },
+        { icon: ScrollText, label: 'Final Exams',       path: '/teacher/exams' },
       ],
     },
     {
