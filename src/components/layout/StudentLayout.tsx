@@ -35,37 +35,37 @@ export default function StudentLayout({ children }: { children: React.ReactNode 
     {
       key: 'main',
       items: [
-        { icon: LayoutDashboard, label: t('nav.dashboard'),        path: '/student' },
-        { icon: Megaphone,       label: t('nav.announcements'),    path: '/student/announcements' },
-        { icon: ClipboardList,   label: t('nav.assignments'),      path: '/student/assignments' },
-        { icon: BookOpen,        label: t('nav.myCourses'),        path: '/student/courses' },
+        { icon: LayoutDashboard, label: t('nav.dashboard'), path: '/student' },
+        { icon: BookOpen,        label: t('nav.myCourses'), path: '/student/courses' },
       ]
     },
     {
       key: 'learning',
       items: [
-        { icon: HelpCircle,    label: t('nav.quizzes'),      path: '/student/quizzes' },
-        { icon: ScrollText,    label: 'Test',                path: '/student/exams' },
-      ]
-    },
-    {
-      key: 'progress',
-      items: [
-        { icon: BarChart3,    label: t('nav.myProgress'),   path: '/student/progress' },
-        { icon: FileBarChart, label: 'Quiz Results',        path: '/student/results' },
+        { icon: HelpCircle,    label: t('nav.quizzes'),         path: '/student/quizzes' },
+        { icon: ScrollText,    label: 'Test',                   path: '/student/exams' },
+        { icon: Megaphone,     label: t('nav.announcements'),   path: '/student/announcements' },
+        { icon: ClipboardList, label: t('nav.assignments'),     path: '/student/assignments' },
       ]
     },
     {
       key: 'compete',
       items: [
-        { icon: Zap,    label: t('nav.liveQuiz'), path: '/student/live-quiz' },
+        { icon: Zap, label: t('nav.liveQuiz'), path: '/student/live-quiz' },
+      ]
+    },
+    {
+      key: 'progress',
+      items: [
+        { icon: BarChart3,    label: t('nav.myProgress'), path: '/student/progress' },
+        { icon: FileBarChart, label: 'Quiz Results',      path: '/student/results' },
       ]
     },
     {
       key: 'interaction',
       items: [
-        { icon: Video,         label: t('nav.liveClasses'),  path: '/student/live-classes' },
-        { icon: Radio,         label: t('nav.liveSessions'), path: '/student/live-sessions' },
+        { icon: Video, label: t('nav.liveClasses'),  path: '/student/live-classes' },
+        { icon: Radio, label: t('nav.liveSessions'), path: '/student/live-sessions' },
       ]
     },
     {
