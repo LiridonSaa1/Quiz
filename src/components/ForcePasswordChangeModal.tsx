@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { supabase } from '../supabase';
-import { apiUrl } from '../lib/apiUrl';
+import { authFetch } from '../lib/apiUrl';
 import { toast } from 'sonner';
 import { Lock, Eye, EyeOff, ShieldCheck, Loader2, CheckCircle2 } from 'lucide-react';
 
@@ -38,17 +38,19 @@ export default function ForcePasswordChangeModal({ onDone }: Props) {
     if (!canSave) return;
     setSaving(true);
     try {
-      const { data: { session } } = await supabase.auth.getSession();
-      const token = session?.access_token;
-      if (!token) throw new Error('Nuk jeni i kyçur.');
+      // 1. Clear sessionStorage flags first — so fetchProfile won't re-trigger the modal
+      //    even if onAuthStateChange fires before we call onDone().
+      sessionStorage.removeItem('firstLoginHint');
 
-      const res = await fetch(apiUrl('/api/auth/change-password'), {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ newPassword: newPw }),
-      });
-      const json = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(json.error || 'Ndryshimi dështoi.');
+      // 2. Clear the force_password_change DB flag BEFORE changing the password,
+      //    so that the USER_UPDATED onAuthStateChange event finds force_password_change=false.
+      await authFetch('/api/auth/clear-force-password-flag', { method: 'POST' }).catch(() => {});
+
+      // 3. Change the password client-side — this keeps the session alive.
+      //    Using supabase.auth.updateUser avoids the session invalidation that
+      //    supabaseAdmin.auth.admin.updateUserById causes server-side.
+      const { error: pwErr } = await supabase.auth.updateUser({ password: newPw });
+      if (pwErr) throw pwErr;
 
       toast.success('Fjalëkalimi u ndryshua me sukses!');
       onDone();
