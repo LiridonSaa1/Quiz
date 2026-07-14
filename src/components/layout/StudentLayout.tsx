@@ -12,9 +12,9 @@ import { useBranding } from '../../lib/useBranding';
 import { useActiveHoliday } from '../../lib/useActiveHoliday';
 import { HOLIDAY_ACCESSORIES } from '../HolidayEffects';
 import {
-  LayoutDashboard, BookOpen, PlayCircle, HelpCircle, ClipboardList, BarChart3,
-  FileBarChart, Award, MessageSquare, Video, Radio, User, LogOut, Menu, X,
-  GraduationCap, ScrollText, Zap, Trophy, Megaphone, Presentation, Headphones, FlaskConical, Layers,
+  LayoutDashboard, BookOpen, HelpCircle, ClipboardList, BarChart3,
+  FileBarChart, Video, Radio, User, LogOut, Menu, X,
+  GraduationCap, ScrollText, Zap, Megaphone,
 } from 'lucide-react';
 
 interface NavItemDef { icon: React.ElementType; label: string; path: string; }
@@ -36,45 +36,34 @@ export default function StudentLayout({ children }: { children: React.ReactNode 
       key: 'main',
       items: [
         { icon: LayoutDashboard, label: t('nav.dashboard'),        path: '/student' },
+        { icon: Megaphone,       label: t('nav.announcements'),    path: '/student/announcements' },
+        { icon: ClipboardList,   label: t('nav.assignments'),      path: '/student/assignments' },
         { icon: BookOpen,        label: t('nav.myCourses'),        path: '/student/courses' },
-        { icon: PlayCircle,      label: t('nav.continueLearning'), path: '/student/continue' },
       ]
     },
     {
       key: 'learning',
       items: [
-        { icon: Layers,        label: t('nav.modules'),      path: '/student/modules' },
-        { icon: BookOpen,      label: t('nav.lessons'),      path: '/student/lessons' },
         { icon: HelpCircle,    label: t('nav.quizzes'),      path: '/student/quizzes' },
-        { icon: ScrollText,    label: t('nav.exams'),        path: '/student/exams' },
-        { icon: ClipboardList, label: t('nav.assignments'),  path: '/student/assignments' },
+        { icon: ScrollText,    label: 'Test',                path: '/student/exams' },
       ]
     },
     {
       key: 'progress',
       items: [
-        { icon: BarChart3,    label: t('nav.myProgress'), path: '/student/progress' },
-        { icon: FileBarChart, label: t('nav.results'),    path: '/student/results' },
-      ]
-    },
-    {
-      key: 'extra',
-      items: [
-        { icon: Award,     label: t('nav.certificates'),  path: '/student/certificates'  },
-        { icon: Megaphone, label: t('nav.announcements'), path: '/student/announcements' },
+        { icon: BarChart3,    label: t('nav.myProgress'),   path: '/student/progress' },
+        { icon: FileBarChart, label: 'Quiz Results',        path: '/student/results' },
       ]
     },
     {
       key: 'compete',
       items: [
-        { icon: Trophy, label: t('nav.badges'),   path: '/student/badges' },
         { icon: Zap,    label: t('nav.liveQuiz'), path: '/student/live-quiz' },
       ]
     },
     {
       key: 'interaction',
       items: [
-        { icon: MessageSquare, label: t('nav.community'),    path: '/student/community' },
         { icon: Video,         label: t('nav.liveClasses'),  path: '/student/live-classes' },
         { icon: Radio,         label: t('nav.liveSessions'), path: '/student/live-sessions' },
       ]
@@ -82,8 +71,7 @@ export default function StudentLayout({ children }: { children: React.ReactNode 
     {
       key: 'account',
       items: [
-        { icon: User,        label: t('nav.profile'), path: '/student/profile' },
-        { icon: HelpCircle,  label: 'Udhëzues',       path: '/student/guide' },
+        { icon: User, label: t('nav.profile'), path: '/student/profile' },
       ]
     }
   ];

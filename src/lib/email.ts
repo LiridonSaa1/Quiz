@@ -711,3 +711,64 @@ export function renderLiveSessionInviteEmail(opts: {
 
   return { subject, htmlContent, textContent };
 }
+
+/** Renders the exam-passed congratulations email (HTML + plain text). */
+export function renderExamPassedEmail(opts: {
+  studentName: string;
+  examTitle: string;
+  scorePercent: number;
+  grade: string;
+  brandName?: string;
+  language?: 'sq' | 'en';
+}) {
+  const brand = (opts.brandName || 'QuizMaster').trim();
+  const lang = opts.language || 'sq';
+  const score = Math.round(opts.scorePercent);
+
+  const copy = lang === 'sq' ? {
+    subject: `Urime! Keni kaluar testin "${opts.examTitle}"`,
+    heading: 'Urime! 🎉',
+    line1: `Keni kaluar me sukses testin <strong>${opts.examTitle}</strong>.`,
+    score: `Pikët tuaja: <strong>${score}%</strong> — Nota: <strong>${opts.grade}</strong>`,
+    line2: "Certifikata juaj është duke u përgatitur dhe do t'ju dërgohet sa më shpejt.",
+    footer: `© ${new Date().getFullYear()} ${brand}. Të gjitha të drejtat e rezervuara.`,
+  } : {
+    subject: `Congratulations! You passed the test "${opts.examTitle}"`,
+    heading: 'Congratulations! 🎉',
+    line1: `You successfully passed the test <strong>${opts.examTitle}</strong>.`,
+    score: `Your score: <strong>${score}%</strong> — Grade: <strong>${opts.grade}</strong>`,
+    line2: 'Your certificate is being prepared and will be sent to you shortly.',
+    footer: `© ${new Date().getFullYear()} ${brand}. All rights reserved.`,
+  };
+
+  const htmlContent = `<!DOCTYPE html>
+<html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>
+<body style="margin:0;padding:0;background:#f1f5f9;font-family:'Segoe UI',Arial,sans-serif;">
+  <table width="100%" cellpadding="0" cellspacing="0" style="background:#f1f5f9;padding:32px 16px;">
+    <tr><td align="center">
+      <table width="520" cellpadding="0" cellspacing="0" style="background:#ffffff;border-radius:16px;overflow:hidden;box-shadow:0 4px 24px rgba(0,0,0,0.07);">
+        <tr><td style="background:linear-gradient(135deg,#10b981 0%,#059669 100%);padding:36px 40px;text-align:center;">
+          <div style="font-size:48px;margin-bottom:8px;">🏆</div>
+          <h1 style="margin:0;color:#ffffff;font-size:26px;font-weight:700;">${copy.heading}</h1>
+        </td></tr>
+        <tr><td style="padding:32px 40px;">
+          <p style="margin:0 0 16px;font-size:16px;color:#1e293b;line-height:1.6;">${copy.line1}</p>
+          <div style="background:#ecfdf5;border:1px solid #6ee7b7;border-radius:12px;padding:20px 24px;margin:24px 0;text-align:center;">
+            <p style="margin:0;font-size:18px;color:#065f46;line-height:1.6;">${copy.score}</p>
+          </div>
+          <p style="margin:0;font-size:15px;color:#475569;line-height:1.6;">${copy.line2}</p>
+        </td></tr>
+        <tr><td style="background:#f8fafc;padding:16px 40px;border-top:1px solid #e2e8f0;">
+          <p style="margin:0;font-size:11px;color:#94a3b8;text-align:center;">${copy.footer}</p>
+        </td></tr>
+      </table>
+    </td></tr>
+  </table>
+</body></html>`;
+
+  const textContent = lang === 'sq'
+    ? `${copy.heading}\n\nKeni kaluar testin "${opts.examTitle}".\nPikë: ${score}% — Nota: ${opts.grade}\n\nCertifikata juaj është duke u përgatitur dhe do t'ju dërgohet sa më shpejt.\n\n${brand}`
+    : `${copy.heading}\n\nYou passed the test "${opts.examTitle}".\nScore: ${score}% — Grade: ${opts.grade}\n\nYour certificate is being prepared and will be sent to you shortly.\n\n${brand}`;
+
+  return { subject: copy.subject, htmlContent, textContent };
+}

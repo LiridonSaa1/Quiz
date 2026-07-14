@@ -6,7 +6,7 @@ import jwt from "jsonwebtoken";
 import { isMissingCoursesStudentIdsError } from "./src/lib/schemaErrors.js";
 import { canAccessTeacherCourses, isAdmin, isAdminSeedAllowed } from "./src/lib/routeAuth.js";
 import { generateFixSuggestion } from "./src/lib/ai/generateFixSuggestion.js";
-import { isEmailConfigured, sendEmail, renderVerificationEmail, renderCredentialEmail, renderInvoiceEmail, renderPaymentReminderEmail, renderAssignmentEmail, renderTrialWelcomeEmail, renderLiveSessionInviteEmail } from "./src/lib/email.js";
+import { isEmailConfigured, sendEmail, renderVerificationEmail, renderCredentialEmail, renderInvoiceEmail, renderPaymentReminderEmail, renderAssignmentEmail, renderTrialWelcomeEmail, renderLiveSessionInviteEmail, renderExamPassedEmail } from "./src/lib/email.js";
 import { notifyEvent, type NotifyContext, type NotifyEventKey } from "./src/lib/notifyEvents.js";
 import { HEADWAY_FULL_DATA, buildUnitQuestions as buildHwUnitQuestions, type HUnit } from "./src/lib/headwayData.js";
 import { getQuestionsForSection, getTopicsForLevel, HEADWAY_QUESTIONS } from "./src/lib/headwayQuestions.js";
@@ -13212,6 +13212,21 @@ Content:\n"""${clipped}"""`;
           }
         );
       } catch { /* notifications are best-effort */ }
+
+      // 9. Send exam-passed congratulations email (exams only, best-effort)
+      if (isExam && isEmailConfigured()) {
+        try {
+          const profileRes = await supabaseAdmin.from('profiles').select('email,full_name,display_name').eq('id', caller.userId).maybeSingle().catch(() => ({ data: null }));
+          const studentEmail = profileRes?.data?.email || caller.email || '';
+          const studentName = profileRes?.data?.display_name || profileRes?.data?.full_name || 'Student';
+          if (studentEmail) {
+            const tpl = renderExamPassedEmail({ studentName, examTitle: certTitle, scorePercent: pct, grade, language: 'sq' });
+            await sendEmail({ to: studentEmail, toName: studentName, subject: tpl.subject, htmlContent: tpl.htmlContent, textContent: tpl.textContent });
+          }
+        } catch (emailErr: any) {
+          console.error('[auto-certificate] exam-passed email failed:', emailErr?.message);
+        }
+      }
 
       return res.json({ ok: true, duplicate: false, certificateId: cert.id, certificateNumber: certNumber, grade, level, score: pct, totalPoints: attempt.total_points, earnedPoints: attempt.score });
     } catch (e: any) {

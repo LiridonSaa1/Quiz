@@ -809,6 +809,66 @@ function renderLiveSessionInviteEmail(opts) {
 </html>`;
   return { subject, htmlContent, textContent };
 }
+function renderExamPassedEmail(opts) {
+  const brand = (opts.brandName || "QuizMaster").trim();
+  const lang = opts.language || "sq";
+  const score = Math.round(opts.scorePercent);
+  const copy = lang === "sq" ? {
+    subject: `Urime! Keni kaluar testin "${opts.examTitle}"`,
+    heading: "Urime! \u{1F389}",
+    line1: `Keni kaluar me sukses testin <strong>${opts.examTitle}</strong>.`,
+    score: `Pik\xEBt tuaja: <strong>${score}%</strong> \u2014 Nota: <strong>${opts.grade}</strong>`,
+    line2: "Certifikata juaj \xEBsht\xEB duke u p\xEBrgatitur dhe do t'ju d\xEBrgohet sa m\xEB shpejt.",
+    footer: `\xA9 ${(/* @__PURE__ */ new Date()).getFullYear()} ${brand}. T\xEB gjitha t\xEB drejtat e rezervuara.`
+  } : {
+    subject: `Congratulations! You passed the test "${opts.examTitle}"`,
+    heading: "Congratulations! \u{1F389}",
+    line1: `You successfully passed the test <strong>${opts.examTitle}</strong>.`,
+    score: `Your score: <strong>${score}%</strong> \u2014 Grade: <strong>${opts.grade}</strong>`,
+    line2: "Your certificate is being prepared and will be sent to you shortly.",
+    footer: `\xA9 ${(/* @__PURE__ */ new Date()).getFullYear()} ${brand}. All rights reserved.`
+  };
+  const htmlContent = `<!DOCTYPE html>
+<html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>
+<body style="margin:0;padding:0;background:#f1f5f9;font-family:'Segoe UI',Arial,sans-serif;">
+  <table width="100%" cellpadding="0" cellspacing="0" style="background:#f1f5f9;padding:32px 16px;">
+    <tr><td align="center">
+      <table width="520" cellpadding="0" cellspacing="0" style="background:#ffffff;border-radius:16px;overflow:hidden;box-shadow:0 4px 24px rgba(0,0,0,0.07);">
+        <tr><td style="background:linear-gradient(135deg,#10b981 0%,#059669 100%);padding:36px 40px;text-align:center;">
+          <div style="font-size:48px;margin-bottom:8px;">\u{1F3C6}</div>
+          <h1 style="margin:0;color:#ffffff;font-size:26px;font-weight:700;">${copy.heading}</h1>
+        </td></tr>
+        <tr><td style="padding:32px 40px;">
+          <p style="margin:0 0 16px;font-size:16px;color:#1e293b;line-height:1.6;">${copy.line1}</p>
+          <div style="background:#ecfdf5;border:1px solid #6ee7b7;border-radius:12px;padding:20px 24px;margin:24px 0;text-align:center;">
+            <p style="margin:0;font-size:18px;color:#065f46;line-height:1.6;">${copy.score}</p>
+          </div>
+          <p style="margin:0;font-size:15px;color:#475569;line-height:1.6;">${copy.line2}</p>
+        </td></tr>
+        <tr><td style="background:#f8fafc;padding:16px 40px;border-top:1px solid #e2e8f0;">
+          <p style="margin:0;font-size:11px;color:#94a3b8;text-align:center;">${copy.footer}</p>
+        </td></tr>
+      </table>
+    </td></tr>
+  </table>
+</body></html>`;
+  const textContent = lang === "sq" ? `${copy.heading}
+
+Keni kaluar testin "${opts.examTitle}".
+Pik\xEB: ${score}% \u2014 Nota: ${opts.grade}
+
+Certifikata juaj \xEBsht\xEB duke u p\xEBrgatitur dhe do t'ju d\xEBrgohet sa m\xEB shpejt.
+
+${brand}` : `${copy.heading}
+
+You passed the test "${opts.examTitle}".
+Score: ${score}% \u2014 Grade: ${opts.grade}
+
+Your certificate is being prepared and will be sent to you shortly.
+
+${brand}`;
+  return { subject: copy.subject, htmlContent, textContent };
+}
 
 // src/lib/notifyEvents.ts
 var RECIPIENTS = {
@@ -13154,6 +13214,19 @@ ${smartUserPrompt}` });
           }
         );
       } catch {
+      }
+      if (isExam && isEmailConfigured()) {
+        try {
+          const profileRes = await supabaseAdmin.from("profiles").select("email,full_name,display_name").eq("id", caller.userId).maybeSingle().catch(() => ({ data: null }));
+          const studentEmail = profileRes?.data?.email || caller.email || "";
+          const studentName = profileRes?.data?.display_name || profileRes?.data?.full_name || "Student";
+          if (studentEmail) {
+            const tpl = renderExamPassedEmail({ studentName, examTitle: certTitle, scorePercent: pct, grade, language: "sq" });
+            await sendEmail({ to: studentEmail, toName: studentName, subject: tpl.subject, htmlContent: tpl.htmlContent, textContent: tpl.textContent });
+          }
+        } catch (emailErr) {
+          console.error("[auto-certificate] exam-passed email failed:", emailErr?.message);
+        }
       }
       return res.json({ ok: true, duplicate: false, certificateId: cert.id, certificateNumber: certNumber, grade, level, score: pct, totalPoints: attempt.total_points, earnedPoints: attempt.score });
     } catch (e) {
