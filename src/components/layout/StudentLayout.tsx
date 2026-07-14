@@ -35,17 +35,17 @@ export default function StudentLayout({ children }: { children: React.ReactNode 
     {
       key: 'main',
       items: [
-        { icon: LayoutDashboard, label: t('nav.dashboard'), path: '/student' },
-        { icon: BookOpen,        label: t('nav.myCourses'), path: '/student/courses' },
+        { icon: LayoutDashboard, label: t('nav.dashboard'),      path: '/student' },
+        { icon: Megaphone,       label: t('nav.announcements'),  path: '/student/announcements' },
+        { icon: ClipboardList,   label: t('nav.assignments'),    path: '/student/assignments' },
       ]
     },
     {
       key: 'learning',
       items: [
-        { icon: HelpCircle,    label: t('nav.quizzes'),         path: '/student/quizzes' },
-        { icon: ScrollText,    label: 'Test',                   path: '/student/exams' },
-        { icon: Megaphone,     label: t('nav.announcements'),   path: '/student/announcements' },
-        { icon: ClipboardList, label: t('nav.assignments'),     path: '/student/assignments' },
+        { icon: BookOpen,     label: t('nav.myCourses'), path: '/student/courses' },
+        { icon: HelpCircle,   label: t('nav.quizzes'),   path: '/student/quizzes' },
+        { icon: ScrollText,   label: 'Test',             path: '/student/exams' },
       ]
     },
     {
