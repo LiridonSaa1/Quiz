@@ -10096,6 +10096,21 @@ Rules:
     }
   });
 
+  // Clears force_password_change flag only — the client uses supabase.auth.updateUser()
+  // for the actual password change (preserves session), then calls this endpoint.
+  app.post('/api/auth/clear-force-password-flag', async (req, res) => {
+    try {
+      const caller = await assertAuthenticated(req, res);
+      if (!caller) return;
+      if (profilesHasForcePasswordChange) {
+        await supabaseAdmin.from('profiles').update({ force_password_change: false }).eq('id', caller.userId);
+      }
+      return res.json({ success: true });
+    } catch (err: any) {
+      return res.status(500).json({ error: err?.message });
+    }
+  });
+
   app.get('/api/auth/check-student-password-change', async (req, res) => {
     try {
       const caller = await assertAuthenticated(req, res);

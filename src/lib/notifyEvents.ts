@@ -577,6 +577,7 @@ export async function notifyEvent(
 
     // Resilient insert: strip columns the live DB doesn't have and retry.
     // Older Supabase instances may be missing `title`, `read`, and/or `action_url`.
+    // Also handles GENERATED ALWAYS columns that reject explicit values.
     let insertRows: Record<string, unknown>[] = rows as Record<string, unknown>[];
     let lastError: string | null = null;
     for (let attempt = 0; attempt < 4; attempt++) {
@@ -584,7 +585,11 @@ export async function notifyEvent(
       if (!error) { lastError = null; break; }
       const msg = String(error.message || "");
       lastError = msg;
-      const missingCol = msg.match(/Could not find the '(\w+)' column/)?.[1];
+      // Pattern 1: "Could not find the 'X' column" — column missing entirely
+      // Pattern 2: "cannot insert a non-DEFAULT value into column \"X\"" — GENERATED ALWAYS column
+      const missingCol =
+        msg.match(/Could not find the '(\w+)' column/)?.[1] ||
+        msg.match(/cannot insert a non-default value into column "(\w+)"/i)?.[1];
       if (missingCol && ["title", "read", "action_url"].includes(missingCol)) {
         insertRows = insertRows.map((r) => {
           const copy = { ...r };

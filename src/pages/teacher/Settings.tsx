@@ -110,7 +110,7 @@ export default function TeacherSettings() {
         const { data } = await supabase
           .from('platform_config')
           .select('value')
-          .eq('key', `teacher_settings:${uid}`)
+          .eq('section', `teacher_settings:${uid}`)
           .maybeSingle();
         if (data?.value) setSettings({ ...DEFAULT_SETTINGS, ...data.value });
       } catch { /* use defaults */ }
@@ -178,7 +178,7 @@ export default function TeacherSettings() {
     try {
       const { error } = await supabase
         .from('platform_config')
-        .upsert({ key: `teacher_settings:${userId}`, value: next }, { onConflict: 'key' });
+        .upsert({ section: `teacher_settings:${userId}`, value: next }, { onConflict: 'section' });
       if (error) throw error;
       toast.success('Settings saved');
     } catch (e: any) {

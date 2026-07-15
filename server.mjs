@@ -1290,7 +1290,7 @@ async function notifyEvent(admin, deps, event, ctx) {
       }
       const msg = String(error.message || "");
       lastError = msg;
-      const missingCol = msg.match(/Could not find the '(\w+)' column/)?.[1];
+      const missingCol = msg.match(/Could not find the '(\w+)' column/)?.[1] || msg.match(/cannot insert a non-default value into column "(\w+)"/i)?.[1];
       if (missingCol && ["title", "read", "action_url"].includes(missingCol)) {
         insertRows = insertRows.map((r) => {
           const copy = { ...r };
@@ -10808,6 +10808,18 @@ ${e?.stack || ""}`),
     } catch (err) {
       console.error("[change-password]", err?.message);
       return res.status(500).json({ error: err?.message || "Ndryshimi i fjal\xEBkalimit d\xEBshtoi." });
+    }
+  });
+  app.post("/api/auth/clear-force-password-flag", async (req, res) => {
+    try {
+      const caller = await assertAuthenticated(req, res);
+      if (!caller) return;
+      if (profilesHasForcePasswordChange) {
+        await supabaseAdmin.from("profiles").update({ force_password_change: false }).eq("id", caller.userId);
+      }
+      return res.json({ success: true });
+    } catch (err) {
+      return res.status(500).json({ error: err?.message });
     }
   });
   app.get("/api/auth/check-student-password-change", async (req, res) => {
