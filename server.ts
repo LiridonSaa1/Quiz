@@ -17174,7 +17174,7 @@ Content:\n"""${clipped}"""`;
         .filter((c: any) => Array.isArray(c.student_ids) && c.student_ids.map(String).includes(studentId))
         .map((c: any) => ({ id: String(c.id), title: String(c.title || "Untitled"), role: "student" }));
 
-      // Quiz attempts
+      // Quiz attempts — fetch student's attempts first, then look up quiz metadata
       const teacherIds2 = caller.role === "teacher"
         ? (await getTeacherIdCandidates(caller.userId).then(ids => ids.length > 0 ? ids : [caller.userId]))
         : null;
@@ -17182,22 +17182,54 @@ Content:\n"""${clipped}"""`;
         ? (await fetchTeacherCourseRows(teacherIds2)).map((c: any) => String(c.id || "")).filter(Boolean)
         : [];
 
+      // Step 1: fetch all attempts for this student (no quiz-id filter — avoids empty-set bug)
+      const rawStudentAttempts = await fetchFilteredAttemptRows({ studentIds: new Set([studentId]) });
+
+      // Step 2: collect unique quiz IDs present in those attempts
+      const attemptQuizIdArr = [...new Set(
+        rawStudentAttempts.map((a: any) => String(a.quiz_id || "")).filter(Boolean)
+      )];
+
+      // Step 3: fetch quiz metadata by id (reliable — no course_id dependency)
       let quizRows: any[] = [];
-      if (teacherCourseIds.length > 0) {
-        const quizzesRes = await supabaseAdmin.from("quizzes").select("id,title,course_id,settings,passing_score,pass_mark").in("course_id", teacherCourseIds);
+      if (attemptQuizIdArr.length > 0) {
+        const quizzesRes = await supabaseAdmin
+          .from("quizzes")
+          .select("id,title,course_id,settings,passing_score,pass_mark")
+          .in("id", attemptQuizIdArr);
         if (!quizzesRes.error) quizRows = quizzesRes.data || [];
+        else {
+          // Retry without optional columns if schema error
+          const retry = await supabaseAdmin.from("quizzes").select("id,title").in("id", attemptQuizIdArr);
+          if (!retry.error) quizRows = retry.data || [];
+        }
       }
-      const quizIds = new Set<string>(quizRows.map((q: any) => String(q.id || "")).filter(Boolean));
+
+      // Step 4: determine scope — only filter to teacher's courses when we CAN reliably do so
+      // If we can't determine scope (no course_id column, empty courses), show all attempts
+      let scopedQuizIds: Set<string> | null = null;
+      if (teacherCourseIds.length > 0 && quizRows.length > 0) {
+        const quizzesInScope = quizRows.filter((q: any) =>
+          q.course_id && teacherCourseIds.map(String).includes(String(q.course_id))
+        );
+        if (quizzesInScope.length > 0) {
+          scopedQuizIds = new Set(quizzesInScope.map((q: any) => String(q.id)));
+        }
+        // If quizzesInScope is empty, course_id column probably missing — show all
+      }
+
       const passingScoreByQuiz = quizRows.reduce((acc: Record<string, number>, q: any) => {
         const raw = q?.settings?.passingScore ?? q?.passing_score ?? q?.pass_mark;
         acc[String(q.id)] = Number.isFinite(Number(raw)) ? Number(raw) : 50;
         return acc;
       }, {});
 
-      const attemptRows = normalizeAttempts(
-        await fetchFilteredAttemptRows({ quizIds, studentIds: new Set([studentId]) }),
-        passingScoreByQuiz
-      ).filter((a: any) => String(a.student_id || "") === studentId && quizIds.has(String(a.quiz_id || "")));
+      const attemptRows = normalizeAttempts(rawStudentAttempts, passingScoreByQuiz)
+        .filter((a: any) => {
+          if (String(a.student_id || "") !== studentId) return false;
+          if (scopedQuizIds !== null) return scopedQuizIds.has(String(a.quiz_id || ""));
+          return true; // no reliable scope → show all attempts for this student
+        });
 
       const attempts = attemptRows.length;
       const passed = attemptRows.filter((a: any) => a.passed).length;

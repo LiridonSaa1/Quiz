@@ -4631,21 +4631,28 @@ Assistant:`
       return fetchAllAttemptRows();
     }
     const startedAt = Date.now();
-    const buildQuery = (table) => {
-      let q = supabaseAdmin.from(table).select(
-        "id,quiz_id,student_id,score,score_percent,total_points,correct_answers,total_questions,status,passed,started_at,completed_at,answers"
-      );
+    const buildQuery = (table, withScorePercent = true) => {
+      const selectCols = withScorePercent ? "id,quiz_id,student_id,score,score_percent,total_points,correct_answers,total_questions,status,passed,started_at,completed_at,answers" : "id,quiz_id,student_id,score,total_points,correct_answers,total_questions,status,passed,started_at,completed_at,answers";
+      let q = supabaseAdmin.from(table).select(selectCols);
       if (quizArr.length > 0) q = q.in("quiz_id", quizArr);
       if (studentArr.length > 0) q = q.in("student_id", studentArr);
       return q;
     };
-    const modern = await buildQuery("quiz_attempts");
+    const modern = await buildQuery("quiz_attempts", true);
     const durationMs = Date.now() - startedAt;
     if (durationMs > PERF_SLOW_THRESHOLD_MS) {
       console.warn(`[perf] slow fetchFilteredAttemptRows quiz_attempts ${durationMs}ms quizIds=${quizArr.length} studentIds=${studentArr.length}`);
     }
     if (!modern.error) return modern.data || [];
-    if (!isAttemptsTableMissing(modern.error) && !isAnyTableMissingError(modern.error)) throw modern.error;
+    const isScorePercentMissing = (e) => {
+      const hay = `${e?.message || ""} ${e?.details || ""}`.toLowerCase();
+      return hay.includes("score_percent") && (hay.includes("does not exist") || hay.includes("column") || e?.code === "42703" || e?.code === "PGRST204");
+    };
+    if (isScorePercentMissing(modern.error)) {
+      const retry = await buildQuery("quiz_attempts", false);
+      if (!retry.error) return retry.data || [];
+      if (!isAttemptsTableMissing(retry.error) && !isAnyTableMissingError(retry.error)) throw retry.error;
+    } else if (!isAttemptsTableMissing(modern.error) && !isAnyTableMissingError(modern.error)) throw modern.error;
     const legacy = await buildQuery("attempts");
     if (!legacy.error) return legacy.data || [];
     if (isAnyTableMissingError(legacy.error)) return [];
@@ -6935,6 +6942,14 @@ Assistant:`
         if (quizzesRes.error && !isAnyTableMissingError(quizzesRes.error)) throw quizzesRes.error;
         quizRows = quizzesRes.error ? [] : quizzesRes.data || [];
       }
+      const rawAttemptsFetch = await fetchFilteredAttemptRows({ studentIds: allowedStudentIds });
+      const attemptedQuizIds = new Set(rawAttemptsFetch.map((a) => String(a.quiz_id || "")).filter(Boolean));
+      const knownQuizIds = new Set(quizRows.map((q) => String(q.id || "")));
+      const missingQuizIds = [...attemptedQuizIds].filter((id) => id && !knownQuizIds.has(id));
+      if (missingQuizIds.length > 0) {
+        const extraQuizzesRes = await supabaseAdmin.from("quizzes").select("*").in("id", missingQuizIds);
+        if (!extraQuizzesRes.error) quizRows = [...quizRows, ...extraQuizzesRes.data || []];
+      }
       const quizzesCount = quizRows.length;
       const quizIds = new Set(quizRows.map((q) => String(q.id || "")).filter(Boolean));
       const passingScoreByQuiz = quizRows.reduce((acc, q) => {
@@ -6943,13 +6958,7 @@ Assistant:`
         acc[String(q.id)] = Number.isFinite(n) ? n : 50;
         return acc;
       }, {});
-      const attemptsRows = normalizeAttempts(
-        await fetchFilteredAttemptRows({ quizIds, studentIds: allowedStudentIds }),
-        passingScoreByQuiz
-      ).filter((a) => {
-        if (!quizIds.has(String(a.quiz_id || ""))) return false;
-        return allowedStudentIds.has(String(a.student_id || ""));
-      });
+      const attemptsRows = normalizeAttempts(rawAttemptsFetch, passingScoreByQuiz).filter((a) => allowedStudentIds.has(String(a.student_id || "")));
       const attemptsByStudent = {};
       attemptsRows.forEach((a) => {
         const sid = String(a.student_id || "");
@@ -16461,21 +16470,38 @@ ${shortContent}`;
       const enrolledCourses = allCourses.filter((c) => Array.isArray(c.student_ids) && c.student_ids.map(String).includes(studentId)).map((c) => ({ id: String(c.id), title: String(c.title || "Untitled"), role: "student" }));
       const teacherIds2 = caller.role === "teacher" ? await getTeacherIdCandidates(caller.userId).then((ids) => ids.length > 0 ? ids : [caller.userId]) : null;
       const teacherCourseIds = teacherIds2 ? (await fetchTeacherCourseRows(teacherIds2)).map((c) => String(c.id || "")).filter(Boolean) : [];
+      const rawStudentAttempts = await fetchFilteredAttemptRows({ studentIds: /* @__PURE__ */ new Set([studentId]) });
+      const attemptQuizIdArr = [...new Set(
+        rawStudentAttempts.map((a) => String(a.quiz_id || "")).filter(Boolean)
+      )];
       let quizRows = [];
-      if (teacherCourseIds.length > 0) {
-        const quizzesRes = await supabaseAdmin.from("quizzes").select("id,title,course_id,settings,passing_score,pass_mark").in("course_id", teacherCourseIds);
+      if (attemptQuizIdArr.length > 0) {
+        const quizzesRes = await supabaseAdmin.from("quizzes").select("id,title,course_id,settings,passing_score,pass_mark").in("id", attemptQuizIdArr);
         if (!quizzesRes.error) quizRows = quizzesRes.data || [];
+        else {
+          const retry = await supabaseAdmin.from("quizzes").select("id,title").in("id", attemptQuizIdArr);
+          if (!retry.error) quizRows = retry.data || [];
+        }
       }
-      const quizIds = new Set(quizRows.map((q) => String(q.id || "")).filter(Boolean));
+      let scopedQuizIds = null;
+      if (teacherCourseIds.length > 0 && quizRows.length > 0) {
+        const quizzesInScope = quizRows.filter(
+          (q) => q.course_id && teacherCourseIds.map(String).includes(String(q.course_id))
+        );
+        if (quizzesInScope.length > 0) {
+          scopedQuizIds = new Set(quizzesInScope.map((q) => String(q.id)));
+        }
+      }
       const passingScoreByQuiz = quizRows.reduce((acc, q) => {
         const raw = q?.settings?.passingScore ?? q?.passing_score ?? q?.pass_mark;
         acc[String(q.id)] = Number.isFinite(Number(raw)) ? Number(raw) : 50;
         return acc;
       }, {});
-      const attemptRows = normalizeAttempts(
-        await fetchFilteredAttemptRows({ quizIds, studentIds: /* @__PURE__ */ new Set([studentId]) }),
-        passingScoreByQuiz
-      ).filter((a) => String(a.student_id || "") === studentId && quizIds.has(String(a.quiz_id || "")));
+      const attemptRows = normalizeAttempts(rawStudentAttempts, passingScoreByQuiz).filter((a) => {
+        if (String(a.student_id || "") !== studentId) return false;
+        if (scopedQuizIds !== null) return scopedQuizIds.has(String(a.quiz_id || ""));
+        return true;
+      });
       const attempts = attemptRows.length;
       const passed = attemptRows.filter((a) => a.passed).length;
       const failed = attempts - passed;
