@@ -12,6 +12,11 @@ import {
 import { cn } from '../../lib/utils';
 import { authFetch } from '../../lib/apiUrl';
 import { useNavigate } from 'react-router-dom';
+import {
+  AdminListPageShell,
+  AdminListFilterBar,
+  ADMIN_LIST_SEARCH_INPUT,
+} from '../../components/admin/AdminListPageShell';
 
 /* ─── Types ─────────────────────────────────────────────────────────────── */
 interface StudentProgressRow {
@@ -283,31 +288,35 @@ export default function TeacherProgress() {
     }),
   [classes, rowById, rows]);
 
+  const overallAvg = useMemo(() => {
+    const withQuiz = rows.filter(r => r.attempts > 0);
+    return withQuiz.length > 0
+      ? Math.round(withQuiz.reduce((a, r) => a + r.avgScore, 0) / withQuiz.length)
+      : 0;
+  }, [rows]);
+
+  const classListStats = [
+    { label: 'Classes',   value: classes.length, gradient: 'from-indigo-500 to-violet-600', shadow: 'shadow-indigo-500/25',  icon: GraduationCap },
+    { label: 'Students',  value: rows.length,    gradient: 'from-blue-500 to-cyan-600',     shadow: 'shadow-blue-500/25',    icon: Users },
+    { label: 'Courses',   value: coursesCount,   gradient: 'from-emerald-500 to-teal-600',  shadow: 'shadow-emerald-500/25', icon: BookOpen },
+    { label: 'Avg Score', value: overallAvg,     gradient: 'from-amber-500 to-orange-600',  shadow: 'shadow-amber-500/25',   icon: TrendingUp },
+  ];
+
   /* ── Render: class list ── */
   if (!loading && !selectedClass) {
     const noClasses = classCards.length === 0;
 
     return (
       <TeacherLayout>
-        <div className="space-y-6">
-          {/* Header */}
-          <div className="flex items-start justify-between gap-4">
-            <div>
-              <h1 className="text-2xl font-black text-slate-900">Student Progress</h1>
-              <p className="text-slate-500 text-sm mt-1">
-                Select a class to view student performance details
-              </p>
-            </div>
-            <div className="flex items-center gap-2 text-xs text-slate-400 bg-white border border-slate-100 rounded-xl px-3 py-2 shadow-sm">
-              <BookOpen className="w-3.5 h-3.5" />
-              <span>{coursesCount} course{coursesCount !== 1 ? 's' : ''}</span>
-              <span className="w-px h-3 bg-slate-200 mx-1" />
-              <Users className="w-3.5 h-3.5" />
-              <span>{rows.length} student{rows.length !== 1 ? 's' : ''}</span>
-            </div>
-          </div>
-
-          {noClasses ? (
+        <AdminListPageShell
+          breadcrumbPortalLabel="Teacher Portal"
+          breadcrumbLabel="Progress"
+          title="Student Progress"
+          description="Select a class to view student performance and individual details."
+          statsGridClassName="grid grid-cols-2 sm:grid-cols-4 gap-4"
+          stats={classListStats}
+        >
+        {noClasses ? (
             <div className="flex flex-col items-center justify-center py-24 text-center bg-white rounded-3xl border border-slate-100 shadow-sm">
               <div className="w-16 h-16 bg-indigo-50 rounded-3xl flex items-center justify-center mb-4">
                 <GraduationCap className="w-8 h-8 text-indigo-400" />
@@ -411,83 +420,54 @@ export default function TeacherProgress() {
               })}
             </div>
           )}
-        </div>
+        </AdminListPageShell>
       </TeacherLayout>
     );
   }
 
   /* ── Render: student list inside a class ── */
-  const cls = selectedClass;
+  const cls = selectedClass!;
+  const clsStats = computeClassStats(classStudents);
+  const clsGradient = classCards.find(c => c.id === cls.id)?.gradient || 'from-indigo-500 to-violet-600';
+
+  const classDetailStats = [
+    { label: 'Students',  value: classStudents.length, gradient: 'from-blue-500 to-cyan-600',     shadow: 'shadow-blue-500/25',    icon: Users },
+    { label: 'Avg Score', value: clsStats.avgScore,    gradient: 'from-emerald-500 to-teal-600',  shadow: 'shadow-emerald-500/25', icon: TrendingUp },
+    { label: 'Pass Rate', value: clsStats.avgPassRate, gradient: 'from-amber-500 to-orange-600',  shadow: 'shadow-amber-500/25',   icon: CheckCircle2 },
+    { label: 'Courses',   value: coursesCount,         gradient: 'from-indigo-500 to-violet-600', shadow: 'shadow-indigo-500/25',  icon: BookOpen },
+  ];
 
   return (
     <TeacherLayout>
-      <div className="space-y-6">
-        {/* Breadcrumb + back */}
-        <div className="flex items-center gap-2 text-sm">
+      <AdminListPageShell
+        breadcrumbPortalLabel="Teacher Portal"
+        breadcrumbLabel="Progress"
+        title={cls.name}
+        description={cls.description || 'Student performance for this class.'}
+        statsGridClassName="grid grid-cols-2 sm:grid-cols-4 gap-4"
+        stats={classDetailStats}
+        action={
           <button
             type="button"
             onClick={() => { setSelectedClass(null); setSearch(''); }}
-            className="flex items-center gap-1.5 text-slate-500 hover:text-indigo-600 font-semibold transition-colors"
+            className="inline-flex items-center gap-2 px-4 py-2.5 rounded-2xl font-semibold text-sm text-slate-600 hover:text-indigo-600 bg-white border border-slate-200 hover:border-indigo-300 shadow-sm transition-all"
           >
             <ArrowLeft className="w-4 h-4" />
             All Classes
           </button>
-          <ChevronRight className="w-4 h-4 text-slate-300" />
-          <span className="text-slate-800 font-bold">{cls?.name}</span>
-        </div>
-
-        {/* Class header */}
-        {cls && (
-          <motion.div
-            initial={{ opacity: 0, y: -12 }}
-            animate={{ opacity: 1, y: 0 }}
-            className={`bg-gradient-to-br ${classCards.find(c => c.id === cls.id)?.gradient || 'from-indigo-500 to-violet-600'} rounded-3xl p-6 text-white relative overflow-hidden`}
-          >
-            <div className="absolute top-0 right-0 w-40 h-40 bg-white/10 rounded-full -translate-y-16 translate-x-16" />
-            <div className="relative z-10 flex items-start justify-between gap-4">
-              <div>
-                <div className="flex items-center gap-2 mb-2">
-                  <GraduationCap className="w-5 h-5 text-white/80" />
-                  <span className="text-white/70 text-sm font-semibold">Class</span>
-                </div>
-                <h1 className="text-2xl font-black">{cls.name}</h1>
-                {cls.description && <p className="text-white/70 text-sm mt-1">{cls.description}</p>}
-              </div>
-              {(() => {
-                const stats = computeClassStats(classStudents);
-                return (
-                  <div className="flex items-center gap-6 shrink-0">
-                    <div className="text-center">
-                      <div className="text-3xl font-black">{classStudents.length}</div>
-                      <div className="text-white/70 text-xs font-semibold uppercase tracking-wide">Students</div>
-                    </div>
-                    <div className="text-center">
-                      <div className="text-3xl font-black">{stats.avgScore}%</div>
-                      <div className="text-white/70 text-xs font-semibold uppercase tracking-wide">Avg Score</div>
-                    </div>
-                    <div className="text-center">
-                      <div className="text-3xl font-black">{stats.avgPassRate}%</div>
-                      <div className="text-white/70 text-xs font-semibold uppercase tracking-wide">Pass Rate</div>
-                    </div>
-                  </div>
-                );
-              })()}
-            </div>
-          </motion.div>
-        )}
-
-        {/* Search */}
-        <div className="relative max-w-xs">
-          <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-indigo-400" />
-          <input
-            value={search}
-            onChange={e => setSearch(e.target.value)}
-            placeholder="Search students…"
-            className="w-full pl-11 pr-4 py-2.5 rounded-xl border border-slate-200 bg-white text-sm text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-400/40 focus:border-indigo-400 shadow-sm transition"
-          />
-        </div>
-
-        {/* Students grid */}
+        }
+        filterBar={
+          <div className="relative max-w-xs">
+            <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-indigo-400" />
+            <input
+              value={search}
+              onChange={e => setSearch(e.target.value)}
+              placeholder="Search students…"
+              className={ADMIN_LIST_SEARCH_INPUT}
+            />
+          </div>
+        }
+      >
         {loading ? (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
             {Array(6).fill(0).map((_, i) => (
@@ -520,7 +500,7 @@ export default function TeacherProgress() {
             </p>
           </>
         )}
-      </div>
+      </AdminListPageShell>
     </TeacherLayout>
   );
 }
