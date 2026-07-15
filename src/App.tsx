@@ -94,6 +94,7 @@ const StudentLiveClasses = lazy(() => import('./pages/student/LiveClasses'));
 const StudentLiveSessionJoin = lazy(() => import('./pages/student/LiveSessionJoin'));
 const StudentExams = lazy(() => import('./pages/student/Exams'));
 const StudentAnnouncements = lazy(() => import('./pages/student/Announcements'));
+const StudentSettingsPage = lazy(() => import('./pages/student/Settings'));
 const HeadwayAudio = lazy(() => import('./pages/student/HeadwayAudio'));
 const TestBuilder = lazy(() => import('./pages/student/TestBuilder'));
 const ModuleTestBuilder = lazy(() => import('./pages/student/ModuleTestBuilder'));
@@ -572,6 +573,7 @@ function StudentRoutes({ features }: { features: FeatureFlags }) {
       <Route path="/quiz/:quizId" element={<QuizExperience />} />
       <Route path="/results/:attemptId" element={<QuizResults />} />
       <Route path="/profile" element={<StudentProfile />} />
+      <Route path="/settings" element={<StudentSettingsPage />} />
       <Route path="/headway-audio" element={<HeadwayAudio />} />
       <Route path="/test-builder" element={<TestBuilder />} />
       <Route path="/module-test-builder" element={<ModuleTestBuilder />} />

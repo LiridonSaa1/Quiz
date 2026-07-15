@@ -14,7 +14,7 @@ import { HOLIDAY_ACCESSORIES } from '../HolidayEffects';
 import {
   LayoutDashboard, BookOpen, HelpCircle, ClipboardList, BarChart3,
   FileBarChart, Video, Radio, User, LogOut, Menu, X,
-  GraduationCap, ScrollText, Zap, Megaphone,
+  GraduationCap, ScrollText, Zap, Megaphone, Settings,
 } from 'lucide-react';
 
 interface NavItemDef { icon: React.ElementType; label: string; path: string; }
@@ -71,7 +71,8 @@ export default function StudentLayout({ children }: { children: React.ReactNode 
     {
       key: 'account',
       items: [
-        { icon: User, label: t('nav.profile'), path: '/student/profile' },
+        { icon: User,     label: t('nav.profile'), path: '/student/profile' },
+        { icon: Settings, label: 'Cilësimet',      path: '/student/settings' },
       ]
     }
   ];
