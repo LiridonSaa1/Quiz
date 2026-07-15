@@ -6,7 +6,7 @@ import jwt from "jsonwebtoken";
 import { isMissingCoursesStudentIdsError } from "./src/lib/schemaErrors.js";
 import { canAccessTeacherCourses, isAdmin, isAdminSeedAllowed } from "./src/lib/routeAuth.js";
 import { generateFixSuggestion } from "./src/lib/ai/generateFixSuggestion.js";
-import { isEmailConfigured, sendEmail, renderVerificationEmail, renderCredentialEmail, renderInvoiceEmail, renderPaymentReminderEmail, renderAssignmentEmail, renderTrialWelcomeEmail, renderLiveSessionInviteEmail, renderExamPassedEmail } from "./src/lib/email.js";
+import { isEmailConfigured, sendEmail, renderVerificationEmail, renderCredentialEmail, renderInvoiceEmail, renderPaymentReminderEmail, renderAssignmentEmail, renderTrialWelcomeEmail, renderLiveSessionInviteEmail, renderExamPassedEmail, renderQuizResultEmail } from "./src/lib/email.js";
 import { notifyEvent, type NotifyContext, type NotifyEventKey } from "./src/lib/notifyEvents.js";
 import { HEADWAY_FULL_DATA, buildUnitQuestions as buildHwUnitQuestions, type HUnit } from "./src/lib/headwayData.js";
 import { getQuestionsForSection, getTopicsForLevel, HEADWAY_QUESTIONS } from "./src/lib/headwayQuestions.js";
@@ -13350,6 +13350,95 @@ Content:\n"""${clipped}"""`;
       return res.json({ ok: true, duplicate: false, certificateId: cert.id, certificateNumber: certNumber, grade, level, score: pct, totalPoints: attempt.total_points, earnedPoints: attempt.score });
     } catch (e: any) {
       console.error('[auto-certificate]', e?.message);
+      return res.status(500).json({ error: 'Server error' });
+    }
+  });
+
+  /** Send a quiz result email to the student who just completed a quiz/exam */
+  app.post('/api/student/quiz/result-email', async (req: Request, res: Response) => {
+    try {
+      const caller = await assertAuthenticated(req, res);
+      if (!caller) return;
+      if (caller.role !== 'student' && caller.role !== 'admin') {
+        return res.status(403).json({ error: 'Forbidden' });
+      }
+
+      if (!isEmailConfigured()) {
+        return res.json({ ok: false, reason: 'email_not_configured' });
+      }
+
+      const { attemptId, language } = req.body as { attemptId?: string; language?: string };
+      if (!attemptId) return res.status(400).json({ error: 'attemptId is required' });
+
+      // 1. Fetch the attempt — must belong to this student
+      const { data: attempt, error: attErr } = await supabaseAdmin
+        .from('quiz_attempts')
+        .select('id, quiz_id, student_id, score, total_points, score_percent, passed, completed_at')
+        .eq('id', attemptId)
+        .maybeSingle()
+        .catch(() => ({ data: null, error: null }));
+
+      if (attErr || !attempt) return res.status(404).json({ error: 'Attempt not found' });
+      if (attempt.student_id !== caller.userId) return res.status(403).json({ error: 'Forbidden' });
+
+      // 2. Fetch quiz title and passing score setting
+      const { data: quiz } = await supabaseAdmin
+        .from('quizzes')
+        .select('id, title, settings')
+        .eq('id', attempt.quiz_id)
+        .maybeSingle()
+        .catch(() => ({ data: null }));
+
+      // 3. Fetch student profile (email + name)
+      const { data: profile } = await supabaseAdmin
+        .from('profiles')
+        .select('email, full_name, display_name')
+        .eq('id', caller.userId)
+        .maybeSingle()
+        .catch(() => ({ data: null }));
+
+      const studentEmail = profile?.email || caller.email || '';
+      if (!studentEmail) return res.json({ ok: false, reason: 'no_email' });
+
+      const studentName = profile?.display_name || profile?.full_name || 'Student';
+      const quizTitle = quiz?.title || 'Quiz';
+      const passingPercent = Number(quiz?.settings?.passingScore ?? 50);
+      const totalPoints = Number(attempt.total_points) || 0;
+      const earnedPoints = Number(attempt.score) || 0;
+      const scorePercent = attempt.score_percent != null
+        ? Number(attempt.score_percent)
+        : (totalPoints > 0 ? Math.round((earnedPoints / totalPoints) * 100) : 0);
+      const passed = Boolean(attempt.passed);
+      const lang = language === 'en' ? 'en' : 'sq';
+
+      const appUrl = process.env.APP_URL || `https://${process.env.REPLIT_DEV_DOMAIN || 'localhost:5000'}`;
+      const resultsUrl = `${appUrl}/student/results/${attemptId}`;
+
+      const tpl = renderQuizResultEmail({
+        studentName,
+        quizTitle,
+        scorePercent,
+        earnedPoints,
+        totalPoints,
+        passed,
+        passingPercent,
+        attemptId,
+        resultsUrl,
+        language: lang,
+      });
+
+      await sendEmail({
+        to: studentEmail,
+        toName: studentName,
+        subject: tpl.subject,
+        htmlContent: tpl.htmlContent,
+        textContent: tpl.textContent,
+      });
+
+      console.log(`[quiz-result-email] sent to ${studentEmail} for attempt ${attemptId} (passed=${passed})`);
+      return res.json({ ok: true });
+    } catch (e: any) {
+      console.error('[quiz-result-email]', e?.message);
       return res.status(500).json({ error: 'Server error' });
     }
   });

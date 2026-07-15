@@ -869,6 +869,125 @@ Your certificate is being prepared and will be sent to you shortly.
 ${brand}`;
   return { subject: copy.subject, htmlContent, textContent };
 }
+function renderQuizResultEmail(opts) {
+  const brand = (opts.brandName || "QuizMaster").trim();
+  const lang = opts.language === "en" ? "en" : "sq";
+  const isEn = lang === "en";
+  const score = Math.round(opts.scorePercent);
+  const passing = opts.passingPercent ?? 50;
+  const accentColor = opts.passed ? "#10b981" : "#ef4444";
+  const bgColor = opts.passed ? "#f0fdf4" : "#fef2f2";
+  const borderColor = opts.passed ? "#bbf7d0" : "#fecaca";
+  const t = isEn ? {
+    subject: opts.passed ? `\u2705 You passed "${opts.quizTitle}" \u2014 ${brand}` : `\u274C Quiz result: "${opts.quizTitle}" \u2014 ${brand}`,
+    headerTag: opts.passed ? "\u2705 Quiz Passed" : "\u274C Quiz Result",
+    greeting: `Hello, ${opts.studentName}!`,
+    intro: opts.passed ? `Congratulations! You successfully passed the quiz <strong>${opts.quizTitle}</strong>.` : `You did not pass the quiz <strong>${opts.quizTitle}</strong> this time. Keep practicing \u2014 you can do it!`,
+    detailsLabel: "Your Result",
+    quizLabel: "\u{1F4CB} Quiz",
+    scoreLabel: "\u{1F3AF} Your score",
+    pointsLabel: "\u{1F4CA} Points",
+    passingLabel: "\u2705 Passing score",
+    resultLabel: "\u{1F3C6} Result",
+    passedValue: "PASSED",
+    failedValue: "NOT PASSED",
+    btn: "\u{1F50D} View detailed results",
+    footerNote: "This email was sent automatically after you submitted your quiz.",
+    footer: `Sent by the <strong>${brand}</strong> platform \xB7 Good luck!`
+  } : {
+    subject: opts.passed ? `\u2705 Keni kaluar kuizin "${opts.quizTitle}" \u2014 ${brand}` : `\u274C Rezultati i kuizit "${opts.quizTitle}" \u2014 ${brand}`,
+    headerTag: opts.passed ? "\u2705 Kuiz i Kaluar" : "\u274C Rezultati i Kuizit",
+    greeting: `P\xEBrsh\xEBndetje, ${opts.studentName}!`,
+    intro: opts.passed ? `Urime! Keni kaluar me sukses kuizin <strong>${opts.quizTitle}</strong>.` : `Nuk e keni kaluar kuizin <strong>${opts.quizTitle}</strong> k\xEBt\xEB her\xEB. Vazhdoni t\xEB praktikoheni \u2014 mund ta arrini!`,
+    detailsLabel: "Rezultati Juaj",
+    quizLabel: "\u{1F4CB} Kuizi",
+    scoreLabel: "\u{1F3AF} Nota juaj",
+    pointsLabel: "\u{1F4CA} Pik\xEBt",
+    passingLabel: "\u2705 Nota kalimtare",
+    resultLabel: "\u{1F3C6} Rezultati",
+    passedValue: "KALUAR",
+    failedValue: "NUK KALOI",
+    btn: "\u{1F50D} Shiko rezultatet e detajuara",
+    footerNote: "Ky email u d\xEBrgua automatikisht pas dor\xEBzimit t\xEB kuizit tuaj.",
+    footer: `D\xEBrguar nga platforma <strong>${brand}</strong> \xB7 Suksese!`
+  };
+  const textContent = [
+    `${t.headerTag} \u2014 ${brand}`,
+    ``,
+    t.greeting,
+    t.intro.replace(/<[^>]+>/g, ""),
+    ``,
+    `${t.quizLabel}: ${opts.quizTitle}`,
+    `${t.scoreLabel}: ${score}%`,
+    `${t.pointsLabel}: ${opts.earnedPoints}/${opts.totalPoints}`,
+    `${t.passingLabel}: ${passing}%`,
+    `${t.resultLabel}: ${opts.passed ? t.passedValue : t.failedValue}`,
+    ``,
+    opts.resultsUrl ? `${t.btn}: ${opts.resultsUrl}` : "",
+    ``,
+    t.footer.replace(/<[^>]+>/g, "")
+  ].filter(Boolean).join("\n");
+  const resultsBtn = opts.resultsUrl ? `<div style="text-align:center;margin-bottom:20px;"><a href="${opts.resultsUrl}" style="display:inline-block;background:${accentColor};color:#ffffff;font-size:14px;font-weight:700;text-decoration:none;padding:13px 28px;border-radius:12px;">${t.btn}</a></div>` : "";
+  const htmlContent = `<!doctype html>
+<html>
+<body style="margin:0;padding:0;background:#f1f5f9;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f1f5f9;padding:40px 16px;">
+    <tr><td align="center">
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:520px;background:#ffffff;border-radius:20px;overflow:hidden;box-shadow:0 4px 24px rgba(0,0,0,0.06);">
+        <tr><td style="background:${accentColor};padding:28px 36px;">
+          <div style="font-size:22px;font-weight:800;color:#ffffff;letter-spacing:-0.02em;">${brand}</div>
+          <div style="font-size:13px;color:rgba(255,255,255,0.85);margin-top:4px;">${t.headerTag}</div>
+        </td></tr>
+        <tr><td style="padding:36px;">
+          <p style="margin:0 0 8px;font-size:15px;font-weight:700;color:#0f172a;">${t.greeting}</p>
+          <p style="margin:0 0 24px;font-size:14px;line-height:1.6;color:#475569;">${t.intro}</p>
+
+          <!-- Score badge -->
+          <div style="text-align:center;margin:0 0 24px;">
+            <div style="display:inline-block;background:${bgColor};border:2px solid ${borderColor};border-radius:50%;width:96px;height:96px;line-height:96px;font-size:28px;font-weight:900;color:${accentColor};">${score}%</div>
+          </div>
+
+          <!-- Result details -->
+          <div style="background:${bgColor};border:1px solid ${borderColor};border-radius:14px;padding:20px 24px;margin-bottom:24px;">
+            <p style="margin:0 0 14px;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:1px;color:#6b7280;">${t.detailsLabel}</p>
+            <table role="presentation" cellpadding="0" cellspacing="0" width="100%">
+              <tr>
+                <td style="padding:6px 0;font-size:13px;color:#64748b;width:130px;">${t.quizLabel}</td>
+                <td style="padding:6px 0;font-size:13px;font-weight:600;color:#0f172a;">${opts.quizTitle}</td>
+              </tr>
+              <tr>
+                <td style="padding:6px 0;font-size:13px;color:#64748b;">${t.scoreLabel}</td>
+                <td style="padding:6px 0;font-size:16px;font-weight:800;color:${accentColor};">${score}%</td>
+              </tr>
+              <tr>
+                <td style="padding:6px 0;font-size:13px;color:#64748b;">${t.pointsLabel}</td>
+                <td style="padding:6px 0;font-size:13px;font-weight:600;color:#0f172a;">${opts.earnedPoints} / ${opts.totalPoints}</td>
+              </tr>
+              <tr>
+                <td style="padding:6px 0;font-size:13px;color:#64748b;">${t.passingLabel}</td>
+                <td style="padding:6px 0;font-size:13px;font-weight:600;color:#0f172a;">${passing}%</td>
+              </tr>
+              <tr>
+                <td style="padding:6px 0;font-size:13px;color:#64748b;">${t.resultLabel}</td>
+                <td style="padding:6px 0;font-size:13px;font-weight:800;color:${accentColor};">${opts.passed ? t.passedValue : t.failedValue}</td>
+              </tr>
+            </table>
+          </div>
+
+          ${resultsBtn}
+
+          <p style="margin:0;font-size:12px;line-height:1.6;color:#94a3b8;">${t.footerNote}</p>
+        </td></tr>
+        <tr><td style="background:#f8fafc;padding:16px 36px;border-top:1px solid #e2e8f0;">
+          <p style="margin:0;font-size:11px;color:#94a3b8;text-align:center;">${t.footer}</p>
+        </td></tr>
+      </table>
+    </td></tr>
+  </table>
+</body>
+</html>`;
+  return { subject, htmlContent, textContent };
+}
 
 // src/lib/notifyEvents.ts
 var RECIPIENTS = {
@@ -13326,6 +13445,61 @@ ${smartUserPrompt}` });
       return res.json({ ok: true, duplicate: false, certificateId: cert.id, certificateNumber: certNumber, grade, level, score: pct, totalPoints: attempt.total_points, earnedPoints: attempt.score });
     } catch (e) {
       console.error("[auto-certificate]", e?.message);
+      return res.status(500).json({ error: "Server error" });
+    }
+  });
+  app.post("/api/student/quiz/result-email", async (req, res) => {
+    try {
+      const caller = await assertAuthenticated(req, res);
+      if (!caller) return;
+      if (caller.role !== "student" && caller.role !== "admin") {
+        return res.status(403).json({ error: "Forbidden" });
+      }
+      if (!isEmailConfigured()) {
+        return res.json({ ok: false, reason: "email_not_configured" });
+      }
+      const { attemptId, language } = req.body;
+      if (!attemptId) return res.status(400).json({ error: "attemptId is required" });
+      const { data: attempt, error: attErr } = await supabaseAdmin.from("quiz_attempts").select("id, quiz_id, student_id, score, total_points, score_percent, passed, completed_at").eq("id", attemptId).maybeSingle().catch(() => ({ data: null, error: null }));
+      if (attErr || !attempt) return res.status(404).json({ error: "Attempt not found" });
+      if (attempt.student_id !== caller.userId) return res.status(403).json({ error: "Forbidden" });
+      const { data: quiz } = await supabaseAdmin.from("quizzes").select("id, title, settings").eq("id", attempt.quiz_id).maybeSingle().catch(() => ({ data: null }));
+      const { data: profile } = await supabaseAdmin.from("profiles").select("email, full_name, display_name").eq("id", caller.userId).maybeSingle().catch(() => ({ data: null }));
+      const studentEmail = profile?.email || caller.email || "";
+      if (!studentEmail) return res.json({ ok: false, reason: "no_email" });
+      const studentName = profile?.display_name || profile?.full_name || "Student";
+      const quizTitle = quiz?.title || "Quiz";
+      const passingPercent = Number(quiz?.settings?.passingScore ?? 50);
+      const totalPoints = Number(attempt.total_points) || 0;
+      const earnedPoints = Number(attempt.score) || 0;
+      const scorePercent = attempt.score_percent != null ? Number(attempt.score_percent) : totalPoints > 0 ? Math.round(earnedPoints / totalPoints * 100) : 0;
+      const passed = Boolean(attempt.passed);
+      const lang = language === "en" ? "en" : "sq";
+      const appUrl = process.env.APP_URL || `https://${process.env.REPLIT_DEV_DOMAIN || "localhost:5000"}`;
+      const resultsUrl = `${appUrl}/student/results/${attemptId}`;
+      const tpl = renderQuizResultEmail({
+        studentName,
+        quizTitle,
+        scorePercent,
+        earnedPoints,
+        totalPoints,
+        passed,
+        passingPercent,
+        attemptId,
+        resultsUrl,
+        language: lang
+      });
+      await sendEmail({
+        to: studentEmail,
+        toName: studentName,
+        subject: tpl.subject,
+        htmlContent: tpl.htmlContent,
+        textContent: tpl.textContent
+      });
+      console.log(`[quiz-result-email] sent to ${studentEmail} for attempt ${attemptId} (passed=${passed})`);
+      return res.json({ ok: true });
+    } catch (e) {
+      console.error("[quiz-result-email]", e?.message);
       return res.status(500).json({ error: "Server error" });
     }
   });

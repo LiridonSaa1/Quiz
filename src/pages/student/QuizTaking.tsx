@@ -793,6 +793,15 @@ export default function QuizTaking() {
         // Notifications are best-effort — don't fail the submission if dispatch fails.
       }
 
+      // Send result email to the student — best-effort, never blocks navigation
+      if (attempt.id) {
+        authFetch('/api/student/quiz/result-email', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ attemptId: attempt.id }),
+        }).catch(() => { /* best-effort */ });
+      }
+
       // Auto-generate certificate when the student passes — best-effort, never blocks navigation
       if (passed && attempt.id) {
         authFetch('/api/student/quiz/auto-certificate', {
