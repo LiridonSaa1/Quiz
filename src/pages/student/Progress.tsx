@@ -218,12 +218,12 @@ export default function StudentProgress() {
 
         {/* Stat cards */}
         {loading ? (
-          <div className="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4">
-            {[1,2,3,4,5,6].map(i => <div key={i} className="h-28 bg-white rounded-2xl border border-slate-100 animate-pulse" />)}
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4">
+            {[1,2,3,4,5].map(i => <div key={i} className="h-28 bg-white rounded-2xl border border-slate-100 animate-pulse" />)}
           </div>
         ) : (
           <>
-            <div className="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4">
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4">
               {statCards.map((s, i) => (
                 <motion.div key={s.label} initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.08 }}
                   className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
@@ -277,26 +277,18 @@ export default function StudentProgress() {
                     <div className="w-8 h-8 bg-emerald-50 rounded-xl flex items-center justify-center"><BarChart2 className="w-4 h-4 text-emerald-600" /></div>
                     <h2 className="font-bold text-slate-900">{t('student.progress.averageScorePerCourse')}</h2>
                   </div>
-                  {courseStats.every(c => c.avg === 0) && completed.length === 0 ? (
-                    <div className="flex flex-col items-center justify-center h-[180px] text-slate-400 gap-2">
-                      <BarChart2 className="w-8 h-8 opacity-25" />
-                      <p className="text-sm font-medium">{t('student.progress.noScores')}</p>
-                      <p className="text-xs text-center max-w-[200px]">{t('student.progress.completeQuizzesMsg')}</p>
-                    </div>
-                  ) : (
-                    <ResponsiveContainer width="100%" height={220}>
-                      <BarChart data={courseStats} barCategoryGap="30%" margin={{ top: 20, right: 8, left: 0, bottom: 0 }}>
-                        <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" vertical={false} />
-                        <XAxis dataKey="name" tick={{ fontSize: 10, fill: '#94a3b8' }} tickLine={false} axisLine={false} />
-                        <YAxis domain={[0, 100]} tick={{ fontSize: 10, fill: '#94a3b8' }} tickLine={false} axisLine={false} tickFormatter={v => `${v}%`} />
-                        <Tooltip formatter={(v: any) => [`${v}%`, t('student.progress.chartAvgScoreLabel')]} contentStyle={{ borderRadius: 12, border: '1px solid #e2e8f0', fontSize: 12 }} />
-                        <Bar dataKey="avg" radius={[6, 6, 0, 0]}>
-                          <LabelList dataKey="avg" position="top" formatter={(v: any) => `${v}%`} style={{ fontSize: 11, fontWeight: 600, fill: '#475569' }} />
-                          {courseStats.map((_, i) => <Cell key={i} fill={CHART_COLORS[i % CHART_COLORS.length]} />)}
-                        </Bar>
-                      </BarChart>
-                    </ResponsiveContainer>
-                  )}
+                  <ResponsiveContainer width="100%" height={220}>
+                    <BarChart data={courseStats} barCategoryGap="30%" margin={{ top: 20, right: 8, left: 0, bottom: 0 }}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" vertical={false} />
+                      <XAxis dataKey="name" tick={{ fontSize: 10, fill: '#94a3b8' }} tickLine={false} axisLine={false} />
+                      <YAxis domain={[0, 100]} tick={{ fontSize: 10, fill: '#94a3b8' }} tickLine={false} axisLine={false} tickFormatter={v => `${v}%`} />
+                      <Tooltip formatter={(v: any) => [`${v}%`, t('student.progress.chartAvgScoreLabel')]} contentStyle={{ borderRadius: 12, border: '1px solid #e2e8f0', fontSize: 12 }} />
+                      <Bar dataKey="avg" radius={[6, 6, 0, 0]}>
+                        <LabelList dataKey="avg" position="top" formatter={(v: any) => `${v}%`} style={{ fontSize: 11, fontWeight: 600, fill: '#475569' }} />
+                        {courseStats.map((_, i) => <Cell key={i} fill={CHART_COLORS[i % CHART_COLORS.length]} />)}
+                      </Bar>
+                    </BarChart>
+                  </ResponsiveContainer>
                 </motion.div>
 
                 {/* Lesson completion per course */}

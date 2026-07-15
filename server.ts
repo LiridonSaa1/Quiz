@@ -14339,36 +14339,62 @@ Content:\n"""${clipped}"""`;
       }
       const uid = caller.userId;
 
-      // 1. Fetch all quiz attempts for this student
-      const attemptsRes = await poolQuery(
-        `SELECT id, quiz_id, score, total_points, status, started_at, completed_at, created_at, passed
-         FROM quiz_attempts WHERE student_id = $1 ORDER BY created_at DESC`,
-        [uid]
-      );
-      const attemptRows = attemptsRes.rows || [];
+      // 1. Fetch all quiz attempts — try poolQuery first, fall back to supabaseAdmin
+      let attemptRows: any[] = [];
+      try {
+        const attemptsRes = await poolQuery(
+          `SELECT id, quiz_id, score, total_points, status, started_at, completed_at, created_at, passed
+           FROM quiz_attempts WHERE student_id = $1 ORDER BY created_at DESC`,
+          [uid]
+        );
+        attemptRows = attemptsRes.rows || [];
+      } catch {
+        const { data } = await supabaseAdmin
+          .from('quiz_attempts')
+          .select('id, quiz_id, score, total_points, status, started_at, completed_at, created_at, passed')
+          .eq('student_id', uid)
+          .order('created_at', { ascending: false });
+        attemptRows = data || [];
+      }
 
       // 2. Get unique quiz IDs from attempts
       const quizIds = [...new Set(attemptRows.map((r: any) => String(r.quiz_id || '')).filter(Boolean))];
 
-      // 3. Fetch quiz metadata (title + course_id) using poolQuery — bypasses schema visibility issue
+      // 3. Fetch quiz metadata — try poolQuery first, fall back to supabaseAdmin
       let quizRows: any[] = [];
       if (quizIds.length > 0) {
-        const qRes = await poolQuery(
-          `SELECT id, title, course_id FROM quizzes WHERE id = ANY($1::uuid[])`,
-          [quizIds]
-        );
-        quizRows = qRes.rows || [];
+        try {
+          const qRes = await poolQuery(
+            `SELECT id, title, course_id FROM quizzes WHERE id = ANY($1::uuid[])`,
+            [quizIds]
+          );
+          quizRows = qRes.rows || [];
+        } catch {
+          const { data } = await supabaseAdmin
+            .from('quizzes')
+            .select('id, title, course_id')
+            .in('id', quizIds);
+          quizRows = data || [];
+        }
       }
 
       // 4. Collect course IDs from quizzes, then fetch course titles
       const courseIdSet = new Set(quizRows.map((q: any) => String(q.course_id || '')).filter(Boolean));
       let courseRows: any[] = [];
       if (courseIdSet.size > 0) {
-        const cRes = await poolQuery(
-          `SELECT id, title FROM courses WHERE id = ANY($1::uuid[])`,
-          [[...courseIdSet]]
-        );
-        courseRows = cRes.rows || [];
+        try {
+          const cRes = await poolQuery(
+            `SELECT id, title FROM courses WHERE id = ANY($1::uuid[])`,
+            [[...courseIdSet]]
+          );
+          courseRows = cRes.rows || [];
+        } catch {
+          const { data } = await supabaseAdmin
+            .from('courses')
+            .select('id, title')
+            .in('id', [...courseIdSet]);
+          courseRows = data || [];
+        }
       }
 
       // Build maps

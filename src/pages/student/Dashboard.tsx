@@ -8,7 +8,6 @@ import { Link } from 'react-router-dom';
 import { Quiz } from '../../types';
 import { cn } from '../../lib/utils';
 import { fetchAttemptRowsByStudentId, normalizeAttempts } from '../../lib/quizAttempts';
-import { selectPublishedQuizzesCompat } from '../../lib/quizzesCompat';
 import { isMissingCoursesStudentIdsError } from '../../lib/schemaErrors';
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, ResponsiveContainer, Tooltip } from 'recharts';
 import { format, subDays } from 'date-fns';
@@ -131,15 +130,28 @@ export default function StudentDashboard() {
         // Live sessions already resolved
         if (liveSessionsRes?.success) setLiveSessions(liveSessionsRes.sessions || []);
 
-        // Quizzes depend on courseIds — fetch after courses resolved
-        if (enrolledCourses.length > 0) {
-          const courseIds = enrolledCourses.map((c: any) => c.id);
-          const t1 = performance.now();
-          const quizRows = await selectPublishedQuizzesCompat(supabase, courseIds, '*');
-          if (performance.now() - t1 > 500) {
-            console.warn(`[perf] Quiz fetch took ${Math.round(performance.now() - t1)}ms`);
+        // Fetch quizzes via the server API — it resolves lesson-level quizzes and
+        // handles all schema compat issues server-side.
+        try {
+          const quizzesApiRes = await authFetch('/api/student/quizzes');
+          if (quizzesApiRes.ok) {
+            const quizzesJson = await quizzesApiRes.json();
+            const rows = Array.isArray(quizzesJson?.quizzes) ? quizzesJson.quizzes : [];
+            quizzes = rows
+              .filter((q: any) => String(q?.type || 'standard').toLowerCase() !== 'exam')
+              .map((q: any) => ({
+                id: q.id,
+                title: q.title,
+                description: q.description || '',
+                timeLimit: q.timeLimit ?? q.time_limit ?? 0,
+                totalMarks: q.totalMarks ?? q.total_marks ?? 0,
+                passMark: q.passMark ?? q.pass_mark ?? 0,
+                course_id: q.course_id,
+                status: q.status || 'published',
+              } as any));
           }
-          quizzes = (quizRows as any) || [];
+        } catch {
+          // fall through with empty quizzes
         }
         setAvailableQuizzes(quizzes);
       } catch (error) {

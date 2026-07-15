@@ -14106,29 +14106,45 @@ Notes: ${notes}` : ""}`;
         return res.status(403).json({ error: "Forbidden" });
       }
       const uid = caller.userId;
-      const attemptsRes = await poolQuery(
-        `SELECT id, quiz_id, score, total_points, status, started_at, completed_at, created_at, passed
-         FROM quiz_attempts WHERE student_id = $1 ORDER BY created_at DESC`,
-        [uid]
-      );
-      const attemptRows = attemptsRes.rows || [];
+      let attemptRows = [];
+      try {
+        const attemptsRes = await poolQuery(
+          `SELECT id, quiz_id, score, total_points, status, started_at, completed_at, created_at, passed
+           FROM quiz_attempts WHERE student_id = $1 ORDER BY created_at DESC`,
+          [uid]
+        );
+        attemptRows = attemptsRes.rows || [];
+      } catch {
+        const { data } = await supabaseAdmin.from("quiz_attempts").select("id, quiz_id, score, total_points, status, started_at, completed_at, created_at, passed").eq("student_id", uid).order("created_at", { ascending: false });
+        attemptRows = data || [];
+      }
       const quizIds = [...new Set(attemptRows.map((r) => String(r.quiz_id || "")).filter(Boolean))];
       let quizRows = [];
       if (quizIds.length > 0) {
-        const qRes = await poolQuery(
-          `SELECT id, title, course_id FROM quizzes WHERE id = ANY($1::uuid[])`,
-          [quizIds]
-        );
-        quizRows = qRes.rows || [];
+        try {
+          const qRes = await poolQuery(
+            `SELECT id, title, course_id FROM quizzes WHERE id = ANY($1::uuid[])`,
+            [quizIds]
+          );
+          quizRows = qRes.rows || [];
+        } catch {
+          const { data } = await supabaseAdmin.from("quizzes").select("id, title, course_id").in("id", quizIds);
+          quizRows = data || [];
+        }
       }
       const courseIdSet = new Set(quizRows.map((q) => String(q.course_id || "")).filter(Boolean));
       let courseRows = [];
       if (courseIdSet.size > 0) {
-        const cRes = await poolQuery(
-          `SELECT id, title FROM courses WHERE id = ANY($1::uuid[])`,
-          [[...courseIdSet]]
-        );
-        courseRows = cRes.rows || [];
+        try {
+          const cRes = await poolQuery(
+            `SELECT id, title FROM courses WHERE id = ANY($1::uuid[])`,
+            [[...courseIdSet]]
+          );
+          courseRows = cRes.rows || [];
+        } catch {
+          const { data } = await supabaseAdmin.from("courses").select("id, title").in("id", [...courseIdSet]);
+          courseRows = data || [];
+        }
       }
       const quizMap = {};
       quizRows.forEach((q) => {

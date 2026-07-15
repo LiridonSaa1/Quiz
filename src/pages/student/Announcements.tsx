@@ -18,6 +18,7 @@ import {
   ChevronDown,
   ChevronUp,
   X,
+  Bell,
 } from "lucide-react";
 import { cn } from "../../lib/utils";
 
@@ -339,32 +340,48 @@ export default function StudentAnnouncements() {
   return (
     <StudentLayout>
       <div className="max-w-8xl mx-auto space-y-6">
-        {/* Header */}
-        <div className="flex items-center gap-3">
-          <div className="w-10 h-10 bg-indigo-100 rounded-xl flex items-center justify-center shrink-0">
-            <Megaphone className="w-5 h-5 text-indigo-600" />
-          </div>
-          <div>
-            <div className="flex items-center gap-2">
-              <h1 className="text-2xl font-bold text-slate-900">
+        {/* Header banner */}
+        <motion.div
+          initial={{ opacity: 0, y: -16 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.4 }}
+          className="relative rounded-3xl overflow-hidden bg-gradient-to-br from-slate-900 via-indigo-950 to-slate-900 p-8 shadow-2xl"
+        >
+          <motion.div
+            className="absolute top-0 right-0 w-80 h-80 bg-indigo-500/20 rounded-full blur-3xl pointer-events-none"
+            animate={{ scale: [1, 1.12, 1] }}
+            transition={{ duration: 7, repeat: Infinity }}
+          />
+          <motion.div
+            className="absolute bottom-0 left-20 w-48 h-48 bg-violet-500/15 rounded-full blur-3xl pointer-events-none"
+            animate={{ scale: [1, 1.08, 1] }}
+            transition={{ duration: 9, repeat: Infinity, delay: 1 }}
+          />
+          <div className="relative z-10 flex items-start justify-between gap-4">
+            <div>
+              <div className="inline-flex items-center gap-2 bg-white/10 border border-white/20 rounded-full px-3 py-1.5 mb-3">
+                <Bell className="w-3.5 h-3.5 text-indigo-300" />
+                <span className="text-white/80 text-xs font-semibold">{t('student.announcements.announcements')}</span>
+              </div>
+              <h1 className="text-3xl font-black text-white">
                 {t('student.announcements.announcements')}
               </h1>
-              {urgentCount > 0 && (
-                <span className="inline-flex items-center gap-1 px-2.5 py-1 bg-rose-100 text-rose-700 rounded-full text-xs font-bold animate-pulse">
-                  <Zap className="w-3 h-3" />
-                  {urgentCount} {t('student.announcements.urgent')}
-                </span>
-              )}
+              <p className="text-slate-400 text-sm mt-1">
+                {loading
+                  ? t('student.announcements.loading')
+                  : announcements.length === 0
+                    ? t('student.announcements.noAnnouncementsAtMoment')
+                    : t('student.announcements.announcementCount', { count: announcements.length }) + t('student.announcements.fromYourSchool')}
+              </p>
             </div>
-            <p className="text-slate-500 text-sm">
-              {loading
-                ? t('student.announcements.loading')
-                : announcements.length === 0
-                  ? t('student.announcements.noAnnouncementsAtMoment')
-                  : t('student.announcements.announcementCount', { count: announcements.length }) + t('student.announcements.fromYourSchool')}
-            </p>
+            {urgentCount > 0 && (
+              <div className="shrink-0 flex items-center gap-1.5 bg-rose-500/20 border border-rose-400/30 text-rose-300 text-xs font-bold px-3 py-2 rounded-xl animate-pulse">
+                <Zap className="w-3.5 h-3.5" />
+                {urgentCount} {t('student.announcements.urgent')}
+              </div>
+            )}
           </div>
-        </div>
+        </motion.div>
 
         {/* Filters */}
         <div className="flex flex-wrap gap-3">
