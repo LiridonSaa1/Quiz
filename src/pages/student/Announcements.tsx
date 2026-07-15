@@ -54,7 +54,7 @@ interface Announcement {
 const PRIORITY_CFG: Record<
   Priority,
   {
-    label: string;
+    tKey: string;
     headerGradient: string;
     border: string;
     icon: React.ElementType;
@@ -63,7 +63,7 @@ const PRIORITY_CFG: Record<
   }
 > = {
   normal: {
-    label: "Normal",
+    tKey: "student.announcements.priorityNormal",
     headerGradient: "from-slate-600 to-slate-700",
     border: "border-slate-200",
     icon: Info,
@@ -71,7 +71,7 @@ const PRIORITY_CFG: Record<
     glow: "",
   },
   important: {
-    label: "Important",
+    tKey: "student.announcements.priorityImportant",
     headerGradient: "from-amber-500 to-orange-600",
     border: "border-amber-200",
     icon: AlertTriangle,
@@ -79,7 +79,7 @@ const PRIORITY_CFG: Record<
     glow: "shadow-amber-100",
   },
   urgent: {
-    label: "Urgent",
+    tKey: "student.announcements.priorityUrgent",
     headerGradient: "from-rose-500 to-red-600",
     border: "border-rose-200",
     icon: Zap,
@@ -88,22 +88,22 @@ const PRIORITY_CFG: Record<
   },
 };
 
-const ANN_TYPE_CFG: Record<AnnType, { label: string; emoji: string }> = {
-  general: { label: "General", emoji: "📢" },
-  holiday: { label: "School Holiday", emoji: "🏖️" },
-  religious_holiday: { label: "Religious Holiday", emoji: "🌙" },
-  teacher_absence: { label: "Teacher Absence", emoji: "🙏" },
-  class_cancelled: { label: "Class Cancelled", emoji: "❌" },
-  exam_reminder: { label: "Exam Reminder", emoji: "📝" },
-  homework_reminder: { label: "Homework Reminder", emoji: "📚" },
-  emergency: { label: "Emergency", emoji: "🚨" },
-  event: { label: "Event", emoji: "🎉" },
+const ANN_TYPE_CFG: Record<AnnType, { tKey: string; emoji: string }> = {
+  general:           { tKey: "student.announcements.typeGeneral",          emoji: "📢" },
+  holiday:           { tKey: "student.announcements.typeHoliday",          emoji: "🏖️" },
+  religious_holiday: { tKey: "student.announcements.typeReligiousHoliday", emoji: "🌙" },
+  teacher_absence:   { tKey: "student.announcements.typeTeacherAbsence",   emoji: "🙏" },
+  class_cancelled:   { tKey: "student.announcements.typeClassCancelled",   emoji: "❌" },
+  exam_reminder:     { tKey: "student.announcements.typeExamReminder",     emoji: "📝" },
+  homework_reminder: { tKey: "student.announcements.typeHomeworkReminder", emoji: "📚" },
+  emergency:         { tKey: "student.announcements.typeEmergency",        emoji: "🚨" },
+  event:             { tKey: "student.announcements.typeEvent",            emoji: "🎉" },
 };
 
-const AUD_CFG: Record<Audience, { label: string; icon: React.ElementType }> = {
-  all: { label: "Everyone", icon: Globe },
-  students: { label: "Students", icon: GraduationCap },
-  teachers: { label: "Teachers", icon: GraduationCap },
+const AUD_CFG: Record<Audience, { tKey: string; icon: React.ElementType }> = {
+  all:      { tKey: "student.announcements.audienceAll",      icon: Globe },
+  students: { tKey: "student.announcements.audienceStudents", icon: GraduationCap },
+  teachers: { tKey: "student.announcements.audienceTeachers", icon: GraduationCap },
 };
 
 function AnnouncementModal({
@@ -113,6 +113,7 @@ function AnnouncementModal({
   ann: Announcement;
   onClose: () => void;
 }) {
+  const { t } = useTranslation();
   const priCfg = PRIORITY_CFG[ann.priority];
   const typeCfg = ANN_TYPE_CFG[ann.ann_type || "general"];
   const PriIcon = priCfg.icon;
@@ -193,12 +194,12 @@ function AnnouncementModal({
           {ann.expires_at && !isExpired && (
             <span className="flex items-center gap-1 text-amber-500">
               <Calendar className="w-3.5 h-3.5" />
-              Expires {format(new Date(ann.expires_at), "MMM d, yyyy")}
+              {t('student.announcements.expires')} {format(new Date(ann.expires_at), "MMM d, yyyy")}
             </span>
           )}
           {isExpired && (
             <span className="px-2 py-0.5 rounded-full bg-slate-100 text-slate-400">
-              Expired
+              {t('student.announcements.expired')}
             </span>
           )}
         </div>
@@ -214,6 +215,7 @@ function AnnouncementCard({
   ann: Announcement;
   onClick: () => void;
 }) {
+  const { t } = useTranslation();
   const priCfg = PRIORITY_CFG[ann.priority];
   const typeCfg = ANN_TYPE_CFG[ann.ann_type || "general"];
   const PriIcon = priCfg.icon;
@@ -251,11 +253,11 @@ function AnnouncementCard({
               )}
             >
               <PriIcon className="w-2.5 h-2.5" />
-              {priCfg.label}
+              {t(priCfg.tKey)}
             </span>
             {isExpired && (
               <span className="px-1.5 py-0.5 rounded-full bg-white/10 text-white/60 text-xs line-through">
-                Expired
+                {t('student.announcements.expired')}
               </span>
             )}
           </div>
@@ -284,7 +286,7 @@ function AnnouncementCard({
           {ann.ann_type && ann.ann_type !== "general" && (
             <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-xs font-medium bg-indigo-50 text-indigo-600">
               <Tag className="w-2.5 h-2.5" />
-              {typeCfg.label}
+              {t(typeCfg.tKey)}
             </span>
           )}
         </div>

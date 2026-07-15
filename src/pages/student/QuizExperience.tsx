@@ -1,4 +1,5 @@
 import React, { useEffect, useState, useCallback, useRef } from 'react';
+import { useTranslation } from 'react-i18next';
 import { useParams, useNavigate } from 'react-router-dom';
 import {
   Clock, ChevronLeft, ChevronRight, Send, CheckCircle2, BookOpen,
@@ -74,7 +75,7 @@ function AudioPlayer({ url }: { url: string }) {
         {playing ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4 ml-0.5" />}
       </button>
       <div className="flex-1">
-        <div className="text-xs font-semibold text-amber-700 mb-1">Audio</div>
+        <div className="text-xs font-semibold text-amber-700 mb-1">{t('student.quizExperience.audioLabel')}</div>
         <div className="relative h-1.5 rounded-full bg-amber-200 cursor-pointer" onClick={(e) => {
           if (!audioRef.current || !duration) return;
           const rect = e.currentTarget.getBoundingClientRect();
@@ -232,6 +233,7 @@ function QuestionItem({
 }
 
 export default function QuizExperience() {
+  const { t } = useTranslation();
   const { quizId } = useParams<{ quizId: string }>();
   const navigate = useNavigate();
 
@@ -507,7 +509,7 @@ export default function QuizExperience() {
           <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-red-50">
             <AlertCircle className="h-7 w-7 text-red-500" />
           </div>
-          <h1 className="text-xl font-bold text-slate-900">Quiz Unavailable</h1>
+          <h1 className="text-xl font-bold text-slate-900">{t('student.quizExperience.unavailable')}</h1>
           <p className="mt-2 text-sm text-slate-500">{loadError}</p>
           <button
             onClick={() => navigate('/student/quizzes')}
@@ -535,7 +537,7 @@ export default function QuizExperience() {
         </button>
 
         <div className="flex-1 min-w-0">
-          <p className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider">Quiz</p>
+          <p className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider">{t('student.quizExperience.headerQuiz')}</p>
           <p className="text-sm font-bold text-slate-800 truncate">{quiz?.title}</p>
         </div>
 
@@ -543,7 +545,7 @@ export default function QuizExperience() {
         <div className="hidden sm:flex items-center gap-2 text-xs text-slate-600">
           <span className="font-bold text-indigo-700">{answeredCount}</span>
           <span className="text-slate-400">/</span>
-          <span>{scorableTotal} answered</span>
+          <span>{scorableTotal} {t('student.quizExperience.answeredOf')}</span>
         </div>
 
         {/* Timer */}
@@ -563,7 +565,7 @@ export default function QuizExperience() {
           className="flex items-center gap-2 px-4 py-2 rounded-xl bg-indigo-600 text-white text-sm font-bold hover:bg-indigo-700 transition-colors disabled:opacity-50 shrink-0"
         >
           <Send className="w-4 h-4" />
-          <span className="hidden sm:inline">Submit</span>
+          <span className="hidden sm:inline">{t('student.quizExperience.submitButton')}</span>
         </button>
       </header>
 
@@ -581,7 +583,7 @@ export default function QuizExperience() {
         {/* LEFT SIDEBAR */}
         <aside className="w-64 xl:w-72 shrink-0 flex flex-col bg-slate-900 text-white overflow-y-auto">
           <div className="p-4 border-b border-white/10">
-            <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-1">Sections</p>
+            <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-1">{t('student.quizExperience.sectionsLabel')}</p>
             <div className="flex items-center gap-2 text-xs text-slate-400">
               <CircleDot className="w-3.5 h-3.5" />
               <span>{progressPct}% complete</span>

@@ -57,11 +57,11 @@ const readLocalCompletedLessonIds = (studentId: string, courseId: string): strin
 
 type FilterTab = 'all' | 'inprogress' | 'completed' | 'notstarted';
 
-const LEVEL_META: Record<string, { label: string; gradient: string; pattern: string; badge: string; icon: string }> = {
-  beginner:     { label: 'Beginner',      gradient: 'from-emerald-400 via-teal-500 to-cyan-500',       pattern: 'circles',   badge: 'bg-emerald-400/20 text-emerald-100 border-emerald-300/30', icon: '🌱' },
-  intermediate: { label: 'Intermediate',  gradient: 'from-blue-500 via-indigo-500 to-violet-500',       pattern: 'grid',      badge: 'bg-blue-400/20 text-blue-100 border-blue-300/30',         icon: '⚡' },
-  advanced:     { label: 'Advanced',      gradient: 'from-violet-500 via-purple-500 to-fuchsia-500',    pattern: 'dots',      badge: 'bg-violet-400/20 text-violet-100 border-violet-300/30',   icon: '🔥' },
-  proficiency:  { label: 'Proficiency',   gradient: 'from-rose-500 via-pink-500 to-orange-400',         pattern: 'wave',      badge: 'bg-rose-400/20 text-rose-100 border-rose-300/30',         icon: '🏆' },
+const LEVEL_META: Record<string, { tKey: string; gradient: string; pattern: string; badge: string; icon: string }> = {
+  beginner:     { tKey: 'student.courses.levelBeginner',     gradient: 'from-emerald-400 via-teal-500 to-cyan-500',       pattern: 'circles',   badge: 'bg-emerald-400/20 text-emerald-100 border-emerald-300/30', icon: '🌱' },
+  intermediate: { tKey: 'student.courses.levelIntermediate', gradient: 'from-blue-500 via-indigo-500 to-violet-500',       pattern: 'grid',      badge: 'bg-blue-400/20 text-blue-100 border-blue-300/30',         icon: '⚡' },
+  advanced:     { tKey: 'student.courses.levelAdvanced',     gradient: 'from-violet-500 via-purple-500 to-fuchsia-500',    pattern: 'dots',      badge: 'bg-violet-400/20 text-violet-100 border-violet-300/30',   icon: '🔥' },
+  proficiency:  { tKey: 'student.courses.levelProficiency',  gradient: 'from-rose-500 via-pink-500 to-orange-400',         pattern: 'wave',      badge: 'bg-rose-400/20 text-rose-100 border-rose-300/30',         icon: '🏆' },
 };
 
 const FALLBACK_GRADIENTS = [
@@ -76,7 +76,7 @@ function getMeta(level: string, index: number) {
   const key = (level || '').toLowerCase();
   if (LEVEL_META[key]) return LEVEL_META[key];
   const gradient = FALLBACK_GRADIENTS[index % FALLBACK_GRADIENTS.length];
-  return { label: level || 'Course', gradient, pattern: 'dots', badge: 'bg-white/20 text-white border-white/20', icon: '📚' };
+  return { tKey: '', gradient, pattern: 'dots', badge: 'bg-white/20 text-white border-white/20', icon: '📚', _rawLabel: level || 'Course' };
 }
 
 function CircleProgress({ pct }: { pct: number }) {
@@ -153,7 +153,7 @@ function CourseCard({
         <div className="absolute top-4 left-4 right-4 flex items-start justify-between">
           <span className={cn('inline-flex items-center gap-1.5 border text-xs font-bold px-2.5 py-1 rounded-xl backdrop-blur-sm', meta.badge)}>
             <span className="text-sm">{meta.icon}</span>
-            {meta.label}
+            {meta.tKey ? t(meta.tKey) : (meta as any)._rawLabel}
           </span>
           {isCompleted && (
             <span className="inline-flex items-center gap-1 bg-white/20 backdrop-blur-sm border border-white/30 text-white text-[10px] font-bold px-2.5 py-1 rounded-xl">
@@ -572,10 +572,10 @@ export default function StudentCourses() {
     : 0;
 
   const TABS: { id: FilterTab; label: string; icon: React.ElementType }[] = [
-    { id: 'all',        label: 'All Courses',  icon: BookOpen },
-    { id: 'inprogress', label: 'In Progress',  icon: Play },
-    { id: 'completed',  label: 'Completed',    icon: CheckCircle2 },
-    { id: 'notstarted', label: 'Not Started',  icon: Lock },
+    { id: 'all',        label: t('student.courses.filterAll'),       icon: BookOpen },
+    { id: 'inprogress', label: t('student.courses.filterInProgress'), icon: Play },
+    { id: 'completed',  label: t('student.courses.filterCompleted'),  icon: CheckCircle2 },
+    { id: 'notstarted', label: t('student.courses.filterNotStarted'), icon: Lock },
   ];
 
   return (
@@ -600,14 +600,14 @@ export default function StudentCourses() {
           <div className="relative flex flex-col sm:flex-row sm:items-center justify-between gap-6">
             <div>
               <div className="inline-flex items-center gap-2 bg-emerald-500/20 border border-emerald-400/30 text-emerald-300 text-xs font-bold px-3 py-1.5 rounded-full mb-4">
-                <Flame className="w-3.5 h-3.5" /> Keep learning!
+                <Flame className="w-3.5 h-3.5" /> {t('student.courses.keepLearning')}
               </div>
               <h1 className="text-2xl sm:text-3xl font-black text-white leading-tight">
-                Welcome back,<br />
+                {t('student.courses.welcomeBack')},<br />
                 <span className="text-emerald-400">{loading ? '...' : firstName}</span> 👋
               </h1>
               <p className="text-slate-400 text-sm mt-2">
-                You're enrolled in <span className="text-white font-bold">{courses.length} course{courses.length !== 1 ? 's' : ''}</span>. Keep pushing forward!
+                {t('student.courses.enrolledCount', { count: courses.length, plural: courses.length !== 1 ? 's' : '' })}
               </p>
             </div>
 
@@ -633,10 +633,10 @@ export default function StudentCourses() {
               </div>
               <div>
                 <div className="text-white font-black text-lg">{counts.completed}</div>
-                <div className="text-slate-400 text-xs font-medium">Completed</div>
+                <div className="text-slate-400 text-xs font-medium">{t('student.courses.completedLabel')}</div>
                 <div className="h-px bg-white/10 my-2" />
                 <div className="text-white font-black text-lg">{counts.inprogress}</div>
-                <div className="text-slate-400 text-xs font-medium">In Progress</div>
+                <div className="text-slate-400 text-xs font-medium">{t('student.courses.inProgressLabel')}</div>
               </div>
             </div>
           </div>
@@ -644,9 +644,9 @@ export default function StudentCourses() {
           {/* Quick stat bar */}
           <div className="relative mt-6 pt-6 border-t border-white/10 grid grid-cols-3 sm:grid-cols-3 gap-4">
             {[
-              { icon: Trophy, label: 'Overall Progress', value: `${totalPct}%`, color: 'text-amber-400' },
-              { icon: GraduationCap, label: 'Active Courses', value: courses.length, color: 'text-emerald-400' },
-              { icon: Star, label: 'Quizzes Attempted', value: courses.reduce((a, c) => a + c.attemptedQuizzes, 0), color: 'text-violet-400' },
+              { icon: Trophy, label: t('student.courses.overallProgress'), value: `${totalPct}%`, color: 'text-amber-400' },
+              { icon: GraduationCap, label: t('student.courses.activeCourses'), value: courses.length, color: 'text-emerald-400' },
+              { icon: Star, label: t('student.courses.quizzesAttempted'), value: courses.reduce((a, c) => a + c.attemptedQuizzes, 0), color: 'text-violet-400' },
             ].map(s => (
               <div key={s.label} className="flex items-center gap-3">
                 <div className="w-8 h-8 bg-white/10 rounded-xl flex items-center justify-center shrink-0">
@@ -668,7 +668,7 @@ export default function StudentCourses() {
             <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
             <input
               type="text"
-              placeholder="Search your courses..."
+              placeholder={t('student.courses.searchPlaceholder')}
               value={search}
               onChange={e => setSearch(e.target.value)}
               className="w-full pl-10 pr-4 py-2.5 bg-white border border-slate-200 rounded-2xl text-sm text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-500 shadow-sm transition-all"
@@ -712,7 +712,7 @@ export default function StudentCourses() {
               <BookOpen className="w-9 h-9 text-emerald-400" />
             </div>
             <h3 className="text-lg font-black text-slate-900 mb-2">
-              {search ? 'No courses match your search' : 'No courses here yet'}
+              {search ? t('student.courses.noCoursesMatch') : t('student.courses.noCoursesYet')}
             </h3>
             <p className="text-slate-400 text-sm max-w-sm leading-relaxed">
               {search

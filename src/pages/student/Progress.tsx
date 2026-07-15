@@ -260,7 +260,7 @@ export default function StudentProgress() {
                     <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
                     <XAxis dataKey="date" tick={{ fontSize: 10, fill: '#94a3b8' }} tickLine={false} axisLine={false} />
                     <YAxis domain={[0, 100]} tick={{ fontSize: 10, fill: '#94a3b8' }} tickLine={false} axisLine={false} tickFormatter={v => `${v}%`} />
-                    <Tooltip formatter={(v: any) => [`${v ?? '—'}%`, 'Score']} contentStyle={{ borderRadius: 12, border: '1px solid #e2e8f0', fontSize: 12 }} />
+                    <Tooltip formatter={(v: any) => [`${v ?? '—'}%`, t('student.progress.chartScoreLabel')]} contentStyle={{ borderRadius: 12, border: '1px solid #e2e8f0', fontSize: 12 }} />
                     <Area type="monotone" dataKey="score" stroke="#6366f1" strokeWidth={2} fill="url(#scoreGrad)" connectNulls />
                   </AreaChart>
                 </ResponsiveContainer>
@@ -280,8 +280,8 @@ export default function StudentProgress() {
                   {courseStats.every(c => c.avg === 0) && completed.length === 0 ? (
                     <div className="flex flex-col items-center justify-center h-[180px] text-slate-400 gap-2">
                       <BarChart2 className="w-8 h-8 opacity-25" />
-                      <p className="text-sm font-medium">No quiz scores yet</p>
-                      <p className="text-xs text-center max-w-[200px]">Complete quizzes in your courses to see your average scores here</p>
+                      <p className="text-sm font-medium">{t('student.progress.noScores')}</p>
+                      <p className="text-xs text-center max-w-[200px]">{t('student.progress.completeQuizzesMsg')}</p>
                     </div>
                   ) : (
                     <ResponsiveContainer width="100%" height={220}>
@@ -289,7 +289,7 @@ export default function StudentProgress() {
                         <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" vertical={false} />
                         <XAxis dataKey="name" tick={{ fontSize: 10, fill: '#94a3b8' }} tickLine={false} axisLine={false} />
                         <YAxis domain={[0, 100]} tick={{ fontSize: 10, fill: '#94a3b8' }} tickLine={false} axisLine={false} tickFormatter={v => `${v}%`} />
-                        <Tooltip formatter={(v: any) => [`${v}%`, 'Avg Score']} contentStyle={{ borderRadius: 12, border: '1px solid #e2e8f0', fontSize: 12 }} />
+                        <Tooltip formatter={(v: any) => [`${v}%`, t('student.progress.chartAvgScoreLabel')]} contentStyle={{ borderRadius: 12, border: '1px solid #e2e8f0', fontSize: 12 }} />
                         <Bar dataKey="avg" radius={[6, 6, 0, 0]}>
                           <LabelList dataKey="avg" position="top" formatter={(v: any) => `${v}%`} style={{ fontSize: 11, fontWeight: 600, fill: '#475569' }} />
                           {courseStats.map((_, i) => <Cell key={i} fill={CHART_COLORS[i % CHART_COLORS.length]} />)}
@@ -313,7 +313,7 @@ export default function StudentProgress() {
                           <div className="flex items-center justify-between mb-1">
                             <span className="text-xs font-semibold text-slate-700 truncate max-w-[60%]">{c.name}</span>
                             <span className="text-xs text-slate-500 shrink-0 ml-2">
-                              {c.completedLessons}/{c.totalLessons > 0 ? c.totalLessons : '?'} lessons
+                              {c.completedLessons}/{c.totalLessons > 0 ? c.totalLessons : '?'} {t('student.progress.lessonsLabel')}
                             </span>
                           </div>
                           <div className="h-2 bg-slate-100 rounded-full overflow-hidden">

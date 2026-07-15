@@ -485,7 +485,7 @@ export default function StudentLessonDetail() {
                   <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-blue-600 to-indigo-700 flex items-center justify-center shrink-0">
                     <Globe className="w-4 h-4 text-white" />
                   </div>
-                  <span className="text-sm font-bold text-slate-800">Headway Resources</span>
+                  <span className="text-sm font-bold text-slate-800">{t('student.lessons.headwayResources')}</span>
                 </div>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   {sections.link.filter(item => String(item.text_content || '').includes('elt.oup.com')).map((item) => {
@@ -519,7 +519,7 @@ export default function StudentLessonDetail() {
                           <p className="text-sm font-bold text-slate-800 truncate">{item.title || 'OUP Resource'}</p>
                           {item.description && <p className="text-xs text-slate-500 mt-0.5 truncate">{item.description}</p>}
                           <p className="text-xs text-indigo-600 mt-1 flex items-center gap-1">
-                            <ExternalLink className="w-3 h-3" /> Open on OUP
+                            <ExternalLink className="w-3 h-3" /> {t('student.lessons.openOnOup')}
                           </p>
                         </div>
                       </a>
@@ -536,7 +536,7 @@ export default function StudentLessonDetail() {
                   <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-slate-500 to-slate-700 flex items-center justify-center shrink-0">
                     <ExternalLink className="w-4 h-4 text-white" />
                   </div>
-                  <span className="text-sm font-bold text-slate-800">Links</span>
+                  <span className="text-sm font-bold text-slate-800">{t('student.lessons.linksLabel')}</span>
                 </div>
                 <div className="flex flex-col gap-2">
                   {sections.link.filter(item => !String(item.text_content || '').includes('elt.oup.com')).map((item) => {
@@ -573,7 +573,7 @@ export default function StudentLessonDetail() {
                     <Music className="w-4 h-4 text-white" />
                   </div>
                   <div>
-                    <p className="text-sm font-bold text-slate-800">Lesson Resources</p>
+                    <p className="text-sm font-bold text-slate-800">{t('student.lessons.lessonResources')}</p>
                     <p className="text-xs text-slate-400">{hwContents.length} {hwContents.length === 1 ? 'file' : 'files'} — Audio &amp; Video</p>
                   </div>
                 </div>

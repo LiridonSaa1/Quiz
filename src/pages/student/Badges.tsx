@@ -11,14 +11,15 @@ interface Badge {
   color: string; rarity: string; earned: boolean; earnedAt: string | null;
 }
 
-const RARITY_CONFIG: Record<string, { label: string; ring: string; glow: string }> = {
-  common:   { label: 'Common',   ring: 'ring-slate-200',   glow: '' },
-  uncommon: { label: 'Uncommon', ring: 'ring-blue-300',    glow: 'shadow-blue-200' },
-  rare:     { label: 'Rare',     ring: 'ring-violet-400',  glow: 'shadow-violet-200' },
-  epic:     { label: 'Epic',     ring: 'ring-amber-400',   glow: 'shadow-amber-200' },
+const RARITY_CONFIG: Record<string, { tKey: string; ring: string; glow: string }> = {
+  common:   { tKey: 'student.badges.rarityCommon',   ring: 'ring-slate-200',   glow: '' },
+  uncommon: { tKey: 'student.badges.rarityUncommon', ring: 'ring-blue-300',    glow: 'shadow-blue-200' },
+  rare:     { tKey: 'student.badges.rarityRare',     ring: 'ring-violet-400',  glow: 'shadow-violet-200' },
+  epic:     { tKey: 'student.badges.rarityEpic',     ring: 'ring-amber-400',   glow: 'shadow-amber-200' },
 };
 
 function BadgeCard({ badge, index }: { badge: Badge; index: number }) {
+  const { t } = useTranslation();
   const rarity = RARITY_CONFIG[badge.rarity] ?? RARITY_CONFIG.common;
   return (
     <motion.div
@@ -60,7 +61,7 @@ function BadgeCard({ badge, index }: { badge: Badge; index: number }) {
           badge.rarity === 'rare' ? 'bg-violet-100 text-violet-700' :
           badge.rarity === 'uncommon' ? 'bg-blue-100 text-blue-700' :
           'bg-slate-100 text-slate-600'
-        )}>{rarity.label}</span>
+        )}>{t(rarity.tKey)}</span>
         <h3 className={cn('font-bold text-sm', badge.earned ? 'text-slate-900' : 'text-slate-500')}>
           {badge.name}
         </h3>
@@ -68,7 +69,7 @@ function BadgeCard({ badge, index }: { badge: Badge; index: number }) {
       </div>
 
       {!badge.earned && (
-        <p className="mt-3 text-xs font-semibold text-slate-400">Locked</p>
+        <p className="mt-3 text-xs font-semibold text-slate-400">{t('student.badges.lockedLabel')}</p>
       )}
     </motion.div>
   );

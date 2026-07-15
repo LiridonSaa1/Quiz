@@ -437,7 +437,7 @@ export default function QuizResults() {
             <div className="grid grid-cols-3 divide-x divide-amber-100 px-1 py-2">
               {/* Grade */}
               <div className="flex flex-col items-center py-2 px-3">
-                <span className="text-[10px] font-semibold text-amber-500 uppercase tracking-wider">Grade</span>
+                <span className="text-[10px] font-semibold text-amber-500 uppercase tracking-wider">{t('student.quizResults.gradeLabel')}</span>
                 <span className="text-2xl font-black text-amber-800 leading-tight">
                   {certData?.grade ?? (
                     scorePercent >= 97 ? 'A+' : scorePercent >= 93 ? 'A' : scorePercent >= 90 ? 'A-' :
@@ -448,7 +448,7 @@ export default function QuizResults() {
               </div>
               {/* Level */}
               <div className="flex flex-col items-center py-2 px-3">
-                <span className="text-[10px] font-semibold text-amber-500 uppercase tracking-wider">Level</span>
+                <span className="text-[10px] font-semibold text-amber-500 uppercase tracking-wider">{t('student.quizResults.levelLabel')}</span>
                 <span className="text-sm font-bold text-amber-800 text-center leading-snug mt-0.5">
                   {certData?.level ?? (
                     scorePercent >= 97 ? 'Outstanding' : scorePercent >= 90 ? 'Excellent' :
@@ -459,7 +459,7 @@ export default function QuizResults() {
               </div>
               {/* Points */}
               <div className="flex flex-col items-center py-2 px-3">
-                <span className="text-[10px] font-semibold text-amber-500 uppercase tracking-wider">Points</span>
+                <span className="text-[10px] font-semibold text-amber-500 uppercase tracking-wider">{t('student.quizResults.pointsLabel')}</span>
                 <span className="text-sm font-bold text-amber-800 text-center leading-snug mt-0.5">
                   {certData?.earnedPoints != null && certData?.totalPoints != null
                     ? `${certData.earnedPoints} / ${certData.totalPoints}`
@@ -515,7 +515,7 @@ export default function QuizResults() {
               {tab === 'overview'
                 ? t('student.quizResults.overviewTab')
                 : tab === 'sections'
-                  ? <span className="flex items-center gap-1.5"><Layers className="w-3.5 h-3.5" />Sections</span>
+                  ? <span className="flex items-center gap-1.5"><Layers className="w-3.5 h-3.5" />{t('student.quizResults.sectionsTab')}</span>
                   : t('student.quizResults.reviewTab')}
             </button>
           ))}
@@ -665,8 +665,8 @@ export default function QuizResults() {
                 return (
                   <div className="bg-slate-50 rounded-2xl border border-slate-200 px-5 py-4 flex items-center gap-4">
                     <div className="flex-1">
-                      <div className="text-sm font-bold text-slate-600">Other questions</div>
-                      <div className="text-xs text-slate-400">{unsectioned.length} questions not assigned to a section</div>
+                      <div className="text-sm font-bold text-slate-600">{t('student.quizResults.otherQuestionsLabel')}</div>
+                      <div className="text-xs text-slate-400">{unsectioned.length} {t('student.quizResults.questionsNotInSection')}</div>
                     </div>
                     {usPct !== null && (
                       <div className="text-right">
