@@ -14221,6 +14221,115 @@ Content:\n"""${clipped}"""`;
   // Student profile: get and update profile + stats.
   // Returns quiz→course mapping for the progress page, using poolQuery so it
   // works even when public.quizzes is not accessible via the Supabase anon key.
+  // Create attendance record + optionally email parent
+  app.post('/api/teacher/attendance', async (req, res) => {
+    try {
+      const caller = await assertAuthenticated(req, res);
+      if (!caller) return;
+      if (caller.role !== 'teacher' && caller.role !== 'admin') {
+        return res.status(403).json({ error: 'Forbidden' });
+      }
+
+      const { class_id, student_id, date, status, notes, notifyParents, emailLang } = req.body || {};
+      if (!student_id) return res.status(400).json({ error: 'student_id is required' });
+      if (!date) return res.status(400).json({ error: 'date is required' });
+
+      const payload: Record<string, unknown> = {
+        class_id: class_id || null,
+        student_id,
+        date,
+        status: status || 'present',
+        notes: notes || null,
+        marked_by: caller.userId,
+        created_at: new Date().toISOString(),
+      };
+
+      const { data: inserted, error: insertErr } = await supabaseAdmin
+        .from('attendance')
+        .insert(payload)
+        .select()
+        .single();
+      if (insertErr) throw insertErr;
+
+      // Optionally notify parent via email
+      if (notifyParents && isEmailConfigured()) {
+        try {
+          const { data: profile } = await supabaseAdmin
+            .from('profiles')
+            .select('display_name, parent_email')
+            .eq('id', student_id)
+            .single();
+
+          const parentEmail = (profile as any)?.parent_email;
+          const studentName = (profile as any)?.display_name || student_id;
+
+          if (parentEmail) {
+            const isSq = (emailLang || 'sq') === 'sq';
+            const formattedDate = new Date(date).toLocaleDateString(
+              isSq ? 'sq-AL' : 'en-US',
+              { day: '2-digit', month: 'long', year: 'numeric' }
+            );
+            const statusLabels: Record<string, { sq: string; en: string }> = {
+              present:  { sq: 'Prezent',      en: 'Present' },
+              absent:   { sq: 'Mungon',       en: 'Absent'  },
+              late:     { sq: 'Me vonesë',    en: 'Late'    },
+              excused:  { sq: 'Arsyetuar',    en: 'Excused' },
+            };
+            const statusLabel = isSq
+              ? (statusLabels[status]?.sq || status)
+              : (statusLabels[status]?.en || status);
+
+            const subject = isSq
+              ? `Njoftim Prezence — ${studentName}`
+              : `Attendance Notification — ${studentName}`;
+
+            const htmlContent = isSq ? `
+<!DOCTYPE html><html><head><meta charset="utf-8"/></head><body style="font-family:sans-serif;color:#1e293b;max-width:520px;margin:0 auto;padding:24px">
+  <div style="background:linear-gradient(135deg,#6366f1,#8b5cf6);border-radius:16px;padding:24px 28px;margin-bottom:24px">
+    <h1 style="color:#fff;margin:0;font-size:20px;font-weight:700">Njoftim Prezence</h1>
+    <p style="color:rgba(255,255,255,0.8);margin:6px 0 0;font-size:13px">${formattedDate}</p>
+  </div>
+  <p style="font-size:15px">Të nderuar prindër të <strong>${studentName}</strong>,</p>
+  <p style="font-size:15px">Ju informojmë se prezenca e fëmijës suaj për datën <strong>${formattedDate}</strong> është shënuar si:</p>
+  <div style="background:#f8fafc;border-left:4px solid #6366f1;border-radius:8px;padding:16px 20px;margin:20px 0">
+    <span style="font-size:18px;font-weight:700;color:#4f46e5">${statusLabel}</span>
+  </div>
+  ${notes ? `<p style="font-size:14px;color:#64748b"><strong>Shënime:</strong> ${notes}</p>` : ''}
+  <p style="font-size:13px;color:#94a3b8;margin-top:32px;border-top:1px solid #e2e8f0;padding-top:16px">Ky email u dërgua automatikisht nga sistemi QuizMaster.</p>
+</body></html>` : `
+<!DOCTYPE html><html><head><meta charset="utf-8"/></head><body style="font-family:sans-serif;color:#1e293b;max-width:520px;margin:0 auto;padding:24px">
+  <div style="background:linear-gradient(135deg,#6366f1,#8b5cf6);border-radius:16px;padding:24px 28px;margin-bottom:24px">
+    <h1 style="color:#fff;margin:0;font-size:20px;font-weight:700">Attendance Notification</h1>
+    <p style="color:rgba(255,255,255,0.8);margin:6px 0 0;font-size:13px">${formattedDate}</p>
+  </div>
+  <p style="font-size:15px">Dear parent of <strong>${studentName}</strong>,</p>
+  <p style="font-size:15px">We are informing you that your child's attendance for <strong>${formattedDate}</strong> has been marked as:</p>
+  <div style="background:#f8fafc;border-left:4px solid #6366f1;border-radius:8px;padding:16px 20px;margin:20px 0">
+    <span style="font-size:18px;font-weight:700;color:#4f46e5">${statusLabel}</span>
+  </div>
+  ${notes ? `<p style="font-size:14px;color:#64748b"><strong>Notes:</strong> ${notes}</p>` : ''}
+  <p style="font-size:13px;color:#94a3b8;margin-top:32px;border-top:1px solid #e2e8f0;padding-top:16px">This email was sent automatically by QuizMaster.</p>
+</body></html>`;
+
+            const textContent = isSq
+              ? `Prezenca e ${studentName} për datën ${formattedDate}: ${statusLabel}${notes ? `\nShënime: ${notes}` : ''}`
+              : `Attendance for ${studentName} on ${formattedDate}: ${statusLabel}${notes ? `\nNotes: ${notes}` : ''}`;
+
+            await sendEmail({ to: parentEmail, toName: isSq ? `Prindi i ${studentName}` : `Parent of ${studentName}`, subject, htmlContent, textContent })
+              .catch((e: any) => console.warn('[attendance] parent email failed:', e?.message));
+          }
+        } catch (emailErr: any) {
+          console.warn('[attendance] parent notify error:', emailErr?.message || emailErr);
+        }
+      }
+
+      return res.json({ success: true, record: inserted });
+    } catch (e: any) {
+      console.error('POST /api/teacher/attendance', e?.message || e);
+      return res.status(500).json({ error: e?.message || 'Failed to save attendance' });
+    }
+  });
+
   app.get('/api/student/progress-data', async (req, res) => {
     try {
       const caller = await assertAuthenticated(req, res);
