@@ -303,8 +303,8 @@ export default function TeacherProgress() {
   ];
 
   /* ── Render: class list ── */
-  if (!loading && !selectedClass) {
-    const noClasses = classCards.length === 0;
+  if (!selectedClass) {
+    const noClasses = !loading && classCards.length === 0;
 
     return (
       <TeacherLayout>
@@ -316,7 +316,13 @@ export default function TeacherProgress() {
           statsGridClassName="grid grid-cols-2 sm:grid-cols-4 gap-4"
           stats={classListStats}
         >
-        {noClasses ? (
+        {loading ? (
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
+              {Array(6).fill(0).map((_, i) => (
+                <div key={i} className="h-56 rounded-3xl bg-slate-100 animate-pulse" />
+              ))}
+            </div>
+          ) : noClasses ? (
             <div className="flex flex-col items-center justify-center py-24 text-center bg-white rounded-3xl border border-slate-100 shadow-sm">
               <div className="w-16 h-16 bg-indigo-50 rounded-3xl flex items-center justify-center mb-4">
                 <GraduationCap className="w-8 h-8 text-indigo-400" />
