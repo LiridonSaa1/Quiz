@@ -31,6 +31,12 @@ import { authFetch } from '../../lib/apiUrl';
 type TabFilter = 'all' | 'passed' | 'failed';
 type SortField = 'student' | 'quiz' | 'score' | 'date' | 'duration';
 
+interface UiClass {
+  id: string;
+  name: string;
+  studentIds: string[];
+}
+
 interface UiAttempt {
   id: string;
   quizId: string;
@@ -84,6 +90,8 @@ export default function TeacherResults() {
   const [search, setSearch] = useState(() => searchParams.get('student') || '');
   const [tab, setTab] = useState<TabFilter>('all');
   const [selectedQuiz, setSelectedQuiz] = useState('all');
+  const [selectedClass, setSelectedClass] = useState('all');
+  const [classes, setClasses] = useState<UiClass[]>([]);
   const [sortBy, setSortBy] = useState<SortField>('date');
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
 
@@ -110,6 +118,16 @@ export default function TeacherResults() {
         if (Array.isArray(json?.assignmentSubmissions) && json.assignmentSubmissions.length > 0) {
           setMainTab('assignments');
         }
+      }
+      // Load classes for filter
+      const clsRes = await authFetch('/api/teacher/classes');
+      if (clsRes.ok) {
+        const clsJson = await clsRes.json().catch(() => ({}));
+        setClasses((clsJson?.classes || []).map((c: any) => ({
+          id: String(c.id),
+          name: String(c.name || 'Class'),
+          studentIds: Array.isArray(c.student_ids) ? c.student_ids.map(String) : [],
+        })));
       }
     } catch (error: any) {
       toast.error(error?.message || 'Failed to load results');
@@ -207,6 +225,10 @@ export default function TeacherResults() {
     if (tab === 'passed') list = list.filter((a) => a.passed);
     if (tab === 'failed') list = list.filter((a) => !a.passed && a.status === 'completed');
     if (selectedQuiz !== 'all') list = list.filter((a) => a.quizId === selectedQuiz);
+    if (selectedClass !== 'all') {
+      const cls = classes.find((c) => c.id === selectedClass);
+      if (cls) list = list.filter((a) => cls.studentIds.includes(a.studentId));
+    }
     if (search.trim()) {
       const q = search.toLowerCase();
       list = list.filter((a) => {
@@ -532,6 +554,18 @@ export default function TeacherResults() {
                 {t('teacher.results.failed')} ({attempts.filter((a) => !a.passed && a.status === 'completed').length})
               </option>
             </select>
+            {classes.length > 0 && (
+              <select
+                value={selectedClass}
+                onChange={(e) => setSelectedClass(e.target.value)}
+                className={ADMIN_LIST_SELECT}
+              >
+                <option value="all">{t('teacher.results.allClasses')}</option>
+                {classes.map((c) => (
+                  <option key={c.id} value={c.id}>{c.name}</option>
+                ))}
+              </select>
+            )}
             {quizOptions.length > 0 && (
               <select
                 value={selectedQuiz}
@@ -557,8 +591,8 @@ export default function TeacherResults() {
             >
               <option value="date:desc">{t('teacher.results.newestFirst')}</option>
               <option value="date:asc">{t('teacher.results.oldestFirst')}</option>
-              <option value="score:desc">{t('teacher.results.scoreHighLow')}</option>
-              <option value="score:asc">{t('teacher.results.scoreLowHigh')}</option>
+              <option value="score:desc">{t('teacher.results.scoreHighToLow')}</option>
+              <option value="score:asc">{t('teacher.results.scoreLowToHigh')}</option>
               <option value="student:asc">{t('teacher.results.studentAZ')}</option>
               <option value="quiz:asc">{t('teacher.results.quizAZ')}</option>
             </select>
@@ -577,7 +611,7 @@ export default function TeacherResults() {
                 : 'text-slate-500 hover:text-slate-700',
             )}
           >
-            Quizzes {attempts.length > 0 && <span className="ml-1.5 text-xs text-slate-400">({attempts.length})</span>}
+            {t('teacher.results.quizzesTab')} {attempts.length > 0 && <span className="ml-1.5 text-xs text-slate-400">({attempts.length})</span>}
           </button>
           <button
             type="button"
@@ -589,7 +623,7 @@ export default function TeacherResults() {
                 : 'text-slate-500 hover:text-slate-700',
             )}
           >
-            Assignments {assignmentSubmissions.length > 0 && <span className="ml-1.5 text-xs text-slate-400">({assignmentSubmissions.length})</span>}
+            {t('teacher.results.assignmentsTab')} {assignmentSubmissions.length > 0 && <span className="ml-1.5 text-xs text-slate-400">({assignmentSubmissions.length})</span>}
           </button>
         </div>
 
@@ -602,9 +636,9 @@ export default function TeacherResults() {
             ) : assignmentSubmissions.length === 0 ? (
               <div className="flex flex-col items-center justify-center py-20 gap-2 text-slate-400">
                 <ClipboardList className="w-10 h-10 opacity-30" />
-                <p className="text-sm font-medium">No assignment submissions yet</p>
+                <p className="text-sm font-medium">{t('teacher.results.noSubmissionsYet')}</p>
                 <p className="text-xs text-slate-400 max-w-sm text-center">
-                  Assignment submissions from your students will appear here once they submit their work.
+                  {t('teacher.results.noSubmissionsDesc')}
                 </p>
               </div>
             ) : (
@@ -612,11 +646,11 @@ export default function TeacherResults() {
                 <table className="w-full text-sm">
                   <thead>
                     <tr className="border-b border-slate-100">
-                      <th className="text-left px-5 py-3.5 font-semibold text-slate-500 text-xs uppercase tracking-wide">Student</th>
-                      <th className="text-left px-5 py-3.5 font-semibold text-slate-500 text-xs uppercase tracking-wide">Assignment</th>
-                      <th className="text-left px-5 py-3.5 font-semibold text-slate-500 text-xs uppercase tracking-wide">Status</th>
-                      <th className="text-left px-5 py-3.5 font-semibold text-slate-500 text-xs uppercase tracking-wide">Grade</th>
-                      <th className="text-left px-5 py-3.5 font-semibold text-slate-500 text-xs uppercase tracking-wide">Submitted</th>
+                      <th className="text-left px-5 py-3.5 font-semibold text-slate-500 text-xs uppercase tracking-wide">{t('teacher.results.student')}</th>
+                      <th className="text-left px-5 py-3.5 font-semibold text-slate-500 text-xs uppercase tracking-wide">{t('teacher.results.assignmentCol')}</th>
+                      <th className="text-left px-5 py-3.5 font-semibold text-slate-500 text-xs uppercase tracking-wide">{t('teacher.results.statusCol')}</th>
+                      <th className="text-left px-5 py-3.5 font-semibold text-slate-500 text-xs uppercase tracking-wide">{t('teacher.results.gradeCol')}</th>
+                      <th className="text-left px-5 py-3.5 font-semibold text-slate-500 text-xs uppercase tracking-wide">{t('teacher.results.submittedCol')}</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -654,7 +688,7 @@ export default function TeacherResults() {
                             <td className="px-5 py-3.5">
                               {sub.grade != null
                                 ? <span className="font-bold text-slate-800">{sub.grade}%</span>
-                                : <span className="text-slate-400 text-xs">Not graded</span>
+                                : <span className="text-slate-400 text-xs">{t('teacher.results.notGraded')}</span>
                               }
                             </td>
                             <td className="px-5 py-3.5 text-xs text-slate-500">
@@ -668,7 +702,7 @@ export default function TeacherResults() {
                   </tbody>
                 </table>
                 <div className="px-5 py-3 border-t border-slate-100 text-xs text-slate-400">
-                  {assignmentSubmissions.length} submission{assignmentSubmissions.length !== 1 ? 's' : ''}
+                  {t('teacher.results.submissionsCount', { count: assignmentSubmissions.length })}
                 </div>
               </div>
             )}
@@ -737,7 +771,7 @@ export default function TeacherResults() {
                 <p className="text-xs text-slate-400 mb-4">{t('teacher.results.byAttemptVolume')}</p>
                 <div className="space-y-3">
                   {quizBreakdown.length === 0 ? (
-                    <p className="text-slate-400 text-sm text-center py-6">{t('teacher.results.noBreakdown')}</p>
+                    <p className="text-slate-400 text-sm text-center py-6">{t('teacher.results.noBreakdownYet')}</p>
                   ) : (
                     quizBreakdown.map((q, i) => (
                       <div key={q.id} className="flex items-center gap-3">
@@ -762,7 +796,7 @@ export default function TeacherResults() {
                                 style={{ width: `${Math.min(q.avgScore, 100)}%` }}
                               />
                             </div>
-                            <span className="text-[10px] text-slate-500 font-medium shrink-0">{q.avgScore}% {t('teacher.results.avg')}</span>
+                            <span className="text-[10px] text-slate-500 font-medium shrink-0">{q.avgScore}% {t('teacher.results.avg', 'avg')}</span>
                           </div>
                         </div>
                         <span className="text-xs font-bold text-slate-600 shrink-0">{q.count}</span>
@@ -788,9 +822,12 @@ export default function TeacherResults() {
                   <Layers className="w-4 h-4 text-violet-600" />
                 </div>
                 <div>
-                  <h2 className="text-base font-bold text-slate-900">Section Performance</h2>
+                  <h2 className="text-base font-bold text-slate-900">{t('teacher.results.sectionPerformance')}</h2>
                   <p className="text-xs text-slate-400">
-                    Class averages across {attempts.filter(a => a.quizId === selectedQuiz && a.status === 'completed').length} completed attempt(s) — {quizzes[selectedQuiz] || 'selected quiz'}
+                    {t('teacher.results.sectionPerfDesc', {
+                      count: attempts.filter(a => a.quizId === selectedQuiz && a.status === 'completed').length,
+                      quiz: quizzes[selectedQuiz] || '',
+                    })}
                   </p>
                 </div>
               </div>
@@ -840,7 +877,7 @@ export default function TeacherResults() {
                               <div className="text-xl font-black" style={{ color: barColor }}>
                                 {sec.avgPct}%
                               </div>
-                              <div className="text-[10px] text-slate-400">class avg</div>
+                              <div className="text-[10px] text-slate-400">{t('teacher.results.classAvg')}</div>
                             </div>
                           )}
                         </div>
@@ -864,17 +901,17 @@ export default function TeacherResults() {
                             <>
                               <span className="flex items-center gap-1">
                                 <CheckCircle2 className="w-3 h-3 text-emerald-500" />
-                                {sec.totalCorrect}/{sec.totalAnswered} correct
+                                {sec.totalCorrect}/{sec.totalAnswered} {t('teacher.results.correct')}
                               </span>
                               {sec.passRate !== null && (
                                 <span className="flex items-center gap-1 ml-auto">
                                   <Trophy className="w-3 h-3 text-amber-500" />
-                                  {sec.passRate}% pass rate
+                                  {sec.passRate}% {t('teacher.results.passRateLabel')}
                                 </span>
                               )}
                             </>
                           ) : (
-                            <span className="text-slate-400 italic">No attempts yet</span>
+                            <span className="text-slate-400 italic">{t('teacher.results.noAttemptsYet')}</span>
                           )}
                         </div>
                       </motion.div>
@@ -896,10 +933,10 @@ export default function TeacherResults() {
           ) : filtered.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-20 px-6 text-slate-400">
               <BarChart3 className="w-12 h-12 mb-3 opacity-30" />
-              <p className="font-medium text-slate-600">{t('teacher.results.noResults')}</p>
+              <p className="font-medium text-slate-600">{t('teacher.results.noResultsFound')}</p>
               <p className="text-sm mt-1 text-center max-w-md">
-                {search || tab !== 'all' || selectedQuiz !== 'all'
-                  ? t('teacher.results.adjustFilters')
+                {search || tab !== 'all' || selectedQuiz !== 'all' || selectedClass !== 'all'
+                  ? t('teacher.results.tryAdjustingFilters')
                   : t('teacher.results.resultsAppearWhen')}
               </p>
             </div>
@@ -919,7 +956,7 @@ export default function TeacherResults() {
                         : 'border-slate-200 bg-white text-slate-600 hover:border-indigo-100',
                     )}
                   >
-                    {col === 'student' ? t('teacher.results.columnStudent') : col === 'quiz' ? t('teacher.results.columnQuiz') : col === 'score' ? t('teacher.results.columnScore') : col === 'duration' ? t('teacher.results.columnTime') : t('teacher.results.columnDate')}
+                    {col === 'student' ? t('teacher.results.student') : col === 'quiz' ? t('teacher.results.quiz') : col === 'score' ? t('teacher.results.score') : col === 'duration' ? t('teacher.results.time') : t('teacher.results.date')}
                     <SortIcon col={col} />
                   </button>
                 ))}
@@ -1005,12 +1042,13 @@ export default function TeacherResults() {
                 <span>
                   {t('teacher.results.showing', { count: filtered.length, total: attempts.length })}
                 </span>
-                {(tab !== 'all' || selectedQuiz !== 'all' || search.trim()) && (
+                {(tab !== 'all' || selectedQuiz !== 'all' || selectedClass !== 'all' || search.trim()) && (
                   <button
                     type="button"
                     onClick={() => {
                       setTab('all');
                       setSelectedQuiz('all');
+                      setSelectedClass('all');
                       setSearch('');
                     }}
                     className="text-indigo-600 font-semibold hover:underline"
