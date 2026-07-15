@@ -16489,9 +16489,13 @@ ${shortContent}`;
       if (!caller) return;
       const { data: classRows } = await supabaseAdmin.from("classes").select("id").contains("student_ids", [caller.userId]);
       const myClassIds = (classRows || []).map((c) => c.id);
-      let query = supabaseAdmin.from("announcements").select("*, author:profiles!author_id(id,display_name,email)").eq("status", "published").in("target_audience", ["all", "students"]).order("created_at", { ascending: false });
-      const { data, error } = await query;
-      if (error) throw error;
+      const { data, error } = await supabaseAdmin.from("announcements").select("*, author:profiles!author_id(id,display_name,email)").eq("status", "published").in("target_audience", ["all", "students"]).order("created_at", { ascending: false });
+      if (error) {
+        if (/relation.*does not exist|does not exist/i.test(error.message)) {
+          return res.json({ success: true, announcements: [], classIds: myClassIds });
+        }
+        throw error;
+      }
       const now = /* @__PURE__ */ new Date();
       const visible = (data || []).filter((a) => {
         if (a.expires_at && new Date(a.expires_at) < now) return false;
@@ -16517,7 +16521,12 @@ ${shortContent}`;
   app.get("/api/admin/announcements", async (req, res) => {
     try {
       const { data, error } = await supabaseAdmin.from("announcements").select("*, author:profiles!author_id(id,display_name,email)").order("created_at", { ascending: false });
-      if (error) throw error;
+      if (error) {
+        if (/relation.*does not exist|does not exist/i.test(error.message)) {
+          return res.json({ success: true, announcements: [] });
+        }
+        throw error;
+      }
       res.json({ success: true, announcements: data });
     } catch (e) {
       res.status(500).json({ error: e.message });
@@ -16654,7 +16663,12 @@ ${shortContent}`;
       if (!caller) return;
       if (caller.role !== "teacher" && caller.role !== "admin") return res.status(403).json({ error: "Forbidden" });
       const { data, error } = await supabaseAdmin.from("announcements").select("*, author:profiles!author_id(id,display_name,email)").order("created_at", { ascending: false });
-      if (error) throw error;
+      if (error) {
+        if (/relation.*does not exist|does not exist/i.test(error.message)) {
+          return res.json({ success: true, announcements: [] });
+        }
+        throw error;
+      }
       res.json({ success: true, announcements: data });
     } catch (e) {
       res.status(500).json({ error: e.message });
@@ -18151,11 +18165,40 @@ async function runDiscussionMigration() {
 async function runAnnouncementColumnsMigration() {
   const dbUrl = process.env.DATABASE_URL;
   if (!dbUrl) return;
-  const attempts = [
+  const createSql = `
+    CREATE TABLE IF NOT EXISTS public.announcements (
+      id              uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+      title           text NOT NULL,
+      content         text NOT NULL DEFAULT '',
+      author_id       uuid,
+      target_audience text NOT NULL DEFAULT 'all',
+      priority        text NOT NULL DEFAULT 'normal',
+      status          text NOT NULL DEFAULT 'draft',
+      ann_type        text NOT NULL DEFAULT 'general',
+      scheduled_at    timestamptz NULL,
+      published_at    timestamptz NULL,
+      expires_at      timestamptz NULL,
+      created_at      timestamptz NOT NULL DEFAULT now(),
+      updated_at      timestamptz NULL
+    );
+    CREATE INDEX IF NOT EXISTS announcements_status_idx          ON public.announcements(status);
+    CREATE INDEX IF NOT EXISTS announcements_target_audience_idx ON public.announcements(target_audience);
+    CREATE INDEX IF NOT EXISTS announcements_created_at_idx      ON public.announcements(created_at DESC);
+  `;
+  try {
+    await poolQuery(createSql);
+    await poolQuery(`NOTIFY pgrst, 'reload schema'`).catch(() => {
+    });
+    console.log("[migration] announcements table ensured \u2713");
+    return;
+  } catch (err) {
+    console.warn("[migration] announcements table create attempt failed:", err?.message?.split("\n")[0]);
+  }
+  const alterAttempts = [
     `SET search_path TO public; ALTER TABLE announcements ADD COLUMN IF NOT EXISTS ann_type text NOT NULL DEFAULT 'general'; ALTER TABLE announcements ADD COLUMN IF NOT EXISTS scheduled_at timestamptz NULL;`,
     `ALTER TABLE public.announcements ADD COLUMN IF NOT EXISTS ann_type text NOT NULL DEFAULT 'general'; ALTER TABLE public.announcements ADD COLUMN IF NOT EXISTS scheduled_at timestamptz NULL;`
   ];
-  for (const sql of attempts) {
+  for (const sql of alterAttempts) {
     try {
       await poolQuery(sql);
       await poolQuery(`NOTIFY pgrst, 'reload schema'`).catch(() => {

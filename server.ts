@@ -17143,15 +17143,20 @@ Content:\n"""${clipped}"""`;
       const myClassIds = (classRows || []).map((c: { id: string }) => c.id);
 
       // Fetch published announcements visible to students
-      let query = supabaseAdmin
+      const { data, error } = await supabaseAdmin
         .from('announcements')
         .select('*, author:profiles!author_id(id,display_name,email)')
         .eq('status', 'published')
         .in('target_audience', ['all', 'students'])
         .order('created_at', { ascending: false });
 
-      const { data, error } = await query;
-      if (error) throw error;
+      // Gracefully handle missing table
+      if (error) {
+        if (/relation.*does not exist|does not exist/i.test(error.message)) {
+          return res.json({ success: true, announcements: [], classIds: myClassIds });
+        }
+        throw error;
+      }
 
       // Filter out expired ones
       const now = new Date();
@@ -17189,7 +17194,12 @@ Content:\n"""${clipped}"""`;
         .from('announcements')
         .select('*, author:profiles!author_id(id,display_name,email)')
         .order('created_at', { ascending: false });
-      if (error) throw error;
+      if (error) {
+        if (/relation.*does not exist|does not exist/i.test(error.message)) {
+          return res.json({ success: true, announcements: [] });
+        }
+        throw error;
+      }
       res.json({ success: true, announcements: data });
     } catch (e: any) { res.status(500).json({ error: e.message }); }
   });
@@ -17334,7 +17344,12 @@ Content:\n"""${clipped}"""`;
         .from('announcements')
         .select('*, author:profiles!author_id(id,display_name,email)')
         .order('created_at', { ascending: false });
-      if (error) throw error;
+      if (error) {
+        if (/relation.*does not exist|does not exist/i.test(error.message)) {
+          return res.json({ success: true, announcements: [] });
+        }
+        throw error;
+      }
       res.json({ success: true, announcements: data });
     } catch (e: any) { res.status(500).json({ error: e.message }); }
   });
@@ -18973,12 +18988,44 @@ async function runDiscussionMigration(): Promise<boolean> {
 async function runAnnouncementColumnsMigration(): Promise<void> {
   const dbUrl = process.env.DATABASE_URL;
   if (!dbUrl) return;
-  // Try with explicit search_path first, then without schema prefix
-  const attempts = [
+
+  // Step 1: Create the table if it doesn't exist at all
+  // Note: no FK on author_id — poolQuery cannot reference profiles in DDL
+  const createSql = `
+    CREATE TABLE IF NOT EXISTS public.announcements (
+      id              uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+      title           text NOT NULL,
+      content         text NOT NULL DEFAULT '',
+      author_id       uuid,
+      target_audience text NOT NULL DEFAULT 'all',
+      priority        text NOT NULL DEFAULT 'normal',
+      status          text NOT NULL DEFAULT 'draft',
+      ann_type        text NOT NULL DEFAULT 'general',
+      scheduled_at    timestamptz NULL,
+      published_at    timestamptz NULL,
+      expires_at      timestamptz NULL,
+      created_at      timestamptz NOT NULL DEFAULT now(),
+      updated_at      timestamptz NULL
+    );
+    CREATE INDEX IF NOT EXISTS announcements_status_idx          ON public.announcements(status);
+    CREATE INDEX IF NOT EXISTS announcements_target_audience_idx ON public.announcements(target_audience);
+    CREATE INDEX IF NOT EXISTS announcements_created_at_idx      ON public.announcements(created_at DESC);
+  `;
+  try {
+    await poolQuery(createSql);
+    await poolQuery(`NOTIFY pgrst, 'reload schema'`).catch(() => {});
+    console.log('[migration] announcements table ensured ✓');
+    return;
+  } catch (err: any) {
+    console.warn('[migration] announcements table create attempt failed:', err?.message?.split('\n')[0]);
+  }
+
+  // Step 2: Table exists — just ensure the newer columns are present
+  const alterAttempts = [
     `SET search_path TO public; ALTER TABLE announcements ADD COLUMN IF NOT EXISTS ann_type text NOT NULL DEFAULT 'general'; ALTER TABLE announcements ADD COLUMN IF NOT EXISTS scheduled_at timestamptz NULL;`,
     `ALTER TABLE public.announcements ADD COLUMN IF NOT EXISTS ann_type text NOT NULL DEFAULT 'general'; ALTER TABLE public.announcements ADD COLUMN IF NOT EXISTS scheduled_at timestamptz NULL;`,
   ];
-  for (const sql of attempts) {
+  for (const sql of alterAttempts) {
     try {
       await poolQuery(sql);
       await poolQuery(`NOTIFY pgrst, 'reload schema'`).catch(() => {});
@@ -18988,8 +19035,6 @@ async function runAnnouncementColumnsMigration(): Promise<void> {
       console.warn('[migration] announcements column attempt failed:', err?.message?.split('\n')[0]);
     }
   }
-  // Final fallback: use supabaseAdmin to trigger a schema reload via a no-op query
-  // The annInsert/annUpdate helpers already handle the missing columns gracefully.
   console.log('[migration] announcements columns: will use graceful fallback in API handlers');
 }
 
