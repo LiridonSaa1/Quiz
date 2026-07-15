@@ -195,7 +195,6 @@ export default function StudentProgress() {
     { label: t('student.progress.averageScore'), value: avgScore, suffix: '%', icon: Target, color: 'from-violet-500 to-purple-500' },
     { label: t('student.progress.passRate'), value: passRate, suffix: '%', icon: CheckCircle2, color: 'from-emerald-500 to-teal-500' },
     { label: t('student.progress.bestScore'), value: best, suffix: '%', icon: Trophy, color: 'from-amber-500 to-orange-500' },
-    { label: t('student.progress.lessonsCompleted', 'Lessons Completed'), value: completedLessons, suffix: '', icon: BookOpen, color: 'from-sky-500 to-cyan-500' },
     { label: t('student.progress.coursesEnrolled', 'Courses Enrolled'), value: courses.length, suffix: '', icon: Star, color: 'from-rose-500 to-pink-500' },
   ];
 
