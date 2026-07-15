@@ -2077,22 +2077,32 @@ When giving instructions, number each step clearly. Be precise and technical whe
 
     const startedAt = Date.now();
 
-    const buildQuery = (table: string) => {
-      let q = supabaseAdmin.from(table).select(
-        "id,quiz_id,student_id,score,score_percent,total_points,correct_answers,total_questions,status,passed,started_at,completed_at,answers"
-      );
+    const buildQuery = (table: string, withScorePercent = true) => {
+      const selectCols = withScorePercent
+        ? "id,quiz_id,student_id,score,score_percent,total_points,correct_answers,total_questions,status,passed,started_at,completed_at,answers"
+        : "id,quiz_id,student_id,score,total_points,correct_answers,total_questions,status,passed,started_at,completed_at,answers";
+      let q = supabaseAdmin.from(table).select(selectCols);
       if (quizArr.length > 0) q = q.in("quiz_id", quizArr);
       if (studentArr.length > 0) q = q.in("student_id", studentArr);
       return q;
     };
 
-    const modern = await buildQuery("quiz_attempts");
+    const modern = await buildQuery("quiz_attempts", true);
     const durationMs = Date.now() - startedAt;
     if (durationMs > PERF_SLOW_THRESHOLD_MS) {
       console.warn(`[perf] slow fetchFilteredAttemptRows quiz_attempts ${durationMs}ms quizIds=${quizArr.length} studentIds=${studentArr.length}`);
     }
     if (!modern.error) return modern.data || [];
-    if (!isAttemptsTableMissing(modern.error) && !isAnyTableMissingError(modern.error)) throw modern.error;
+    // score_percent column may not exist — retry without it
+    const isScorePercentMissing = (e: any) => {
+      const hay = `${e?.message || ""} ${e?.details || ""}`.toLowerCase();
+      return hay.includes("score_percent") && (hay.includes("does not exist") || hay.includes("column") || e?.code === "42703" || e?.code === "PGRST204");
+    };
+    if (isScorePercentMissing(modern.error)) {
+      const retry = await buildQuery("quiz_attempts", false);
+      if (!retry.error) return retry.data || [];
+      if (!isAttemptsTableMissing(retry.error) && !isAnyTableMissingError(retry.error)) throw retry.error;
+    } else if (!isAttemptsTableMissing(modern.error) && !isAnyTableMissingError(modern.error)) throw modern.error;
 
     const legacy = await buildQuery("attempts");
     if (!legacy.error) return legacy.data || [];
@@ -5250,6 +5260,18 @@ When giving instructions, number each step clearly. Be precise and technical whe
         if (quizzesRes.error && !isAnyTableMissingError(quizzesRes.error)) throw quizzesRes.error;
         quizRows = quizzesRes.error ? [] : (quizzesRes.data || []);
       }
+
+      // Fetch attempts for teacher's students (by studentIds only — doesn't require course ownership)
+      const rawAttemptsFetch = await fetchFilteredAttemptRows({ studentIds: allowedStudentIds });
+      // Build quizIds from what was attempted (supplement course-based quiz list)
+      const attemptedQuizIds = new Set<string>(rawAttemptsFetch.map((a: any) => String(a.quiz_id || "")).filter(Boolean));
+      // Fetch quiz metadata for any quizzes not already in quizRows
+      const knownQuizIds = new Set(quizRows.map((q: any) => String(q.id || "")));
+      const missingQuizIds = [...attemptedQuizIds].filter(id => id && !knownQuizIds.has(id));
+      if (missingQuizIds.length > 0) {
+        const extraQuizzesRes = await supabaseAdmin.from("quizzes").select("*").in("id", missingQuizIds);
+        if (!extraQuizzesRes.error) quizRows = [...quizRows, ...(extraQuizzesRes.data || [])];
+      }
       const quizzesCount = quizRows.length;
       const quizIds = new Set<string>(quizRows.map((q: any) => String(q.id || "")).filter(Boolean));
       const passingScoreByQuiz = quizRows.reduce((acc: Record<string, number>, q: any) => {
@@ -5263,13 +5285,8 @@ When giving instructions, number each step clearly. Be precise and technical whe
         return acc;
       }, {});
 
-      const attemptsRows = normalizeAttempts(
-        await fetchFilteredAttemptRows({ quizIds, studentIds: allowedStudentIds }),
-        passingScoreByQuiz
-      ).filter((a: any) => {
-        if (!quizIds.has(String(a.quiz_id || ""))) return false;
-        return allowedStudentIds.has(String(a.student_id || ""));
-      });
+      const attemptsRows = normalizeAttempts(rawAttemptsFetch, passingScoreByQuiz)
+        .filter((a: any) => allowedStudentIds.has(String(a.student_id || "")));
 
       const attemptsByStudent: Record<string, { attempts: number; passed: number; scoreSum: number }> = {};
       attemptsRows.forEach((a: any) => {
