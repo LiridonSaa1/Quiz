@@ -17062,14 +17062,20 @@ ${shortContent}`;
       const fileUrlsJson = JSON.stringify(Array.isArray(file_urls) ? file_urls : []);
       const linkUrlsJson = JSON.stringify(Array.isArray(link_urls) ? link_urls : []);
       let existingId = null;
+      let existingStatus = null;
       try {
         const r = await poolQuery(
-          `SELECT id FROM assignment_submissions WHERE assignment_id=$1 AND student_id=$2 LIMIT 1`,
+          `SELECT id, status FROM assignment_submissions WHERE assignment_id=$1 AND student_id=$2 LIMIT 1`,
           [assignmentId, caller.userId]
         );
         existingId = r.rows[0]?.id || null;
+        existingStatus = r.rows[0]?.status || null;
       } catch {
         existingId = null;
+        existingStatus = null;
+      }
+      if (existingId && (existingStatus === "submitted" || existingStatus === "graded")) {
+        return res.status(400).json({ error: "You have already submitted this assignment" });
       }
       let rowData;
       try {

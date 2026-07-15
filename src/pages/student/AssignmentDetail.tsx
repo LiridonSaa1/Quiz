@@ -596,8 +596,8 @@ export default function StudentAssignmentDetail() {
     ? isPast(new Date(assignment.due_date))
     : false;
   const canSubmit =
-    (!isExpired || assignment?.allow_late_submission) &&
-    submission?.status !== "graded";
+    !submission &&
+    (!isExpired || assignment?.allow_late_submission);
   const wordCount = answer.trim() ? answer.trim().split(/\s+/).length : 0;
   const charCount = answer.length;
   const typeMeta =
@@ -1201,448 +1201,425 @@ export default function StudentAssignmentDetail() {
               </motion.div>
             )}
 
-            {/* ── Submission Area ── */}
-            {canSubmit && (
+            {/* ── Your Submission (read-only once submitted) ── */}
+            {submission && (
               <motion.div
                 initial={{ opacity: 0, y: 8 }}
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ delay: 0.15 }}
                 className="bg-white rounded-3xl border border-slate-100 shadow-sm overflow-hidden"
               >
-                <div className="px-6 py-4 border-b border-slate-50 flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <div className="w-7 h-7 rounded-lg bg-indigo-50 flex items-center justify-center">
-                      <Send className="w-4 h-4 text-indigo-500" />
-                    </div>
-                    <h2 className="text-sm font-bold text-slate-700">
-                      {submission
-                        ? t("student.assignments.yourSubmission")
-                        : t("student.assignments.submitWork")}
-                    </h2>
+                <div className="px-6 py-4 border-b border-slate-50 flex items-center gap-2">
+                  <div className="w-7 h-7 rounded-lg bg-indigo-50 flex items-center justify-center">
+                    <Send className="w-4 h-4 text-indigo-500" />
                   </div>
-                  {submission && !showForm && (
-                    <button
-                      onClick={openEditForm}
-                      className="inline-flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-xl bg-slate-100 text-slate-600 hover:bg-slate-200 transition-colors"
-                    >
-                      <RefreshCw className="w-3 h-3" />
-                      {t("common.edit")}
-                    </button>
-                  )}
+                  <h2 className="text-sm font-bold text-slate-700">
+                    {t("student.assignments.yourSubmission")}
+                  </h2>
+                  <span className="ml-auto inline-flex items-center gap-1.5 text-xs font-semibold px-2.5 py-1 rounded-xl bg-blue-50 text-blue-600 border border-blue-100">
+                    <CheckCircle2 className="w-3 h-3" /> Submitted
+                  </span>
                 </div>
 
                 <div className="px-6 py-5">
-                  {/* Existing submission view */}
-                  {submission && !showForm ? (
-                    <div className="space-y-3">
+                  <div className="space-y-3">
+                    {submission.is_late && (
+                      <div className="inline-flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-xl bg-orange-50 border border-orange-200 text-orange-600 font-semibold">
+                        <AlertCircle className="w-3.5 h-3.5" /> Submitted late
+                      </div>
+                    )}
+                    {submission.content && (
+                      <div className="bg-slate-50 rounded-2xl p-4 border border-slate-100">
+                        <div className="flex items-center gap-2 mb-2">
+                          <FileText className="w-4 h-4 text-slate-400" />
+                          <span className="text-xs font-bold text-slate-500 uppercase tracking-wide">
+                            {t("student.assignments.textAnswer")}
+                          </span>
+                        </div>
+                        <p className="text-sm text-slate-700 leading-relaxed whitespace-pre-wrap">
+                          {submission.content}
+                        </p>
+                      </div>
+                    )}
+                    {submission.file_urls?.length > 0 && (
+                      <div className="bg-slate-50 rounded-2xl p-4 border border-slate-100">
+                        <div className="flex items-center gap-2 mb-3">
+                          <Paperclip className="w-4 h-4 text-blue-500" />
+                          <span className="text-xs font-bold text-blue-700 uppercase tracking-wide">
+                            {t("student.assignments.filesCount", {
+                              count: submission.file_urls.length,
+                            })}
+                          </span>
+                        </div>
+                        <div className="space-y-2">
+                          {submission.file_urls.map((f, i) => (
+                            <a
+                              key={i}
+                              href={f.url}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="flex items-center gap-3 p-3 rounded-xl bg-white border border-slate-100 hover:border-blue-200 hover:bg-blue-50 transition-colors group"
+                            >
+                              <span className="text-slate-400 group-hover:text-blue-500">
+                                {getFileIcon(f.mime_type)}
+                              </span>
+                              <div className="flex-1 min-w-0">
+                                <p className="text-xs font-semibold text-slate-700 truncate">
+                                  {f.name}
+                                </p>
+                                <p className="text-[10px] text-slate-400">
+                                  {formatBytes(f.size)}
+                                </p>
+                              </div>
+                              <ExternalLink className="w-3.5 h-3.5 text-slate-300 group-hover:text-blue-400" />
+                            </a>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                    {submission.link_urls?.length > 0 && (
+                      <div className="bg-slate-50 rounded-2xl p-4 border border-slate-100">
+                        <div className="flex items-center gap-2 mb-3">
+                          <Link2 className="w-4 h-4 text-violet-500" />
+                          <span className="text-xs font-bold text-violet-700 uppercase tracking-wide">
+                            {t("student.assignments.linksCount", {
+                              count: submission.link_urls.length,
+                            })}
+                          </span>
+                        </div>
+                        <div className="space-y-1.5">
+                          {submission.link_urls.map((l, i) => (
+                            <a
+                              key={i}
+                              href={l.url}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="flex items-center gap-2 text-sm text-violet-600 hover:text-violet-700 font-medium truncate"
+                            >
+                              <ExternalLink className="w-3.5 h-3.5 shrink-0" />
+                              {l.label || l.url}
+                            </a>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                    <p className="text-xs text-slate-400">
+                      {t("student.assignments.submittedAt", {
+                        date: formatDistanceToNow(
+                          new Date(submission.submitted_at),
+                          { addSuffix: true },
+                        ),
+                      })}
+                      {submission.is_late &&
+                        ` · ${t("student.assignments.markedAsLate")}`}
+                    </p>
+                  </div>
+                </div>
+              </motion.div>
+            )}
 
-                      {submission.is_late && (
-                        <div className="inline-flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-xl bg-orange-50 border border-orange-200 text-orange-600 font-semibold">
-                          <AlertCircle className="w-3.5 h-3.5" /> Submitted late
-                        </div>
-                      )}
-                      {submission.content && (
-                        <div className="bg-slate-50 rounded-2xl p-4 border border-slate-100">
-                          <div className="flex items-center gap-2 mb-2">
-                            <FileText className="w-4 h-4 text-slate-400" />
-                            <span className="text-xs font-bold text-slate-500 uppercase tracking-wide">
-                              {t("student.assignments.textAnswer")}
+            {/* ── Submit Work (only shown before any submission) ── */}
+            {!submission && canSubmit && showForm && (
+              <motion.div
+                initial={{ opacity: 0, y: 8 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: 0.15 }}
+                className="bg-white rounded-3xl border border-slate-100 shadow-sm overflow-hidden"
+              >
+                <div className="px-6 py-4 border-b border-slate-50 flex items-center gap-2">
+                  <div className="w-7 h-7 rounded-lg bg-indigo-50 flex items-center justify-center">
+                    <Send className="w-4 h-4 text-indigo-500" />
+                  </div>
+                  <h2 className="text-sm font-bold text-slate-700">
+                    {t("student.assignments.submitWork")}
+                  </h2>
+                </div>
+
+                <div className="px-6 py-5">
+                  <div className="space-y-4">
+                    {draftSavedAt && (
+                      <div className="flex items-center gap-1.5 text-xs text-slate-400">
+                        <Save className="w-3 h-3" />
+                        {t("student.assignments.draftSaved", {
+                          date: formatDistanceToNow(draftSavedAt, {
+                            addSuffix: true,
+                          }),
+                        })}
+                      </div>
+                    )}
+
+                    {availableTabs.length > 1 && (
+                      <div className="flex gap-1 bg-slate-100 p-1 rounded-2xl">
+                        {availableTabs.map((tab) => (
+                          <button
+                            key={tab.key}
+                            onClick={() => setActiveTab(tab.key)}
+                            className={cn(
+                              "flex-1 flex items-center justify-center gap-1.5 py-2.5 rounded-xl text-xs font-semibold transition-all",
+                              activeTab === tab.key
+                                ? "bg-white text-slate-800 shadow-sm"
+                                : "text-slate-500 hover:text-slate-700",
+                            )}
+                          >
+                            <tab.icon className="w-3.5 h-3.5" />
+                            {t(`common.${tab.key}`)}
+                            {tab.key === "files" && files.length > 0 && (
+                              <span className="bg-blue-500 text-white text-[10px] rounded-full w-4 h-4 flex items-center justify-center">
+                                {files.length}
+                              </span>
+                            )}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+
+                    <AnimatePresence mode="wait">
+                      {(activeTab === "text" ||
+                        (availableTabs.length === 1 &&
+                          config.allow_text)) && (
+                        <motion.div
+                          key="text"
+                          initial={{ opacity: 0, y: 4 }}
+                          animate={{ opacity: 1, y: 0 }}
+                          exit={{ opacity: 0 }}
+                        >
+                          <textarea
+                            value={answer}
+                            onChange={(e) => setAnswer(e.target.value)}
+                            rows={8}
+                            placeholder="Write your answer here..."
+                            className="w-full px-4 py-3 text-sm border border-slate-200 rounded-2xl focus:outline-none focus:ring-2 focus:ring-teal-400/40 focus:border-teal-400 resize-none leading-relaxed"
+                          />
+                          <div className="flex items-center gap-3 mt-1.5 text-xs text-slate-400">
+                            <span>
+                              {wordCount} word{wordCount !== 1 ? "s" : ""}
                             </span>
+                            <span>·</span>
+                            <span>{charCount} characters</span>
                           </div>
-                          <p className="text-sm text-slate-700 leading-relaxed whitespace-pre-wrap">
-                            {submission.content}
-                          </p>
-                        </div>
+                        </motion.div>
                       )}
-                      {submission.file_urls?.length > 0 && (
-                        <div className="bg-slate-50 rounded-2xl p-4 border border-slate-100">
-                          <div className="flex items-center gap-2 mb-3">
-                            <Paperclip className="w-4 h-4 text-blue-500" />
-                            <span className="text-xs font-bold text-blue-700 uppercase tracking-wide">
-                              {t("student.assignments.filesCount", {
-                                count: submission.file_urls.length,
-                              })}
-                            </span>
+
+                      {activeTab === "files" && (
+                        <motion.div
+                          key="files"
+                          initial={{ opacity: 0, y: 4 }}
+                          animate={{ opacity: 1, y: 0 }}
+                          exit={{ opacity: 0 }}
+                          className="space-y-3"
+                        >
+                          <div
+                            onDragOver={(e) => {
+                              e.preventDefault();
+                              setDragging(true);
+                            }}
+                            onDragLeave={() => setDragging(false)}
+                            onDrop={handleDrop}
+                            onClick={() => fileInputRef.current?.click()}
+                            className={cn(
+                              "border-2 border-dashed rounded-2xl p-8 text-center cursor-pointer transition-all",
+                              dragging
+                                ? "border-teal-400 bg-teal-50"
+                                : "border-slate-200 hover:border-teal-300 hover:bg-slate-50",
+                            )}
+                          >
+                            <Upload
+                              className={cn(
+                                "w-8 h-8 mx-auto mb-3",
+                                dragging ? "text-teal-500" : "text-slate-300",
+                              )}
+                            />
+                            <p className="text-sm font-semibold text-slate-600">
+                              Drag & drop files here
+                            </p>
+                            <p className="text-xs text-slate-400 mt-1">
+                              or click to browse · max{" "}
+                              {config.max_file_count || 5} files · 50 MB each
+                            </p>
+                            {config.accepted_types?.length > 0 && (
+                              <p className="text-xs text-slate-400 mt-1">
+                                Accepted: {config.accepted_types.join(", ")}
+                              </p>
+                            )}
                           </div>
-                          <div className="space-y-2">
-                            {submission.file_urls.map((f, i) => (
+                          <input
+                            ref={fileInputRef}
+                            type="file"
+                            multiple
+                            className="hidden"
+                            accept={
+                              config.accepted_types?.join(",") || undefined
+                            }
+                            onChange={(e) => {
+                              if (e.target.files)
+                                handleUploadFiles(e.target.files);
+                              e.target.value = "";
+                            }}
+                          />
+
+                          {uploadingFiles.map((u) => (
+                            <div
+                              key={u.name}
+                              className="flex items-center gap-3 p-3 bg-slate-50 rounded-xl border border-slate-100"
+                            >
+                              <div className="w-4 h-4 rounded-full border-2 border-teal-400 border-t-transparent animate-spin" />
+                              <span className="text-xs text-slate-600 flex-1 truncate">
+                                Uploading {u.name}…
+                              </span>
+                            </div>
+                          ))}
+                          {files.map((f, i) => (
+                            <div
+                              key={i}
+                              className="flex items-center gap-3 p-3 bg-white rounded-xl border border-slate-100"
+                            >
+                              <span className="text-slate-500">
+                                {getFileIcon(f.mime_type)}
+                              </span>
+                              <div className="flex-1 min-w-0">
+                                <p className="text-xs font-semibold text-slate-700 truncate">
+                                  {f.name}
+                                </p>
+                                <p className="text-[10px] text-slate-400">
+                                  {formatBytes(f.size)}
+                                </p>
+                              </div>
                               <a
-                                key={i}
                                 href={f.url}
                                 target="_blank"
                                 rel="noopener noreferrer"
-                                className="flex items-center gap-3 p-3 rounded-xl bg-white border border-slate-100 hover:border-blue-200 hover:bg-blue-50 transition-colors group"
+                                className="p-1 text-slate-400 hover:text-blue-500"
                               >
-                                <span className="text-slate-400 group-hover:text-blue-500">
-                                  {getFileIcon(f.mime_type)}
-                                </span>
-                                <div className="flex-1 min-w-0">
-                                  <p className="text-xs font-semibold text-slate-700 truncate">
-                                    {f.name}
-                                  </p>
-                                  <p className="text-[10px] text-slate-400">
-                                    {formatBytes(f.size)}
-                                  </p>
-                                </div>
-                                <ExternalLink className="w-3.5 h-3.5 text-slate-300 group-hover:text-blue-400" />
+                                <ExternalLink className="w-3.5 h-3.5" />
                               </a>
-                            ))}
-                          </div>
-                        </div>
-                      )}
-                      {submission.link_urls?.length > 0 && (
-                        <div className="bg-slate-50 rounded-2xl p-4 border border-slate-100">
-                          <div className="flex items-center gap-2 mb-3">
-                            <Link2 className="w-4 h-4 text-violet-500" />
-                            <span className="text-xs font-bold text-violet-700 uppercase tracking-wide">
-                              {t("student.assignments.linksCount", {
-                                count: submission.link_urls.length,
-                              })}
-                            </span>
-                          </div>
-                          <div className="space-y-1.5">
-                            {submission.link_urls.map((l, i) => (
-                              <a
-                                key={i}
-                                href={l.url}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="flex items-center gap-2 text-sm text-violet-600 hover:text-violet-700 font-medium truncate"
+                              <button
+                                onClick={() =>
+                                  setFiles((prev) =>
+                                    prev.filter((_, j) => j !== i),
+                                  )
+                                }
+                                className="p-1 text-slate-400 hover:text-rose-500"
                               >
-                                <ExternalLink className="w-3.5 h-3.5 shrink-0" />
-                                {l.label || l.url}
-                              </a>
-                            ))}
-                          </div>
-                        </div>
-                      )}
-                      <p className="text-xs text-slate-400">
-                        {t("student.assignments.submittedAt", {
-                          date: formatDistanceToNow(
-                            new Date(submission.submitted_at),
-                            { addSuffix: true },
-                          ),
-                        })}
-                        {submission.is_late &&
-                          ` · ${t("student.assignments.markedAsLate")}`}
-                      </p>
-                    </div>
-                  ) : showForm ? (
-                    /* Submission form */
-                    <div className="space-y-4">
-                      {submission && (
-                        <div className="bg-amber-50 border border-amber-200 rounded-2xl px-4 py-3 text-xs text-amber-700 font-medium flex items-center gap-2">
-                          <AlertCircle className="w-3.5 h-3.5 shrink-0" />
-                          {t("student.assignments.editWillReplace")}
-                        </div>
-                      )}
-                      {draftSavedAt && (
-                        <div className="flex items-center gap-1.5 text-xs text-slate-400">
-                          <Save className="w-3 h-3" />
-                          {t("student.assignments.draftSaved", {
-                            date: formatDistanceToNow(draftSavedAt, {
-                              addSuffix: true,
-                            }),
-                          })}
-                        </div>
-                      )}
-
-                      {availableTabs.length > 1 && (
-                        <div className="flex gap-1 bg-slate-100 p-1 rounded-2xl">
-                          {availableTabs.map((tab) => (
-                            <button
-                              key={tab.key}
-                              onClick={() => setActiveTab(tab.key)}
-                              className={cn(
-                                "flex-1 flex items-center justify-center gap-1.5 py-2.5 rounded-xl text-xs font-semibold transition-all",
-                                activeTab === tab.key
-                                  ? "bg-white text-slate-800 shadow-sm"
-                                  : "text-slate-500 hover:text-slate-700",
-                              )}
-                            >
-                              <tab.icon className="w-3.5 h-3.5" />
-                              {t(`common.${tab.key}`)}
-                              {tab.key === "files" && files.length > 0 && (
-                                <span className="bg-blue-500 text-white text-[10px] rounded-full w-4 h-4 flex items-center justify-center">
-                                  {files.length}
-                                </span>
-                              )}
-                            </button>
+                                <X className="w-3.5 h-3.5" />
+                              </button>
+                            </div>
                           ))}
-                        </div>
+                          {files.length === 0 &&
+                            uploadingFiles.length === 0 && (
+                              <p className="text-xs text-slate-400 text-center">
+                                No files added yet
+                              </p>
+                            )}
+                        </motion.div>
                       )}
 
-                      <AnimatePresence mode="wait">
-                        {(activeTab === "text" ||
-                          (availableTabs.length === 1 &&
-                            config.allow_text)) && (
-                          <motion.div
-                            key="text"
-                            initial={{ opacity: 0, y: 4 }}
-                            animate={{ opacity: 1, y: 0 }}
-                            exit={{ opacity: 0 }}
-                          >
-                            <textarea
-                              value={answer}
-                              onChange={(e) => setAnswer(e.target.value)}
-                              rows={8}
-                              placeholder="Write your answer here..."
-                              className="w-full px-4 py-3 text-sm border border-slate-200 rounded-2xl focus:outline-none focus:ring-2 focus:ring-teal-400/40 focus:border-teal-400 resize-none leading-relaxed"
-                            />
-                            <div className="flex items-center gap-3 mt-1.5 text-xs text-slate-400">
-                              <span>
-                                {wordCount} word{wordCount !== 1 ? "s" : ""}
-                              </span>
-                              <span>·</span>
-                              <span>{charCount} characters</span>
-                            </div>
-                          </motion.div>
-                        )}
-
-                        {activeTab === "files" && (
-                          <motion.div
-                            key="files"
-                            initial={{ opacity: 0, y: 4 }}
-                            animate={{ opacity: 1, y: 0 }}
-                            exit={{ opacity: 0 }}
-                            className="space-y-3"
-                          >
-                            <div
-                              onDragOver={(e) => {
-                                e.preventDefault();
-                                setDragging(true);
-                              }}
-                              onDragLeave={() => setDragging(false)}
-                              onDrop={handleDrop}
-                              onClick={() => fileInputRef.current?.click()}
-                              className={cn(
-                                "border-2 border-dashed rounded-2xl p-8 text-center cursor-pointer transition-all",
-                                dragging
-                                  ? "border-teal-400 bg-teal-50"
-                                  : "border-slate-200 hover:border-teal-300 hover:bg-slate-50",
-                              )}
-                            >
-                              <Upload
-                                className={cn(
-                                  "w-8 h-8 mx-auto mb-3",
-                                  dragging ? "text-teal-500" : "text-slate-300",
-                                )}
-                              />
-                              <p className="text-sm font-semibold text-slate-600">
-                                Drag & drop files here
-                              </p>
-                              <p className="text-xs text-slate-400 mt-1">
-                                or click to browse · max{" "}
-                                {config.max_file_count || 5} files · 50 MB each
-                              </p>
-                              {config.accepted_types?.length > 0 && (
-                                <p className="text-xs text-slate-400 mt-1">
-                                  Accepted: {config.accepted_types.join(", ")}
-                                </p>
-                              )}
-                            </div>
-                            <input
-                              ref={fileInputRef}
-                              type="file"
-                              multiple
-                              className="hidden"
-                              accept={
-                                config.accepted_types?.join(",") || undefined
-                              }
-                              onChange={(e) => {
-                                if (e.target.files)
-                                  handleUploadFiles(e.target.files);
-                                e.target.value = "";
-                              }}
-                            />
-
-                            {uploadingFiles.map((u) => (
-                              <div
-                                key={u.name}
-                                className="flex items-center gap-3 p-3 bg-slate-50 rounded-xl border border-slate-100"
-                              >
-                                <div className="w-4 h-4 rounded-full border-2 border-teal-400 border-t-transparent animate-spin" />
-                                <span className="text-xs text-slate-600 flex-1 truncate">
-                                  Uploading {u.name}…
-                                </span>
-                              </div>
-                            ))}
-                            {files.map((f, i) => (
-                              <div
-                                key={i}
-                                className="flex items-center gap-3 p-3 bg-white rounded-xl border border-slate-100"
-                              >
-                                <span className="text-slate-500">
-                                  {getFileIcon(f.mime_type)}
-                                </span>
-                                <div className="flex-1 min-w-0">
-                                  <p className="text-xs font-semibold text-slate-700 truncate">
-                                    {f.name}
-                                  </p>
-                                  <p className="text-[10px] text-slate-400">
-                                    {formatBytes(f.size)}
-                                  </p>
-                                </div>
-                                <a
-                                  href={f.url}
-                                  target="_blank"
-                                  rel="noopener noreferrer"
-                                  className="p-1 text-slate-400 hover:text-blue-500"
-                                >
-                                  <ExternalLink className="w-3.5 h-3.5" />
-                                </a>
-                                <button
-                                  onClick={() =>
-                                    setFiles((prev) =>
-                                      prev.filter((_, j) => j !== i),
-                                    )
-                                  }
-                                  className="p-1 text-slate-400 hover:text-rose-500"
-                                >
-                                  <X className="w-3.5 h-3.5" />
-                                </button>
-                              </div>
-                            ))}
-                            {files.length === 0 &&
-                              uploadingFiles.length === 0 && (
-                                <p className="text-xs text-slate-400 text-center">
-                                  No files added yet
-                                </p>
-                              )}
-                          </motion.div>
-                        )}
-
-                        {activeTab === "links" && (
-                          <motion.div
-                            key="links"
-                            initial={{ opacity: 0, y: 4 }}
-                            animate={{ opacity: 1, y: 0 }}
-                            exit={{ opacity: 0 }}
-                            className="space-y-3"
-                          >
-                            <p className="text-xs text-slate-500">
-                              Add URLs to GitHub, Figma, Google Drive, YouTube,
-                              or any other link.
-                            </p>
-                            {links.map((l, i) => (
-                              <div key={i} className="flex gap-2">
-                                <div className="flex-1 space-y-1.5">
-                                  <div className="relative">
-                                    <Link2 className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-400" />
-                                    <input
-                                      value={l.url}
-                                      onChange={(e) =>
-                                        setLinks((prev) =>
-                                          prev.map((x, j) =>
-                                            j === i
-                                              ? { ...x, url: e.target.value }
-                                              : x,
-                                          ),
-                                        )
-                                      }
-                                      placeholder="https://..."
-                                      className={cn(
-                                        "w-full pl-9 pr-3 py-2.5 text-sm border rounded-xl focus:outline-none focus:ring-2 focus:ring-violet-400/30 focus:border-violet-400",
-                                        l.url && !isValidUrl(l.url)
-                                          ? "border-rose-300 bg-rose-50"
-                                          : "border-slate-200",
-                                      )}
-                                    />
-                                  </div>
+                      {activeTab === "links" && (
+                        <motion.div
+                          key="links"
+                          initial={{ opacity: 0, y: 4 }}
+                          animate={{ opacity: 1, y: 0 }}
+                          exit={{ opacity: 0 }}
+                          className="space-y-3"
+                        >
+                          <p className="text-xs text-slate-500">
+                            Add URLs to GitHub, Figma, Google Drive, YouTube,
+                            or any other link.
+                          </p>
+                          {links.map((l, i) => (
+                            <div key={i} className="flex gap-2">
+                              <div className="flex-1 space-y-1.5">
+                                <div className="relative">
+                                  <Link2 className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-400" />
                                   <input
-                                    value={l.label}
+                                    value={l.url}
                                     onChange={(e) =>
                                       setLinks((prev) =>
                                         prev.map((x, j) =>
                                           j === i
-                                            ? { ...x, label: e.target.value }
+                                            ? { ...x, url: e.target.value }
                                             : x,
                                         ),
                                       )
                                     }
-                                    placeholder="Label (optional)"
-                                    className="w-full px-3 py-2 text-xs border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-violet-400/30"
+                                    placeholder="https://..."
+                                    className={cn(
+                                      "w-full pl-9 pr-3 py-2.5 text-sm border rounded-xl focus:outline-none focus:ring-2 focus:ring-violet-400/30 focus:border-violet-400",
+                                      l.url && !isValidUrl(l.url)
+                                        ? "border-rose-300 bg-rose-50"
+                                        : "border-slate-200",
+                                    )}
                                   />
                                 </div>
-                                {links.length > 1 && (
-                                  <button
-                                    onClick={() =>
-                                      setLinks((prev) =>
-                                        prev.filter((_, j) => j !== i),
-                                      )
-                                    }
-                                    className="p-2 self-start mt-1 text-slate-400 hover:text-rose-500 rounded-lg hover:bg-rose-50"
-                                  >
-                                    <X className="w-4 h-4" />
-                                  </button>
-                                )}
+                                <input
+                                  value={l.label}
+                                  onChange={(e) =>
+                                    setLinks((prev) =>
+                                      prev.map((x, j) =>
+                                        j === i
+                                          ? { ...x, label: e.target.value }
+                                          : x,
+                                      ),
+                                    )
+                                  }
+                                  placeholder="Label (optional)"
+                                  className="w-full px-3 py-2 text-xs border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-violet-400/30"
+                                />
                               </div>
-                            ))}
-                            <button
-                              onClick={() =>
-                                setLinks((prev) => [
-                                  ...prev,
-                                  { url: "", label: "" },
-                                ])
-                              }
-                              className="text-xs font-semibold text-violet-600 hover:text-violet-700 flex items-center gap-1"
-                            >
-                              + Add another link
-                            </button>
-                          </motion.div>
-                        )}
-                      </AnimatePresence>
-
-                      {/* Action buttons */}
-                      <div className="flex items-center justify-between pt-3 border-t border-slate-100">
-                        <div className="flex gap-2">
-                          {submission && (
-                            <button
-                              onClick={() => {
-                                setShowForm(false);
-                                setAnswer(submission.content || "");
-                                setFiles(submission.file_urls || []);
-                                setLinks(
-                                  submission.link_urls?.length
-                                    ? submission.link_urls
-                                    : [{ url: "", label: "" }],
-                                );
-                              }}
-                              className="px-4 py-2.5 text-sm font-semibold text-slate-600 hover:bg-slate-100 rounded-xl transition-colors"
-                            >
-                              Cancel
-                            </button>
-                          )}
+                              {links.length > 1 && (
+                                <button
+                                  onClick={() =>
+                                    setLinks((prev) =>
+                                      prev.filter((_, j) => j !== i),
+                                    )
+                                  }
+                                  className="p-2 self-start mt-1 text-slate-400 hover:text-rose-500 rounded-lg hover:bg-rose-50"
+                                >
+                                  <X className="w-4 h-4" />
+                                </button>
+                              )}
+                            </div>
+                          ))}
                           <button
-                            onClick={handleSaveDraft}
-                            disabled={savingDraft}
-                            className="inline-flex items-center gap-1.5 px-4 py-2.5 text-sm font-semibold text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-xl transition-colors disabled:opacity-50"
+                            onClick={() =>
+                              setLinks((prev) => [
+                                ...prev,
+                                { url: "", label: "" },
+                              ])
+                            }
+                            className="text-xs font-semibold text-violet-600 hover:text-violet-700 flex items-center gap-1"
                           >
-                            <Save className="w-3.5 h-3.5" />
-                            {savingDraft ? "Saving…" : "Save Draft"}
+                            + Add another link
                           </button>
-                        </div>
-                        <button
-                          onClick={handleSubmit}
-                          disabled={submitting}
-                          className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-bold bg-gradient-to-r from-teal-500 to-cyan-500 text-white hover:opacity-90 transition-opacity disabled:opacity-40 shadow-md shadow-teal-200/50"
-                        >
-                          <Send className="w-3.5 h-3.5" />
-                          {submitting
-                            ? "Submitting…"
-                            : submission
-                              ? "Update Submission"
-                              : "Submit Assignment"}
-                        </button>
-                      </div>
+                        </motion.div>
+                      )}
+                    </AnimatePresence>
+
+                    {/* Action buttons */}
+                    <div className="flex items-center justify-between pt-3 border-t border-slate-100">
+                      <button
+                        onClick={handleSaveDraft}
+                        disabled={savingDraft}
+                        className="inline-flex items-center gap-1.5 px-4 py-2.5 text-sm font-semibold text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-xl transition-colors disabled:opacity-50"
+                      >
+                        <Save className="w-3.5 h-3.5" />
+                        {savingDraft ? "Saving…" : "Save Draft"}
+                      </button>
+                      <button
+                        onClick={handleSubmit}
+                        disabled={submitting}
+                        className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-bold bg-gradient-to-r from-teal-500 to-cyan-500 text-white hover:opacity-90 transition-opacity disabled:opacity-40 shadow-md shadow-teal-200/50"
+                      >
+                        <Send className="w-3.5 h-3.5" />
+                        {submitting ? "Submitting…" : "Submit Assignment"}
+                      </button>
                     </div>
-                  ) : null}
+                  </div>
                 </div>
               </motion.div>
             )}
 
             {/* Not submitted — show start button */}
-            {canSubmit && !submission && !showForm && (
+            {!submission && canSubmit && !showForm && (
               <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
                 <button
                   onClick={() => setShowForm(true)}
