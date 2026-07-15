@@ -4,7 +4,7 @@ import { supabase } from '../../supabase';
 import StudentLayout from '../../components/layout/StudentLayout';
 import { motion } from 'motion/react';
 import { TrendingUp, Target, Trophy, CheckCircle2, BookOpen, Zap, BarChart2, Star } from 'lucide-react';
-import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, BarChart, Bar, Cell } from 'recharts';
+import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, BarChart, Bar, Cell, LabelList } from 'recharts';
 import { cn } from '../../lib/utils';
 import { format, subDays } from 'date-fns';
 import { fetchAttemptRowsByStudentId, normalizeAttempts } from '../../lib/quizAttempts';
@@ -270,7 +270,7 @@ export default function StudentProgress() {
 
             {/* Per-course charts */}
             {courseStats.length > 0 && (
-              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+              <div className="space-y-6">
                 {/* Quiz avg score per course — always shown when courses exist */}
                 <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.4 }}
                   className="bg-white rounded-3xl border border-slate-100 shadow-sm p-6">
@@ -285,13 +285,14 @@ export default function StudentProgress() {
                       <p className="text-xs text-center max-w-[200px]">Complete quizzes in your courses to see your average scores here</p>
                     </div>
                   ) : (
-                    <ResponsiveContainer width="100%" height={180}>
-                      <BarChart data={courseStats} barCategoryGap="30%">
+                    <ResponsiveContainer width="100%" height={220}>
+                      <BarChart data={courseStats} barCategoryGap="30%" margin={{ top: 20, right: 8, left: 0, bottom: 0 }}>
                         <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" vertical={false} />
                         <XAxis dataKey="name" tick={{ fontSize: 10, fill: '#94a3b8' }} tickLine={false} axisLine={false} />
                         <YAxis domain={[0, 100]} tick={{ fontSize: 10, fill: '#94a3b8' }} tickLine={false} axisLine={false} tickFormatter={v => `${v}%`} />
                         <Tooltip formatter={(v: any) => [`${v}%`, 'Avg Score']} contentStyle={{ borderRadius: 12, border: '1px solid #e2e8f0', fontSize: 12 }} />
                         <Bar dataKey="avg" radius={[6, 6, 0, 0]}>
+                          <LabelList dataKey="avg" position="top" formatter={(v: any) => `${v}%`} style={{ fontSize: 11, fontWeight: 600, fill: '#475569' }} />
                           {courseStats.map((_, i) => <Cell key={i} fill={CHART_COLORS[i % CHART_COLORS.length]} />)}
                         </Bar>
                       </BarChart>
