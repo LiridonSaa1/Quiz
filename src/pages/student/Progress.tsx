@@ -296,17 +296,23 @@ export default function StudentProgress() {
               </motion.div>
             )}
 
-            {/* Per-course bar chart */}
+            {/* Per-course charts */}
             {courseStats.length > 0 && (
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                {/* Quiz avg score per course */}
-                {completed.length > 0 && (
-                  <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.4 }}
-                    className="bg-white rounded-3xl border border-slate-100 shadow-sm p-6">
-                    <div className="flex items-center gap-2 mb-6">
-                      <div className="w-8 h-8 bg-emerald-50 rounded-xl flex items-center justify-center"><BarChart2 className="w-4 h-4 text-emerald-600" /></div>
-                      <h2 className="font-bold text-slate-900">{t('student.progress.averageScorePerCourse')}</h2>
+                {/* Quiz avg score per course — always shown when courses exist */}
+                <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.4 }}
+                  className="bg-white rounded-3xl border border-slate-100 shadow-sm p-6">
+                  <div className="flex items-center gap-2 mb-6">
+                    <div className="w-8 h-8 bg-emerald-50 rounded-xl flex items-center justify-center"><BarChart2 className="w-4 h-4 text-emerald-600" /></div>
+                    <h2 className="font-bold text-slate-900">{t('student.progress.averageScorePerCourse')}</h2>
+                  </div>
+                  {courseStats.every(c => c.avg === 0) && completed.length === 0 ? (
+                    <div className="flex flex-col items-center justify-center h-[180px] text-slate-400 gap-2">
+                      <BarChart2 className="w-8 h-8 opacity-25" />
+                      <p className="text-sm font-medium">No quiz scores yet</p>
+                      <p className="text-xs text-center max-w-[200px]">Complete quizzes in your courses to see your average scores here</p>
                     </div>
+                  ) : (
                     <ResponsiveContainer width="100%" height={180}>
                       <BarChart data={courseStats} barCategoryGap="30%">
                         <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" vertical={false} />
@@ -318,8 +324,8 @@ export default function StudentProgress() {
                         </Bar>
                       </BarChart>
                     </ResponsiveContainer>
-                  </motion.div>
-                )}
+                  )}
+                </motion.div>
 
                 {/* Lesson completion per course */}
                 {completedLessons > 0 && (
