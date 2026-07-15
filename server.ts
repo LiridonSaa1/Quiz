@@ -5575,12 +5575,14 @@ When giving instructions, number each step clearly. Be precise and technical whe
         }
         asgRows.forEach((a: any) => { assignments[String(a.id)] = String(a.title || "Assignment"); });
         const asgIds = Object.keys(assignments);
-        if (asgIds.length > 0 && allowedStudentIds.size > 0) {
+        if (asgIds.length > 0) {
+          // Fetch ALL submissions for the teacher's assignments — no student_id filter,
+          // because a submitter may not be linked via profiles.teacher_id / courses.student_ids.
           const subRes = await poolQuery(
             `SELECT id,assignment_id,student_id,grade,status,submitted_at
              FROM assignment_submissions
-             WHERE assignment_id = ANY($1::uuid[]) AND student_id = ANY($2::uuid[])`,
-            [asgIds, [...allowedStudentIds]]
+             WHERE assignment_id = ANY($1::uuid[])`,
+            [asgIds]
           );
           assignmentSubmissions = subRes.rows.map((s: any) => ({
             id: String(s.id || ""),
@@ -5590,8 +5592,27 @@ When giving instructions, number each step clearly. Be precise and technical whe
             status: String(s.status || "submitted"),
             submittedAt: s.submitted_at || null,
           }));
+
+          // Backfill student names for any submitters not already in the students map
+          const unknownIds = assignmentSubmissions
+            .map(s => s.studentId)
+            .filter(id => id && !studentById.has(id));
+          if (unknownIds.length > 0) {
+            const extraProfiles = await supabaseAdmin
+              .from("profiles")
+              .select("id,display_name,email")
+              .in("id", [...new Set(unknownIds)]);
+            if (!extraProfiles.error) {
+              for (const p of (extraProfiles.data || [])) {
+                const pid = String(p.id || "");
+                if (pid) studentById.set(pid, { name: String(p.display_name || "Unknown"), email: String(p.email || "") });
+              }
+            }
+          }
         }
-      } catch { /* tables may not exist yet */ }
+      } catch (subErr: any) {
+        console.warn("[results] assignment submissions query failed:", subErr?.message || subErr);
+      }
 
       res.json({ success: true, attempts, quizzes, students, assignmentSubmissions, assignments });
     } catch (e: any) {

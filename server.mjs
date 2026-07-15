@@ -7314,12 +7314,12 @@ Assistant:`
           assignments[String(a.id)] = String(a.title || "Assignment");
         });
         const asgIds = Object.keys(assignments);
-        if (asgIds.length > 0 && allowedStudentIds.size > 0) {
+        if (asgIds.length > 0) {
           const subRes = await poolQuery(
             `SELECT id,assignment_id,student_id,grade,status,submitted_at
              FROM assignment_submissions
-             WHERE assignment_id = ANY($1::uuid[]) AND student_id = ANY($2::uuid[])`,
-            [asgIds, [...allowedStudentIds]]
+             WHERE assignment_id = ANY($1::uuid[])`,
+            [asgIds]
           );
           assignmentSubmissions = subRes.rows.map((s) => ({
             id: String(s.id || ""),
@@ -7329,8 +7329,19 @@ Assistant:`
             status: String(s.status || "submitted"),
             submittedAt: s.submitted_at || null
           }));
+          const unknownIds = assignmentSubmissions.map((s) => s.studentId).filter((id) => id && !studentById.has(id));
+          if (unknownIds.length > 0) {
+            const extraProfiles = await supabaseAdmin.from("profiles").select("id,display_name,email").in("id", [...new Set(unknownIds)]);
+            if (!extraProfiles.error) {
+              for (const p of extraProfiles.data || []) {
+                const pid = String(p.id || "");
+                if (pid) studentById.set(pid, { name: String(p.display_name || "Unknown"), email: String(p.email || "") });
+              }
+            }
+          }
         }
-      } catch {
+      } catch (subErr) {
+        console.warn("[results] assignment submissions query failed:", subErr?.message || subErr);
       }
       res.json({ success: true, attempts, quizzes, students, assignmentSubmissions, assignments });
     } catch (e) {
