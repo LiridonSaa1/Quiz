@@ -793,8 +793,8 @@ export default function QuizTaking() {
         // Notifications are best-effort — don't fail the submission if dispatch fails.
       }
 
-      // Send result email to the student — best-effort, never blocks navigation
-      if (attempt.id) {
+      // Send result email to the student (exams only) — best-effort, never blocks navigation
+      if (attempt.id && String(quiz.type || '').toLowerCase() === 'exam') {
         authFetch('/api/student/quiz/result-email', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
