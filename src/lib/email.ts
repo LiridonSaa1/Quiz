@@ -770,7 +770,7 @@ export function renderExamPassedEmail(opts: {
     ? `${copy.heading}\n\nKeni kaluar testin "${opts.examTitle}".\nPikë: ${score}% — Nota: ${opts.grade}\n\nCertifikata juaj është duke u përgatitur dhe do t'ju dërgohet sa më shpejt.\n\n${brand}`
     : `${copy.heading}\n\nYou passed the test "${opts.examTitle}".\nScore: ${score}% — Grade: ${opts.grade}\n\nYour certificate is being prepared and will be sent to you shortly.\n\n${brand}`;
 
-  return { subject: copy.subject, htmlContent, textContent };
+  return { subject: copy.subject, htmlContent: htmlContent, textContent };
 }
 
 /**
@@ -922,5 +922,5 @@ export function renderQuizResultEmail(opts: {
 </body>
 </html>`;
 
-  return { subject, htmlContent, textContent };
+  return { subject: t.subject, htmlContent, textContent };
 }

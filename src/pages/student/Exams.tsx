@@ -243,7 +243,7 @@ export default function StudentExams() {
 
       {/* Exam Cards */}
       {loading ? (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
           {[...Array(6)].map((_, i) => (
             <div key={i} className="bg-white rounded-3xl border border-slate-100 overflow-hidden shadow-sm">
               <div className="h-3 bg-slate-200 animate-pulse" />
@@ -267,7 +267,7 @@ export default function StudentExams() {
           </p>
         </motion.div>
       ) : (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
           <AnimatePresence>
             {visible.map((exam, i) => {
               const statusColor = exam.passed ? 'from-emerald-500 to-teal-500' : 'from-violet-500 to-purple-500';

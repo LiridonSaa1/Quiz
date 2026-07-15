@@ -986,7 +986,7 @@ function renderQuizResultEmail(opts) {
   </table>
 </body>
 </html>`;
-  return { subject, htmlContent, textContent };
+  return { subject: t.subject, htmlContent, textContent };
 }
 
 // src/lib/notifyEvents.ts
