@@ -18,6 +18,7 @@ import {
   BarChart3, Search, Download, ChevronDown, ChevronUp,
   CheckCircle2, XCircle, TrendingUp, FileText, Clock,
   Trophy, Flame, Activity, ClipboardList, Layers,
+  Users, GraduationCap, BookOpen,
 } from 'lucide-react';
 import {
   AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip,
@@ -418,6 +419,71 @@ export default function TeacherResults() {
     });
   }, [sectionData, attempts, selectedQuiz]);
 
+  const [selectedAssignmentClass, setSelectedAssignmentClass] = useState('all');
+
+  /* ── Per-class assignment averages ───────────────────────────────────────── */
+  const classAssignmentStats = useMemo(() => {
+    if (classes.length === 0) return [];
+    return classes.map(cls => {
+      const classSubs = cls.studentIds.length > 0
+        ? assignmentSubmissions.filter(s => cls.studentIds.includes(s.studentId))
+        : assignmentSubmissions; // fallback: show all if class has no studentIds
+      const graded = classSubs.filter(s => s.grade != null);
+      const avgGrade = graded.length > 0
+        ? Math.round(graded.reduce((sum, s) => sum + (s.grade as number), 0) / graded.length)
+        : null;
+      const submittedStudents = new Set(classSubs.map(s => s.studentId)).size;
+      // count unique assignments submitted
+      const uniqueAssignments = new Set(classSubs.map(s => s.assignmentId)).size;
+      const gradedPct = classSubs.length > 0 ? Math.round((graded.length / classSubs.length) * 100) : 0;
+      return {
+        id: cls.id,
+        name: cls.name,
+        studentCount: cls.studentIds.length,
+        submittedStudents,
+        totalSubmissions: classSubs.length,
+        uniqueAssignments,
+        gradedCount: graded.length,
+        gradedPct,
+        avgGrade,
+      };
+    });
+  }, [classes, assignmentSubmissions]);
+
+  const CLASS_ASGN_GRADIENTS = [
+    'from-emerald-500 to-teal-600',
+    'from-blue-500 to-cyan-600',
+    'from-violet-500 to-purple-600',
+    'from-amber-500 to-orange-600',
+    'from-rose-500 to-pink-600',
+    'from-indigo-500 to-blue-600',
+    'from-sky-500 to-indigo-500',
+    'from-teal-500 to-emerald-600',
+  ];
+
+  /* Filtered submissions for the assignment tab table */
+  const filteredAssignmentSubs = useMemo(() => {
+    let list = [...assignmentSubmissions];
+    if (selectedAssignmentClass !== 'all') {
+      const cls = classes.find(c => c.id === selectedAssignmentClass);
+      if (cls && cls.studentIds.length > 0) {
+        list = list.filter(s => cls.studentIds.includes(s.studentId));
+      }
+    }
+    if (search.trim()) {
+      const q = search.trim().toLowerCase();
+      list = list.filter(s => {
+        const student = students[s.studentId];
+        return (
+          (student?.name || '').toLowerCase().includes(q) ||
+          (student?.email || '').toLowerCase().includes(q) ||
+          (assignments[s.assignmentId] || '').toLowerCase().includes(q)
+        );
+      });
+    }
+    return list;
+  }, [assignmentSubmissions, selectedAssignmentClass, classes, search, students, assignments]);
+
   const [exportOpen, setExportOpen] = useState(false);
   const exportRef = useRef<HTMLDivElement>(null);
 
@@ -629,83 +695,211 @@ export default function TeacherResults() {
 
         {/* ── Assignments panel ──────────────────────────────────────────── */}
         {mainTab === 'assignments' && (
-          <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
-            <div className="h-1 bg-gradient-to-r from-emerald-400 to-teal-500" />
-            {loading ? (
-              <div className="p-8 flex items-center justify-center text-slate-400 text-sm">Loading…</div>
-            ) : assignmentSubmissions.length === 0 ? (
-              <div className="flex flex-col items-center justify-center py-20 gap-2 text-slate-400">
-                <ClipboardList className="w-10 h-10 opacity-30" />
-                <p className="text-sm font-medium">{t('teacher.results.noSubmissionsYet')}</p>
-                <p className="text-xs text-slate-400 max-w-sm text-center">
-                  {t('teacher.results.noSubmissionsDesc')}
-                </p>
-              </div>
-            ) : (
-              <div className="overflow-x-auto">
-                <table className="w-full text-sm">
-                  <thead>
-                    <tr className="border-b border-slate-100">
-                      <th className="text-left px-5 py-3.5 font-semibold text-slate-500 text-xs uppercase tracking-wide">{t('teacher.results.student')}</th>
-                      <th className="text-left px-5 py-3.5 font-semibold text-slate-500 text-xs uppercase tracking-wide">{t('teacher.results.assignmentCol')}</th>
-                      <th className="text-left px-5 py-3.5 font-semibold text-slate-500 text-xs uppercase tracking-wide">{t('teacher.results.statusCol')}</th>
-                      <th className="text-left px-5 py-3.5 font-semibold text-slate-500 text-xs uppercase tracking-wide">{t('teacher.results.gradeCol')}</th>
-                      <th className="text-left px-5 py-3.5 font-semibold text-slate-500 text-xs uppercase tracking-wide">{t('teacher.results.submittedCol')}</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {assignmentSubmissions
-                      .filter((s) => {
-                        if (!search.trim()) return true;
-                        const q = search.trim().toLowerCase();
-                        const student = students[s.studentId];
-                        const asgTitle = assignments[s.assignmentId] || '';
-                        return (
-                          (student?.name || '').toLowerCase().includes(q) ||
-                          (student?.email || '').toLowerCase().includes(q) ||
-                          asgTitle.toLowerCase().includes(q)
-                        );
-                      })
-                      .map((sub) => {
-                        const student = students[sub.studentId];
-                        const asgTitle = assignments[sub.assignmentId] || 'Assignment';
-                        const statusColor =
-                          sub.status === 'graded' ? 'bg-emerald-100 text-emerald-700' :
-                          sub.status === 'submitted' ? 'bg-blue-100 text-blue-700' :
-                          'bg-amber-100 text-amber-700';
-                        return (
-                          <tr key={sub.id} className="border-b border-slate-50 hover:bg-slate-50 transition-colors">
-                            <td className="px-5 py-3.5">
-                              <div className="font-semibold text-slate-800">{student?.name || sub.studentId}</div>
-                              {student?.email && <div className="text-xs text-slate-400">{student.email}</div>}
-                            </td>
-                            <td className="px-5 py-3.5 text-slate-700">{asgTitle}</td>
-                            <td className="px-5 py-3.5">
-                              <span className={cn('px-2 py-0.5 rounded-full text-xs font-semibold capitalize', statusColor)}>
-                                {sub.status}
-                              </span>
-                            </td>
-                            <td className="px-5 py-3.5">
-                              {sub.grade != null
-                                ? <span className="font-bold text-slate-800">{sub.grade}%</span>
-                                : <span className="text-slate-400 text-xs">{t('teacher.results.notGraded')}</span>
-                              }
-                            </td>
-                            <td className="px-5 py-3.5 text-xs text-slate-500">
-                              {sub.submittedAt
-                                ? format(new Date(sub.submittedAt), 'MMM d, yyyy')
-                                : '—'}
-                            </td>
-                          </tr>
-                        );
-                      })}
-                  </tbody>
-                </table>
-                <div className="px-5 py-3 border-t border-slate-100 text-xs text-slate-400">
-                  {t('teacher.results.submissionsCount', { count: assignmentSubmissions.length })}
+          <div className="space-y-6">
+
+            {/* ── Class averages grid ─────────────────────────────────────── */}
+            {!loading && classAssignmentStats.length > 0 && (
+              <div>
+                <h3 className="text-sm font-bold text-slate-700 uppercase tracking-widest mb-3 flex items-center gap-2">
+                  <GraduationCap className="w-4 h-4 text-emerald-500" />
+                  Average per Class
+                </h3>
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+                  {classAssignmentStats.map((cls, i) => {
+                    const gradient = CLASS_ASGN_GRADIENTS[i % CLASS_ASGN_GRADIENTS.length];
+                    const avgDisplay = cls.avgGrade != null ? `${cls.avgGrade}%` : '—';
+                    const isSelected = selectedAssignmentClass === cls.id;
+                    return (
+                      <motion.div
+                        key={cls.id}
+                        whileHover={{ y: -3, boxShadow: '0 12px 36px rgba(0,0,0,0.09)' }}
+                        onClick={() => setSelectedAssignmentClass(isSelected ? 'all' : cls.id)}
+                        className={cn(
+                          'rounded-2xl border shadow-sm overflow-hidden cursor-pointer transition-all',
+                          isSelected ? 'border-emerald-400 ring-2 ring-emerald-300/50' : 'border-slate-100 bg-white'
+                        )}
+                      >
+                        {/* header */}
+                        <div className={`bg-gradient-to-br ${gradient} p-4 relative overflow-hidden`}>
+                          <div className="absolute top-0 right-0 w-16 h-16 bg-white/10 rounded-full -translate-y-6 translate-x-6" />
+                          <div className="relative z-10 flex items-start justify-between gap-2">
+                            <div>
+                              <p className="text-white font-black text-base leading-tight">{cls.name}</p>
+                              <p className="text-white/70 text-xs mt-0.5 flex items-center gap-1">
+                                <Users className="w-3 h-3" />
+                                {cls.submittedStudents} / {cls.studentCount || '?'} submitted
+                              </p>
+                            </div>
+                            <div className="text-right shrink-0">
+                              <div className="text-2xl font-black text-white">{avgDisplay}</div>
+                              <div className="text-[10px] text-white/70 font-semibold uppercase tracking-wide">avg grade</div>
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* body */}
+                        <div className="bg-white p-4 space-y-3">
+                          {/* avg grade bar */}
+                          <div>
+                            <div className="flex justify-between text-xs mb-1">
+                              <span className="text-slate-500 font-medium">Avg grade</span>
+                              <span className="font-bold text-slate-700">{avgDisplay}</span>
+                            </div>
+                            <div className="h-2 bg-slate-100 rounded-full overflow-hidden">
+                              <motion.div
+                                className={`h-full rounded-full bg-gradient-to-r ${gradient}`}
+                                initial={{ width: 0 }}
+                                animate={{ width: `${cls.avgGrade ?? 0}%` }}
+                                transition={{ duration: 0.6, delay: i * 0.05 }}
+                              />
+                            </div>
+                          </div>
+
+                          {/* meta row */}
+                          <div className="flex items-center gap-3 text-[11px] text-slate-400 flex-wrap">
+                            <span className="flex items-center gap-1">
+                              <BookOpen className="w-3 h-3" />
+                              <span className="font-semibold text-slate-600">{cls.totalSubmissions}</span> submission{cls.totalSubmissions !== 1 ? 's' : ''}
+                            </span>
+                            <span className="flex items-center gap-1">
+                              <CheckCircle2 className="w-3 h-3 text-emerald-500" />
+                              <span className="font-semibold text-slate-600">{cls.gradedCount}</span> graded
+                            </span>
+                          </div>
+
+                          {/* graded progress */}
+                          {cls.totalSubmissions > 0 && (
+                            <div className="flex items-center gap-2 text-[11px] text-slate-400">
+                              <div className="flex-1 h-1 bg-slate-100 rounded-full overflow-hidden">
+                                <div
+                                  className="h-full bg-emerald-400 rounded-full transition-all"
+                                  style={{ width: `${cls.gradedPct}%` }}
+                                />
+                              </div>
+                              <span className="shrink-0 font-semibold">{cls.gradedPct}% graded</span>
+                            </div>
+                          )}
+
+                          {isSelected && (
+                            <p className="text-[10px] text-emerald-600 font-semibold">
+                              ✓ Filtered to this class — click again to clear
+                            </p>
+                          )}
+                        </div>
+                      </motion.div>
+                    );
+                  })}
                 </div>
               </div>
             )}
+
+            {/* ── Submissions table ───────────────────────────────────────── */}
+            <div>
+              {classAssignmentStats.length > 0 && (
+                <div className="flex items-center justify-between mb-3">
+                  <h3 className="text-sm font-bold text-slate-700 uppercase tracking-widest flex items-center gap-2">
+                    <ClipboardList className="w-4 h-4 text-emerald-500" />
+                    Submissions
+                    {selectedAssignmentClass !== 'all' && (
+                      <span className="text-emerald-600 normal-case font-semibold">
+                        — {classes.find(c => c.id === selectedAssignmentClass)?.name}
+                      </span>
+                    )}
+                  </h3>
+                  {selectedAssignmentClass !== 'all' && (
+                    <button
+                      type="button"
+                      onClick={() => setSelectedAssignmentClass('all')}
+                      className="text-xs text-slate-400 hover:text-slate-600 underline"
+                    >
+                      Show all classes
+                    </button>
+                  )}
+                </div>
+              )}
+
+              <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
+                <div className="h-1 bg-gradient-to-r from-emerald-400 to-teal-500" />
+                {loading ? (
+                  <div className="p-8 flex items-center justify-center text-slate-400 text-sm">Loading…</div>
+                ) : filteredAssignmentSubs.length === 0 ? (
+                  <div className="flex flex-col items-center justify-center py-20 gap-2 text-slate-400">
+                    <ClipboardList className="w-10 h-10 opacity-30" />
+                    <p className="text-sm font-medium">{t('teacher.results.noSubmissionsYet')}</p>
+                    <p className="text-xs text-slate-400 max-w-sm text-center">
+                      {t('teacher.results.noSubmissionsDesc')}
+                    </p>
+                  </div>
+                ) : (
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-sm">
+                      <thead>
+                        <tr className="border-b border-slate-100">
+                          <th className="text-left px-5 py-3.5 font-semibold text-slate-500 text-xs uppercase tracking-wide">{t('teacher.results.student')}</th>
+                          <th className="text-left px-5 py-3.5 font-semibold text-slate-500 text-xs uppercase tracking-wide">{t('teacher.results.assignmentCol')}</th>
+                          <th className="text-left px-5 py-3.5 font-semibold text-slate-500 text-xs uppercase tracking-wide">{t('teacher.results.statusCol')}</th>
+                          <th className="text-left px-5 py-3.5 font-semibold text-slate-500 text-xs uppercase tracking-wide">{t('teacher.results.gradeCol')}</th>
+                          <th className="text-left px-5 py-3.5 font-semibold text-slate-500 text-xs uppercase tracking-wide">{t('teacher.results.submittedCol')}</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {filteredAssignmentSubs.map((sub) => {
+                          const student = students[sub.studentId];
+                          const asgTitle = assignments[sub.assignmentId] || 'Assignment';
+                          const statusColor =
+                            sub.status === 'graded' ? 'bg-emerald-100 text-emerald-700' :
+                            sub.status === 'submitted' ? 'bg-blue-100 text-blue-700' :
+                            'bg-amber-100 text-amber-700';
+                          return (
+                            <tr key={sub.id} className="border-b border-slate-50 hover:bg-slate-50 transition-colors">
+                              <td className="px-5 py-3.5">
+                                <div className="flex items-center gap-2.5">
+                                  <GenderAvatar name={student?.name || sub.studentId} size="sm" />
+                                  <div>
+                                    <div className="font-semibold text-slate-800 text-sm">{student?.name || sub.studentId}</div>
+                                    {student?.email && <div className="text-xs text-slate-400">{student.email}</div>}
+                                  </div>
+                                </div>
+                              </td>
+                              <td className="px-5 py-3.5 text-slate-700 text-sm">{asgTitle}</td>
+                              <td className="px-5 py-3.5">
+                                <span className={cn('px-2 py-0.5 rounded-full text-xs font-semibold capitalize', statusColor)}>
+                                  {sub.status}
+                                </span>
+                              </td>
+                              <td className="px-5 py-3.5">
+                                {sub.grade != null ? (
+                                  <div className="flex items-center gap-2">
+                                    <span className="font-bold text-slate-800">{sub.grade}%</span>
+                                    <div className="w-16 h-1.5 bg-slate-100 rounded-full overflow-hidden">
+                                      <div
+                                        className={cn('h-full rounded-full', sub.grade >= 80 ? 'bg-emerald-500' : sub.grade >= 60 ? 'bg-amber-400' : 'bg-rose-400')}
+                                        style={{ width: `${sub.grade}%` }}
+                                      />
+                                    </div>
+                                  </div>
+                                ) : (
+                                  <span className="text-slate-400 text-xs">{t('teacher.results.notGraded')}</span>
+                                )}
+                              </td>
+                              <td className="px-5 py-3.5 text-xs text-slate-500">
+                                {sub.submittedAt ? format(new Date(sub.submittedAt), 'MMM d, yyyy') : '—'}
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                    <div className="px-5 py-3 border-t border-slate-100 text-xs text-slate-400">
+                      {t('teacher.results.submissionsCount', { count: filteredAssignmentSubs.length })}
+                      {selectedAssignmentClass !== 'all' && assignmentSubmissions.length !== filteredAssignmentSubs.length && (
+                        <span className="ml-2 text-slate-300">({assignmentSubmissions.length} total)</span>
+                      )}
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
           </div>
         )}
 
