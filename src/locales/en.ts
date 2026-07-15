@@ -1861,6 +1861,12 @@ const en = {
       dateLabel: 'Date',
       markedBy: 'Marked by',
       showing: 'Showing {{count}} of {{total}} records',
+      cancel: 'Cancel',
+      notifyParents: 'Send email notification to parent',
+      emailLanguage: 'Email language',
+      emailLangAlbanian: 'Albanian (Shqip)',
+      emailLangEnglish: 'English',
+      emailWillBeSent: 'An email will be sent to the parent',
     },
   },
   continueLearning: {

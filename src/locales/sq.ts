@@ -1763,6 +1763,12 @@ const sq = {
       dateLabel: 'Data',
       markedBy: 'Shënuar nga',
       showing: 'Duke shfaqur {{count}} nga {{total}} regjistrime',
+      cancel: 'Anulo',
+      notifyParents: 'Dërgo email njoftues te prindi',
+      emailLanguage: 'Gjuha e emailit',
+      emailLangAlbanian: 'Shqip',
+      emailLangEnglish: 'Anglisht (English)',
+      emailWillBeSent: 'Një email do t\'i dërgohet prindit',
     },
   },
   continueLearning: {
