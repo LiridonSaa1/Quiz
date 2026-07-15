@@ -5550,34 +5550,48 @@ When giving instructions, number each step clearly. Be precise and technical whe
         }));
 
       // Assignment submissions — poolQuery to bypass schema cache
+      // Fetch by teacher_id (primary) OR course_id (secondary) to cover all assignment creation paths.
       let assignmentSubmissions: any[] = [];
       let assignments: Record<string, string> = {};
-      if (teacherCourseIds.length > 0) {
-        try {
-          const asgRes = await poolQuery(
+      try {
+        let asgRows: any[] = [];
+        if (scopedIds.length > 0) {
+          const byTeacher = await poolQuery(
+            `SELECT id, title FROM assignments WHERE teacher_id = ANY($1::uuid[])`,
+            [scopedIds]
+          );
+          asgRows = byTeacher.rows;
+        }
+        // Also include any assignments linked by course_id not already found
+        if (teacherCourseIds.length > 0) {
+          const existingIds = new Set(asgRows.map((r: any) => String(r.id)));
+          const byCourse = await poolQuery(
             `SELECT id, title FROM assignments WHERE course_id = ANY($1::uuid[])`,
             [teacherCourseIds]
           );
-          asgRes.rows.forEach((a: any) => { assignments[String(a.id)] = String(a.title || "Assignment"); });
-          const asgIds = Object.keys(assignments);
-          if (asgIds.length > 0 && allowedStudentIds.size > 0) {
-            const subRes = await poolQuery(
-              `SELECT id,assignment_id,student_id,grade,status,submitted_at
-               FROM assignment_submissions
-               WHERE assignment_id = ANY($1::uuid[]) AND student_id = ANY($2::uuid[])`,
-              [asgIds, [...allowedStudentIds]]
-            );
-            assignmentSubmissions = subRes.rows.map((s: any) => ({
-              id: String(s.id || ""),
-              assignmentId: String(s.assignment_id || ""),
-              studentId: String(s.student_id || ""),
-              grade: s.grade != null ? Number(s.grade) : null,
-              status: String(s.status || "submitted"),
-              submittedAt: s.submitted_at || null,
-            }));
+          for (const r of byCourse.rows) {
+            if (!existingIds.has(String(r.id))) asgRows.push(r);
           }
-        } catch { /* tables may not exist yet */ }
-      }
+        }
+        asgRows.forEach((a: any) => { assignments[String(a.id)] = String(a.title || "Assignment"); });
+        const asgIds = Object.keys(assignments);
+        if (asgIds.length > 0 && allowedStudentIds.size > 0) {
+          const subRes = await poolQuery(
+            `SELECT id,assignment_id,student_id,grade,status,submitted_at
+             FROM assignment_submissions
+             WHERE assignment_id = ANY($1::uuid[]) AND student_id = ANY($2::uuid[])`,
+            [asgIds, [...allowedStudentIds]]
+          );
+          assignmentSubmissions = subRes.rows.map((s: any) => ({
+            id: String(s.id || ""),
+            assignmentId: String(s.assignment_id || ""),
+            studentId: String(s.student_id || ""),
+            grade: s.grade != null ? Number(s.grade) : null,
+            status: String(s.status || "submitted"),
+            submittedAt: s.submitted_at || null,
+          }));
+        }
+      } catch { /* tables may not exist yet */ }
 
       res.json({ success: true, attempts, quizzes, students, assignmentSubmissions, assignments });
     } catch (e: any) {

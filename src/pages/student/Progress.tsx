@@ -8,6 +8,7 @@ import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContai
 import { cn } from '../../lib/utils';
 import { format, subDays } from 'date-fns';
 import { fetchAttemptRowsByStudentId, normalizeAttempts } from '../../lib/quizAttempts';
+import { authFetch } from '../../lib/apiUrl';
 
 function AnimatedCounter({ value, suffix = '' }: { value: number; suffix?: string }) {
   const [count, setCount] = useState(0);
@@ -33,6 +34,8 @@ export default function StudentProgress() {
   const [attempts, setAttempts] = useState<any[]>([]);
   const [courses, setCourses] = useState<any[]>([]);
   const [quizMap, setQuizMap] = useState<Record<string, { title: string; courseId: string }>>({});
+  const [lessonProgress, setLessonProgress] = useState<any[]>([]);
+  const [lessonCourseMap, setLessonCourseMap] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -41,17 +44,26 @@ export default function StudentProgress() {
       if (!session) return;
       const uid = session.user.id;
 
-      const [coursesSnap, attemptRows] = await Promise.all([
-        supabase.from('courses').select('id, title').contains('student_ids', [uid]),
-        fetchAttemptRowsByStudentId(supabase, uid),
+      // Fetch courses via server API (handles missing student_ids / teacher_id columns gracefully)
+      const [coursesRes, attemptRows, lpSnap] = await Promise.all([
+        authFetch('/api/student/courses/available').then(r => r.ok ? r.json() : { courses: [] }),
+        fetchAttemptRowsByStudentId(supabase, uid).catch(() => []),
+        supabase.from('lesson_progress').select('lesson_id, completed').eq('student_id', uid),
       ]);
 
-      const coursesData = coursesSnap.data || [];
+      const coursesData: any[] = coursesRes?.courses || [];
       setCourses(coursesData);
       const courseIds = coursesData.map((c: any) => c.id);
       const normalizedAttempts = normalizeAttempts(attemptRows || []);
+      setAttempts(normalizedAttempts);
+
+      // Build lesson→course map and collect completed lesson IDs
+      const lpRows = lpSnap.data || [];
+      setLessonProgress(lpRows);
 
       let qMap: Record<string, { title: string; courseId: string }> = {};
+      let lCourseMap: Record<string, string> = {};
+
       if (courseIds.length > 0) {
         const [modulesSnap, lessonsByCourseSnap] = await Promise.all([
           supabase.from('modules').select('id, course_id').in('course_id', courseIds),
@@ -69,19 +81,20 @@ export default function StudentProgress() {
         const lessonsByModuleSnap = moduleIds.length > 0
           ? await supabase.from('lessons').select('id, course_id, module_id').in('module_id', moduleIds)
           : { data: [] as any[] };
+
         const allLessons = [
           ...(lessonsByCourseSnap.data || []),
           ...(lessonsByModuleSnap.data || []),
         ];
-        const lessonToCourse: Record<string, string> = {};
         allLessons.forEach((l: any) => {
           const lid = String(l?.id || '');
           const directCourseId = String(l?.course_id || '');
           const mappedCourseId = directCourseId || moduleToCourse[String(l?.module_id || '')] || '';
-          if (lid && mappedCourseId) lessonToCourse[lid] = mappedCourseId;
+          if (lid && mappedCourseId) lCourseMap[lid] = mappedCourseId;
         });
+        setLessonCourseMap(lCourseMap);
 
-        const lessonIds = Object.keys(lessonToCourse);
+        const lessonIds = Object.keys(lCourseMap);
         const [quizzesByCourseSnap, quizzesByLessonSnap] = await Promise.all([
           supabase.from('quizzes').select('id, title, course_id').in('course_id', courseIds),
           lessonIds.length > 0
@@ -99,13 +112,39 @@ export default function StudentProgress() {
           const qid = String(q?.id || '');
           if (!qid) return;
           const directCourseId = String(q?.course_id || '');
-          const mappedCourseId = directCourseId || lessonToCourse[String(q?.lesson_id || '')] || '';
+          const mappedCourseId = directCourseId || lCourseMap[String(q?.lesson_id || '')] || '';
           if (!mappedCourseId) return;
           qMap[qid] = { title: String(q?.title || 'Quiz'), courseId: mappedCourseId };
         });
+      } else if (lpRows.length > 0) {
+        // No courses found via teacher link, but student has lesson_progress entries —
+        // derive courses from those lessons directly.
+        const progressLessonIds = lpRows.map((r: any) => String(r.lesson_id)).filter(Boolean);
+        if (progressLessonIds.length > 0) {
+          const lessonsSnap = await supabase
+            .from('lessons')
+            .select('id, course_id')
+            .in('id', progressLessonIds);
+          (lessonsSnap.data || []).forEach((l: any) => {
+            const lid = String(l?.id || '');
+            const cid = String(l?.course_id || '');
+            if (lid && cid) lCourseMap[lid] = cid;
+          });
+          setLessonCourseMap(lCourseMap);
+
+          // Fetch course titles for discovered course IDs
+          const discoveredCourseIds = [...new Set(Object.values(lCourseMap))];
+          if (discoveredCourseIds.length > 0 && coursesData.length === 0) {
+            const cSnap = await supabase
+              .from('courses')
+              .select('id, title')
+              .in('id', discoveredCourseIds);
+            setCourses(cSnap.data || []);
+          }
+        }
       }
+
       setQuizMap(qMap);
-      setAttempts(normalizedAttempts);
       setLoading(false);
     };
     load();
@@ -130,6 +169,9 @@ export default function StudentProgress() {
   const passRate = completed.length > 0 ? Math.round((passed / completed.length) * 100) : 0;
   const best = completed.length > 0 ? Math.round(Math.max(...completed.map((a) => getAttemptPercent(a)))) : 0;
 
+  // Lessons completed count
+  const completedLessons = lessonProgress.filter((r: any) => r.completed).length;
+
   // Last 14 days trend
   const trendData = Array.from({ length: 14 }, (_, i) => {
     const day = subDays(new Date(), 13 - i);
@@ -144,21 +186,45 @@ export default function StudentProgress() {
     return { date: format(day, 'MMM d'), score: avg, count: dayAttempts.length };
   });
 
-  // Per-course stats
+  // Per-course stats: quiz avg score + lesson completion %
   const courseStats = courses.map((c: any, i: number) => {
     const cQuizIds = Object.entries(quizMap).filter(([, v]) => v.courseId === c.id).map(([k]) => k);
     const cAttempts = completed.filter(a => cQuizIds.includes(a.quiz_id));
     const avg = cAttempts.length > 0
       ? Math.round(cAttempts.reduce((s, a) => s + getAttemptPercent(a), 0) / cAttempts.length)
       : 0;
-    return { name: c.title, avg, attempts: cAttempts.length, color: CHART_COLORS[i % CHART_COLORS.length] };
+
+    // Lesson completion for this course
+    const courseLessonIds = Object.entries(lessonCourseMap)
+      .filter(([, cid]) => cid === c.id)
+      .map(([lid]) => lid);
+    const completedInCourse = lessonProgress.filter(
+      (r: any) => r.completed && courseLessonIds.includes(String(r.lesson_id))
+    ).length;
+    const lessonPct = courseLessonIds.length > 0
+      ? Math.round((completedInCourse / courseLessonIds.length) * 100)
+      : 0;
+
+    return {
+      name: c.title,
+      avg,
+      lessonPct,
+      attempts: cAttempts.length,
+      completedLessons: completedInCourse,
+      totalLessons: courseLessonIds.length,
+      color: CHART_COLORS[i % CHART_COLORS.length],
+    };
   });
+
+  const hasAnyData = completed.length > 0 || completedLessons > 0;
 
   const statCards = [
     { label: t('student.progress.quizzesTaken'), value: completed.length, suffix: '', icon: Zap, color: 'from-blue-500 to-indigo-500' },
     { label: t('student.progress.averageScore'), value: avgScore, suffix: '%', icon: Target, color: 'from-violet-500 to-purple-500' },
     { label: t('student.progress.passRate'), value: passRate, suffix: '%', icon: CheckCircle2, color: 'from-emerald-500 to-teal-500' },
     { label: t('student.progress.bestScore'), value: best, suffix: '%', icon: Trophy, color: 'from-amber-500 to-orange-500' },
+    { label: t('student.progress.lessonsCompleted', 'Lessons Completed'), value: completedLessons, suffix: '', icon: BookOpen, color: 'from-sky-500 to-cyan-500' },
+    { label: t('student.progress.coursesEnrolled', 'Courses Enrolled'), value: courses.length, suffix: '', icon: Star, color: 'from-rose-500 to-pink-500' },
   ];
 
   return (
@@ -181,12 +247,12 @@ export default function StudentProgress() {
 
         {/* Stat cards */}
         {loading ? (
-          <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-            {[1,2,3,4].map(i => <div key={i} className="h-28 bg-white rounded-2xl border border-slate-100 animate-pulse" />)}
+          <div className="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4">
+            {[1,2,3,4,5,6].map(i => <div key={i} className="h-28 bg-white rounded-2xl border border-slate-100 animate-pulse" />)}
           </div>
         ) : (
           <>
-            <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+            <div className="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4">
               {statCards.map((s, i) => (
                 <motion.div key={s.label} initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.08 }}
                   className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
@@ -232,28 +298,66 @@ export default function StudentProgress() {
 
             {/* Per-course bar chart */}
             {courseStats.length > 0 && (
-              <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.4 }}
-                className="bg-white rounded-3xl border border-slate-100 shadow-sm p-6">
-                <div className="flex items-center gap-2 mb-6">
-                  <div className="w-8 h-8 bg-emerald-50 rounded-xl flex items-center justify-center"><BarChart2 className="w-4 h-4 text-emerald-600" /></div>
-                  <h2 className="font-bold text-slate-900">{t('student.progress.averageScorePerCourse')}</h2>
-                </div>
-                <ResponsiveContainer width="100%" height={180}>
-                  <BarChart data={courseStats} barCategoryGap="30%">
-                    <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" vertical={false} />
-                    <XAxis dataKey="name" tick={{ fontSize: 10, fill: '#94a3b8' }} tickLine={false} axisLine={false} />
-                    <YAxis domain={[0, 100]} tick={{ fontSize: 10, fill: '#94a3b8' }} tickLine={false} axisLine={false} tickFormatter={v => `${v}%`} />
-                    <Tooltip formatter={(v: any) => [`${v}%`, 'Avg Score']} contentStyle={{ borderRadius: 12, border: '1px solid #e2e8f0', fontSize: 12 }} />
-                    <Bar dataKey="avg" radius={[6, 6, 0, 0]}>
-                      {courseStats.map((_, i) => <Cell key={i} fill={CHART_COLORS[i % CHART_COLORS.length]} />)}
-                    </Bar>
-                  </BarChart>
-                </ResponsiveContainer>
-              </motion.div>
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                {/* Quiz avg score per course */}
+                {completed.length > 0 && (
+                  <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.4 }}
+                    className="bg-white rounded-3xl border border-slate-100 shadow-sm p-6">
+                    <div className="flex items-center gap-2 mb-6">
+                      <div className="w-8 h-8 bg-emerald-50 rounded-xl flex items-center justify-center"><BarChart2 className="w-4 h-4 text-emerald-600" /></div>
+                      <h2 className="font-bold text-slate-900">{t('student.progress.averageScorePerCourse')}</h2>
+                    </div>
+                    <ResponsiveContainer width="100%" height={180}>
+                      <BarChart data={courseStats} barCategoryGap="30%">
+                        <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" vertical={false} />
+                        <XAxis dataKey="name" tick={{ fontSize: 10, fill: '#94a3b8' }} tickLine={false} axisLine={false} />
+                        <YAxis domain={[0, 100]} tick={{ fontSize: 10, fill: '#94a3b8' }} tickLine={false} axisLine={false} tickFormatter={v => `${v}%`} />
+                        <Tooltip formatter={(v: any) => [`${v}%`, 'Avg Score']} contentStyle={{ borderRadius: 12, border: '1px solid #e2e8f0', fontSize: 12 }} />
+                        <Bar dataKey="avg" radius={[6, 6, 0, 0]}>
+                          {courseStats.map((_, i) => <Cell key={i} fill={CHART_COLORS[i % CHART_COLORS.length]} />)}
+                        </Bar>
+                      </BarChart>
+                    </ResponsiveContainer>
+                  </motion.div>
+                )}
+
+                {/* Lesson completion per course */}
+                {completedLessons > 0 && (
+                  <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.45 }}
+                    className="bg-white rounded-3xl border border-slate-100 shadow-sm p-6">
+                    <div className="flex items-center gap-2 mb-6">
+                      <div className="w-8 h-8 bg-sky-50 rounded-xl flex items-center justify-center"><BookOpen className="w-4 h-4 text-sky-600" /></div>
+                      <h2 className="font-bold text-slate-900">{t('student.progress.lessonCompletionPerCourse', 'Lesson Completion by Course')}</h2>
+                    </div>
+                    <div className="space-y-3">
+                      {courseStats.map((c, i) => (
+                        <div key={i}>
+                          <div className="flex items-center justify-between mb-1">
+                            <span className="text-xs font-semibold text-slate-700 truncate max-w-[60%]">{c.name}</span>
+                            <span className="text-xs text-slate-500 shrink-0 ml-2">
+                              {c.completedLessons}/{c.totalLessons > 0 ? c.totalLessons : '?'} lessons
+                            </span>
+                          </div>
+                          <div className="h-2 bg-slate-100 rounded-full overflow-hidden">
+                            <motion.div
+                              className="h-full rounded-full"
+                              style={{ backgroundColor: c.color }}
+                              initial={{ width: 0 }}
+                              animate={{ width: `${c.lessonPct}%` }}
+                              transition={{ duration: 0.8, delay: i * 0.1 }}
+                            />
+                          </div>
+                          <div className="text-right text-[10px] text-slate-400 mt-0.5">{c.lessonPct}%</div>
+                        </div>
+                      ))}
+                    </div>
+                  </motion.div>
+                )}
+              </div>
             )}
 
             {/* Empty */}
-            {completed.length === 0 && (
+            {!hasAnyData && (
               <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }}
                 className="flex flex-col items-center justify-center py-24 text-center">
                 <motion.div animate={{ y: [0, -8, 0] }} transition={{ duration: 3, repeat: Infinity }}

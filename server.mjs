@@ -7291,34 +7291,46 @@ Assistant:`
       }));
       let assignmentSubmissions = [];
       let assignments = {};
-      if (teacherCourseIds.length > 0) {
-        try {
-          const asgRes = await poolQuery(
+      try {
+        let asgRows = [];
+        if (scopedIds.length > 0) {
+          const byTeacher = await poolQuery(
+            `SELECT id, title FROM assignments WHERE teacher_id = ANY($1::uuid[])`,
+            [scopedIds]
+          );
+          asgRows = byTeacher.rows;
+        }
+        if (teacherCourseIds.length > 0) {
+          const existingIds = new Set(asgRows.map((r) => String(r.id)));
+          const byCourse = await poolQuery(
             `SELECT id, title FROM assignments WHERE course_id = ANY($1::uuid[])`,
             [teacherCourseIds]
           );
-          asgRes.rows.forEach((a) => {
-            assignments[String(a.id)] = String(a.title || "Assignment");
-          });
-          const asgIds = Object.keys(assignments);
-          if (asgIds.length > 0 && allowedStudentIds.size > 0) {
-            const subRes = await poolQuery(
-              `SELECT id,assignment_id,student_id,grade,status,submitted_at
-               FROM assignment_submissions
-               WHERE assignment_id = ANY($1::uuid[]) AND student_id = ANY($2::uuid[])`,
-              [asgIds, [...allowedStudentIds]]
-            );
-            assignmentSubmissions = subRes.rows.map((s) => ({
-              id: String(s.id || ""),
-              assignmentId: String(s.assignment_id || ""),
-              studentId: String(s.student_id || ""),
-              grade: s.grade != null ? Number(s.grade) : null,
-              status: String(s.status || "submitted"),
-              submittedAt: s.submitted_at || null
-            }));
+          for (const r of byCourse.rows) {
+            if (!existingIds.has(String(r.id))) asgRows.push(r);
           }
-        } catch {
         }
+        asgRows.forEach((a) => {
+          assignments[String(a.id)] = String(a.title || "Assignment");
+        });
+        const asgIds = Object.keys(assignments);
+        if (asgIds.length > 0 && allowedStudentIds.size > 0) {
+          const subRes = await poolQuery(
+            `SELECT id,assignment_id,student_id,grade,status,submitted_at
+             FROM assignment_submissions
+             WHERE assignment_id = ANY($1::uuid[]) AND student_id = ANY($2::uuid[])`,
+            [asgIds, [...allowedStudentIds]]
+          );
+          assignmentSubmissions = subRes.rows.map((s) => ({
+            id: String(s.id || ""),
+            assignmentId: String(s.assignment_id || ""),
+            studentId: String(s.student_id || ""),
+            grade: s.grade != null ? Number(s.grade) : null,
+            status: String(s.status || "submitted"),
+            submittedAt: s.submitted_at || null
+          }));
+        }
+      } catch {
       }
       res.json({ success: true, attempts, quizzes, students, assignmentSubmissions, assignments });
     } catch (e) {
