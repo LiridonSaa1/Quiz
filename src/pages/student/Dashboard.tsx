@@ -9,6 +9,7 @@ import { Quiz } from '../../types';
 import { cn } from '../../lib/utils';
 import { fetchAttemptRowsByStudentId, normalizeAttempts } from '../../lib/quizAttempts';
 import { selectPublishedQuizzesCompat } from '../../lib/quizzesCompat';
+import { isMissingCoursesStudentIdsError } from '../../lib/schemaErrors';
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, ResponsiveContainer, Tooltip } from 'recharts';
 import { format, subDays } from 'date-fns';
 import WelcomeCelebration from '../../components/WelcomeCelebration';
@@ -89,10 +90,10 @@ export default function StudentDashboard() {
           console.warn(`[perf] Student dashboard initial batch took ${Math.round(performance.now() - t0)}ms`);
         }
 
-        if (enrolledCoursesRes.error) throw enrolledCoursesRes.error;
+        if (enrolledCoursesRes.error && !isMissingCoursesStudentIdsError(enrolledCoursesRes.error)) throw enrolledCoursesRes.error;
         if (enrolledClassesRes.error) throw enrolledClassesRes.error;
 
-        const directCourses = Array.isArray(enrolledCoursesRes.data) ? enrolledCoursesRes.data : [];
+        const directCourses = !enrolledCoursesRes.error && Array.isArray(enrolledCoursesRes.data) ? enrolledCoursesRes.data : [];
         const classCourseIds = (Array.isArray(enrolledClassesRes.data) ? enrolledClassesRes.data : [])
           .map((row: any) => String(row?.course_id || '').trim())
           .filter(Boolean);
