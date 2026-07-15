@@ -2253,6 +2253,7 @@ When giving instructions, number each step clearly. Be precise and technical whe
     classId?: string | null;
     courseId?: string | null;
     teacherId?: string | null;
+    targetStudentId?: string | null;
     title: string;
     description?: string | null;
     dueDate?: string | null;
@@ -2262,7 +2263,16 @@ When giving instructions, number each step clearly. Be precise and technical whe
   }) => {
     try {
       let students: Array<{ id: string; email: string; display_name: string | null }> = [];
-      if (opts.classId) {
+      if (opts.targetStudentId) {
+        const { data: sRow } = await supabaseAdmin
+          .from('profiles')
+          .select('id, email, display_name, status')
+          .eq('id', opts.targetStudentId)
+          .maybeSingle();
+        if (sRow && (sRow as any).email && (sRow as any).status !== 'inactive') {
+          students = [{ id: String((sRow as any).id), email: String((sRow as any).email), display_name: (sRow as any).display_name || null }];
+        }
+      } else if (opts.classId) {
         students = await resolveClassStudentProfiles(opts.classId, opts.teacherId || undefined);
       } else if (opts.courseId) {
         // No class linked — fall back to resolving students directly via the course,
@@ -18079,10 +18089,10 @@ Content:\n"""${clipped}"""`;
       try {
         const result = await poolQuery(
           `INSERT INTO assignments
-             (title, description, instructions, course_id, class_id, teacher_id,
+             (title, description, instructions, course_id, class_id, target_student_id, teacher_id,
               type, due_date, max_score, status, allow_late_submission,
               submission_config, publish_at, attachments, created_at, updated_at)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12::jsonb,$13,$14::jsonb,now(),now())
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13::jsonb,$14,$15::jsonb,now(),now())
            RETURNING id`,
           [
             String(b.title),
@@ -18090,6 +18100,7 @@ Content:\n"""${clipped}"""`;
             b.instructions != null ? String(b.instructions) : null,
             b.course_id || null,
             b.class_id || null,
+            b.target_student_id || null,
             b.teacher_id || caller.userId,
             b.type || 'homework',
             b.due_date || null,
@@ -18106,6 +18117,7 @@ Content:\n"""${clipped}"""`;
           classId: b.class_id ? String(b.class_id) : null,
           courseId: b.course_id ? String(b.course_id) : null,
           teacherId: b.teacher_id ? String(b.teacher_id) : caller.userId,
+          targetStudentId: b.target_student_id ? String(b.target_student_id) : null,
           title: String(b.title),
           description: b.description != null ? String(b.description) : null,
           dueDate: b.due_date ? String(b.due_date) : null,
@@ -18121,6 +18133,7 @@ Content:\n"""${clipped}"""`;
           title: String(b.title),
           description: b.description != null ? String(b.description) : null,
           course_id: b.course_id || null, class_id: b.class_id || null,
+          target_student_id: b.target_student_id || null,
           teacher_id: b.teacher_id || caller.userId,
           type: b.type || 'homework', due_date: b.due_date || null,
           max_score: Number(b.max_score) || 100, status: b.status || 'draft',
@@ -18131,7 +18144,7 @@ Content:\n"""${clipped}"""`;
           created_at: now, updated_at: now,
         };
         if (publishAt) payload.publish_at = publishAt; // only include if actually set
-        const STRIP_COLS = ['publish_at', 'allow_late_submission', 'instructions', 'submission_config', 'attachments'];
+        const STRIP_COLS = ['publish_at', 'allow_late_submission', 'instructions', 'submission_config', 'attachments', 'target_student_id'];
         for (let i = 0; i < STRIP_COLS.length + 2; i++) {
           const { data, error } = await supabaseAdmin.from('assignments').insert(payload).select('id').single();
           if (!error && data?.id) {
@@ -18139,6 +18152,7 @@ Content:\n"""${clipped}"""`;
               classId: b.class_id ? String(b.class_id) : null,
               courseId: b.course_id ? String(b.course_id) : null,
               teacherId: b.teacher_id ? String(b.teacher_id) : caller.userId,
+              targetStudentId: b.target_student_id ? String(b.target_student_id) : null,
               title: String(b.title),
               description: b.description != null ? String(b.description) : null,
               dueDate: b.due_date ? String(b.due_date) : null,
@@ -18195,6 +18209,7 @@ Content:\n"""${clipped}"""`;
         if (b.description !== undefined) payload.description = b.description != null ? String(b.description) : null;
         if (b.course_id !== undefined) payload.course_id = b.course_id || null;
         if (b.class_id !== undefined) payload.class_id = b.class_id || null;
+        if (b.target_student_id !== undefined) payload.target_student_id = b.target_student_id || null;
         if (b.type !== undefined) payload.type = b.type;
         if (b.due_date !== undefined) payload.due_date = b.due_date || null;
         if (b.max_score !== undefined) payload.max_score = Number(b.max_score) || 100;
@@ -18205,7 +18220,7 @@ Content:\n"""${clipped}"""`;
         if (b.attachments !== undefined) payload.attachments = b.attachments != null ? b.attachments : [];
         // Only include publish_at if it has a value (null/absent = don't touch the column)
         if ('publish_at' in b && b.publish_at) payload.publish_at = new Date(String(b.publish_at)).toISOString();
-        const STRIP_COLS = ['publish_at', 'allow_late_submission', 'instructions', 'submission_config', 'attachments'];
+        const STRIP_COLS = ['publish_at', 'allow_late_submission', 'instructions', 'submission_config', 'attachments', 'target_student_id'];
         for (let i = 0; i < STRIP_COLS.length + 2; i++) {
           const { error } = await supabaseAdmin.from('assignments').update(payload).eq('id', aId);
           if (!error) return res.json({ success: true });

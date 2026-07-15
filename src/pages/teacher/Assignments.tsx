@@ -14,9 +14,9 @@ import {
 import {
   ClipboardList, Plus, Search, Star,
   X, Pencil, Trash2, CheckCircle2, Archive, FileText, AlertCircle,
-  Users, MessageSquare, ChevronDown, ChevronUp, Award, Clock,
+  Users, User, MessageSquare, ChevronDown, ChevronUp, Award, Clock,
   Paperclip, Link2, ExternalLink, File, Image, Video,
-  Archive as ArchiveIcon, Code, FileSpreadsheet, Calendar,
+  Archive as ArchiveIcon, Code, FileSpreadsheet, Calendar, UserCircle,
 } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { format, isPast, isToday, formatDistanceToNow } from 'date-fns';
@@ -35,6 +35,7 @@ interface Assignment {
   course_id: string | null;
   teacher_id: string | null;
   class_id: string | null;
+  target_student_id: string | null;
   type: AssignmentType;
   due_date: string | null;
   max_score: number;
@@ -121,6 +122,8 @@ const getAvatarColor = (str: string) => {
 
 const emptyForm = {
   title: '', description: '', instructions: '', course_id: '', class_id: '',
+  target_student_id: '',
+  assignTo: 'class' as 'class' | 'student',
   type: 'homework' as AssignmentType, due_date: '', max_score: 100,
   status: 'draft' as AssignmentStatus, allow_late_submission: false,
   submission_config: { ...DEFAULT_CFG },
@@ -385,6 +388,8 @@ export default function TeacherAssignments() {
   const attachmentInputRef = useRef<HTMLInputElement>(null);
   const [attachMode, setAttachMode] = useState<'upload' | 'url'>('upload');
   const [urlInput, setUrlInput] = useState('');
+  const [students, setStudents] = useState<{id: string; display_name: string; email: string}[]>([]);
+  const [studentSearch, setStudentSearch] = useState('');
 
   useEffect(() => {
     // Trigger server-side auto-publish check immediately on page load
@@ -404,14 +409,21 @@ export default function TeacherAssignments() {
     try {
       const { data: { session } } = await supabase.auth.getSession();
       const userId = session?.user?.id || '';
-      const [aRes, cRes, clRes] = await Promise.all([
+      const [aRes, cRes, clRes, sRes] = await Promise.all([
         authFetch('/api/teacher/assignments'),
         authFetch(userId ? `/api/teacher/courses?userId=${encodeURIComponent(userId)}` : '/api/teacher/courses'),
         authFetch('/api/teacher/classes'),
+        authFetch('/api/teacher/students?limit=200'),
       ]);
-      const aJson = aRes.ok ? await aRes.json() : { assignments: [] };
-      const cJson = cRes.ok ? await cRes.json() : { courses: [] };
+      const aJson  = aRes.ok  ? await aRes.json()  : { assignments: [] };
+      const cJson  = cRes.ok  ? await cRes.json()  : { courses: [] };
       const clJson = clRes.ok ? await clRes.json() : { classes: [] };
+      const sJson  = sRes.ok  ? await sRes.json()  : { students: [] };
+      setStudents((sJson.students || []).map((s: any) => ({
+        id: String(s.id),
+        display_name: s.display_name || '',
+        email: s.email || '',
+      })));
 
       const coursesData: Course[] = (cJson.courses || []).map((c: any) => ({ id: String(c.id), title: String(c.title || 'Untitled') }));
       const classesData: ClassRec[] = (clJson.classes || []).map((c: any) => ({ id: String(c.id), name: String(c.name || 'Untitled'), course_id: c.course_id ? String(c.course_id) : null }));
@@ -453,10 +465,17 @@ export default function TeacherAssignments() {
     { label: 'Overdue',   value: assignments.filter(a => a.due_date && isPast(new Date(a.due_date)) && !isToday(new Date(a.due_date)) && a.status === 'published').length, gradient: 'from-rose-500 to-pink-600', shadow: 'shadow-rose-500/25', icon: AlertCircle },
   ];
 
-  const openAdd = () => { setEditId(null); setForm(emptyForm); setFormAttachments([]); setShowModal(true); };
+  const openAdd = () => { setEditId(null); setForm(emptyForm); setFormAttachments([]); setStudentSearch(''); setShowModal(true); };
   const openEdit = (a: Assignment) => {
     setEditId(a.id);
     const cfg = a.submission_config ? parseJsonField<SubmissionConfig>(a.submission_config, { ...DEFAULT_CFG }) : { ...DEFAULT_CFG };
+    const hasTargetStudent = !!a.target_student_id;
+    if (hasTargetStudent) {
+      const s = students.find(st => st.id === a.target_student_id);
+      setStudentSearch(s?.display_name || '');
+    } else {
+      setStudentSearch('');
+    }
     const hasPublishAt = !!a.publish_at;
     const publishAtLocal = hasPublishAt ? (() => {
       const d = new Date(a.publish_at!);
@@ -465,7 +484,10 @@ export default function TeacherAssignments() {
     })() : '';
     setForm({
       title: a.title, description: a.description || '', instructions: a.instructions || '',
-      course_id: a.course_id || '', class_id: a.class_id || '', type: a.type,
+      course_id: a.course_id || '', class_id: a.class_id || '',
+      target_student_id: a.target_student_id || '',
+      assignTo: a.target_student_id ? 'student' : 'class',
+      type: a.type,
       due_date: a.due_date ? a.due_date.substring(0, 10) : '', max_score: a.max_score,
       status: hasPublishAt ? 'draft' : a.status,
       allow_late_submission: a.allow_late_submission || false,
@@ -490,7 +512,8 @@ export default function TeacherAssignments() {
         description: form.description || null,
         instructions: form.instructions || null,
         course_id: form.course_id || null,
-        class_id: form.class_id || null,
+        class_id: form.assignTo === 'class' ? (form.class_id || null) : null,
+        target_student_id: form.assignTo === 'student' ? (form.target_student_id || null) : null,
         type: form.type,
         due_date: form.due_date || null,
         max_score: Number(form.max_score),
@@ -784,17 +807,127 @@ export default function TeacherAssignments() {
                     className="mt-1 w-full px-3 py-2.5 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-500/30" />
                 </div>
               </div>
-              {/* Class */}
+              {/* Assign To */}
               <div>
-                <label className="text-xs font-semibold text-slate-600 uppercase tracking-wide">Class</label>
-                <select value={form.class_id} onChange={e => set('class_id', e.target.value)}
-                  className="mt-1 w-full px-3 py-2.5 text-sm border border-slate-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-amber-500/30">
-                  <option value="">No class</option>
-                  {classes.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-                </select>
+                <label className="text-xs font-semibold text-slate-600 uppercase tracking-wide">Assign To</label>
+                <div className="flex gap-2 mt-1.5">
+                  <button
+                    type="button"
+                    onClick={() => { set('assignTo', 'class' as any); set('target_student_id', '' as any); setStudentSearch(''); }}
+                    className={cn(
+                      'flex-1 flex items-center justify-center gap-1.5 py-2 text-sm font-medium rounded-lg border transition-all',
+                      form.assignTo === 'class'
+                        ? 'bg-amber-500 text-white border-amber-500 shadow-sm'
+                        : 'border-slate-200 text-slate-600 hover:border-amber-300 hover:bg-amber-50/50'
+                    )}
+                  >
+                    <Users className="w-3.5 h-3.5" />
+                    Whole Class
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => { set('assignTo', 'student' as any); set('class_id', '' as any); }}
+                    className={cn(
+                      'flex-1 flex items-center justify-center gap-1.5 py-2 text-sm font-medium rounded-lg border transition-all',
+                      form.assignTo === 'student'
+                        ? 'bg-amber-500 text-white border-amber-500 shadow-sm'
+                        : 'border-slate-200 text-slate-600 hover:border-amber-300 hover:bg-amber-50/50'
+                    )}
+                  >
+                    <UserCircle className="w-3.5 h-3.5" />
+                    Specific Student
+                  </button>
+                </div>
               </div>
 
-              {form.class_id && (
+              {/* Class picker */}
+              {form.assignTo === 'class' && (
+                <div>
+                  <label className="text-xs font-semibold text-slate-600 uppercase tracking-wide">Class</label>
+                  <select value={form.class_id} onChange={e => set('class_id', e.target.value)}
+                    className="mt-1 w-full px-3 py-2.5 text-sm border border-slate-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-amber-500/30">
+                    <option value="">No class</option>
+                    {classes.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                  </select>
+                </div>
+              )}
+
+              {/* Specific student picker */}
+              {form.assignTo === 'student' && (
+                <div>
+                  <label className="text-xs font-semibold text-slate-600 uppercase tracking-wide">Student</label>
+                  <div className="relative mt-1">
+                    {form.target_student_id ? (
+                      /* Selected student chip */
+                      <div className="flex items-center gap-2.5 px-3 py-2 border border-amber-200 bg-amber-50 rounded-lg">
+                        <div className={cn('w-7 h-7 rounded-full flex items-center justify-center text-white text-xs font-bold shrink-0', getAvatarColor(students.find(s => s.id === form.target_student_id)?.display_name || 'S'))}>
+                          {(students.find(s => s.id === form.target_student_id)?.display_name || 'S')[0].toUpperCase()}
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm font-semibold text-slate-900 truncate">
+                            {students.find(s => s.id === form.target_student_id)?.display_name || 'Unknown'}
+                          </p>
+                          <p className="text-xs text-slate-500 truncate">
+                            {students.find(s => s.id === form.target_student_id)?.email || ''}
+                          </p>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => { set('target_student_id', '' as any); setStudentSearch(''); }}
+                          className="shrink-0 p-1 rounded-md hover:bg-amber-200 transition-colors"
+                        >
+                          <X className="w-3.5 h-3.5 text-amber-600" />
+                        </button>
+                      </div>
+                    ) : (
+                      <div className="relative">
+                        <User className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 pointer-events-none" />
+                        <input
+                          type="text"
+                          value={studentSearch}
+                          onChange={e => setStudentSearch(e.target.value)}
+                          placeholder="Search by name or email..."
+                          className="w-full pl-9 pr-3 py-2.5 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-500/30"
+                        />
+                        {studentSearch && (
+                          <div className="absolute z-20 top-full mt-1 w-full bg-white border border-slate-200 rounded-xl shadow-xl max-h-52 overflow-y-auto">
+                            {students
+                              .filter(s =>
+                                s.display_name.toLowerCase().includes(studentSearch.toLowerCase()) ||
+                                s.email.toLowerCase().includes(studentSearch.toLowerCase())
+                              )
+                              .slice(0, 8)
+                              .map(s => (
+                                <button
+                                  key={s.id}
+                                  type="button"
+                                  onClick={() => { set('target_student_id', s.id as any); setStudentSearch(s.display_name || s.email); }}
+                                  className="w-full flex items-center gap-2.5 px-3 py-2.5 hover:bg-slate-50 transition-colors text-left border-b border-slate-50 last:border-0"
+                                >
+                                  <div className={cn('w-8 h-8 rounded-full flex items-center justify-center text-white text-xs font-bold shrink-0', getAvatarColor(s.display_name || s.email))}>
+                                    {(s.display_name || s.email)[0].toUpperCase()}
+                                  </div>
+                                  <div className="min-w-0">
+                                    <p className="text-sm font-medium text-slate-900 truncate">{s.display_name || 'No name'}</p>
+                                    <p className="text-xs text-slate-400 truncate">{s.email}</p>
+                                  </div>
+                                </button>
+                              ))}
+                            {students.filter(s =>
+                              s.display_name.toLowerCase().includes(studentSearch.toLowerCase()) ||
+                              s.email.toLowerCase().includes(studentSearch.toLowerCase())
+                            ).length === 0 && (
+                              <div className="px-3 py-4 text-xs text-slate-400 text-center">No students found</div>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {(form.class_id || form.target_student_id) && (
                 <div>
                   <label className="text-xs font-semibold text-slate-600 uppercase tracking-wide">Notification Email Language</label>
                   <select value={form.email_language} onChange={e => set('email_language', e.target.value as 'sq' | 'en')}
@@ -802,11 +935,11 @@ export default function TeacherAssignments() {
                     <option value="sq">Shqip</option>
                     <option value="en">English</option>
                   </select>
-                  <p className="mt-1 text-[11px] text-slate-400">Language of the email sent to students about this assignment.</p>
+                  <p className="mt-1 text-[11px] text-slate-400">Language of the email sent to the recipient(s) about this assignment.</p>
                 </div>
               )}
 
-              {form.class_id && (
+              {(form.class_id || form.target_student_id) && (
                 <label className="flex items-center gap-2 cursor-pointer select-none">
                   <input type="checkbox" checked={form.notify_parents} onChange={e => set('notify_parents', e.target.checked as any)}
                     className="rounded border-slate-300 text-amber-500 focus:ring-amber-500" />
