@@ -3443,6 +3443,38 @@ When giving instructions, number each step clearly. Be precise and technical whe
     }
   });
 
+  // ── Teacher personal settings (stored in platform_config as teacher_settings:{uid}) ──
+  app.get("/api/teacher/config/settings", async (req, res) => {
+    try {
+      const caller = await assertAuthenticated(req, res);
+      if (!caller) return;
+      const section = `teacher_settings:${caller.userId}`;
+      const { data, error } = await supabaseAdmin
+        .from("platform_config").select("value").eq("section", section).maybeSingle();
+      if (error && !isPlatformConfigMissing(error)) throw error;
+      res.json({ success: true, value: data?.value || {} });
+    } catch (e: any) {
+      res.status(500).json({ error: e?.message || "Failed to load teacher settings" });
+    }
+  });
+
+  app.put("/api/teacher/config/settings", async (req, res) => {
+    try {
+      const caller = await assertAuthenticated(req, res);
+      if (!caller) return;
+      const value = req.body?.value;
+      if (value === undefined) return res.status(400).json({ error: "value is required" });
+      const section = `teacher_settings:${caller.userId}`;
+      const { error } = await supabaseAdmin
+        .from("platform_config")
+        .upsert({ section, value, updated_at: new Date().toISOString() }, { onConflict: "section" });
+      if (error && !isPlatformConfigMissing(error)) throw error;
+      res.json({ success: true });
+    } catch (e: any) {
+      res.status(500).json({ error: e?.message || "Failed to save teacher settings" });
+    }
+  });
+
   app.get("/api/admin/profile", async (req, res) => {
     try {
       const caller = await getAuthUser(req);

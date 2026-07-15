@@ -107,12 +107,13 @@ export default function TeacherSettings() {
       const uid = session.user.id;
       setUserId(uid);
       try {
-        const { data } = await supabase
-          .from('platform_config')
-          .select('value')
-          .eq('section', `teacher_settings:${uid}`)
-          .maybeSingle();
-        if (data?.value) setSettings({ ...DEFAULT_SETTINGS, ...data.value });
+        const cfgRes = await authFetch('/api/teacher/config/settings');
+        if (cfgRes.ok) {
+          const cfgJson = await cfgRes.json().catch(() => ({}));
+          if (cfgJson?.value && typeof cfgJson.value === 'object') {
+            setSettings({ ...DEFAULT_SETTINGS, ...cfgJson.value });
+          }
+        }
       } catch { /* use defaults */ }
       setLoading(false);
       loadStudents(uid);
@@ -176,10 +177,12 @@ export default function TeacherSettings() {
     setSettings(next);
     setSaving(true);
     try {
-      const { error } = await supabase
-        .from('platform_config')
-        .upsert({ section: `teacher_settings:${userId}`, value: next }, { onConflict: 'section' });
-      if (error) throw error;
+      const resp = await authFetch('/api/teacher/config/settings', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ value: next }),
+      });
+      if (!resp.ok) { const e = await resp.json().catch(() => ({})); throw new Error(e?.error || 'Failed to save'); }
       toast.success('Settings saved');
     } catch (e: any) {
       toast.error(e?.message || 'Failed to save settings');
