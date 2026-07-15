@@ -14219,6 +14219,65 @@ Content:\n"""${clipped}"""`;
   });
 
   // Student profile: get and update profile + stats.
+  // Returns quiz→course mapping for the progress page, using poolQuery so it
+  // works even when public.quizzes is not accessible via the Supabase anon key.
+  app.get('/api/student/progress-data', async (req, res) => {
+    try {
+      const caller = await assertAuthenticated(req, res);
+      if (!caller) return;
+      if (caller.role !== 'student' && caller.role !== 'admin') {
+        return res.status(403).json({ error: 'Forbidden' });
+      }
+      const uid = caller.userId;
+
+      // 1. Fetch all quiz attempts for this student
+      const attemptsRes = await poolQuery(
+        `SELECT id, quiz_id, score, total_points, status, started_at, completed_at, created_at, passed
+         FROM quiz_attempts WHERE student_id = $1 ORDER BY created_at DESC`,
+        [uid]
+      );
+      const attemptRows = attemptsRes.rows || [];
+
+      // 2. Get unique quiz IDs from attempts
+      const quizIds = [...new Set(attemptRows.map((r: any) => String(r.quiz_id || '')).filter(Boolean))];
+
+      // 3. Fetch quiz metadata (title + course_id) using poolQuery — bypasses schema visibility issue
+      let quizRows: any[] = [];
+      if (quizIds.length > 0) {
+        const qRes = await poolQuery(
+          `SELECT id, title, course_id FROM quizzes WHERE id = ANY($1::uuid[])`,
+          [quizIds]
+        );
+        quizRows = qRes.rows || [];
+      }
+
+      // 4. Collect course IDs from quizzes, then fetch course titles
+      const courseIdSet = new Set(quizRows.map((q: any) => String(q.course_id || '')).filter(Boolean));
+      let courseRows: any[] = [];
+      if (courseIdSet.size > 0) {
+        const cRes = await poolQuery(
+          `SELECT id, title FROM courses WHERE id = ANY($1::uuid[])`,
+          [[...courseIdSet]]
+        );
+        courseRows = cRes.rows || [];
+      }
+
+      // Build maps
+      const quizMap: Record<string, { title: string; courseId: string }> = {};
+      quizRows.forEach((q: any) => {
+        quizMap[String(q.id)] = { title: String(q.title || 'Quiz'), courseId: String(q.course_id || '') };
+      });
+
+      const courseMap: Record<string, string> = {};
+      courseRows.forEach((c: any) => { courseMap[String(c.id)] = String(c.title || 'Course'); });
+
+      return res.json({ success: true, attempts: attemptRows, quizMap, courseMap });
+    } catch (e: any) {
+      console.error('GET /api/student/progress-data', e?.message || e);
+      return res.status(500).json({ error: e?.message || 'Failed to load progress data' });
+    }
+  });
+
   app.get('/api/student/profile', async (req, res) => {
     try {
       const caller = await assertAuthenticated(req, res);

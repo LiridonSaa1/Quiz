@@ -14016,6 +14016,52 @@ ${smartUserPrompt}` });
       return res.status(500).json({ error: e?.message || "Failed to clear quiz runtime state" });
     }
   });
+  app.get("/api/student/progress-data", async (req, res) => {
+    try {
+      const caller = await assertAuthenticated(req, res);
+      if (!caller) return;
+      if (caller.role !== "student" && caller.role !== "admin") {
+        return res.status(403).json({ error: "Forbidden" });
+      }
+      const uid = caller.userId;
+      const attemptsRes = await poolQuery(
+        `SELECT id, quiz_id, score, total_points, status, started_at, completed_at, created_at, passed
+         FROM quiz_attempts WHERE student_id = $1 ORDER BY created_at DESC`,
+        [uid]
+      );
+      const attemptRows = attemptsRes.rows || [];
+      const quizIds = [...new Set(attemptRows.map((r) => String(r.quiz_id || "")).filter(Boolean))];
+      let quizRows = [];
+      if (quizIds.length > 0) {
+        const qRes = await poolQuery(
+          `SELECT id, title, course_id FROM quizzes WHERE id = ANY($1::uuid[])`,
+          [quizIds]
+        );
+        quizRows = qRes.rows || [];
+      }
+      const courseIdSet = new Set(quizRows.map((q) => String(q.course_id || "")).filter(Boolean));
+      let courseRows = [];
+      if (courseIdSet.size > 0) {
+        const cRes = await poolQuery(
+          `SELECT id, title FROM courses WHERE id = ANY($1::uuid[])`,
+          [[...courseIdSet]]
+        );
+        courseRows = cRes.rows || [];
+      }
+      const quizMap = {};
+      quizRows.forEach((q) => {
+        quizMap[String(q.id)] = { title: String(q.title || "Quiz"), courseId: String(q.course_id || "") };
+      });
+      const courseMap = {};
+      courseRows.forEach((c) => {
+        courseMap[String(c.id)] = String(c.title || "Course");
+      });
+      return res.json({ success: true, attempts: attemptRows, quizMap, courseMap });
+    } catch (e) {
+      console.error("GET /api/student/progress-data", e?.message || e);
+      return res.status(500).json({ error: e?.message || "Failed to load progress data" });
+    }
+  });
   app.get("/api/student/profile", async (req, res) => {
     try {
       const caller = await assertAuthenticated(req, res);

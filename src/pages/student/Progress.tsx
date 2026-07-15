@@ -44,24 +44,40 @@ export default function StudentProgress() {
       if (!session) return;
       const uid = session.user.id;
 
-      // Fetch courses via server API (handles missing student_ids / teacher_id columns gracefully)
-      const [coursesRes, attemptRows, lpSnap] = await Promise.all([
-        authFetch('/api/student/courses/available').then(r => r.ok ? r.json() : { courses: [] }),
-        fetchAttemptRowsByStudentId(supabase, uid).catch(() => []),
+      // Fetch everything in parallel: server progress-data (uses poolQuery, bypasses
+      // public.quizzes schema issue), courses API, and lesson_progress from Supabase.
+      const [progressRes, coursesRes, lpSnap] = await Promise.all([
+        authFetch('/api/student/progress-data').then(r => r.ok ? r.json() : {}).catch(() => ({})),
+        authFetch('/api/student/courses/available').then(r => r.ok ? r.json() : { courses: [] }).catch(() => ({ courses: [] })),
         supabase.from('lesson_progress').select('lesson_id, completed').eq('student_id', uid),
       ]);
 
-      const coursesData: any[] = coursesRes?.courses || [];
-      setCourses(coursesData);
-      const courseIds = coursesData.map((c: any) => c.id);
-      const normalizedAttempts = normalizeAttempts(attemptRows || []);
+      // ── Attempts + quiz map come from the server endpoint (poolQuery-backed)
+      const rawAttempts = Array.isArray(progressRes?.attempts) ? progressRes.attempts : [];
+      const normalizedAttempts = normalizeAttempts(rawAttempts);
       setAttempts(normalizedAttempts);
 
-      // Build lesson→course map and collect completed lesson IDs
+      const serverQuizMap: Record<string, { title: string; courseId: string }> = progressRes?.quizMap || {};
+      const serverCourseMap: Record<string, string> = progressRes?.courseMap || {}; // courseId → title
+      setQuizMap(serverQuizMap);
+
+      // ── Merge courses: API list + any courses discovered via server quiz map
+      const apiCourses: any[] = coursesRes?.courses || [];
+      const apiCourseIdSet = new Set(apiCourses.map((c: any) => String(c.id || '')));
+
+      // Build extra courses from server courseMap that aren't in the API list
+      const extraCourses = Object.entries(serverCourseMap)
+        .filter(([id]) => id && !apiCourseIdSet.has(id))
+        .map(([id, title]) => ({ id, title }));
+
+      const allCourses = [...apiCourses, ...extraCourses];
+      setCourses(allCourses);
+
       const lpRows = lpSnap.data || [];
       setLessonProgress(lpRows);
 
-      let qMap: Record<string, { title: string; courseId: string }> = {};
+      // ── Lesson→course map for the lesson completion chart (Supabase direct — lessons table is in public schema)
+      const courseIds = allCourses.map((c: any) => String(c.id || '')).filter(Boolean);
       let lCourseMap: Record<string, string> = {};
 
       if (courseIds.length > 0) {
@@ -69,82 +85,38 @@ export default function StudentProgress() {
           supabase.from('modules').select('id, course_id').in('course_id', courseIds),
           supabase.from('lessons').select('id, course_id, module_id').in('course_id', courseIds),
         ]);
-
-        const modules = modulesSnap.data || [];
         const moduleToCourse: Record<string, string> = {};
-        modules.forEach((m: any) => {
-          const mid = String(m?.id || '');
-          const cid = String(m?.course_id || '');
+        (modulesSnap.data || []).forEach((m: any) => {
+          const mid = String(m?.id || ''); const cid = String(m?.course_id || '');
           if (mid && cid) moduleToCourse[mid] = cid;
         });
-        const moduleIds = modules.map((m: any) => String(m?.id || '')).filter(Boolean);
+        const moduleIds = (modulesSnap.data || []).map((m: any) => String(m?.id || '')).filter(Boolean);
         const lessonsByModuleSnap = moduleIds.length > 0
           ? await supabase.from('lessons').select('id, course_id, module_id').in('module_id', moduleIds)
           : { data: [] as any[] };
-
-        const allLessons = [
-          ...(lessonsByCourseSnap.data || []),
-          ...(lessonsByModuleSnap.data || []),
-        ];
-        allLessons.forEach((l: any) => {
+        [...(lessonsByCourseSnap.data || []), ...(lessonsByModuleSnap.data || [])].forEach((l: any) => {
           const lid = String(l?.id || '');
-          const directCourseId = String(l?.course_id || '');
-          const mappedCourseId = directCourseId || moduleToCourse[String(l?.module_id || '')] || '';
-          if (lid && mappedCourseId) lCourseMap[lid] = mappedCourseId;
-        });
-        setLessonCourseMap(lCourseMap);
-
-        const lessonIds = Object.keys(lCourseMap);
-        const [quizzesByCourseSnap, quizzesByLessonSnap] = await Promise.all([
-          supabase.from('quizzes').select('id, title, course_id').in('course_id', courseIds),
-          lessonIds.length > 0
-            ? supabase.from('quizzes').select('id, title, course_id, lesson_id').in('lesson_id', lessonIds)
-            : Promise.resolve({ data: [] as any[] }),
-        ]);
-
-        (quizzesByCourseSnap.data || []).forEach((q: any) => {
-          const qid = String(q?.id || '');
-          const courseId = String(q?.course_id || '');
-          if (!qid || !courseId) return;
-          qMap[qid] = { title: String(q?.title || 'Quiz'), courseId };
-        });
-        (quizzesByLessonSnap.data || []).forEach((q: any) => {
-          const qid = String(q?.id || '');
-          if (!qid) return;
-          const directCourseId = String(q?.course_id || '');
-          const mappedCourseId = directCourseId || lCourseMap[String(q?.lesson_id || '')] || '';
-          if (!mappedCourseId) return;
-          qMap[qid] = { title: String(q?.title || 'Quiz'), courseId: mappedCourseId };
+          const cid = String(l?.course_id || '') || moduleToCourse[String(l?.module_id || '')] || '';
+          if (lid && cid) lCourseMap[lid] = cid;
         });
       } else if (lpRows.length > 0) {
-        // No courses found via teacher link, but student has lesson_progress entries —
-        // derive courses from those lessons directly.
+        // No courses at all — derive from lesson_progress entries
         const progressLessonIds = lpRows.map((r: any) => String(r.lesson_id)).filter(Boolean);
         if (progressLessonIds.length > 0) {
-          const lessonsSnap = await supabase
-            .from('lessons')
-            .select('id, course_id')
-            .in('id', progressLessonIds);
+          const lessonsSnap = await supabase.from('lessons').select('id, course_id').in('id', progressLessonIds);
           (lessonsSnap.data || []).forEach((l: any) => {
-            const lid = String(l?.id || '');
-            const cid = String(l?.course_id || '');
+            const lid = String(l?.id || ''); const cid = String(l?.course_id || '');
             if (lid && cid) lCourseMap[lid] = cid;
           });
-          setLessonCourseMap(lCourseMap);
-
-          // Fetch course titles for discovered course IDs
           const discoveredCourseIds = [...new Set(Object.values(lCourseMap))];
-          if (discoveredCourseIds.length > 0 && coursesData.length === 0) {
-            const cSnap = await supabase
-              .from('courses')
-              .select('id, title')
-              .in('id', discoveredCourseIds);
+          if (discoveredCourseIds.length > 0 && allCourses.length === 0) {
+            const cSnap = await supabase.from('courses').select('id, title').in('id', discoveredCourseIds);
             setCourses(cSnap.data || []);
           }
         }
       }
 
-      setQuizMap(qMap);
+      setLessonCourseMap(lCourseMap);
       setLoading(false);
     };
     load();
