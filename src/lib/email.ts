@@ -789,58 +789,97 @@ export function renderQuizResultEmail(opts: {
   brandName?: string;
   resultsUrl?: string;
   language?: EmailLanguage;
+  isExam?: boolean;
+  grade?: string;
 }) {
   const brand = (opts.brandName || 'QuizMaster').trim();
   const lang: EmailLanguage = opts.language === 'en' ? 'en' : 'sq';
   const isEn = lang === 'en';
+  const isExam = opts.isExam === true;
   const score = Math.round(opts.scorePercent);
   const passing = opts.passingPercent ?? 50;
+  const grade = opts.grade || null;
 
   const accentColor = opts.passed ? '#10b981' : '#ef4444';
   const bgColor     = opts.passed ? '#f0fdf4' : '#fef2f2';
   const borderColor = opts.passed ? '#bbf7d0' : '#fecaca';
+  const headerIcon  = opts.passed ? (isExam ? '🎓' : '✅') : '❌';
+  const headerBg    = opts.passed
+    ? (isExam ? 'linear-gradient(135deg,#7c3aed 0%,#4f46e5 100%)' : '#10b981')
+    : '#ef4444';
 
   const t = isEn ? {
     subject: opts.passed
-      ? `✅ You passed "${opts.quizTitle}" — ${brand}`
-      : `❌ Quiz result: "${opts.quizTitle}" — ${brand}`,
-    headerTag: opts.passed ? '✅ Quiz Passed' : '❌ Quiz Result',
+      ? (isExam ? `🎓 Exam passed: "${opts.quizTitle}" — ${brand}` : `✅ You passed "${opts.quizTitle}" — ${brand}`)
+      : (isExam ? `❌ Exam result: "${opts.quizTitle}" — ${brand}` : `❌ Quiz result: "${opts.quizTitle}" — ${brand}`),
+    headerTag: opts.passed
+      ? (isExam ? `${headerIcon} Exam Passed` : '✅ Quiz Passed')
+      : (isExam ? `${headerIcon} Exam Result` : '❌ Quiz Result'),
     greeting: `Hello, ${opts.studentName}!`,
     intro: opts.passed
-      ? `Congratulations! You successfully passed the quiz <strong>${opts.quizTitle}</strong>.`
-      : `You did not pass the quiz <strong>${opts.quizTitle}</strong> this time. Keep practicing — you can do it!`,
-    detailsLabel: 'Your Result',
-    quizLabel: '📋 Quiz',
+      ? (isExam
+          ? `Congratulations! You have successfully <strong>passed</strong> the exam <strong>${opts.quizTitle}</strong>.`
+          : `Congratulations! You successfully passed the quiz <strong>${opts.quizTitle}</strong>.`)
+      : (isExam
+          ? `You did <strong>not pass</strong> the exam <strong>${opts.quizTitle}</strong> this time. Review the material and try again!`
+          : `You did not pass the quiz <strong>${opts.quizTitle}</strong> this time. Keep practicing — you can do it!`),
+    detailsLabel: isExam ? 'Exam Results' : 'Your Result',
+    typeLabel: isExam ? '📋 Exam' : '📋 Quiz',
     scoreLabel: '🎯 Your score',
     pointsLabel: '📊 Points',
     passingLabel: '✅ Passing score',
+    gradeLabel: '🏅 Grade',
     resultLabel: '🏆 Result',
-    passedValue: 'PASSED',
-    failedValue: 'NOT PASSED',
+    passedValue: 'PASSED ✅',
+    failedValue: 'NOT PASSED ❌',
     btn: '🔍 View detailed results',
-    footerNote: 'This email was sent automatically after you submitted your quiz.',
+    footerNote: isExam
+      ? 'This email was sent automatically after your exam submission.'
+      : 'This email was sent automatically after you submitted your quiz.',
     footer: `Sent by the <strong>${brand}</strong> platform · Good luck!`,
+    retryNote: !opts.passed && isExam ? 'Don\'t give up — review the topics you found difficult and try again!' : '',
   } : {
     subject: opts.passed
-      ? `✅ Keni kaluar kuizin "${opts.quizTitle}" — ${brand}`
-      : `❌ Rezultati i kuizit "${opts.quizTitle}" — ${brand}`,
-    headerTag: opts.passed ? '✅ Kuiz i Kaluar' : '❌ Rezultati i Kuizit',
+      ? (isExam ? `🎓 Provimi u kalua: "${opts.quizTitle}" — ${brand}` : `✅ Keni kaluar kuizin "${opts.quizTitle}" — ${brand}`)
+      : (isExam ? `❌ Rezultati i provimit "${opts.quizTitle}" — ${brand}` : `❌ Rezultati i kuizit "${opts.quizTitle}" — ${brand}`),
+    headerTag: opts.passed
+      ? (isExam ? `${headerIcon} Provim i Kaluar` : '✅ Kuiz i Kaluar')
+      : (isExam ? `${headerIcon} Rezultati i Provimit` : '❌ Rezultati i Kuizit'),
     greeting: `Përshëndetje, ${opts.studentName}!`,
     intro: opts.passed
-      ? `Urime! Keni kaluar me sukses kuizin <strong>${opts.quizTitle}</strong>.`
-      : `Nuk e keni kaluar kuizin <strong>${opts.quizTitle}</strong> këtë herë. Vazhdoni të praktikoheni — mund ta arrini!`,
-    detailsLabel: 'Rezultati Juaj',
-    quizLabel: '📋 Kuizi',
+      ? (isExam
+          ? `Urime! Keni kaluar me sukses provimin <strong>${opts.quizTitle}</strong>.`
+          : `Urime! Keni kaluar me sukses kuizin <strong>${opts.quizTitle}</strong>.`)
+      : (isExam
+          ? `Nuk e keni kaluar provimin <strong>${opts.quizTitle}</strong> këtë herë. Rishikoni materialin dhe provoni përsëri!`
+          : `Nuk e keni kaluar kuizin <strong>${opts.quizTitle}</strong> këtë herë. Vazhdoni të praktikoheni — mund ta arrini!`),
+    detailsLabel: isExam ? 'Rezultatet e Provimit' : 'Rezultati Juaj',
+    typeLabel: isExam ? '📋 Provimi' : '📋 Kuizi',
     scoreLabel: '🎯 Nota juaj',
     pointsLabel: '📊 Pikët',
     passingLabel: '✅ Nota kalimtare',
+    gradeLabel: '🏅 Vlerësimi',
     resultLabel: '🏆 Rezultati',
-    passedValue: 'KALUAR',
-    failedValue: 'NUK KALOI',
+    passedValue: 'KALUAR ✅',
+    failedValue: 'NUK KALOI ❌',
     btn: '🔍 Shiko rezultatet e detajuara',
-    footerNote: 'Ky email u dërgua automatikisht pas dorëzimit të kuizit tuaj.',
+    footerNote: isExam
+      ? 'Ky email u dërgua automatikisht pas dorëzimit të provimit tuaj.'
+      : 'Ky email u dërgua automatikisht pas dorëzimit të kuizit tuaj.',
     footer: `Dërguar nga platforma <strong>${brand}</strong> · Suksese!`,
+    retryNote: !opts.passed && isExam ? 'Mos u dekurajoni — rishikoni temat ku hasët vështirësi dhe provoni përsëri!' : '',
   };
+
+  const gradeRow = grade
+    ? `<tr>
+        <td style="padding:6px 0;font-size:13px;color:#64748b;">${t.gradeLabel}</td>
+        <td style="padding:6px 0;font-size:16px;font-weight:900;color:${accentColor};">${grade}</td>
+      </tr>`
+    : '';
+
+  const retryBanner = (t as any).retryNote
+    ? `<div style="background:#fef3c7;border:1px solid #fcd34d;border-radius:12px;padding:14px 18px;margin-bottom:20px;font-size:13px;color:#92400e;line-height:1.5;">${(t as any).retryNote}</div>`
+    : '';
 
   const textContent = [
     `${t.headerTag} — ${brand}`,
@@ -848,14 +887,16 @@ export function renderQuizResultEmail(opts: {
     t.greeting,
     t.intro.replace(/<[^>]+>/g, ''),
     ``,
-    `${t.quizLabel}: ${opts.quizTitle}`,
+    `${t.typeLabel}: ${opts.quizTitle}`,
     `${t.scoreLabel}: ${score}%`,
     `${t.pointsLabel}: ${opts.earnedPoints}/${opts.totalPoints}`,
     `${t.passingLabel}: ${passing}%`,
+    grade ? `${t.gradeLabel}: ${grade}` : '',
     `${t.resultLabel}: ${opts.passed ? t.passedValue : t.failedValue}`,
     ``,
     opts.resultsUrl ? `${t.btn}: ${opts.resultsUrl}` : '',
     ``,
+    (t as any).retryNote || '',
     t.footer.replace(/<[^>]+>/g, ''),
   ].filter(Boolean).join('\n');
 
@@ -869,9 +910,10 @@ export function renderQuizResultEmail(opts: {
   <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f1f5f9;padding:40px 16px;">
     <tr><td align="center">
       <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:520px;background:#ffffff;border-radius:20px;overflow:hidden;box-shadow:0 4px 24px rgba(0,0,0,0.06);">
-        <tr><td style="background:${accentColor};padding:28px 36px;">
-          <div style="font-size:22px;font-weight:800;color:#ffffff;letter-spacing:-0.02em;">${brand}</div>
-          <div style="font-size:13px;color:rgba(255,255,255,0.85);margin-top:4px;">${t.headerTag}</div>
+        <tr><td style="background:${headerBg};padding:28px 36px;">
+          <div style="font-size:36px;margin-bottom:6px;text-align:center;">${headerIcon}</div>
+          <div style="font-size:22px;font-weight:800;color:#ffffff;letter-spacing:-0.02em;text-align:center;">${brand}</div>
+          <div style="font-size:13px;color:rgba(255,255,255,0.85);margin-top:4px;text-align:center;">${t.headerTag}</div>
         </td></tr>
         <tr><td style="padding:36px;">
           <p style="margin:0 0 8px;font-size:15px;font-weight:700;color:#0f172a;">${t.greeting}</p>
@@ -879,36 +921,41 @@ export function renderQuizResultEmail(opts: {
 
           <!-- Score badge -->
           <div style="text-align:center;margin:0 0 24px;">
-            <div style="display:inline-block;background:${bgColor};border:2px solid ${borderColor};border-radius:50%;width:96px;height:96px;line-height:96px;font-size:28px;font-weight:900;color:${accentColor};">${score}%</div>
+            <div style="display:inline-flex;flex-direction:column;align-items:center;justify-content:center;background:${bgColor};border:3px solid ${borderColor};border-radius:50%;width:96px;height:96px;">
+              <span style="font-size:26px;font-weight:900;color:${accentColor};line-height:1;">${score}%</span>
+              ${grade ? `<span style="font-size:14px;font-weight:700;color:${accentColor};margin-top:2px;">${grade}</span>` : ''}
+            </div>
           </div>
 
           <!-- Result details -->
-          <div style="background:${bgColor};border:1px solid ${borderColor};border-radius:14px;padding:20px 24px;margin-bottom:24px;">
+          <div style="background:${bgColor};border:1px solid ${borderColor};border-radius:14px;padding:20px 24px;margin-bottom:20px;">
             <p style="margin:0 0 14px;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:1px;color:#6b7280;">${t.detailsLabel}</p>
             <table role="presentation" cellpadding="0" cellspacing="0" width="100%">
               <tr>
-                <td style="padding:6px 0;font-size:13px;color:#64748b;width:130px;">${t.quizLabel}</td>
-                <td style="padding:6px 0;font-size:13px;font-weight:600;color:#0f172a;">${opts.quizTitle}</td>
+                <td style="padding:7px 0;font-size:13px;color:#64748b;width:130px;border-bottom:1px solid ${borderColor};">${t.typeLabel}</td>
+                <td style="padding:7px 0;font-size:13px;font-weight:600;color:#0f172a;border-bottom:1px solid ${borderColor};">${opts.quizTitle}</td>
               </tr>
               <tr>
-                <td style="padding:6px 0;font-size:13px;color:#64748b;">${t.scoreLabel}</td>
-                <td style="padding:6px 0;font-size:16px;font-weight:800;color:${accentColor};">${score}%</td>
+                <td style="padding:7px 0;font-size:13px;color:#64748b;border-bottom:1px solid ${borderColor};">${t.scoreLabel}</td>
+                <td style="padding:7px 0;font-size:16px;font-weight:800;color:${accentColor};border-bottom:1px solid ${borderColor};">${score}%</td>
               </tr>
               <tr>
-                <td style="padding:6px 0;font-size:13px;color:#64748b;">${t.pointsLabel}</td>
-                <td style="padding:6px 0;font-size:13px;font-weight:600;color:#0f172a;">${opts.earnedPoints} / ${opts.totalPoints}</td>
+                <td style="padding:7px 0;font-size:13px;color:#64748b;border-bottom:1px solid ${borderColor};">${t.pointsLabel}</td>
+                <td style="padding:7px 0;font-size:13px;font-weight:600;color:#0f172a;border-bottom:1px solid ${borderColor};">${opts.earnedPoints} / ${opts.totalPoints}</td>
               </tr>
               <tr>
-                <td style="padding:6px 0;font-size:13px;color:#64748b;">${t.passingLabel}</td>
-                <td style="padding:6px 0;font-size:13px;font-weight:600;color:#0f172a;">${passing}%</td>
+                <td style="padding:7px 0;font-size:13px;color:#64748b;border-bottom:1px solid ${borderColor};">${t.passingLabel}</td>
+                <td style="padding:7px 0;font-size:13px;font-weight:600;color:#0f172a;border-bottom:1px solid ${borderColor};">${passing}%</td>
               </tr>
+              ${gradeRow}
               <tr>
-                <td style="padding:6px 0;font-size:13px;color:#64748b;">${t.resultLabel}</td>
-                <td style="padding:6px 0;font-size:13px;font-weight:800;color:${accentColor};">${opts.passed ? t.passedValue : t.failedValue}</td>
+                <td style="padding:8px 0;font-size:13px;color:#64748b;font-weight:600;">${t.resultLabel}</td>
+                <td style="padding:8px 0;font-size:14px;font-weight:900;color:${accentColor};">${opts.passed ? t.passedValue : t.failedValue}</td>
               </tr>
             </table>
           </div>
 
+          ${retryBanner}
           ${resultsBtn}
 
           <p style="margin:0;font-size:12px;line-height:1.6;color:#94a3b8;">${t.footerNote}</p>

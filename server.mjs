@@ -873,58 +873,73 @@ function renderQuizResultEmail(opts) {
   const brand = (opts.brandName || "QuizMaster").trim();
   const lang = opts.language === "en" ? "en" : "sq";
   const isEn = lang === "en";
+  const isExam = opts.isExam === true;
   const score = Math.round(opts.scorePercent);
   const passing = opts.passingPercent ?? 50;
+  const grade = opts.grade || null;
   const accentColor = opts.passed ? "#10b981" : "#ef4444";
   const bgColor = opts.passed ? "#f0fdf4" : "#fef2f2";
   const borderColor = opts.passed ? "#bbf7d0" : "#fecaca";
+  const headerIcon = opts.passed ? isExam ? "\u{1F393}" : "\u2705" : "\u274C";
+  const headerBg = opts.passed ? isExam ? "linear-gradient(135deg,#7c3aed 0%,#4f46e5 100%)" : "#10b981" : "#ef4444";
   const t = isEn ? {
-    subject: opts.passed ? `\u2705 You passed "${opts.quizTitle}" \u2014 ${brand}` : `\u274C Quiz result: "${opts.quizTitle}" \u2014 ${brand}`,
-    headerTag: opts.passed ? "\u2705 Quiz Passed" : "\u274C Quiz Result",
+    subject: opts.passed ? isExam ? `\u{1F393} Exam passed: "${opts.quizTitle}" \u2014 ${brand}` : `\u2705 You passed "${opts.quizTitle}" \u2014 ${brand}` : isExam ? `\u274C Exam result: "${opts.quizTitle}" \u2014 ${brand}` : `\u274C Quiz result: "${opts.quizTitle}" \u2014 ${brand}`,
+    headerTag: opts.passed ? isExam ? `${headerIcon} Exam Passed` : "\u2705 Quiz Passed" : isExam ? `${headerIcon} Exam Result` : "\u274C Quiz Result",
     greeting: `Hello, ${opts.studentName}!`,
-    intro: opts.passed ? `Congratulations! You successfully passed the quiz <strong>${opts.quizTitle}</strong>.` : `You did not pass the quiz <strong>${opts.quizTitle}</strong> this time. Keep practicing \u2014 you can do it!`,
-    detailsLabel: "Your Result",
-    quizLabel: "\u{1F4CB} Quiz",
+    intro: opts.passed ? isExam ? `Congratulations! You have successfully <strong>passed</strong> the exam <strong>${opts.quizTitle}</strong>.` : `Congratulations! You successfully passed the quiz <strong>${opts.quizTitle}</strong>.` : isExam ? `You did <strong>not pass</strong> the exam <strong>${opts.quizTitle}</strong> this time. Review the material and try again!` : `You did not pass the quiz <strong>${opts.quizTitle}</strong> this time. Keep practicing \u2014 you can do it!`,
+    detailsLabel: isExam ? "Exam Results" : "Your Result",
+    typeLabel: isExam ? "\u{1F4CB} Exam" : "\u{1F4CB} Quiz",
     scoreLabel: "\u{1F3AF} Your score",
     pointsLabel: "\u{1F4CA} Points",
     passingLabel: "\u2705 Passing score",
+    gradeLabel: "\u{1F3C5} Grade",
     resultLabel: "\u{1F3C6} Result",
-    passedValue: "PASSED",
-    failedValue: "NOT PASSED",
+    passedValue: "PASSED \u2705",
+    failedValue: "NOT PASSED \u274C",
     btn: "\u{1F50D} View detailed results",
-    footerNote: "This email was sent automatically after you submitted your quiz.",
-    footer: `Sent by the <strong>${brand}</strong> platform \xB7 Good luck!`
+    footerNote: isExam ? "This email was sent automatically after your exam submission." : "This email was sent automatically after you submitted your quiz.",
+    footer: `Sent by the <strong>${brand}</strong> platform \xB7 Good luck!`,
+    retryNote: !opts.passed && isExam ? "Don't give up \u2014 review the topics you found difficult and try again!" : ""
   } : {
-    subject: opts.passed ? `\u2705 Keni kaluar kuizin "${opts.quizTitle}" \u2014 ${brand}` : `\u274C Rezultati i kuizit "${opts.quizTitle}" \u2014 ${brand}`,
-    headerTag: opts.passed ? "\u2705 Kuiz i Kaluar" : "\u274C Rezultati i Kuizit",
+    subject: opts.passed ? isExam ? `\u{1F393} Provimi u kalua: "${opts.quizTitle}" \u2014 ${brand}` : `\u2705 Keni kaluar kuizin "${opts.quizTitle}" \u2014 ${brand}` : isExam ? `\u274C Rezultati i provimit "${opts.quizTitle}" \u2014 ${brand}` : `\u274C Rezultati i kuizit "${opts.quizTitle}" \u2014 ${brand}`,
+    headerTag: opts.passed ? isExam ? `${headerIcon} Provim i Kaluar` : "\u2705 Kuiz i Kaluar" : isExam ? `${headerIcon} Rezultati i Provimit` : "\u274C Rezultati i Kuizit",
     greeting: `P\xEBrsh\xEBndetje, ${opts.studentName}!`,
-    intro: opts.passed ? `Urime! Keni kaluar me sukses kuizin <strong>${opts.quizTitle}</strong>.` : `Nuk e keni kaluar kuizin <strong>${opts.quizTitle}</strong> k\xEBt\xEB her\xEB. Vazhdoni t\xEB praktikoheni \u2014 mund ta arrini!`,
-    detailsLabel: "Rezultati Juaj",
-    quizLabel: "\u{1F4CB} Kuizi",
+    intro: opts.passed ? isExam ? `Urime! Keni kaluar me sukses provimin <strong>${opts.quizTitle}</strong>.` : `Urime! Keni kaluar me sukses kuizin <strong>${opts.quizTitle}</strong>.` : isExam ? `Nuk e keni kaluar provimin <strong>${opts.quizTitle}</strong> k\xEBt\xEB her\xEB. Rishikoni materialin dhe provoni p\xEBrs\xEBri!` : `Nuk e keni kaluar kuizin <strong>${opts.quizTitle}</strong> k\xEBt\xEB her\xEB. Vazhdoni t\xEB praktikoheni \u2014 mund ta arrini!`,
+    detailsLabel: isExam ? "Rezultatet e Provimit" : "Rezultati Juaj",
+    typeLabel: isExam ? "\u{1F4CB} Provimi" : "\u{1F4CB} Kuizi",
     scoreLabel: "\u{1F3AF} Nota juaj",
     pointsLabel: "\u{1F4CA} Pik\xEBt",
     passingLabel: "\u2705 Nota kalimtare",
+    gradeLabel: "\u{1F3C5} Vler\xEBsimi",
     resultLabel: "\u{1F3C6} Rezultati",
-    passedValue: "KALUAR",
-    failedValue: "NUK KALOI",
+    passedValue: "KALUAR \u2705",
+    failedValue: "NUK KALOI \u274C",
     btn: "\u{1F50D} Shiko rezultatet e detajuara",
-    footerNote: "Ky email u d\xEBrgua automatikisht pas dor\xEBzimit t\xEB kuizit tuaj.",
-    footer: `D\xEBrguar nga platforma <strong>${brand}</strong> \xB7 Suksese!`
+    footerNote: isExam ? "Ky email u d\xEBrgua automatikisht pas dor\xEBzimit t\xEB provimit tuaj." : "Ky email u d\xEBrgua automatikisht pas dor\xEBzimit t\xEB kuizit tuaj.",
+    footer: `D\xEBrguar nga platforma <strong>${brand}</strong> \xB7 Suksese!`,
+    retryNote: !opts.passed && isExam ? "Mos u dekurajoni \u2014 rishikoni temat ku has\xEBt v\xEBshtir\xEBsi dhe provoni p\xEBrs\xEBri!" : ""
   };
+  const gradeRow = grade ? `<tr>
+        <td style="padding:6px 0;font-size:13px;color:#64748b;">${t.gradeLabel}</td>
+        <td style="padding:6px 0;font-size:16px;font-weight:900;color:${accentColor};">${grade}</td>
+      </tr>` : "";
+  const retryBanner = t.retryNote ? `<div style="background:#fef3c7;border:1px solid #fcd34d;border-radius:12px;padding:14px 18px;margin-bottom:20px;font-size:13px;color:#92400e;line-height:1.5;">${t.retryNote}</div>` : "";
   const textContent = [
     `${t.headerTag} \u2014 ${brand}`,
     ``,
     t.greeting,
     t.intro.replace(/<[^>]+>/g, ""),
     ``,
-    `${t.quizLabel}: ${opts.quizTitle}`,
+    `${t.typeLabel}: ${opts.quizTitle}`,
     `${t.scoreLabel}: ${score}%`,
     `${t.pointsLabel}: ${opts.earnedPoints}/${opts.totalPoints}`,
     `${t.passingLabel}: ${passing}%`,
+    grade ? `${t.gradeLabel}: ${grade}` : "",
     `${t.resultLabel}: ${opts.passed ? t.passedValue : t.failedValue}`,
     ``,
     opts.resultsUrl ? `${t.btn}: ${opts.resultsUrl}` : "",
     ``,
+    t.retryNote || "",
     t.footer.replace(/<[^>]+>/g, "")
   ].filter(Boolean).join("\n");
   const resultsBtn = opts.resultsUrl ? `<div style="text-align:center;margin-bottom:20px;"><a href="${opts.resultsUrl}" style="display:inline-block;background:${accentColor};color:#ffffff;font-size:14px;font-weight:700;text-decoration:none;padding:13px 28px;border-radius:12px;">${t.btn}</a></div>` : "";
@@ -934,9 +949,10 @@ function renderQuizResultEmail(opts) {
   <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f1f5f9;padding:40px 16px;">
     <tr><td align="center">
       <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:520px;background:#ffffff;border-radius:20px;overflow:hidden;box-shadow:0 4px 24px rgba(0,0,0,0.06);">
-        <tr><td style="background:${accentColor};padding:28px 36px;">
-          <div style="font-size:22px;font-weight:800;color:#ffffff;letter-spacing:-0.02em;">${brand}</div>
-          <div style="font-size:13px;color:rgba(255,255,255,0.85);margin-top:4px;">${t.headerTag}</div>
+        <tr><td style="background:${headerBg};padding:28px 36px;">
+          <div style="font-size:36px;margin-bottom:6px;text-align:center;">${headerIcon}</div>
+          <div style="font-size:22px;font-weight:800;color:#ffffff;letter-spacing:-0.02em;text-align:center;">${brand}</div>
+          <div style="font-size:13px;color:rgba(255,255,255,0.85);margin-top:4px;text-align:center;">${t.headerTag}</div>
         </td></tr>
         <tr><td style="padding:36px;">
           <p style="margin:0 0 8px;font-size:15px;font-weight:700;color:#0f172a;">${t.greeting}</p>
@@ -944,36 +960,41 @@ function renderQuizResultEmail(opts) {
 
           <!-- Score badge -->
           <div style="text-align:center;margin:0 0 24px;">
-            <div style="display:inline-block;background:${bgColor};border:2px solid ${borderColor};border-radius:50%;width:96px;height:96px;line-height:96px;font-size:28px;font-weight:900;color:${accentColor};">${score}%</div>
+            <div style="display:inline-flex;flex-direction:column;align-items:center;justify-content:center;background:${bgColor};border:3px solid ${borderColor};border-radius:50%;width:96px;height:96px;">
+              <span style="font-size:26px;font-weight:900;color:${accentColor};line-height:1;">${score}%</span>
+              ${grade ? `<span style="font-size:14px;font-weight:700;color:${accentColor};margin-top:2px;">${grade}</span>` : ""}
+            </div>
           </div>
 
           <!-- Result details -->
-          <div style="background:${bgColor};border:1px solid ${borderColor};border-radius:14px;padding:20px 24px;margin-bottom:24px;">
+          <div style="background:${bgColor};border:1px solid ${borderColor};border-radius:14px;padding:20px 24px;margin-bottom:20px;">
             <p style="margin:0 0 14px;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:1px;color:#6b7280;">${t.detailsLabel}</p>
             <table role="presentation" cellpadding="0" cellspacing="0" width="100%">
               <tr>
-                <td style="padding:6px 0;font-size:13px;color:#64748b;width:130px;">${t.quizLabel}</td>
-                <td style="padding:6px 0;font-size:13px;font-weight:600;color:#0f172a;">${opts.quizTitle}</td>
+                <td style="padding:7px 0;font-size:13px;color:#64748b;width:130px;border-bottom:1px solid ${borderColor};">${t.typeLabel}</td>
+                <td style="padding:7px 0;font-size:13px;font-weight:600;color:#0f172a;border-bottom:1px solid ${borderColor};">${opts.quizTitle}</td>
               </tr>
               <tr>
-                <td style="padding:6px 0;font-size:13px;color:#64748b;">${t.scoreLabel}</td>
-                <td style="padding:6px 0;font-size:16px;font-weight:800;color:${accentColor};">${score}%</td>
+                <td style="padding:7px 0;font-size:13px;color:#64748b;border-bottom:1px solid ${borderColor};">${t.scoreLabel}</td>
+                <td style="padding:7px 0;font-size:16px;font-weight:800;color:${accentColor};border-bottom:1px solid ${borderColor};">${score}%</td>
               </tr>
               <tr>
-                <td style="padding:6px 0;font-size:13px;color:#64748b;">${t.pointsLabel}</td>
-                <td style="padding:6px 0;font-size:13px;font-weight:600;color:#0f172a;">${opts.earnedPoints} / ${opts.totalPoints}</td>
+                <td style="padding:7px 0;font-size:13px;color:#64748b;border-bottom:1px solid ${borderColor};">${t.pointsLabel}</td>
+                <td style="padding:7px 0;font-size:13px;font-weight:600;color:#0f172a;border-bottom:1px solid ${borderColor};">${opts.earnedPoints} / ${opts.totalPoints}</td>
               </tr>
               <tr>
-                <td style="padding:6px 0;font-size:13px;color:#64748b;">${t.passingLabel}</td>
-                <td style="padding:6px 0;font-size:13px;font-weight:600;color:#0f172a;">${passing}%</td>
+                <td style="padding:7px 0;font-size:13px;color:#64748b;border-bottom:1px solid ${borderColor};">${t.passingLabel}</td>
+                <td style="padding:7px 0;font-size:13px;font-weight:600;color:#0f172a;border-bottom:1px solid ${borderColor};">${passing}%</td>
               </tr>
+              ${gradeRow}
               <tr>
-                <td style="padding:6px 0;font-size:13px;color:#64748b;">${t.resultLabel}</td>
-                <td style="padding:6px 0;font-size:13px;font-weight:800;color:${accentColor};">${opts.passed ? t.passedValue : t.failedValue}</td>
+                <td style="padding:8px 0;font-size:13px;color:#64748b;font-weight:600;">${t.resultLabel}</td>
+                <td style="padding:8px 0;font-size:14px;font-weight:900;color:${accentColor};">${opts.passed ? t.passedValue : t.failedValue}</td>
               </tr>
             </table>
           </div>
 
+          ${retryBanner}
           ${resultsBtn}
 
           <p style="margin:0;font-size:12px;line-height:1.6;color:#94a3b8;">${t.footerNote}</p>
@@ -4862,7 +4883,12 @@ Assistant:`
   const notifyClassOfNewAssignment = async (opts) => {
     try {
       let students = [];
-      if (opts.classId) {
+      if (opts.targetStudentId) {
+        const { data: sRow } = await supabaseAdmin.from("profiles").select("id, email, display_name, status").eq("id", opts.targetStudentId).maybeSingle();
+        if (sRow && sRow.email && sRow.status !== "inactive") {
+          students = [{ id: String(sRow.id), email: String(sRow.email), display_name: sRow.display_name || null }];
+        }
+      } else if (opts.classId) {
         students = await resolveClassStudentProfiles(opts.classId, opts.teacherId || void 0);
       } else if (opts.courseId) {
         let ids = [];
@@ -13486,18 +13512,20 @@ ${smartUserPrompt}` });
       const { data: attempt, error: attErr } = await supabaseAdmin.from("quiz_attempts").select("id, quiz_id, student_id, score, total_points, score_percent, passed, completed_at").eq("id", attemptId).maybeSingle().catch(() => ({ data: null, error: null }));
       if (attErr || !attempt) return res.status(404).json({ error: "Attempt not found" });
       if (attempt.student_id !== caller.userId) return res.status(403).json({ error: "Forbidden" });
-      const { data: quiz } = await supabaseAdmin.from("quizzes").select("id, title, settings").eq("id", attempt.quiz_id).maybeSingle().catch(() => ({ data: null }));
+      const { data: quiz } = await supabaseAdmin.from("quizzes").select("id, title, type, settings").eq("id", attempt.quiz_id).maybeSingle().catch(() => ({ data: null }));
       const { data: profile } = await supabaseAdmin.from("profiles").select("email, full_name, display_name").eq("id", caller.userId).maybeSingle().catch(() => ({ data: null }));
       const studentEmail = profile?.email || caller.email || "";
       if (!studentEmail) return res.json({ ok: false, reason: "no_email" });
       const studentName = profile?.display_name || profile?.full_name || "Student";
-      const quizTitle = quiz?.title || "Quiz";
+      const isExam = String(quiz?.type || "").toLowerCase() === "exam";
+      const quizTitle = quiz?.title || (isExam ? "Exam" : "Quiz");
       const passingPercent = Number(quiz?.settings?.passingScore ?? 50);
       const totalPoints = Number(attempt.total_points) || 0;
       const earnedPoints = Number(attempt.score) || 0;
       const scorePercent = attempt.score_percent != null ? Number(attempt.score_percent) : totalPoints > 0 ? Math.round(earnedPoints / totalPoints * 100) : 0;
       const passed = Boolean(attempt.passed);
       const lang = language === "en" ? "en" : "sq";
+      const grade = isExam ? scorePercent >= 97 ? "A+" : scorePercent >= 93 ? "A" : scorePercent >= 90 ? "A-" : scorePercent >= 87 ? "B+" : scorePercent >= 83 ? "B" : scorePercent >= 80 ? "B-" : scorePercent >= 77 ? "C+" : scorePercent >= 73 ? "C" : scorePercent >= 70 ? "C-" : scorePercent >= 60 ? "D" : "F" : void 0;
       const appUrl = process.env.APP_URL || `https://${process.env.REPLIT_DEV_DOMAIN || "localhost:5000"}`;
       const resultsUrl = `${appUrl}/student/results/${attemptId}`;
       const tpl = renderQuizResultEmail({
@@ -13510,7 +13538,9 @@ ${smartUserPrompt}` });
         passingPercent,
         attemptId,
         resultsUrl,
-        language: lang
+        language: lang,
+        isExam,
+        grade
       });
       await sendEmail({
         to: studentEmail,
@@ -17287,10 +17317,10 @@ ${shortContent}`;
       try {
         const result = await poolQuery(
           `INSERT INTO assignments
-             (title, description, instructions, course_id, class_id, teacher_id,
+             (title, description, instructions, course_id, class_id, target_student_id, teacher_id,
               type, due_date, max_score, status, allow_late_submission,
               submission_config, publish_at, attachments, created_at, updated_at)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12::jsonb,$13,$14::jsonb,now(),now())
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13::jsonb,$14,$15::jsonb,now(),now())
            RETURNING id`,
           [
             String(b.title),
@@ -17298,6 +17328,7 @@ ${shortContent}`;
             b.instructions != null ? String(b.instructions) : null,
             b.course_id || null,
             b.class_id || null,
+            b.target_student_id || null,
             b.teacher_id || caller.userId,
             b.type || "homework",
             b.due_date || null,
@@ -17314,6 +17345,7 @@ ${shortContent}`;
           classId: b.class_id ? String(b.class_id) : null,
           courseId: b.course_id ? String(b.course_id) : null,
           teacherId: b.teacher_id ? String(b.teacher_id) : caller.userId,
+          targetStudentId: b.target_student_id ? String(b.target_student_id) : null,
           title: String(b.title),
           description: b.description != null ? String(b.description) : null,
           dueDate: b.due_date ? String(b.due_date) : null,
@@ -17329,6 +17361,7 @@ ${shortContent}`;
           description: b.description != null ? String(b.description) : null,
           course_id: b.course_id || null,
           class_id: b.class_id || null,
+          target_student_id: b.target_student_id || null,
           teacher_id: b.teacher_id || caller.userId,
           type: b.type || "homework",
           due_date: b.due_date || null,
@@ -17342,7 +17375,7 @@ ${shortContent}`;
           updated_at: now
         };
         if (publishAt) payload.publish_at = publishAt;
-        const STRIP_COLS = ["publish_at", "allow_late_submission", "instructions", "submission_config", "attachments"];
+        const STRIP_COLS = ["publish_at", "allow_late_submission", "instructions", "submission_config", "attachments", "target_student_id"];
         for (let i = 0; i < STRIP_COLS.length + 2; i++) {
           const { data, error } = await supabaseAdmin.from("assignments").insert(payload).select("id").single();
           if (!error && data?.id) {
@@ -17350,6 +17383,7 @@ ${shortContent}`;
               classId: b.class_id ? String(b.class_id) : null,
               courseId: b.course_id ? String(b.course_id) : null,
               teacherId: b.teacher_id ? String(b.teacher_id) : caller.userId,
+              targetStudentId: b.target_student_id ? String(b.target_student_id) : null,
               title: String(b.title),
               description: b.description != null ? String(b.description) : null,
               dueDate: b.due_date ? String(b.due_date) : null,
@@ -17413,6 +17447,7 @@ ${shortContent}`;
         if (b.description !== void 0) payload.description = b.description != null ? String(b.description) : null;
         if (b.course_id !== void 0) payload.course_id = b.course_id || null;
         if (b.class_id !== void 0) payload.class_id = b.class_id || null;
+        if (b.target_student_id !== void 0) payload.target_student_id = b.target_student_id || null;
         if (b.type !== void 0) payload.type = b.type;
         if (b.due_date !== void 0) payload.due_date = b.due_date || null;
         if (b.max_score !== void 0) payload.max_score = Number(b.max_score) || 100;
@@ -17422,7 +17457,7 @@ ${shortContent}`;
         if (b.submission_config !== void 0) payload.submission_config = b.submission_config;
         if (b.attachments !== void 0) payload.attachments = b.attachments != null ? b.attachments : [];
         if ("publish_at" in b && b.publish_at) payload.publish_at = new Date(String(b.publish_at)).toISOString();
-        const STRIP_COLS = ["publish_at", "allow_late_submission", "instructions", "submission_config", "attachments"];
+        const STRIP_COLS = ["publish_at", "allow_late_submission", "instructions", "submission_config", "attachments", "target_student_id"];
         for (let i = 0; i < STRIP_COLS.length + 2; i++) {
           const { error } = await supabaseAdmin.from("assignments").update(payload).eq("id", aId);
           if (!error) return res.json({ success: true });

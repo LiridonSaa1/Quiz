@@ -13426,10 +13426,10 @@ Content:\n"""${clipped}"""`;
       if (attErr || !attempt) return res.status(404).json({ error: 'Attempt not found' });
       if (attempt.student_id !== caller.userId) return res.status(403).json({ error: 'Forbidden' });
 
-      // 2. Fetch quiz title and passing score setting
+      // 2. Fetch quiz title, type, and passing score setting
       const { data: quiz } = await supabaseAdmin
         .from('quizzes')
-        .select('id, title, settings')
+        .select('id, title, type, settings')
         .eq('id', attempt.quiz_id)
         .maybeSingle()
         .catch(() => ({ data: null }));
@@ -13446,7 +13446,8 @@ Content:\n"""${clipped}"""`;
       if (!studentEmail) return res.json({ ok: false, reason: 'no_email' });
 
       const studentName = profile?.display_name || profile?.full_name || 'Student';
-      const quizTitle = quiz?.title || 'Quiz';
+      const isExam = String(quiz?.type || '').toLowerCase() === 'exam';
+      const quizTitle = quiz?.title || (isExam ? 'Exam' : 'Quiz');
       const passingPercent = Number(quiz?.settings?.passingScore ?? 50);
       const totalPoints = Number(attempt.total_points) || 0;
       const earnedPoints = Number(attempt.score) || 0;
@@ -13455,6 +13456,20 @@ Content:\n"""${clipped}"""`;
         : (totalPoints > 0 ? Math.round((earnedPoints / totalPoints) * 100) : 0);
       const passed = Boolean(attempt.passed);
       const lang = language === 'en' ? 'en' : 'sq';
+
+      // Compute letter grade for exams
+      const grade = isExam ? (
+        scorePercent >= 97 ? 'A+' :
+        scorePercent >= 93 ? 'A'  :
+        scorePercent >= 90 ? 'A-' :
+        scorePercent >= 87 ? 'B+' :
+        scorePercent >= 83 ? 'B'  :
+        scorePercent >= 80 ? 'B-' :
+        scorePercent >= 77 ? 'C+' :
+        scorePercent >= 73 ? 'C'  :
+        scorePercent >= 70 ? 'C-' :
+        scorePercent >= 60 ? 'D'  : 'F'
+      ) : undefined;
 
       const appUrl = process.env.APP_URL || `https://${process.env.REPLIT_DEV_DOMAIN || 'localhost:5000'}`;
       const resultsUrl = `${appUrl}/student/results/${attemptId}`;
@@ -13470,6 +13485,8 @@ Content:\n"""${clipped}"""`;
         attemptId,
         resultsUrl,
         language: lang,
+        isExam,
+        grade,
       });
 
       await sendEmail({
